@@ -1,0 +1,76 @@
+{
+  "name": "dsh-chief",
+  "version": "1.0.0",
+  "icon": "icon.svg",
+  "type": "module",
+  "description": "DSH 参谋长 (Chief of Staff for DeepSeek Harness) — SuperAgent-inspired multi-agent command cockpit, full-spread subagent pyramid DAG, cross-session relay, /goal step Q&A, 4-tier cold archive vault, and pinned boundary governance.",
+  "author": "gluztm",
+  "license": "AGPL-3.0-only",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/gluztm/dsh-chief.git"
+  },
+  "homepage": "https://github.com/gluztm/dsh-chief#readme",
+  "bugs": {
+    "url": "https://github.com/gluztm/dsh-chief/issues"
+  },
+  "keywords": [
+    "deepseek",
+    "deepseek-harness",
+    "dsh",
+    "dsh-plugin",
+    "superagent",
+    "chief-of-staff",
+    "multi-agent",
+    "agent-orchestration",
+    "subagent",
+    "dag",
+    "workflow",
+    "archive-vault",
+    "agent-memory",
+    "context-engineering",
+    "guardrails",
+    "handoff"
+  ],
+  "engines": {
+    "node": ">=22.13.0",
+    "dsh": ">=0.2.0"
+  },
+  "main": "./index.js",
+  "exports": {
+    ".": "./index.js",
+    "./client": "./client.js",
+    "./cordis.patch.yml": "./cordis.patch.yml",
+    "./package.json": "./package.json",
+    "./locale/*.json": "./locale/*.json",
+    "./icon": "./icon.svg"
+  },
+  "files": [
+    "index.js",
+    "client.js",
+    "chief.js",
+    "archives.js",
+    "idle-guard.js",
+    "memory.js",
+    "digest.js",
+    "handoff.js",
+    "cordis.patch.yml",
+    "locale/*.json",
+    "icon.svg",
+    "screenshots.json",
+    "README.md",
+    "README.en.md",
+    "CHANGELOG.md",
+    "LICENSE"
+  ],
+  "dsh": {
+    "bundle": {
+      "patch": "./cordis.patch.yml"
+    },
+    "client": {
+      "platform": "web",
+      "immediately": true,
+      "inject": []
+    }
+  }
+}

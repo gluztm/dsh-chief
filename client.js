@@ -1,0 +1,11079 @@
+/**
+ * Client half of dsh-chief — 「DSH 参谋长」 (DSH Chief v1.0.0)
+ * iOS Micro-Flat Minimalist Edition + DS-Bot Narrative Memory + Cross-Session SuperAgent Relay.
+ *
+ * Surfaces:
+ *   1. `sidebar.right.pane.tab` (docked right-hand sidebar tab — primary)
+ *   2. `main` + `sidebar.panellist` (full-page fallback)
+ *   3. `shell.overlay` (floating sheet fallback)
+ *
+ * Crash-hardened with React ErrorBoundaries and null-safe data access across
+ * all tabs, sessions, linked peers, and subagent states.
+ */
+window.__ModuleLoader__.load({
+  id: 'dsh-chief',
+  factory(require) {
+    const React = require('react')
+    const h = React.createElement
+
+    const API = 'api/dsh-chief'
+    const SIDE_ID = 'dsh-chief'
+    const BRAND_NAME = 'DSH 参谋长'
+
+    const STATUSES = ['todo', 'doing', 'blocked', 'done']
+    const STATUS_LABEL = { todo: '待推进', doing: '推进中', blocked: '受阻', done: '已完成' }
+    const STATUS_BADGE = { todo: '○ 待推进', doing: '▶ 推进中', blocked: '⚠ 受阻', done: '✓ 已完成' }
+    const STATUS_HEX = {
+      todo: '#0a84ff',
+      doing: '#ff9f0a',
+      blocked: '#ff453a',
+      done: '#30d158',
+    }
+    const STATUS_BG = {
+      todo: 'rgba(10, 132, 255, 0.14)',
+      doing: 'rgba(255, 159, 10, 0.18)',
+      blocked: 'rgba(255, 69, 58, 0.18)',
+      done: 'rgba(48, 209, 88, 0.15)',
+    }
+
+    const TABS = [
+      { key: 'chief', label: '参谋' },
+      { key: 'tasks', label: '任务' },
+      { key: 'peers', label: '协同' },
+      { key: 'plan', label: '规划' },
+      { key: 'archive', label: '档案' },
+      { key: 'boundaries', label: '边界' },
+    ]
+
+    const FACT_CATEGORIES = [
+      { key: 'discipline', label: '纪律' },
+      { key: 'architecture', label: '架构' },
+      { key: 'team', label: '分工' },
+      { key: 'progress', label: '进展' },
+      { key: 'preference', label: '偏好' },
+    ]
+    const FACT_CAT_LABEL = FACT_CATEGORIES.reduce((acc, c) => {
+      acc[c.key] = c.label
+      return acc
+    }, {})
+
+    const RELAY_MODES = [
+      { key: 'steer', label: '插话', hint: '正在运行时立即在下一步切入' },
+      { key: 'followup', label: '递话', hint: '排队或唤醒待命对话' },
+      { key: 'silent', label: '备忘', hint: '静默放入信箱，不强行唤醒' },
+    ]
+
+    const MEMORY_SECTIONS = [
+      { key: 'progress', label: '目标与进展' },
+      { key: 'decision', label: '决策与结论' },
+      { key: 'verify', label: '门禁与验证' },
+      { key: 'open', label: '待办与风险' },
+      { key: 'other', label: '其他要点' },
+    ]
+
+    const SECTION_LABEL = MEMORY_SECTIONS.reduce((all, section) => {
+      all[section.key] = section.label
+      return all
+    }, {})
+
+    const BOUND_LISTS = [
+      { field: 'allowed', label: '允许事项', dot: '#30d158' },
+      { field: 'forbidden', label: '禁止红线', dot: '#ff453a' },
+      { field: 'notes', label: '注意事项', dot: '#ff9f0a' },
+    ]
+    const BOUND_CAP = 20
+
+    /* ------------------------------------------------------------------ store */
+
+    const store = {
+      open: false,
+      panel: '',
+      dock: false,
+      tab: 'chief',
+      board: null,
+      boundaries: null,
+      error: '',
+      notice: '',
+      busy: false,
+      sessionId: '',
+      inputActions: null,
+      searchOpen: false,
+      askText: '',
+      askHits: null,
+      askNote: '',
+      editTaskId: '',
+      editTaskTitle: '',
+      editTaskNote: '',
+      editTaskIntent: '',
+      editTaskEvidence: '',
+      editTaskParentId: '',
+      editTaskBlockedBy: [],
+      selectedTaskId: '',
+      focusTaskId: '',
+      taskViewMode: 'graph',
+      graphDir: 'TD',
+      taskStatusFilter: 'all',
+      filterAgent: '',
+      fleetCollapsed: false,
+      fleetShowAll: false,
+      pyramidShowAllAgents: false,
+      showInternalProbes: false,
+      subagents: [],
+      agentIdentity: null,
+      handoffText: '',
+      handoffEdit: null,
+      targets: [],
+      target: 'new',
+      pending: null,
+      autoInject: true,
+      guardIdle: true,
+      guardMaxPerSession: 3,
+      guardShortAnswer: 600,
+      transferNote: '',
+      handoffBusy: false,
+      copied: false,
+      exported: false,
+      transferred: false,
+      editNoteId: '',
+      editNoteTitle: '',
+      editNoteBody: '',
+      editNoteTags: '',
+      editNoteShared: false,
+      newNote: false,
+      memAsk: '',
+      memReply: '',
+      memHits: null,
+      memNote: '',
+      memSections: [],
+      memCount: 0,
+      memDigest: '',
+      memOpen: '',
+      memBusy: false,
+      memComposerOpen: false,
+      memText: '',
+      memTitle: '',
+      memSection: 'other',
+      boundDraft: { allowed: '', forbidden: '', notes: '' },
+      boundPinDraft: { allowed: false, forbidden: false, notes: false },
+      boundSelected: { allowed: [], forbidden: [], notes: [] },
+      boundConsolidating: '',
+      boundSubTab: 'rules',
+      // DSH Chief state
+      chiefMeta: {
+        paceMode: 'manual',
+        autoPilot: false,
+        modelRef: '',
+        followModelRef: '',
+        resolvedModelRef: '',
+        pendingSuggestions: 0,
+        factsCount: 0,
+        mailboxCount: 0,
+        linkedPeersCount: 0,
+      },
+      secView: null,
+      secBusy: false,
+      secRegenerating: false,
+      secSubTab: 'digest',
+      secInput: '',
+      secTarget: 'auto',
+      secMode: 'steer',
+      secLatestReply: null,
+      secModelMenuOpen: false,
+      secPaceMenuOpen: false,
+      secModelsCatalog: null,
+      secNewFactText: '',
+      secNewFactCat: 'discipline',
+      secShowRawTurns: false,
+      // Engineering Memory Filing Cabinet (档案柜 · Cold Lazy-Loaded Vault)
+      archiveMeta: {
+        totalCount: 0,
+        folderCount: 0,
+        takenOutCount: 0,
+        unorganizedCount: 0,
+      },
+      archiveLoaded: false,
+      archiveLoading: false,
+      archiveOrganizing: false,
+      archiveOrganizeOpen: false,
+      archiveOrganizeScope: 'unorganized',
+      archiveOrganizePrompt: '',
+      archiveFolders: [],
+      archiveItems: [],
+      archiveDetails: {},
+      archiveDetailLoading: {},
+      archiveOpenFolders: {},
+      archiveOpenFiles: {},
+      archiveOpenPoints: {},
+      archiveRawView: {},
+      archiveFilterClip: 'all',
+      archiveQuery: '',
+      archiveEditor: null,
+      archiveMoveId: '',
+      archiveNewFolderOpen: false,
+      archiveNewFolderName: '',
+      archiveSearchBusy: false,
+    }
+
+    const listeners = new Set()
+    let panelEl = null
+    let dockMountCount = 0
+    let noticeTimer = null
+    let navigation = null
+    let layout = null
+    let hostCtx = null
+
+    function notify() {
+      for (const listener of listeners) {
+        try {
+          listener()
+        } catch (error) {
+          console.error('dsh-chief listener failed', error)
+        }
+      }
+    }
+
+    function patch(next) {
+      Object.assign(store, next)
+      if (next && typeof next.notice === 'string' && next.notice) {
+        if (noticeTimer) clearTimeout(noticeTimer)
+        noticeTimer = setTimeout(() => {
+          if (store.notice === next.notice) patch({ notice: '' })
+        }, 2800)
+      }
+      notify()
+    }
+
+    function subscribe(listener) {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    }
+
+    function useStore() {
+      const [, bump] = React.useState(0)
+      React.useEffect(() => subscribe(() => bump(v => v + 1)), [])
+      return store
+    }
+
+    /* ----------------------------------------------------------- text helpers */
+
+    /** Width-aware truncation so CJK and ASCII labels fit cleanly inside pills & SVG nodes. */
+    function clampTitle(text, maxUnits = 14) {
+      const raw = String(text === null || text === undefined ? '' : text).replace(/\s+/g, ' ').trim()
+      if (!raw) return ''
+      let units = 0
+      let out = ''
+      for (const ch of raw) {
+        const w = ch.charCodeAt(0) > 255 ? 1 : 0.58
+        if (units + w > maxUnits) return out + '…'
+        out += ch
+        units += w
+      }
+      return out
+    }
+
+    function shortSession(id) {
+      if (!id) return ''
+      return String(id).replace(/^session-/, '').slice(0, 6)
+    }
+
+    function ownerLabel(id) {
+      if (!id) return ''
+      const text = String(id)
+      return text.indexOf('session-') === 0 ? shortSession(text) : text
+    }
+
+    function timeLabel(at) {
+      if (!at) return ''
+      const date = new Date(at)
+      if (Number.isNaN(date.getTime())) return ''
+      const pad = v => String(v).padStart(2, '0')
+      const sameDay = date.toDateString() === new Date().toDateString()
+      return (sameDay ? '' : (date.getMonth() + 1) + '/' + date.getDate() + ' ') + pad(date.getHours()) + ':' + pad(date.getMinutes())
+    }
+
+    function relativeTimeLabel(at) {
+      if (!at) return ''
+      const diffMs = Math.max(0, Date.now() - Number(at))
+      const mins = Math.floor(diffMs / 60000)
+      if (mins < 1) return '刚刚'
+      if (mins < 60) return mins + '分钟前'
+      const hours = Math.floor(mins / 60)
+      if (hours < 24) return hours + '小时前'
+      return timeLabel(at)
+    }
+
+    function shortModelName(ref, catalog = null, includeChannel = true) {
+      const s = String(ref || '').trim()
+      if (!s) return '自动跟随'
+      const slashIdx = s.indexOf('/')
+      const provId = slashIdx > 0 ? s.slice(0, slashIdx) : ''
+      const rawModelId = slashIdx > 0 ? s.slice(slashIdx + 1) : s
+      // Strip redundant inner vendor prefix like `deepseek/deepseek-v4.1-flash` -> `deepseek-v4.1-flash`
+      const leafModel = rawModelId.includes('/') ? rawModelId.split('/').slice(1).join('/') : rawModelId
+
+      const modelsList = (catalog && Array.isArray(catalog.models))
+        ? catalog.models
+        : (store.secModelsCatalog && Array.isArray(store.secModelsCatalog.models) ? store.secModelsCatalog.models : [])
+      const hit = modelsList.find(m => m && m.ref === s)
+      const modelLabel = hit && hit.name ? String(hit.name).trim() : leafModel
+      const provName = hit && hit.providerName ? String(hit.providerName).trim() : provId
+
+      if (!includeChannel) return clampTitle(modelLabel, 24)
+
+      let chanShort = provName
+      if (provId === 'commandcode' || /command\s*code/i.test(provName)) chanShort = 'CC'
+      else if (/account/i.test(provId) || /account/i.test(provName)) chanShort = 'Account'
+      else if (provId === 'our-free-model') chanShort = 'Free'
+
+      const alreadyHasTag = (chanShort === 'CC' && /\(CC\)/i.test(modelLabel))
+        || (chanShort && modelLabel.toLowerCase().includes(chanShort.toLowerCase()))
+      const full = alreadyHasTag || !chanShort ? modelLabel : `${chanShort} · ${modelLabel}`
+      return clampTitle(full, 20)
+    }
+
+    function fullModelWithChannel(ref, catalog = null) {
+      const s = String(ref || '').trim()
+      if (!s) return ''
+      if (catalog && catalog.followRef === s && catalog.followLabel) return catalog.followLabel
+      const slashIdx = s.indexOf('/')
+      const provId = slashIdx > 0 ? s.slice(0, slashIdx) : ''
+      const rawModelId = slashIdx > 0 ? s.slice(slashIdx + 1) : s
+      const leafModel = rawModelId.includes('/') ? rawModelId.split('/').slice(1).join('/') : rawModelId
+      const modelsList = (catalog && Array.isArray(catalog.models)) ? catalog.models : []
+      const hit = modelsList.find(m => m && m.ref === s)
+      const provLabel = (hit && hit.providerName)
+        || (provId === 'commandcode' ? 'Command Code' : provId)
+      const modelLabel = (hit && hit.name) ? String(hit.name).trim() : leafModel
+      if (!provLabel || modelLabel.toLowerCase().includes(provLabel.toLowerCase())) return modelLabel
+      return `${provLabel} · ${modelLabel}`
+    }
+
+    /** Shorten verbose auto-generated subagent IDs like `mnemon-review-072e7e671b4b4078` -> `mnemon-review·072e`. */
+    function shortAgentName(name, leafOnly = false) {
+      const raw = String(name || '').trim().replace(/^@/, '')
+      if (!raw) return ''
+      if (raw === 'lead' || raw === 'agent') return '主代理'
+      const parts = raw.split('/').filter(Boolean)
+      const fmtSeg = seg => seg.replace(/[-_]([0-9a-f]{8,40})$/i, (_, hex) => '·' + hex.slice(0, 4))
+      if (leafOnly && parts.length > 1) {
+        return fmtSeg(parts[parts.length - 1])
+      }
+      return parts.map(fmtSeg).join('/')
+    }
+
+    const GENERIC_OWNERS = new Set(['', 'agent', 'lead', 'user', 'operator', 'chief', 'main', 'root'])
+
+    /** Identify internal background checkpoint probes (`@mnemon-review-*` / `@mnemon-run-*`) so they don't clutter task topology. */
+    function isInternalProbeName(name) {
+      const raw = String(name || '').trim().replace(/^@/, '')
+      if (!raw) return false
+      const leaf = raw.split('/').pop() || raw
+      return /^mnemon-(?:review|run)(?:[-_]|$)/i.test(leaf)
+    }
+
+    /** Reconstruct multi-tier parent -> child subagent pyramid from `store.subagents` (by `parentId` and/or slash path). */
+    function buildAgentHierarchy(subagentsRaw, identity, opts = {}) {
+      const list = Array.isArray(subagentsRaw) ? subagentsRaw.filter(a => a && a.name) : []
+      const rootId = (identity && identity.rootId) || store.sessionId || ''
+      const leadEntry = list.find(a => a.name === 'lead' || (rootId && a.id === rootId)) || null
+      const allChildren = list.filter(a => a !== leadEntry && a.name !== 'lead')
+      const includeProbes = Boolean(opts.includeProbes || store.showInternalProbes)
+      const hiddenProbes = includeProbes
+        ? []
+        : allChildren.filter(a => isInternalProbeName(a.name) && a.status !== 'running' && store.filterAgent !== a.name)
+      const hiddenSet = new Set(hiddenProbes)
+      const children = allChildren.filter(a => !hiddenSet.has(a))
+
+      const byId = new Map()
+      const byName = new Map()
+      const byLower = new Map()
+      for (const a of children) {
+        if (a.id) byId.set(a.id, a)
+        byName.set(a.name, a)
+        byLower.set(String(a.name).toLowerCase(), a)
+      }
+
+      const parentKeyOf = new Map()
+      const kidsMap = new Map()
+      kidsMap.set('lead', [])
+      for (const a of children) kidsMap.set(a.name, [])
+
+      for (const a of children) {
+        let pKey = 'lead'
+        if (a.parentId && a.parentId !== rootId && byId.has(a.parentId)) {
+          const parentAgent = byId.get(a.parentId)
+          if (parentAgent && parentAgent.name !== a.name) pKey = parentAgent.name
+        } else if (String(a.name).includes('/')) {
+          const segs = String(a.name).split('/').filter(Boolean)
+          for (let i = segs.length - 1; i >= 1; i--) {
+            const prefix = segs.slice(0, i).join('/')
+            const found = byName.get(prefix) || byLower.get(prefix.toLowerCase())
+            if (found && found.name !== a.name) {
+              pKey = found.name
+              break
+            }
+          }
+        }
+        parentKeyOf.set(a.name, pKey)
+        if (!kidsMap.has(pKey)) kidsMap.set(pKey, [])
+        kidsMap.get(pKey).push(a)
+      }
+
+      const descendantsOf = agentName => {
+        const out = []
+        const seen = new Set([agentName])
+        const stack = [...(kidsMap.get(agentName) || [])]
+        while (stack.length) {
+          const cur = stack.shift()
+          if (!cur || seen.has(cur.name)) continue
+          seen.add(cur.name)
+          out.push(cur)
+          const sub = kidsMap.get(cur.name) || []
+          for (const k of sub) stack.push(k)
+        }
+        return out
+      }
+
+      const matchAgentRef = ref => {
+        const clean = String(ref || '').trim().replace(/^@/, '')
+        if (!clean || GENERIC_OWNERS.has(clean.toLowerCase())) return null
+        if (byName.has(clean)) return byName.get(clean)
+        const low = clean.toLowerCase()
+        if (byLower.has(low)) return byLower.get(low)
+        if (byId.has(clean)) return byId.get(clean)
+        for (const a of children) {
+          const leaf = String(a.name).split('/').pop().toLowerCase()
+          if (leaf === low || shortAgentName(a.name, true).toLowerCase() === low) return a
+        }
+        return null
+      }
+
+      return {
+        leadEntry,
+        children,
+        allChildren,
+        probeCount: hiddenProbes.length,
+        byId,
+        byName,
+        parentKeyOf,
+        kidsMap,
+        descendantsOf,
+        matchAgentRef,
+      }
+    }
+
+    /** Resolve which subagents (and/or lead) are actively advancing or blocking a specific objective task. */
+    function resolveTaskAgents(task, allTasks, subagentsRaw, identity) {
+      const empty = { agentNames: [], includeLead: false, scopeTaskIds: [], inferredLive: false }
+      if (!task) return empty
+      const tasks = Array.isArray(allTasks) ? allTasks.filter(Boolean) : []
+      const hier = buildAgentHierarchy(subagentsRaw, identity)
+
+      // Collect task + all descendant sub-tasks
+      const scopeTasks = [task]
+      const scopeSeen = new Set([task.id])
+      let idx = 0
+      while (idx < scopeTasks.length) {
+        const cur = scopeTasks[idx++]
+        for (const t of tasks) {
+          if (t.parentId === cur.id && !scopeSeen.has(t.id)) {
+            scopeSeen.add(t.id)
+            scopeTasks.push(t)
+          }
+        }
+      }
+
+      const matched = new Set()
+      for (const t of scopeTasks) {
+        const candidates = [t.subagent, t.owner, t.session].filter(Boolean)
+        for (const ref of candidates) {
+          const hit = hier.matchAgentRef(ref)
+          if (hit) {
+            matched.add(hit.name)
+            for (const desc of hier.descendantsOf(hit.name)) matched.add(desc.name)
+          }
+        }
+        for (const a of hier.children) {
+          if (a.taskId && a.taskId === t.id) {
+            matched.add(a.name)
+            for (const desc of hier.descendantsOf(a.name)) matched.add(desc.name)
+          } else if (Array.isArray(a.tasks) && a.tasks.some(at => at && at.id === t.id)) {
+            matched.add(a.name)
+            for (const desc of hier.descendantsOf(a.name)) matched.add(desc.name)
+          }
+        }
+      }
+
+      let inferredLive = false
+      let includeLead = false
+
+      if (matched.size === 0) {
+        const hasActiveWork = scopeTasks.some(t => t.status === 'doing' || t.status === 'blocked')
+        if (hasActiveWork) {
+          const running = hier.children.filter(a => a.status === 'running')
+          if (running.length > 0) {
+            inferredLive = true
+            for (const r of running) {
+              matched.add(r.name)
+              for (const desc of hier.descendantsOf(r.name)) matched.add(desc.name)
+            }
+          } else {
+            includeLead = true
+          }
+        } else {
+          includeLead = true
+        }
+      }
+
+      // Also include parent Tier-1 agent on the chain if a Tier-2 agent is matched
+      for (const name of [...matched]) {
+        let p = hier.parentKeyOf.get(name)
+        let guard = 0
+        while (p && p !== 'lead' && guard++ < 8) {
+          matched.add(p)
+          p = hier.parentKeyOf.get(p)
+        }
+      }
+
+      return {
+        agentNames: [...matched],
+        includeLead,
+        scopeTaskIds: [...scopeSeen],
+        inferredLive,
+      }
+    }
+
+    /** Jump directly to the visual Pyramid view and spotlight-frame the subagents advancing `taskId`. */
+    function focusObjectiveInPyramid(taskId, opts = {}) {
+      if (!taskId) {
+        patch({ focusTaskId: '' })
+        return
+      }
+      patch({
+        tab: 'tasks',
+        taskViewMode: 'graph',
+        graphDir: 'TD',
+        focusTaskId: taskId,
+        filterAgent: '',
+        taskStatusFilter: 'all',
+        selectedTaskId: opts.openInspector ? taskId : '',
+      })
+    }
+
+    function snippetOf(text, needle, radius) {
+      const source = String(text || '')
+      const lower = String(needle || '').toLowerCase()
+      const at = lower ? source.toLowerCase().indexOf(lower) : -1
+      if (at < 0) return source.slice(0, radius * 2)
+      const from = Math.max(0, at - radius)
+      const to = Math.min(source.length, at + lower.length + radius)
+      return (from > 0 ? '…' : '') + source.slice(from, to).replace(/\s+/g, ' ') + (to < source.length ? '…' : '')
+    }
+
+    function sessionIdFromUrl() {
+      try {
+        const match = (location.pathname + location.search + location.hash).match(/([0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12})/)
+        return match ? 'session-' + match[1] : ''
+      } catch {
+        return ''
+      }
+    }
+
+    /* ---------------------------------------------------------- host services */
+
+    function service(name) {
+      if (!hostCtx || typeof hostCtx.get !== 'function') return null
+      try {
+        return hostCtx.get(name) || null
+      } catch {
+        return null
+      }
+    }
+
+    function selectPanel(id) {
+      if (!layout || typeof layout.selectPanel !== 'function') return false
+      try {
+        layout.selectPanel(id)
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    function openTabInRightbar(kind) {
+      const face = service('sidebarRight')
+      if (!face || typeof face.openTab !== 'function') return false
+      try {
+        face.openTab(kind, { revealIfOpened: true })
+        if (typeof face.isExpanded === 'function' && !face.isExpanded() && typeof face.toggleExpanded === 'function') {
+          face.toggleExpanded()
+        }
+        return true
+      } catch {
+        const sessionId = store.sessionId
+        if (sessionId && typeof face.openTabIn === 'function') {
+          try {
+            face.openTabIn(sessionId, kind, { revealIfOpened: true })
+            return true
+          } catch {}
+        }
+        return false
+      }
+    }
+
+    /** Open a subagent's live chat stream in DSH's right sidebar split pane. */
+    function openSubagentChat(agent) {
+      if (!agent || !agent.id) return false
+      const face = service('sidebarRight')
+      if (!face || typeof face.openResource !== 'function') return false
+      const parent = agent.parentId || (store.agentIdentity && store.agentIdentity.rootId) || store.sessionId
+      if (!parent) return false
+      const mode = agent.mode || 'continuable'
+      const query = new URLSearchParams({ parent, mode })
+      const url = 'dsh-resource://subagentchat/session/' + encodeURIComponent(agent.id) + '?' + query.toString()
+      try {
+        face.openResource(url, { revealIfOpened: true, preferSeparatePane: true })
+        return true
+      } catch {
+        try {
+          face.openResource(url, { revealIfOpened: true })
+          return true
+        } catch {
+          return false
+        }
+      }
+    }
+
+    function rightbarExpanded() {
+      const face = service('sidebarRight')
+      if (!face || typeof face.isExpanded !== 'function') return false
+      try {
+        return !!face.isExpanded()
+      } catch {
+        return false
+      }
+    }
+
+    function chiefShown() {
+      if (typeof document === 'undefined') return false
+      const panel = document.querySelector('.dnb-panel')
+      if (!panel) return false
+      const rect = panel.getBoundingClientRect()
+      if (rect.width < 40 || rect.height < 40) return false
+      const style = getComputedStyle(panel)
+      return style.visibility !== 'hidden' && style.display !== 'none'
+    }
+
+    function whenUnplaced(recover) {
+      if (typeof requestAnimationFrame !== 'function') return
+      requestAnimationFrame(() => {
+        requestAnimationFrame(() => {
+          if (chiefShown()) return
+          try {
+            recover()
+          } catch {}
+        })
+      })
+    }
+
+    function openChief() {
+      if (openTabInRightbar(SIDE_ID)) {
+        whenUnplaced(() => {
+          if (selectPanel(SIDE_ID)) return
+          patch({ open: true })
+        })
+        return 'dock'
+      }
+      if (selectPanel(SIDE_ID)) return 'page'
+      return ''
+    }
+
+    let seedAt = 0
+    function tapAddTab(scope) {
+      const button = scope && scope.querySelector('[data-dockkit-add-tab]')
+      if (!button) return false
+      try {
+        button.click()
+        return true
+      } catch {
+        return false
+      }
+    }
+
+    function seedRightbarIfEmpty() {
+      if (typeof document === 'undefined' || store.open) return false
+      const empty = document.querySelector('[data-dockkit-empty]')
+      if (!empty) return false
+      const strips = Array.from(empty.querySelectorAll('[data-dockkit-strip-tabs]'))
+      if (strips.some(strip => strip.children.length > 0)) return false
+      const now = Date.now()
+      if (now - seedAt < 4000) return false
+      seedAt = now
+      if (openTabInRightbar(SIDE_ID)) {
+        whenUnplaced(() => {
+          if (chiefShown()) return
+          const stillEmpty = document.querySelector('[data-dockkit-empty]')
+          if (stillEmpty) tapAddTab(stillEmpty)
+        })
+        return true
+      }
+      return tapAddTab(empty)
+    }
+
+    /** Fast corner-overlay clearance check (queries media elements only, never `querySelectorAll('*')`). */
+    function reserveCornerSpace(node) {
+      const none = { top: 0, bottom: 0 }
+      if (!node || typeof document === 'undefined') return none
+      const rect = node.getBoundingClientRect()
+      if (!rect.width || !rect.height) return none
+
+      const rootOf = el => {
+        for (let p = el; p && p !== document.body; p = p.parentElement) {
+          const s = getComputedStyle(p)
+          if (s.position === 'fixed' && Number(s.zIndex) >= 20) return p
+        }
+        return null
+      }
+
+      let top = 0
+      let bottom = 0
+      const candidates = document.body.querySelectorAll('img, video, canvas')
+      for (const el of candidates) {
+        if (node.contains(el)) continue
+        const er = el.getBoundingClientRect()
+        if (!er.width || !er.height) continue
+        if (er.width * er.height > rect.width * rect.height * 0.55) continue
+        const left = Math.max(er.left, rect.left)
+        const right = Math.min(er.right, rect.right)
+        const yTop = Math.max(er.top, rect.top)
+        const yBot = Math.min(er.bottom, rect.bottom)
+        if (!(left < right && yTop < yBot)) continue
+        const cs = getComputedStyle(el)
+        if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) < 0.05) continue
+        const root = rootOf(el)
+        if (!root) continue
+        if (er.top < rect.top + rect.height * 0.5) {
+          top = Math.max(top, Math.round(er.bottom - rect.top))
+        } else {
+          bottom = Math.max(bottom, Math.round(rect.bottom - er.top))
+        }
+      }
+      return {
+        top: Math.max(0, Math.min(top, Math.round(rect.height * 0.3))),
+        bottom: Math.max(0, Math.min(bottom, 160)),
+      }
+    }
+
+    /* ------------------------------------------------------------------- API */
+
+    function applySecView(viewData) {
+      if (!viewData || typeof viewData !== 'object') return
+      const pendingSuggestions = Array.isArray(viewData.suggestions)
+        ? viewData.suggestions.filter(s => s && s.status === 'pending').length
+        : 0
+      const factsCount = Array.isArray(viewData.facts) ? viewData.facts.length : 0
+      const mailboxCount = Array.isArray(viewData.mailbox) ? viewData.mailbox.length : 0
+      const linkedPeersCount = Array.isArray(viewData.cluster) ? Math.max(0, viewData.cluster.length - 1) : 0
+      const modelsObj = viewData.models || store.secModelsCatalog || null
+      const pinnedRef = (modelsObj && typeof modelsObj.selectedRef === 'string')
+        ? modelsObj.selectedRef
+        : ((viewData.config && viewData.config.modelRef) || '')
+      const followRef = (modelsObj && (modelsObj.followRef || modelsObj.defaultRef))
+        || (store.chiefMeta && store.chiefMeta.followModelRef)
+        || ''
+      const resolvedRef = (modelsObj && modelsObj.resolvedRef) || pinnedRef || followRef || ''
+      patch({
+        secView: viewData,
+        ...(viewData.models ? { secModelsCatalog: viewData.models } : {}),
+        chiefMeta: {
+          paceMode: (viewData.config && viewData.config.paceMode) || 'manual',
+          autoPilot: Boolean(viewData.config && viewData.config.autoPilot),
+          modelRef: pinnedRef,
+          followModelRef: followRef,
+          resolvedModelRef: resolvedRef,
+          pendingSuggestions,
+          factsCount,
+          mailboxCount,
+          linkedPeersCount,
+        },
+      })
+    }
+
+    async function call(path, init) {
+      const response = await fetch(API + '/' + path, {
+        cache: 'no-store',
+        credentials: 'same-origin',
+        ...init,
+        headers: { accept: 'application/json', ...(init && init.headers ? init.headers : {}) },
+      })
+      const text = await response.text()
+      let value = null
+      try {
+        value = text ? JSON.parse(text) : null
+      } catch {
+        throw new Error('接口返回异常：' + text.slice(0, 80))
+      }
+      if (value && value.board) patch({ board: value.board })
+      if (value && Array.isArray(value.subagents)) patch({ subagents: value.subagents })
+      if (value && value.agentIdentity) patch({ agentIdentity: value.agentIdentity })
+      if (value && value.boundaries) patch({ boundaries: value.boundaries })
+      if (value && value.chiefMeta) patch({ chiefMeta: { ...store.chiefMeta, ...value.chiefMeta } })
+      if (value && value.archiveMeta) patch({ archiveMeta: { ...store.archiveMeta, ...value.archiveMeta } })
+      if (value && value.archives && Array.isArray(value.archives.items)) applyArchiveHeaders(value.archives)
+      if (value && value.view) applySecView(value.view)
+      if (!response.ok || (value && value.ok === false)) {
+        throw new Error((value && value.error) || ('HTTP ' + response.status))
+      }
+      return value
+    }
+
+    async function loadChiefView(regenerate = false) {
+      if (regenerate) patch({ secRegenerating: true, error: '' })
+      try {
+        const qs = new URLSearchParams()
+        if (store.sessionId) qs.set('session', store.sessionId)
+        if (regenerate) qs.set('regenerate', '1')
+        const value = await call('chief/view' + (qs.toString() ? '?' + qs.toString() : ''), regenerate ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: store.sessionId, regenerate: true }) } : undefined)
+        if (value && value.ok) applySecView(value)
+        if (regenerate) patch({ notice: '摘要已重新提炼' })
+        return value
+      } catch (error) {
+        if (regenerate) patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        if (regenerate) patch({ secRegenerating: false })
+      }
+    }
+
+    async function loadChiefModels(fresh = false) {
+      try {
+        const qs = new URLSearchParams()
+        if (fresh) qs.set('fresh', '1')
+        if (store.sessionId) qs.set('session', store.sessionId)
+        const value = await call('chief/models' + (qs.toString() ? '?' + qs.toString() : ''))
+        if (value && value.ok) {
+          patch({
+            secModelsCatalog: value,
+            chiefMeta: {
+              ...store.chiefMeta,
+              modelRef: typeof value.selectedRef === 'string' ? value.selectedRef : store.chiefMeta.modelRef,
+              followModelRef: value.followRef || value.defaultRef || store.chiefMeta.followModelRef || '',
+              resolvedModelRef: value.resolvedRef || store.chiefMeta.resolvedModelRef || '',
+            },
+          })
+        }
+        return value
+      } catch {
+        return null
+      }
+    }
+
+    async function updateSecConfig(nextCfg) {
+      try {
+        const value = await call('chief/config', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...nextCfg, session: store.sessionId }),
+        })
+        if (typeof nextCfg.paceMode === 'string') {
+          const paceNotice = nextCfg.paceMode === 'auto'
+            ? '已切为「全自动托管」：节流巡检、跨窗递话与阶段摘要（5分钟冷却）'
+            : nextCfg.paceMode === 'smart'
+              ? '已切为「关键巡检」：仅在撞墙或关键节点节流巡检，摘要按需手动提炼'
+              : '已切为「按需手动」：后台零自动总结，仅在你点提炼或发话时调用模型'
+          patch({ notice: paceNotice })
+        } else if (typeof nextCfg.autoPilot === 'boolean') {
+          patch({ notice: nextCfg.autoPilot ? '已开启全自动协同托管' : '已切换为按需手动模式' })
+        } else if (typeof nextCfg.modelRef === 'string') {
+          const cat = (value && value.view && value.view.models) || store.secModelsCatalog
+          const followHint = (cat && (cat.followLabel || fullModelWithChannel(cat.followRef || cat.defaultRef, cat))) || ''
+          patch({
+            notice: nextCfg.modelRef
+              ? '参谋长专职模型：' + fullModelWithChannel(nextCfg.modelRef, cat)
+              : '已恢复跟随主对话模型' + (followHint ? '（' + followHint + '）' : ''),
+          })
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      }
+    }
+
+    async function togglePeerSessionLink(peerId, linked) {
+      try {
+        const value = await call('chief/link', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ session: store.sessionId, peerSession: peerId, linked }),
+        })
+        patch({ notice: linked ? '已接入跨对话协同网络' : '已断开跨对话联动' })
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      }
+    }
+
+    async function decideSuggestion(sug, decision, editedText = '', boundField = '', pinGlobal = undefined) {
+      if (!sug || !sug.id) return null
+      patch({ secBusy: true, error: '' })
+      try {
+        const value = await call('chief/suggestion', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId,
+            id: sug.id,
+            decision,
+            ...(editedText ? { text: editedText } : {}),
+            ...(boundField ? { boundField } : {}),
+            ...(typeof pinGlobal === 'boolean' ? { pinGlobal } : {}),
+          }),
+        })
+        if (decision === 'approve') {
+          if (sug.kind === 'bound') {
+            const applied = (value && value.boundApplied) || {}
+            const label = applied.label || sug.targetLabel || '边界'
+            const isPinned = Boolean(applied.pinned)
+            const replacedN = Number(applied.replacedCount || (Array.isArray(sug.replaces) ? sug.replaces.length : 0))
+            if (replacedN > 0) {
+              patch({ notice: `${isPinned ? '📌 ' : ''}已将 ${replacedN} 条零散规则浓缩合并进【${label}】${isPinned ? '（全局共享）' : '（仅本任务）'}` })
+            } else {
+              patch({ notice: `${isPinned ? '📌 已批准并定住全局' : '已批准注入本任务'}【${label}】` })
+            }
+          } else {
+            patch({ notice: '已递话 → @' + (sug.targetLabel || sug.target) })
+          }
+          void refresh()
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ secBusy: false })
+      }
+    }
+
+    async function requestConsolidateBounds(field = '', items = []) {
+      if (store.secBusy || store.boundConsolidating) return null
+      const tag = field || 'all'
+      patch({ boundConsolidating: tag, secBusy: true, error: '' })
+      try {
+        const cleanItems = Array.isArray(items) ? items.filter(Boolean) : []
+        const value = await call('chief/consolidate-bounds', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId,
+            field,
+            items: cleanItems,
+          }),
+        })
+        if (value && value.ok) {
+          const nextSel = { ...(store.boundSelected || { allowed: [], forbidden: [], notes: [] }) }
+          if (field && nextSel[field]) nextSel[field] = []
+          else {
+            nextSel.allowed = []
+            nextSel.forbidden = []
+            nextSel.notes = []
+          }
+          patch({
+            boundSelected: nextSel,
+            notice: '🏛 参谋长已将零散边界浓缩为 1 条，请在上方请示卡拍板',
+          })
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ boundConsolidating: '', secBusy: false })
+      }
+    }
+
+    function prefillSuggestion(sug) {
+      if (!sug) return
+      patch({
+        secTarget: sug.target || 'lead',
+        secMode: sug.mode || 'steer',
+        secInput: sug.draftText || '',
+        notice: '已填入底部参谋栏，可微调后发送',
+      })
+      void decideSuggestion(sug, 'dismiss')
+    }
+
+    async function mutateFact(payload) {
+      try {
+        const value = await call('chief/fact', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ session: store.sessionId, ...payload }),
+        })
+        if (payload.op === 'add') patch({ notice: '已记入持久条目' })
+        else if (payload.op === 'remove') patch({ notice: '已移除条目' })
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      }
+    }
+
+    async function submitChiefBar(overrideText = '') {
+      const text = String(overrideText || store.secInput || '').trim()
+      if (!text || store.secBusy) return
+      const target = overrideText ? 'auto' : (store.secTarget || 'auto')
+      const mode = store.secMode || 'steer'
+      patch({ secBusy: true, ...(overrideText ? {} : { secInput: '' }), error: '' })
+      try {
+        const value = await call('chief/ask', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId,
+            text,
+            target,
+            mode,
+          }),
+        })
+        if (value) {
+          const actions = []
+          for (const r of (value.relays || [])) {
+            if (r && r.ok) actions.push('→ ' + (r.target || target))
+          }
+          for (const b of (value.boardOps || [])) actions.push(b)
+          for (const m of (value.memoryChanges || [])) {
+            if (m && m.text) actions.push((m.op === 'remove' ? '移除：' : '记入：') + clampTitle(m.text, 14))
+          }
+          for (const bp of (value.boundProposals || [])) {
+            if (bp && bp.draftText) actions.push('呈批边界：' + clampTitle(bp.draftText, 12))
+          }
+          patch({
+            secLatestReply: {
+              text: value.reply || '- 【已处理】已按吩咐执行完毕。',
+              actions,
+              at: Date.now(),
+            },
+          })
+          if (actions.length) void refresh()
+        }
+      } catch (error) {
+        patch({
+          ...(overrideText ? {} : { secInput: text }),
+          error: String((error && error.message) || error),
+        })
+      } finally {
+        patch({ secBusy: false })
+      }
+    }
+
+    function applyArchiveHeaders(payload, invalidateIds = null) {
+      if (!payload || typeof payload !== 'object') return
+      const folders = Array.isArray(payload.folders) ? payload.folders : store.archiveFolders
+      const items = Array.isArray(payload.items) ? payload.items : store.archiveItems
+      const openFolders = { ...(store.archiveOpenFolders || {}) }
+      // On very first open of the Filing Cabinet, gently open the first non-empty drawer so the user sees how paperclipped files sit inside
+      if (!store.archiveLoaded && Object.keys(openFolders).length === 0) {
+        const firstNonEmpty = folders.find(f => f && f.count > 0)
+        if (firstNonEmpty) openFolders[firstNonEmpty.id] = true
+      }
+      let nextDetails = store.archiveDetails || {}
+      if (Array.isArray(invalidateIds) && invalidateIds.length) {
+        nextDetails = { ...nextDetails }
+        for (const id of invalidateIds) delete nextDetails[id]
+      }
+      // Keep takenOut & paperclip & summary in cached details synchronized with latest headers
+      if (Object.keys(nextDetails).length > 0 && items.length > 0) {
+        let touched = false
+        const headerMap = new Map(items.map(it => [it.id, it]))
+        const synced = { ...nextDetails }
+        for (const [id, det] of Object.entries(synced)) {
+          const hdr = headerMap.get(id)
+          if (!hdr) {
+            delete synced[id]
+            touched = true
+          } else if (
+            det.takenOut !== hdr.takenOut
+            || det.paperclip !== hdr.paperclip
+            || det.folder !== hdr.folder
+            || det.updatedAt !== hdr.updatedAt
+          ) {
+            if (det.updatedAt !== hdr.updatedAt) {
+              delete synced[id]
+            } else {
+              synced[id] = { ...det, takenOut: hdr.takenOut, paperclip: hdr.paperclip, folder: hdr.folder }
+            }
+            touched = true
+          }
+        }
+        if (touched) nextDetails = synced
+      }
+      patch({
+        archiveLoaded: true,
+        archiveFolders: folders,
+        archiveItems: items,
+        archiveOpenFolders: openFolders,
+        archiveDetails: nextDetails,
+      })
+    }
+
+    /** Tier-1 Lazy Load: called ONLY when the user opens or refreshes the `档案` tab */
+    async function loadArchives(force = false) {
+      if (store.archiveLoading) return null
+      if (store.archiveLoaded && !force) return null
+      patch({ archiveLoading: true, error: '' })
+      try {
+        const qs = new URLSearchParams()
+        if (store.sessionId) qs.set('session', store.sessionId)
+        const value = await call('archives' + (qs.toString() ? '?' + qs.toString() : ''))
+        if (value && value.ok) {
+          applyArchiveHeaders(value)
+          // Refresh details of any currently open dossier cards
+          const openIds = Object.keys(store.archiveOpenFiles || {}).filter(id => store.archiveOpenFiles[id] && !store.archiveDetails[id])
+          for (const id of openIds) {
+            void loadArchiveDetail(id, true)
+          }
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ archiveLoading: false })
+      }
+    }
+
+    /** Tier-2 Lazy Load: called ONLY when the user clicks a paperclipped dossier card to unfold its points */
+    async function loadArchiveDetail(archiveId, force = false) {
+      const id = String(archiveId || '').trim()
+      if (!id) return null
+      if (!force && store.archiveDetails && store.archiveDetails[id]) {
+        return store.archiveDetails[id]
+      }
+      if (store.archiveDetailLoading && store.archiveDetailLoading[id]) return null
+      patch({ archiveDetailLoading: { ...(store.archiveDetailLoading || {}), [id]: true } })
+      try {
+        const qs = new URLSearchParams({ id })
+        if (store.sessionId) qs.set('session', store.sessionId)
+        const value = await call('archives/detail?' + qs.toString())
+        if (value && value.ok && value.item) {
+          patch({
+            archiveDetails: {
+              ...(store.archiveDetails || {}),
+              [value.item.id]: value.item,
+            },
+          })
+          return value.item
+        }
+        return null
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        const nextLoad = { ...(store.archiveDetailLoading || {}) }
+        delete nextLoad[id]
+        patch({ archiveDetailLoading: nextLoad })
+      }
+    }
+
+    async function mutateArchiveApi(payload, toastLabel = '') {
+      try {
+        const value = await call('archives', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ session: store.sessionId, ...payload }),
+        })
+        if (value && value.ok) {
+          if (value.item && value.item.id) {
+            patch({
+              archiveDetails: {
+                ...(store.archiveDetails || {}),
+                [value.item.id]: value.item,
+              },
+            })
+          }
+          if (payload.op === 'delete' && (payload.archiveId || payload.id)) {
+            const delId = payload.archiveId || payload.id
+            const nextOpen = { ...(store.archiveOpenFiles || {}) }
+            const nextDet = { ...(store.archiveDetails || {}) }
+            delete nextOpen[delId]
+            delete nextDet[delId]
+            patch({ archiveOpenFiles: nextOpen, archiveDetails: nextDet })
+          }
+          if (toastLabel) patch({ notice: toastLabel })
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      }
+    }
+
+    async function requestOrganizeArchives(opts = {}) {
+      if (store.archiveOrganizing) return null
+      patch({ archiveOrganizing: true, error: '' })
+      try {
+        const value = await call('archives/organize', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId,
+            ids: Array.isArray(opts.ids) ? opts.ids : [],
+            folder: opts.folder || '',
+            scope: opts.scope || store.archiveOrganizeScope || 'unorganized',
+            instruction: opts.instruction !== undefined ? opts.instruction : (store.archiveOrganizePrompt || ''),
+          }),
+        })
+        if (value && value.ok) {
+          // Reload open dossier details so newly structured Chief points show immediately
+          const openIds = Object.keys(store.archiveOpenFiles || {}).filter(k => store.archiveOpenFiles[k])
+          const nextDetails = { ...(store.archiveDetails || {}) }
+          for (const k of openIds) delete nextDetails[k]
+          patch({
+            archiveDetails: nextDetails,
+            archiveOrganizeOpen: false,
+            archiveOrganizePrompt: '',
+            notice: value.updatedCount > 0
+              ? `✦ 参谋长已按层次整理收纳 ${value.updatedCount} 份工程卷宗（原文 100% 无损保留）`
+              : '✦ 当前卷宗已分门别类，无需重复拆整',
+          })
+          for (const k of openIds) {
+            void loadArchiveDetail(k, true)
+          }
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ archiveOrganizing: false })
+      }
+    }
+
+    async function deliverArchiveToChat(headerOrDetail, point = null) {
+      let detail = headerOrDetail
+      if (!point && (!detail || !Array.isArray(detail.points))) {
+        const loaded = await loadArchiveDetail(headerOrDetail && headerOrDetail.id)
+        if (loaded) detail = loaded
+      }
+      if (!detail) return
+      const lines = []
+      if (point) {
+        lines.push(`📎 调阅工程档案《${detail.title}》→ 记忆点「${point.title}」：`)
+        lines.push(point.detail || point.cue || point.title)
+      } else {
+        lines.push(`📎 调阅工程档案《${detail.title}》：`)
+        if (detail.summary) lines.push(`提要：${detail.summary}`)
+        const pts = Array.isArray(detail.points) ? detail.points : []
+        if (pts.length) {
+          pts.slice(0, 8).forEach((p, idx) => {
+            lines.push(`${idx + 1}. 【${p.title}】${p.detail || p.cue || ''}`)
+          })
+        } else if (detail.body) {
+          lines.push(detail.body.slice(0, 1500))
+        }
+      }
+      await askLeadModel(lines.join('\n'), '调阅工程档案')
+    }
+
+    async function searchColdArchives(queryText) {
+      const q = String(queryText || '').trim()
+      if (!q || store.archiveSearchBusy) return
+      patch({ archiveSearchBusy: true })
+      try {
+        const qs = new URLSearchParams({ q })
+        if (store.sessionId) qs.set('session', store.sessionId)
+        const value = await call('archives?' + qs.toString())
+        if (value && value.ok && Array.isArray(value.items)) {
+          const folderMap = new Map((value.folders || []).map(f => [f.id, f.label]))
+          const archHits = value.items.slice(0, 12).map(it => ({
+            kind: '封存档案',
+            tab: 'archive',
+            folderId: it.folder,
+            archiveId: it.id,
+            id: it.id,
+            title: `${it.paperclip === 'gold' ? '📎 ' : ''}${it.title}`,
+            snippet: `[${folderMap.get(it.folder) || it.folder}] ${it.summary || ''}`,
+          }))
+          const localHits = searchBoard(q).filter(hItem => hItem.tab !== 'archive')
+          patch({
+            askHits: [...archHits, ...localHits],
+            notice: archHits.length ? `已在封存档案柜检出 ${archHits.length} 卷匹配记录` : '封存档案柜中未检出匹配卷宗',
+          })
+        }
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+      } finally {
+        patch({ archiveSearchBusy: false })
+      }
+    }
+
+    async function refresh() {
+      const fromUrl = sessionIdFromUrl()
+      if (!store.sessionId && fromUrl) {
+        patch({ sessionId: fromUrl })
+      }
+      try {
+        await call('snapshot' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
+        const panelActive = Boolean(store.dock || store.panel === SIDE_ID || store.open)
+        if (panelActive && (!store.secView || store.tab === 'chief' || store.tab === 'peers' || (store.chiefMeta && store.chiefMeta.pendingSuggestions > 0))) {
+          void loadChiefView(false)
+        }
+        if (store.error) patch({ error: '' })
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+      }
+    }
+
+    function truncationNotice(result) {
+      const list = result && Array.isArray(result.truncated) ? result.truncated : []
+      if (!list.length) return ''
+      return '内容过长已截断：' + list.map(i => i.field).join(', ')
+    }
+
+    async function act(action) {
+      patch({ busy: true, error: '' })
+      try {
+        const result = await call('action', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...action, session: store.sessionId, by: action.by || 'user' }),
+        })
+        let notice = truncationNotice(result)
+        if (!notice && result && result.dispatched) {
+          notice = '已派发 @' + result.dispatched.agent
+        } else if (!notice && result && result.interrupted) {
+          notice = '已停止 @' + result.interrupted
+        } else if (!notice && result && result.messageId && result.agent) {
+          notice = '已发送给 @' + result.agent
+        }
+        if (notice) patch({ notice })
+        return result
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ busy: false })
+      }
+    }
+
+    async function loadTargets() {
+      try {
+        const value = await call('sessions' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
+        patch({
+          targets: (value && Array.isArray(value.sessions)) ? value.sessions : [],
+          pending: (value && value.pending) || null,
+          autoInject: !!(value && value.autoInject),
+          guardIdle: !(value && value.guardIdle === false),
+          guardMaxPerSession: Number.isFinite(Number(value && value.guardMaxPerSession))
+            ? Number(value.guardMaxPerSession)
+            : 3,
+          guardShortAnswer: Number.isFinite(Number(value && value.guardShortAnswer))
+            ? Number(value.guardShortAnswer)
+            : 600,
+        })
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+      }
+    }
+
+    async function loadHandoff() {
+      patch({ handoffBusy: true, error: '' })
+      try {
+        const value = await call('handoff' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
+        const text = value && value.text ? value.text : ''
+        patch({ handoffText: text })
+        return text
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return ''
+      } finally {
+        patch({ handoffBusy: false })
+      }
+    }
+
+    async function transfer(target) {
+      patch({ transferNote: '投递中…', error: '' })
+      try {
+        const value = await call('transfer', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ target, session: store.sessionId, by: 'user' }),
+        })
+        const created = value && value.mode === 'created' && value.sessionId ? String(value.sessionId) : ''
+        let note = '已放入待领取队列'
+        if (value && value.mode === 'injected') note = '已投递至目标会话'
+        if (created) {
+          patch({ transferred: true })
+          setTimeout(() => patch({ transferred: false }), 2000)
+          note = '已创建新会话 ' + shortSession(created)
+          if (navigation && typeof navigation.openSession === 'function') {
+            try {
+              navigation.openSession(created)
+            } catch {}
+          }
+        }
+        patch({
+          transferNote: note,
+          notice: note,
+          handoffText: value && value.text ? value.text : store.handoffText,
+        })
+        void loadTargets()
+      } catch (error) {
+        patch({ transferNote: '失败：' + String((error && error.message) || error) })
+      }
+    }
+
+    async function loadMemory() {
+      patch({ memBusy: true, error: '' })
+      try {
+        const value = await call('memory' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
+        patch({
+          memSections: (value && Array.isArray(value.sections)) ? value.sections : [],
+          memCount: Number(value && value.count) || 0,
+          memDigest: (value && value.digest) || '',
+        })
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+      } finally {
+        patch({ memBusy: false })
+      }
+    }
+
+    async function askMemory(question) {
+      const text = String(question || '').trim()
+      if (!text) return
+      patch({ memBusy: true, memNote: '' })
+      try {
+        const value = await call('action', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'memory.ask', question: text, session: store.sessionId, by: 'user' }),
+        })
+        patch({
+          memReply: (value && value.reply) || '',
+          memHits: (value && value.hits) || [],
+          memNote: value && value.terms && value.terms.length ? value.terms.join(' · ') : '',
+        })
+      } catch (error) {
+        patch({ memNote: String((error && error.message) || error) })
+      } finally {
+        patch({ memBusy: false })
+      }
+    }
+
+    async function addMemory() {
+      const text = store.memText.trim()
+      const title = store.memTitle.trim()
+      const section = store.memSection
+      if (!text) return
+      patch({ memText: '', memTitle: '', memComposerOpen: false, notice: '已记入记忆' })
+      await act({ action: 'memory.add', text, title, section })
+      void loadMemory()
+    }
+
+    async function removeMemory(id) {
+      await act({ action: 'memory.remove', id })
+      void loadMemory()
+    }
+
+    function searchBoard(term) {
+      const needle = String(term || '').trim().toLowerCase()
+      if (!needle) return []
+      const board = store.board || {}
+      const sec = store.secView || {}
+      const hits = []
+      const hit = text => String(text || '').toLowerCase().includes(needle)
+      for (const fact of sec.facts || []) {
+        if (hit(fact.text)) {
+          hits.push({ kind: '纪律/记忆', tab: 'chief', subTab: 'facts', id: fact.id, title: FACT_CAT_LABEL[fact.category] || '记忆条目', snippet: snippetOf(fact.text, needle, 36) })
+        }
+      }
+      for (const task of board.tasks || []) {
+        if (hit(task.title) || hit(task.note) || hit(task.intent) || hit(task.evidence)) {
+          hits.push({ kind: '任务', tab: 'tasks', id: task.id, title: task.title, snippet: snippetOf(task.note || task.evidence || task.title, needle, 34) })
+        }
+      }
+      for (const mail of sec.mailbox || []) {
+        if (hit(mail.text) || hit(mail.subject) || hit(mail.from) || hit(mail.to)) {
+          hits.push({ kind: '协同信箱', tab: 'peers', id: mail.id, title: (mail.from || '参谋长') + ' → ' + (mail.to || '成员'), snippet: snippetOf(mail.text, needle, 34) })
+        }
+      }
+      for (const note of board.notes || []) {
+        if (hit(note.title) || hit(note.body) || (note.tags || []).some(hit)) {
+          hits.push({ kind: '临时便签', tab: 'archive', id: note.id, title: note.title || '无标题', snippet: snippetOf(note.body || note.title, needle, 36) })
+        }
+      }
+      if (store.archiveLoaded && Array.isArray(store.archiveItems)) {
+        for (const arch of store.archiveItems) {
+          if (hit(arch.title) || hit(arch.summary) || (arch.tags || []).some(hit) || (arch.pointPreviews || []).some(hit)) {
+            hits.push({
+              kind: '工程档案',
+              tab: 'archive',
+              folderId: arch.folder,
+              archiveId: arch.id,
+              id: arch.id,
+              title: (arch.paperclip === 'gold' ? '📎 ' : '') + (arch.title || '无标题'),
+              snippet: snippetOf(arch.summary || (arch.pointPreviews || []).join(' · '), needle, 36),
+            })
+          }
+        }
+      }
+      for (const step of board.plan || []) {
+        if (hit(step.text)) hits.push({ kind: '规划', tab: 'plan', id: step.id, title: step.text, snippet: '' })
+      }
+      if (hit(board.objective)) hits.push({ kind: '目标', tab: 'plan', id: 'objective', title: '当前目标', snippet: snippetOf(board.objective, needle, 36) })
+      for (const item of board.memory || []) {
+        if (hit(item.title) || hit(item.text)) {
+          hits.push({ kind: '回合记录', tab: 'chief', subTab: 'facts', showRawTurns: true, id: item.id, title: item.title || SECTION_LABEL[item.section] || '记忆', snippet: snippetOf(item.text || item.title, needle, 36) })
+        }
+      }
+      return hits
+    }
+
+    function sendToComposer(text) {
+      const actions = store.inputActions
+      if (!actions || typeof actions !== 'object') return null
+      const setters = ['setDraft', 'setText', 'replaceText', 'updateText', 'appendText', 'insertText']
+      for (const name of setters) {
+        const fn = actions[name]
+        if (typeof fn !== 'function') continue
+        try {
+          if (fn(text) === false) continue
+        } catch {
+          continue
+        }
+        const submit = typeof actions.submit === 'function' ? actions.submit : (typeof actions.send === 'function' ? actions.send : null)
+        if (submit) {
+          try {
+            submit()
+            return '已发送至对话'
+          } catch {}
+        }
+        return '已填入输入框'
+      }
+      return null
+    }
+
+    async function askLeadModel(promptText, subject = '步骤咨询') {
+      const clean = String(promptText || '').trim()
+      if (!clean) return
+      const sent = sendToComposer(clean)
+      if (sent) {
+        patch({ notice: sent + ' · 等待模型解答' })
+        return
+      }
+      try {
+        await call('chief/relay', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId,
+            by: '用户咨询',
+            target: 'lead',
+            subject,
+            text: clean,
+            mode: 'followup',
+          }),
+        })
+        patch({ notice: '已发送给主对话模型解答' })
+      } catch (error) {
+        copyText(clean, '问题已复制，可粘贴到对话框提问')
+      }
+    }
+
+    function copyText(text, label = '已复制') {
+      if (!text) return
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(String(text)).then(
+            () => patch({ copied: true, notice: label }),
+            () => {},
+          )
+          setTimeout(() => patch({ copied: false }), 1400)
+        }
+      } catch {}
+    }
+
+    /* ----------------------------------------------------------- Icons (SVG) */
+
+    function Icon({ name, size = 14, style }) {
+      const props = {
+        width: size,
+        height: size,
+        viewBox: '0 0 24 24',
+        fill: 'none',
+        stroke: 'currentColor',
+        strokeWidth: 1.8,
+        strokeLinecap: 'round',
+        strokeLinejoin: 'round',
+        'aria-hidden': true,
+        style: { display: 'inline-block', verticalAlign: '-2px', flexShrink: 0, ...style },
+      }
+      switch (name) {
+        case 'search':
+          return h('svg', props, h('circle', { cx: 11, cy: 11, r: 7 }), h('path', { d: 'm20 20-3.5-3.5' }))
+        case 'refresh':
+          return h('svg', props, h('path', { d: 'M20 11A8.1 8.1 0 0 0 4.5 9M4 5v4h4' }), h('path', { d: 'M4 13a8.1 8.1 0 0 0 15.5 2m.5 4v-4h-4' }))
+        case 'plus':
+          return h('svg', props, h('path', { d: 'M12 5v14M5 12h14' }))
+        case 'x':
+          return h('svg', props, h('path', { d: 'M18 6 6 18M6 6l12 12' }))
+        case 'check':
+          return h('svg', props, h('path', { d: 'm5 12 5 5L20 7' }))
+        case 'sparkles':
+          return h('svg', props,
+            h('path', { d: 'M12 3l1.9 4.6L18.5 9.5l-4.6 1.9L12 16l-1.9-4.6L5.5 9.5l4.6-1.9L12 3z' }),
+            h('path', { d: 'M19 16l.8 2 2 .8-2 .8-.8 2-.8-2-2-.8 2-.8.8-2z' }),
+          )
+        case 'network':
+          return h('svg', props,
+            h('rect', { x: 9, y: 3, width: 6, height: 5, rx: 1.5 }),
+            h('rect', { x: 3, y: 16, width: 6, height: 5, rx: 1.5 }),
+            h('rect', { x: 15, y: 16, width: 6, height: 5, rx: 1.5 }),
+            h('path', { d: 'M12 8v4m0 0H6v4m6-4h6v4' }),
+          )
+        case 'list':
+          return h('svg', props, h('path', { d: 'M9 6h11M9 12h11M9 18h11M5 6h.01M5 12h.01M5 18h.01' }))
+        case 'play':
+          return h('svg', props, h('polygon', { points: '6 4 20 12 6 20 6 4' }))
+        case 'stop':
+          return h('svg', props, h('rect', { x: 6, y: 6, width: 12, height: 12, rx: 2 }))
+        case 'send':
+          return h('svg', props, h('path', { d: 'M22 2 11 13' }), h('polygon', { points: '22 2 15 22 11 13 2 9 22 2' }))
+        case 'chat':
+          return h('svg', props, h('path', { d: 'M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z' }))
+        case 'sliders':
+          return h('svg', props, h('path', { d: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6' }))
+        case 'trash':
+          return h('svg', props, h('path', { d: 'M3 6h18M8 6V4a1 1 0 0 1 1-1h6a1 1 0 0 1 1 1v2m2 0v13a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2V6h12z' }))
+        case 'edit':
+          return h('svg', props, h('path', { d: 'M12 20h9M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z' }))
+        case 'copy':
+          return h('svg', props, h('rect', { x: 9, y: 9, width: 12, height: 12, rx: 2 }), h('path', { d: 'M5 15H4a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h9a2 2 0 0 1 2 2v1' }))
+        case 'pin':
+          return h('svg', props, h('path', { d: 'M12 17v5M9 10.76a2 2 0 0 1-1.11 1.79l-1.78.9A2 2 0 0 0 5 15.24V16h14v-.76a2 2 0 0 0-1.11-1.79l-1.78-.9A2 2 0 0 1 15 10.76V6a1 1 0 0 0-1-1h-4a1 1 0 0 0-1 1z' }))
+        case 'pinStamp':
+          return h('svg', props,
+            h('g', { transform: 'rotate(34 12 12)' },
+              h('path', {
+                d: 'M9 4h6l-.6 5.2 2.4 2.2v1.6H7.2v-1.6l2.4-2.2L9 4z',
+                fill: 'currentColor',
+                fillOpacity: 0.28,
+              }),
+              h('path', { d: 'M8 4h8M9.3 4l-.5 5.1L6.6 11.3V13h10.8v-1.7l-2.2-2.2L14.7 4M12 13v7.5' }),
+            ),
+          )
+        case 'chevron':
+          return h('svg', props, h('path', { d: 'm9 18 6-6-6-6' }))
+        case 'arrowUp':
+          return h('svg', props, h('path', { d: 'M12 19V5' }), h('path', { d: 'm6 11 6-6 6 6' }))
+        case 'link':
+          return h('svg', props, h('path', { d: 'M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71' }), h('path', { d: 'M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71' }))
+        case 'mail':
+          return h('svg', props, h('rect', { x: 3, y: 5, width: 18, height: 14, rx: 2.5 }), h('path', { d: 'm3 7 9 6 9-6' }))
+        case 'bolt':
+          return h('svg', props, h('polygon', { points: '13 2 3 14 12 14 11 22 21 10 12 10 13 2' }))
+        case 'target':
+          return h('svg', props,
+            h('circle', { cx: 12, cy: 12, r: 7.5 }),
+            h('circle', { cx: 12, cy: 12, r: 2.5 }),
+            h('path', { d: 'M12 2v3M12 19v3M2 12h3M19 12h3' }),
+          )
+        case 'alert':
+          return h('svg', props,
+            h('path', { d: 'M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z' }),
+            h('path', { d: 'M12 9v4M12 17h.01' }),
+          )
+        case 'folder':
+          return h('svg', props,
+            h('path', { d: 'M3 7a2 2 0 0 1 2-2h4.2a2 2 0 0 1 1.5.7L12.2 7H19a2 2 0 0 1 2 2v8.5a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V7z' }),
+          )
+        case 'folderOpen':
+          return h('svg', props,
+            h('path', { d: 'M3 7a2 2 0 0 1 2-2h4.2a2 2 0 0 1 1.5.7L12.2 7H19a2 2 0 0 1 2 2v1.5' }),
+            h('path', { d: 'M3 10.5h16.6a1.5 1.5 0 0 1 1.4 1.9l-1.5 6A2 2 0 0 1 17.6 20H5a2 2 0 0 1-2-2V10.5z' }),
+          )
+        case 'paperclip':
+          return h('svg', props,
+            h('path', { d: 'm21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48' }),
+          )
+        case 'archive':
+          return h('svg', props,
+            h('rect', { x: 3, y: 4, width: 18, height: 5, rx: 1.5 }),
+            h('path', { d: 'M5 9v9a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V9' }),
+            h('path', { d: 'M10 13h4' }),
+          )
+        case 'trayOut':
+          return h('svg', props,
+            h('path', { d: 'M12 15V4' }),
+            h('path', { d: 'm8 8 4-4 4 4' }),
+            h('path', { d: 'M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3' }),
+          )
+        case 'trayIn':
+          return h('svg', props,
+            h('path', { d: 'M12 4v11' }),
+            h('path', { d: 'm8 11 4 4 4-4' }),
+            h('path', { d: 'M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3' }),
+          )
+        default:
+          return null
+      }
+    }
+
+    /* ---------------------------------------------------- Error Boundary */
+
+    class ChiefErrorBoundary extends React.Component {
+      constructor(props) {
+        super(props)
+        this.state = { error: null }
+      }
+      static getDerivedStateFromError(error) {
+        return { error }
+      }
+      componentDidCatch(error, info) {
+        console.error('dsh-chief view boundary caught error:', error, info)
+      }
+      render() {
+        if (this.state.error) {
+          return h(
+            'div',
+            { className: 'dnb-group', style: { padding: 16, textAlign: 'center', marginTop: 12 } },
+            h('div', { style: { fontWeight: 500, fontSize: 13, marginBottom: 6 } }, '视图渲染已自动恢复保护'),
+            h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', marginBottom: 12, wordBreak: 'break-word' } },
+              String(this.state.error && this.state.error.message ? this.state.error.message : this.state.error)),
+            h('button', {
+              className: 'dnb-primary-btn',
+              onClick: () => {
+                this.setState({ error: null })
+                void refresh()
+              },
+            }, '重新加载'),
+          )
+        }
+        return this.props.children
+      }
+    }
+
+    /* ----------------------------------------------------- iOS Micro-Flat CSS */
+
+    const CSS = `
+      .dnb-panel {
+        --dnb-card: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1, rgba(128,128,136,0.08)));
+        --dnb-card-hover: var(--dsw-alias-card-fill-hover, var(--dsw-alias-bg-layer-2, rgba(128,128,136,0.13)));
+        --dnb-fill: var(--dsw-alias-fill-l1, var(--dsw-alias-bg-layer-2, rgba(120,120,128,0.16)));
+        --dnb-elevated: var(--dsw-alias-bg-elevated, var(--dsw-alias-bg-layer-3, #262629));
+        --dnb-popover: var(--dsw-alias-hovercard-bg, var(--dsw-alias-bg-elevated, #252528));
+        --dnb-border: var(--dsw-alias-border-l1, rgba(128,128,136,0.15));
+        --dnb-border-strong: var(--dsw-alias-border-l2, rgba(128,128,136,0.26));
+        --dnb-text: var(--dsw-alias-label-primary, #f2f2f7);
+        --dnb-text-2: var(--dsw-alias-label-secondary, rgba(235,235,245,0.64));
+        --dnb-text-3: var(--dsw-alias-label-tertiary, rgba(235,235,245,0.38));
+        --dnb-accent: var(--dsw-alias-brand-primary, #0a84ff);
+
+        position: fixed;
+        top: 76px;
+        right: 16px;
+        width: 396px;
+        max-width: calc(100vw - 32px);
+        max-height: min(80vh, 780px);
+        pointer-events: auto;
+        display: flex;
+        flex-direction: column;
+        z-index: 70;
+        border-radius: 18px;
+        overflow: hidden;
+        background: var(--dsw-alias-bg-layer-3, rgba(30, 30, 32, 0.96));
+        backdrop-filter: blur(24px) saturate(1.2);
+        color: var(--dnb-text);
+        border: 1px solid var(--dnb-border-strong);
+        box-shadow: 0 20px 48px rgba(0, 0, 0, 0.28);
+        font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", "PingFang SC", "Microsoft YaHei UI", system-ui, sans-serif;
+        font-size: 12.5px;
+        line-height: 1.45;
+        -webkit-font-smoothing: antialiased;
+      }
+
+      .dnb-main {
+        position: relative;
+        top: auto;
+        right: auto;
+        width: 100%;
+        max-width: none;
+        max-height: none;
+        height: 100%;
+        flex: 1 1 auto;
+        min-width: 0;
+        min-height: 0;
+        z-index: auto;
+        border-radius: 0;
+        border: none;
+        box-shadow: none;
+        backdrop-filter: none;
+        background: transparent;
+      }
+
+      .dnb-page {
+        display: flex;
+        flex: 1 1 auto;
+        flex-direction: column;
+        width: 100%;
+        height: 100%;
+        min-width: 0;
+        min-height: 0;
+        overflow: hidden;
+        color: var(--dsw-alias-label-primary);
+        background: var(--dsw-alias-bg-base, transparent);
+      }
+
+      .dnb-dock-page {
+        background: transparent;
+      }
+
+      .dnb-dock {
+        height: 100%;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+
+      /* Entry button in composer bar */
+      .dnb-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        height: 28px;
+        min-width: 28px;
+        padding: 0 5px;
+        border-radius: 8px;
+        border: none;
+        background: transparent;
+        color: var(--dsw-alias-label-secondary);
+        font: inherit;
+        font-size: 12px;
+        cursor: pointer;
+        transition: background 0.18s ease, color 0.18s ease, transform 0.14s ease;
+      }
+      .dnb-btn:hover {
+        background: var(--dsw-alias-bg-layer-2);
+        color: var(--dsw-alias-label-primary);
+      }
+      .dnb-btn:active { transform: scale(0.94); }
+      .dnb-btn[data-active="1"] { color: var(--dsw-alias-brand-primary); }
+      .dnb-count {
+        min-width: 15px;
+        height: 15px;
+        padding: 0 4px;
+        border-radius: 99px;
+        background: var(--dsw-alias-brand-primary, #0a84ff);
+        color: #fff;
+        font-size: 10px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+
+      /* Header */
+      .dnb-head {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 10px 14px 8px;
+        flex-shrink: 0;
+      }
+      .dnb-title {
+        font-weight: 600;
+        font-size: 14px;
+        letter-spacing: -0.1px;
+      }
+      .dnb-session-chip {
+        font-size: 11px;
+        color: var(--dnb-text-3);
+        background: var(--dnb-fill);
+        padding: 1px 7px;
+        border-radius: 99px;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+      }
+      .dnb-head-actions {
+        margin-left: auto;
+        display: flex;
+        align-items: center;
+        gap: 4px;
+      }
+      .dnb-icon-btn {
+        width: 28px;
+        height: 28px;
+        border-radius: 8px;
+        border: none;
+        background: transparent;
+        color: var(--dnb-text-2);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        transition: background 0.16s ease, color 0.16s ease, transform 0.14s ease;
+      }
+      .dnb-icon-btn:hover {
+        background: var(--dnb-fill);
+        color: var(--dnb-text);
+      }
+      .dnb-icon-btn:active { transform: scale(0.92); }
+      .dnb-icon-btn[data-active="1"] {
+        background: var(--dnb-fill);
+        color: var(--dnb-accent);
+      }
+
+      @keyframes dnb-spin { to { transform: rotate(360deg); } }
+      .dnb-spin { animation: dnb-spin 0.9s linear infinite; }
+
+      /* iOS Segmented Control */
+      .dnb-seg-wrap {
+        padding: 0 12px 8px;
+        flex-shrink: 0;
+      }
+      .dnb-seg {
+        display: flex;
+        padding: 2.5px;
+        border-radius: 10px;
+        background: var(--dnb-fill);
+        gap: 2px;
+      }
+      .dnb-seg-btn {
+        flex: 1 1 0;
+        min-width: 0;
+        border: none;
+        background: transparent;
+        color: var(--dnb-text-2);
+        font: inherit;
+        font-size: 12px;
+        font-weight: 500;
+        padding: 5px 4px;
+        border-radius: 7.5px;
+        cursor: pointer;
+        white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 3px;
+        transition: background 0.2s cubic-bezier(0.32, 0.72, 0, 1), color 0.2s ease, box-shadow 0.2s ease, transform 0.12s ease;
+      }
+      .dnb-seg-btn:hover { color: var(--dnb-text); }
+      .dnb-seg-btn:active { transform: scale(0.96); }
+      .dnb-seg-btn[data-active="1"] {
+        background: var(--dnb-elevated);
+        color: var(--dnb-text);
+        font-weight: 600;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), 0 0 0 0.5px var(--dnb-border);
+      }
+      .dnb-seg-dot {
+        font-size: 10px;
+        opacity: 0.72;
+        font-weight: 500;
+      }
+
+      /* Scrollable body */
+      .dnb-body {
+        padding: calc(4px + var(--dnb-safe-top, 0px)) 12px calc(16px + var(--dnb-safe-bottom, 0px));
+        overflow-y: auto;
+        overflow-x: hidden;
+        flex: 1 1 auto;
+        min-height: 0;
+      }
+      .dnb-body::-webkit-scrollbar { width: 5px; height: 5px; }
+      .dnb-body::-webkit-scrollbar-thumb {
+        background: var(--dsw-alias-scrollbar-bg-l1, rgba(128,128,136,0.24));
+        border-radius: 99px;
+      }
+
+      @keyframes dnb-enter {
+        from { opacity: 0; transform: translateY(4px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      .dnb-view {
+        animation: dnb-enter 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+      }
+
+      /* iOS Inset Grouped Cards */
+      .dnb-group {
+        background: var(--dnb-card);
+        border: 1px solid var(--dnb-border);
+        border-radius: 14px;
+        margin-bottom: 10px;
+        overflow: hidden;
+      }
+      .dnb-section-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 2px 4px 6px;
+        font-size: 11.5px;
+        font-weight: 500;
+        color: var(--dnb-text-2);
+      }
+      .dnb-cell {
+        display: flex;
+        align-items: center;
+        gap: 10px;
+        padding: 9px 12px;
+        position: relative;
+        transition: background 0.15s ease;
+      }
+      .dnb-cell + .dnb-cell {
+        border-top: 1px solid var(--dnb-border);
+      }
+      .dnb-cell-hover:hover {
+        background: var(--dnb-card-hover);
+      }
+      .dnb-row-actions {
+        opacity: 0;
+        display: inline-flex;
+        gap: 4px;
+        transition: opacity 0.15s ease;
+      }
+      .dnb-cell:hover .dnb-row-actions,
+      .dnb-note-card:hover .dnb-row-actions {
+        opacity: 1;
+      }
+
+      /* Inputs & Areas */
+      .dnb-input, .dnb-area {
+        width: 100%;
+        box-sizing: border-box;
+        border: 1px solid var(--dnb-border);
+        border-radius: 10px;
+        background: var(--dnb-card);
+        color: var(--dnb-text);
+        font: inherit;
+        font-size: 12.5px;
+        padding: 7px 10px;
+        outline: none;
+        transition: border-color 0.18s ease, background 0.18s ease;
+      }
+      .dnb-input::placeholder, .dnb-area::placeholder {
+        color: var(--dnb-text-3);
+      }
+      .dnb-input:focus, .dnb-area:focus {
+        border-color: var(--dnb-accent);
+      }
+      .dnb-bare-area {
+        width: 100%;
+        box-sizing: border-box;
+        border: none;
+        background: transparent;
+        color: var(--dnb-text);
+        font: inherit;
+        font-size: 13px;
+        line-height: 1.55;
+        padding: 10px 12px;
+        resize: vertical;
+        min-height: 60px;
+        outline: none;
+      }
+      .dnb-bare-area::placeholder { color: var(--dnb-text-3); }
+
+      /* Buttons & Pills */
+      .dnb-primary-btn {
+        height: 30px;
+        padding: 0 12px;
+        border-radius: 99px;
+        border: none;
+        background: var(--dnb-accent);
+        color: #fff;
+        font: inherit;
+        font-size: 12px;
+        font-weight: 500;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        white-space: nowrap;
+        transition: opacity 0.16s ease, transform 0.14s ease;
+      }
+      .dnb-primary-btn:hover:not(:disabled) { opacity: 0.9; }
+      .dnb-primary-btn:active:not(:disabled) { transform: scale(0.96); }
+      .dnb-primary-btn:disabled { opacity: 0.4; cursor: default; }
+
+      .dnb-pill {
+        height: 26px;
+        padding: 0 10px;
+        border-radius: 99px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-card);
+        color: var(--dnb-text-2);
+        font: inherit;
+        font-size: 11.5px;
+        font-weight: 500;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        white-space: nowrap;
+        transition: all 0.16s cubic-bezier(0.32, 0.72, 0, 1);
+      }
+      .dnb-pill:hover {
+        background: var(--dnb-card-hover);
+        color: var(--dnb-text);
+        border-color: var(--dnb-border-strong);
+      }
+      .dnb-pill:active { transform: scale(0.95); }
+      .dnb-pill[data-active="1"] {
+        background: rgba(10, 132, 255, 0.14);
+        border-color: rgba(10, 132, 255, 0.45);
+        color: var(--dnb-accent);
+      }
+      .dnb-pill-accent {
+        background: rgba(10, 132, 255, 0.12);
+        border-color: rgba(10, 132, 255, 0.3);
+        color: var(--dnb-accent);
+      }
+      .dnb-pill-danger {
+        color: #ff453a;
+        border-color: rgba(255, 69, 58, 0.25);
+      }
+      .dnb-pill-danger:hover {
+        background: rgba(255, 69, 58, 0.12);
+        color: #ff453a;
+        border-color: rgba(255, 69, 58, 0.45);
+      }
+
+      /* iOS Circular Status Ring */
+      .dnb-ring {
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        border: 1.8px solid var(--dnb-text-3);
+        background: transparent;
+        padding: 0;
+        flex-shrink: 0;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: #fff;
+        transition: all 0.18s cubic-bezier(0.32, 0.72, 0, 1);
+      }
+      .dnb-ring:hover { transform: scale(1.08); }
+      .dnb-ring:active { transform: scale(0.9); }
+
+      /* iOS Toggle Switch */
+      .dnb-switch {
+        position: relative;
+        width: 38px;
+        height: 22px;
+        border-radius: 99px;
+        border: none;
+        padding: 2px;
+        background: var(--dnb-fill);
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+      }
+      .dnb-switch[data-on="1"] {
+        background: #30d158;
+      }
+      .dnb-switch-thumb {
+        display: block;
+        width: 18px;
+        height: 18px;
+        border-radius: 50%;
+        background: #fff;
+        box-shadow: 0 1px 3px rgba(0,0,0,0.28);
+        transition: transform 0.22s cubic-bezier(0.32, 0.72, 0, 1);
+      }
+      .dnb-switch[data-on="1"] .dnb-switch-thumb {
+        transform: translateX(16px);
+      }
+
+      /* Progress bar */
+      .dnb-progress {
+        height: 4px;
+        border-radius: 99px;
+        background: var(--dnb-fill);
+        overflow: hidden;
+        display: flex;
+      }
+
+      /* Grand Full-Width Zero-Drag Pyramid Tree (大气铺开金字塔树) */
+      .dnb-pyr-root {
+        display: flex;
+        flex-direction: column;
+        width: 100%;
+        min-width: 0;
+        padding: 2px 0 8px;
+      }
+      .dnb-pyr-apex {
+        position: relative;
+        border-radius: 15px;
+        padding: 12px 14px;
+        background: linear-gradient(145deg, rgba(10, 132, 255, 0.12) 0%, var(--dnb-card) 68%);
+        border: 1.5px solid rgba(10, 132, 255, 0.44);
+        box-shadow: 0 6px 20px rgba(0, 0, 0, 0.12);
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      }
+      .dnb-pyr-apex[data-spotlight="doing"] {
+        border-color: #ff9f0a;
+        box-shadow: 0 0 0 2.5px rgba(255, 159, 10, 0.28), 0 8px 24px rgba(0, 0, 0, 0.18);
+      }
+      .dnb-pyr-apex[data-spotlight="blocked"] {
+        border-color: #ff453a;
+        box-shadow: 0 0 0 2.5px rgba(255, 69, 58, 0.32), 0 8px 24px rgba(0, 0, 0, 0.18);
+      }
+      .dnb-pyr-trunk {
+        width: 2px;
+        height: 18px;
+        margin: 0 auto;
+        background: var(--dnb-border-strong, rgba(155, 155, 168, 0.55));
+        flex-shrink: 0;
+        transition: background 0.2s ease;
+      }
+      .dnb-pyr-trunk[data-tone="doing"] { background: #ff9f0a; }
+      .dnb-pyr-trunk[data-tone="blocked"] { background: #ff453a; }
+      .dnb-pyr-trunk[data-tone="live"] { background: #30d158; }
+
+      .dnb-pyr-crossbar {
+        height: 2px;
+        margin: 0 22%;
+        background: var(--dnb-border-strong, rgba(155, 155, 168, 0.52));
+        border-radius: 2px;
+      }
+      .dnb-pyr-crossbar[data-tone="doing"] { background: linear-gradient(90deg, rgba(255,159,10,0.45), #ff9f0a, rgba(255,159,10,0.45)); }
+      .dnb-pyr-crossbar[data-tone="blocked"] { background: linear-gradient(90deg, rgba(255,69,58,0.45), #ff453a, rgba(255,69,58,0.45)); }
+
+      .dnb-pyr-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(232px, 1fr));
+        gap: 12px;
+        align-items: start;
+        width: 100%;
+        min-width: 0;
+      }
+      .dnb-pyr-grid[data-single="1"] {
+        grid-template-columns: minmax(0, 1fr);
+      }
+      .dnb-pyr-branch {
+        position: relative;
+        padding-top: 12px;
+        min-width: 0;
+        transition: opacity 0.2s ease;
+      }
+      .dnb-pyr-branch::before {
+        content: "";
+        position: absolute;
+        top: 0;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 2px;
+        height: 12px;
+        background: var(--dnb-border-strong, rgba(155, 155, 168, 0.55));
+      }
+      .dnb-pyr-branch::after {
+        content: "";
+        position: absolute;
+        top: 9px;
+        left: 50%;
+        transform: translateX(-50%);
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        background: var(--dnb-border-strong, rgba(165, 165, 178, 0.85));
+      }
+      .dnb-pyr-branch[data-tone="doing"]::before,
+      .dnb-pyr-branch[data-tone="doing"]::after { background: #ff9f0a; }
+      .dnb-pyr-branch[data-tone="blocked"]::before,
+      .dnb-pyr-branch[data-tone="blocked"]::after { background: #ff453a; }
+      .dnb-pyr-branch[data-tone="live"]::before,
+      .dnb-pyr-branch[data-tone="live"]::after { background: #30d158; }
+
+      .dnb-pyr-branch-box {
+        position: relative;
+        border-radius: 15px;
+        min-width: 0;
+        transition: all 0.2s ease;
+      }
+      .dnb-pyr-branch-box[data-spotlight="doing"] {
+        padding: 10px 9px 9px;
+        margin-top: 4px;
+        border: 2px solid #ff9f0a;
+        background: rgba(255, 159, 10, 0.06);
+        box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.16), 0 8px 24px rgba(0, 0, 0, 0.18);
+      }
+      .dnb-pyr-branch-box[data-spotlight="blocked"] {
+        padding: 10px 9px 9px;
+        margin-top: 4px;
+        border: 2px solid #ff453a;
+        background: rgba(255, 69, 58, 0.07);
+        box-shadow: 0 0 0 3px rgba(255, 69, 58, 0.18), 0 8px 24px rgba(0, 0, 0, 0.18);
+      }
+      .dnb-pyr-spot-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 20px;
+        padding: 0 9px;
+        border-radius: 99px;
+        font-size: 10.5px;
+        font-weight: 700;
+        color: #fff;
+        background: #ff9f0a;
+        margin-bottom: 7px;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
+      }
+      .dnb-pyr-spot-tag[data-blocked="1"] {
+        background: #ff453a;
+      }
+
+      .dnb-pyr-agent-card {
+        border-radius: 13px;
+        padding: 10px 12px;
+        background: var(--dnb-elevated, #252529);
+        border: 1px solid var(--dnb-border-strong);
+        min-width: 0;
+        transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
+      }
+      .dnb-pyr-agent-card[data-running="1"] {
+        border-color: rgba(48, 209, 88, 0.52);
+        background: linear-gradient(135deg, rgba(48, 209, 88, 0.09) 0%, var(--dnb-elevated, #252529) 72%);
+      }
+      .dnb-pyr-agent-card[data-focused="doing"] {
+        border-color: rgba(255, 159, 10, 0.65);
+      }
+      .dnb-pyr-agent-card[data-focused="blocked"] {
+        border-color: rgba(255, 69, 58, 0.68);
+      }
+
+      /* Vertical Tree Connector Spine (竖线连接) for Tier 2+ Subagents & Tasks */
+      .dnb-pyr-subtree {
+        position: relative;
+        margin-left: 14px;
+        padding-left: 15px;
+        margin-top: 9px;
+        border-left: 2px solid var(--dnb-border-strong, rgba(155, 155, 168, 0.46));
+        display: flex;
+        flex-direction: column;
+        gap: 9px;
+        min-width: 0;
+      }
+      .dnb-pyr-subtree[data-tone="doing"] {
+        border-left-color: rgba(255, 159, 10, 0.68);
+      }
+      .dnb-pyr-subtree[data-tone="blocked"] {
+        border-left-color: rgba(255, 69, 58, 0.72);
+      }
+      .dnb-pyr-subtree[data-tone="live"] {
+        border-left-color: rgba(48, 209, 88, 0.58);
+      }
+      .dnb-pyr-subitem {
+        position: relative;
+        min-width: 0;
+      }
+      .dnb-pyr-subitem::before {
+        content: "";
+        position: absolute;
+        left: -15px;
+        top: 19px;
+        width: 13px;
+        height: 2px;
+        background: var(--dnb-border-strong, rgba(155, 155, 168, 0.48));
+      }
+      .dnb-pyr-subitem::after {
+        content: "";
+        position: absolute;
+        left: -5px;
+        top: 17px;
+        width: 5px;
+        height: 5px;
+        border-radius: 50%;
+        background: var(--dnb-border-strong, rgba(165, 165, 178, 0.78));
+      }
+      .dnb-pyr-subitem[data-tone="doing"]::before,
+      .dnb-pyr-subitem[data-tone="doing"]::after { background: #ff9f0a; }
+      .dnb-pyr-subitem[data-tone="blocked"]::before,
+      .dnb-pyr-subitem[data-tone="blocked"]::after { background: #ff453a; }
+      .dnb-pyr-subitem[data-tone="done"]::after { background: #30d158; }
+
+      .dnb-pyr-task-card {
+        border-radius: 13px;
+        padding: 10px 12px;
+        background: var(--dnb-card);
+        border: 1px solid var(--dnb-border);
+        border-left: 3.5px solid var(--dnb-border-strong);
+        min-width: 0;
+        transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+      }
+      .dnb-pyr-task-card:hover {
+        border-color: var(--dnb-border-strong);
+      }
+      .dnb-pyr-task-card[data-status="doing"] {
+        border-left-color: #ff9f0a;
+        border-color: rgba(255, 159, 10, 0.34);
+        border-left-width: 3.5px;
+        background: linear-gradient(90deg, rgba(255, 159, 10, 0.08) 0%, var(--dnb-card) 64%);
+      }
+      .dnb-pyr-task-card[data-status="blocked"] {
+        border-left-color: #ff453a;
+        border-color: rgba(255, 69, 58, 0.42);
+        border-left-width: 3.5px;
+        background: linear-gradient(90deg, rgba(255, 69, 58, 0.1) 0%, var(--dnb-card) 64%);
+      }
+      .dnb-pyr-task-card[data-status="todo"] {
+        border-left-color: #0a84ff;
+      }
+      .dnb-pyr-task-card[data-status="done"] {
+        border-left-color: #30d158;
+        opacity: 0.92;
+      }
+      .dnb-pyr-task-card[data-spotlight="doing"] {
+        border-color: #ff9f0a;
+        box-shadow: 0 0 0 2px rgba(255, 159, 10, 0.34), 0 6px 18px rgba(0, 0, 0, 0.18);
+      }
+      .dnb-pyr-task-card[data-spotlight="blocked"] {
+        border-color: #ff453a;
+        box-shadow: 0 0 0 2px rgba(255, 69, 58, 0.4), 0 6px 18px rgba(0, 0, 0, 0.18);
+      }
+
+      /* Laid-out inline status & action pills inside every task card */
+      .dnb-pyr-st-row {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        flex-wrap: wrap;
+        margin-top: 8px;
+        padding-top: 7px;
+        border-top: 1px solid var(--dnb-border);
+      }
+      .dnb-pyr-st-btn {
+        height: 21px;
+        padding: 0 7.5px;
+        border-radius: 99px;
+        border: 1px solid var(--dnb-border);
+        background: transparent;
+        color: var(--dnb-text-3);
+        font: inherit;
+        font-size: 10.5px;
+        font-weight: 500;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 3.5px;
+        white-space: nowrap;
+        transition: all 0.14s ease;
+      }
+      .dnb-pyr-st-btn:hover {
+        color: var(--dnb-text);
+        border-color: var(--dnb-border-strong);
+        background: var(--dnb-fill);
+      }
+      .dnb-pyr-st-btn[data-active="1"][data-st="todo"] {
+        color: #0a84ff;
+        border-color: rgba(10, 132, 255, 0.45);
+        background: rgba(10, 132, 255, 0.14);
+        font-weight: 600;
+      }
+      .dnb-pyr-st-btn[data-active="1"][data-st="doing"] {
+        color: #ff9f0a;
+        border-color: rgba(255, 159, 10, 0.5);
+        background: rgba(255, 159, 10, 0.16);
+        font-weight: 600;
+      }
+      .dnb-pyr-st-btn[data-active="1"][data-st="blocked"] {
+        color: #ff453a;
+        border-color: rgba(255, 69, 58, 0.55);
+        background: rgba(255, 69, 58, 0.18);
+        font-weight: 600;
+      }
+      .dnb-pyr-st-btn[data-active="1"][data-st="done"] {
+        color: #30d158;
+        border-color: rgba(48, 209, 88, 0.45);
+        background: rgba(48, 209, 88, 0.15);
+        font-weight: 600;
+      }
+
+      .dnb-pyr-act-row {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex-wrap: wrap;
+        margin-top: 6px;
+      }
+      .dnb-pyr-act-btn {
+        height: 22px;
+        padding: 0 8px;
+        border-radius: 7px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-elevated, rgba(128,128,136,0.1));
+        color: var(--dnb-text-2);
+        font: inherit;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 3.5px;
+        white-space: nowrap;
+        transition: all 0.14s ease;
+      }
+      .dnb-pyr-act-btn:hover {
+        color: var(--dnb-text);
+        border-color: var(--dnb-border-strong);
+        background: var(--dnb-card-hover);
+      }
+      .dnb-pyr-act-btn[data-accent="1"] {
+        color: var(--dnb-accent);
+        border-color: rgba(10, 132, 255, 0.34);
+        background: rgba(10, 132, 255, 0.1);
+      }
+      .dnb-pyr-act-btn[data-accent="1"]:hover {
+        background: rgba(10, 132, 255, 0.18);
+      }
+      .dnb-pyr-act-btn[data-danger="1"] {
+        color: #ff453a;
+        border-color: rgba(255, 69, 58, 0.26);
+        background: transparent;
+      }
+      .dnb-pyr-act-btn[data-danger="1"]:hover {
+        background: rgba(255, 69, 58, 0.12);
+        border-color: rgba(255, 69, 58, 0.45);
+      }
+
+      /* DAG Zoom Canvas (optional的全景画布视图) */
+      .dnb-canvas {
+        position: relative;
+        border-radius: 14px;
+        border: 1px solid var(--dnb-border);
+        background-color: var(--dnb-card);
+        background-image: radial-gradient(var(--dnb-border-strong) 1px, transparent 1px);
+        background-size: 18px 18px;
+        overflow: auto;
+        min-height: 420px;
+      }
+      .dnb-canvas::-webkit-scrollbar { width: 5px; height: 5px; }
+      .dnb-canvas::-webkit-scrollbar-thumb {
+        background: var(--dsw-alias-scrollbar-bg-l1, rgba(128,128,136,0.24));
+        border-radius: 99px;
+      }
+
+      @keyframes dnb-pulse {
+        0%, 100% { opacity: 0.85; stroke-width: 1.8px; }
+        50% { opacity: 0.25; stroke-width: 4.5px; }
+      }
+      .dnb-pulse-ring { animation: dnb-pulse 2s ease-in-out infinite; }
+
+      @keyframes dnb-live-dot {
+        0%, 100% { opacity: 1; transform: scale(1); }
+        50% { opacity: 0.45; transform: scale(0.82); }
+      }
+      .dnb-live-dot {
+        width: 6.5px;
+        height: 6.5px;
+        border-radius: 50%;
+        display: inline-block;
+        flex-shrink: 0;
+        animation: dnb-live-dot 1.5s ease-in-out infinite;
+      }
+
+      @keyframes dnb-spotlight-march {
+        to { stroke-dashoffset: -28px; }
+      }
+      .dnb-spotlight-dash {
+        animation: dnb-spotlight-march 1.3s linear infinite;
+      }
+
+      @keyframes dnb-spotlight-breathe {
+        0%, 100% { opacity: 0.26; }
+        50% { opacity: 0.48; }
+      }
+      .dnb-spotlight-halo {
+        animation: dnb-spotlight-breathe 2s ease-in-out infinite;
+      }
+
+      /* Eye-catching Objective Status Badges (推进中 / 受阻 / 待推进 / 已完成) */
+      .dnb-status-badge {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 20px;
+        padding: 0 7.5px;
+        border-radius: 99px;
+        font-size: 10.5px;
+        font-weight: 600;
+        letter-spacing: 0.1px;
+        white-space: nowrap;
+        flex-shrink: 0;
+        border: 1px solid transparent;
+      }
+      .dnb-status-badge[data-status="doing"] {
+        background: rgba(255, 159, 10, 0.18);
+        border-color: rgba(255, 159, 10, 0.48);
+        color: #ff9f0a;
+      }
+      .dnb-status-badge[data-status="blocked"] {
+        background: rgba(255, 69, 58, 0.2);
+        border-color: rgba(255, 69, 58, 0.56);
+        color: #ff453a;
+      }
+      .dnb-status-badge[data-status="todo"] {
+        background: rgba(10, 132, 255, 0.14);
+        border-color: rgba(10, 132, 255, 0.34);
+        color: #0a84ff;
+      }
+      .dnb-status-badge[data-status="done"] {
+        background: rgba(48, 209, 88, 0.14);
+        border-color: rgba(48, 209, 88, 0.34);
+        color: #30d158;
+      }
+
+      /* Prominent Advancing & Blocked Objective Radar Cards */
+      .dnb-radar-strip {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-bottom: 10px;
+      }
+      .dnb-radar-card {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 8px 10px 8px 11px;
+        border-radius: 12px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-card);
+        cursor: pointer;
+        transition: transform 0.15s cubic-bezier(0.32, 0.72, 0, 1), border-color 0.16s ease, box-shadow 0.16s ease, background 0.16s ease;
+      }
+      .dnb-radar-card:hover {
+        background: var(--dnb-card-hover);
+        transform: translateY(-1px);
+      }
+      .dnb-radar-card:active {
+        transform: scale(0.985);
+      }
+      .dnb-radar-card[data-kind="doing"] {
+        border-left: 3.5px solid #ff9f0a;
+        background: linear-gradient(90deg, rgba(255, 159, 10, 0.12) 0%, var(--dnb-card) 70%);
+        border-color: rgba(255, 159, 10, 0.34);
+        border-left-color: #ff9f0a;
+      }
+      .dnb-radar-card[data-kind="blocked"] {
+        border-left: 3.5px solid #ff453a;
+        background: linear-gradient(90deg, rgba(255, 69, 58, 0.15) 0%, var(--dnb-card) 70%);
+        border-color: rgba(255, 69, 58, 0.42);
+        border-left-color: #ff453a;
+      }
+      .dnb-radar-card[data-focused="1"] {
+        box-shadow: 0 0 0 2px rgba(255, 159, 10, 0.36), 0 6px 16px rgba(0, 0, 0, 0.18);
+      }
+      .dnb-radar-card[data-kind="blocked"][data-focused="1"] {
+        box-shadow: 0 0 0 2px rgba(255, 69, 58, 0.42), 0 6px 16px rgba(0, 0, 0, 0.18);
+      }
+
+      /* Active Spotlight Banner above Pyramid Canvas */
+      .dnb-focus-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 7px 10px;
+        margin-bottom: 8px;
+        border-radius: 11px;
+        border: 1px solid rgba(255, 159, 10, 0.45);
+        background: rgba(255, 159, 10, 0.13);
+        font-size: 11.5px;
+        animation: dnb-enter 0.18s ease-out;
+      }
+      .dnb-focus-banner[data-blocked="1"] {
+        border-color: rgba(255, 69, 58, 0.5);
+        background: rgba(255, 69, 58, 0.14);
+      }
+
+      /* Pushpin Stamp (小图钉戳) for Global Shared Boundaries */
+      .dnb-pin-stamp {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        border-radius: 7px;
+        border: 1px dashed var(--dnb-border-strong);
+        background: transparent;
+        color: var(--dnb-text-3);
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: transform 0.16s cubic-bezier(0.32, 0.72, 0, 1), background 0.16s ease, color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+      }
+      .dnb-pin-stamp:hover {
+        color: #ff9f0a;
+        border-style: solid;
+        border-color: rgba(255, 159, 10, 0.48);
+        background: rgba(255, 159, 10, 0.1);
+        transform: scale(1.06) rotate(-4deg);
+      }
+      .dnb-pin-stamp:active {
+        transform: scale(0.92);
+      }
+      .dnb-pin-stamp[data-pinned="1"] {
+        border-style: solid;
+        border-color: rgba(255, 159, 10, 0.58);
+        background: linear-gradient(135deg, rgba(255, 159, 10, 0.26) 0%, rgba(255, 107, 0, 0.16) 100%);
+        color: #ff9f0a;
+        box-shadow: 0 2px 7px rgba(255, 159, 10, 0.22), inset 0 0.5px 0 rgba(255, 255, 255, 0.22);
+      }
+      .dnb-pin-badge {
+        display: inline-flex;
+        align-items: center;
+        height: 16px;
+        padding: 0 5px;
+        border-radius: 5px;
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        color: #ff9f0a;
+        background: rgba(255, 159, 10, 0.15);
+        border: 1px solid rgba(255, 159, 10, 0.34);
+        flex-shrink: 0;
+      }
+      .dnb-bound-check {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 16px;
+        height: 16px;
+        padding: 0;
+        border-radius: 5px;
+        border: 1px solid var(--dnb-border-strong);
+        background: transparent;
+        color: transparent;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: all 0.14s ease;
+      }
+      .dnb-bound-check:hover {
+        border-color: var(--dnb-accent);
+      }
+      .dnb-bound-check[data-checked="1"] {
+        border-color: var(--dnb-accent);
+        background: var(--dnb-accent);
+        color: #fff;
+      }
+
+      /* Bottom Sheet Inspector */
+      .dnb-sheet {
+        background: var(--dnb-elevated);
+        border: 1px solid var(--dnb-border-strong);
+        border-radius: 16px;
+        padding: 10px 12px 12px;
+        margin-top: 10px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+        animation: dnb-enter 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+      }
+      .dnb-sheet-handle {
+        width: 32px;
+        height: 3.5px;
+        border-radius: 99px;
+        background: var(--dnb-border-strong);
+        margin: 0 auto 8px;
+      }
+
+      /* Context Menu / Popover */
+      .dnb-menu {
+        position: fixed;
+        z-index: 9999;
+        min-width: 152px;
+        padding: 5px;
+        border-radius: 12px;
+        background: var(--dnb-popover, #252528);
+        border: 1px solid var(--dnb-border-strong, rgba(128,128,136,0.28));
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+        backdrop-filter: blur(20px);
+        color: var(--dnb-text, #f2f2f7);
+        font-size: 12px;
+        animation: dnb-enter 0.14s ease-out;
+      }
+      .dnb-menu-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background 0.12s ease;
+      }
+      .dnb-menu-item:hover {
+        background: var(--dnb-fill, rgba(128,128,136,0.18));
+      }
+
+      /* Toast Notice */
+      .dnb-toast {
+        position: absolute;
+        bottom: 82px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 90;
+        padding: 6px 14px;
+        border-radius: 99px;
+        background: var(--dnb-popover);
+        border: 1px solid var(--dnb-border-strong);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.24);
+        font-size: 11.5px;
+        font-weight: 500;
+        color: var(--dnb-text);
+        pointer-events: none;
+        white-space: nowrap;
+        max-width: calc(100% - 32px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* Header Compact Pills (Model Picker & Auto-Pilot) */
+      .dnb-head-pill {
+        height: 24px;
+        padding: 0 8px;
+        border-radius: 99px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-card);
+        color: var(--dnb-text-2);
+        font: inherit;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 3.5px;
+        white-space: nowrap;
+        transition: all 0.16s ease;
+      }
+      .dnb-head-pill:hover {
+        background: var(--dnb-card-hover);
+        color: var(--dnb-text);
+        border-color: var(--dnb-border-strong);
+      }
+      .dnb-head-pill[data-pilot="1"] {
+        background: rgba(48, 209, 88, 0.14);
+        border-color: rgba(48, 209, 88, 0.42);
+        color: #30d158;
+      }
+
+      /* DS-Bot Style Narrative Memory Card */
+      .dnb-prose-card {
+        background: var(--dnb-card);
+        border: 1px solid var(--dnb-border);
+        border-radius: 16px;
+        padding: 14px 16px 16px;
+        margin-bottom: 10px;
+      }
+      .dnb-prose-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding-bottom: 10px;
+        margin-bottom: 12px;
+        border-bottom: 1px solid var(--dnb-border);
+      }
+      .dnb-prose-h2 {
+        font-size: 14px;
+        font-weight: 600;
+        color: var(--dnb-text);
+        margin: 14px 0 6px;
+        letter-spacing: -0.1px;
+      }
+      .dnb-prose-h2:first-child {
+        margin-top: 0;
+      }
+      .dnb-prose-p {
+        font-size: 12.8px;
+        line-height: 1.72;
+        color: var(--dnb-text-2);
+        margin: 0 0 10px;
+        word-break: break-word;
+      }
+      .dnb-prose-p:last-child {
+        margin-bottom: 0;
+      }
+
+      /* Proactive Suggestion Capsule */
+      .dnb-sug-card {
+        margin: 0 12px 8px;
+        padding: 9px 11px;
+        border-radius: 13px;
+        background: linear-gradient(135deg, rgba(10, 132, 255, 0.11), rgba(255, 159, 10, 0.08));
+        border: 1px solid rgba(10, 132, 255, 0.28);
+        flex-shrink: 0;
+        animation: dnb-enter 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+      }
+
+      /* Persistent Bottom Chief Input Bar (DS-Bot + iOS Style) */
+      .dnb-sec-bar {
+        flex-shrink: 0;
+        padding: 7px 12px calc(10px + var(--dnb-safe-bottom, 0px));
+        border-top: 1px solid var(--dnb-border);
+        background: var(--dsw-alias-bg-layer-2, rgba(28, 28, 31, 0.65));
+        backdrop-filter: blur(16px);
+      }
+      .dnb-sec-targets {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        overflow-x: auto;
+        padding-bottom: 6px;
+        scrollbar-width: none;
+      }
+      .dnb-sec-targets::-webkit-scrollbar { display: none; }
+      .dnb-sec-chip {
+        height: 21px;
+        padding: 0 8px;
+        border-radius: 99px;
+        border: 1px solid var(--dnb-border);
+        background: transparent;
+        color: var(--dnb-text-3);
+        font: inherit;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        transition: all 0.15s ease;
+      }
+      .dnb-sec-chip:hover {
+        color: var(--dnb-text-2);
+        background: var(--dnb-card);
+      }
+      .dnb-sec-chip[data-active="1"] {
+        background: rgba(10, 132, 255, 0.15);
+        border-color: rgba(10, 132, 255, 0.42);
+        color: var(--dnb-accent);
+      }
+      .dnb-sec-shell {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 5px 4px 13px;
+        border-radius: 20px;
+        border: 1px solid var(--dnb-border-strong);
+        background: var(--dnb-card);
+        transition: border-color 0.18s ease, box-shadow 0.18s ease;
+      }
+      .dnb-sec-shell:focus-within {
+        border-color: var(--dnb-accent);
+        box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.14);
+      }
+      .dnb-sec-input {
+        flex: 1;
+        min-width: 0;
+        border: none;
+        background: transparent;
+        color: var(--dnb-text);
+        font: inherit;
+        font-size: 12.5px;
+        line-height: 1.4;
+        padding: 4px 0;
+        outline: none;
+      }
+      .dnb-sec-input::placeholder {
+        color: var(--dnb-text-3);
+      }
+      .dnb-sec-send {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: none;
+        background: var(--dnb-accent);
+        color: #fff;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: transform 0.14s ease, opacity 0.16s ease, background 0.16s ease;
+      }
+      .dnb-sec-send:hover:not(:disabled) { opacity: 0.92; transform: scale(1.04); }
+      .dnb-sec-send:active:not(:disabled) { transform: scale(0.92); }
+      .dnb-sec-send:disabled {
+        background: var(--dnb-fill);
+        color: var(--dnb-text-3);
+        cursor: default;
+      }
+      .dnb-sec-reply {
+        margin-bottom: 7px;
+        padding: 8px 10px;
+        border-radius: 12px;
+        background: var(--dnb-elevated);
+        border: 1px solid var(--dnb-border-strong);
+        font-size: 12px;
+        line-height: 1.5;
+        animation: dnb-enter 0.18s ease-out;
+      }
+
+      .dnb-empty {
+        padding: 28px 16px;
+        text-align: center;
+        color: var(--dnb-text-3);
+        font-size: 12.5px;
+      }
+      .dnb-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 11px;
+        padding: 1px 7px;
+        border-radius: 99px;
+        background: var(--dnb-fill);
+        color: var(--dnb-text-2);
+      }
+      .dnb-pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px;
+        line-height: 1.55;
+        padding: 10px 12px;
+        margin: 0;
+        max-height: 320px;
+        overflow: auto;
+        color: var(--dnb-text-2);
+      }
+
+      /* ---------------- Engineering Memory Filing Cabinet (档案柜) ---------------- */
+      @keyframes dnb-drawer-slide {
+        from { opacity: 0; transform: translateY(-6px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+      @keyframes dnb-point-open {
+        from { opacity: 0; transform: translateY(-3px); }
+        to { opacity: 1; transform: translateY(0); }
+      }
+
+      .dnb-vault-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 11px;
+        border-radius: 12px;
+        background: var(--dnb-card);
+        border: 1px solid var(--dnb-border);
+        margin-bottom: 8px;
+      }
+
+      .dnb-desk-tray {
+        border-radius: 13px;
+        padding: 9px 11px;
+        margin-bottom: 10px;
+        background: rgba(245, 158, 11, 0.08);
+        border: 1px solid rgba(245, 158, 11, 0.34);
+      }
+
+      .dnb-cabinet-drawer {
+        position: relative;
+        margin-top: 9px;
+        margin-bottom: 11px;
+      }
+      .dnb-folder-ear {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        height: 18px;
+        padding: 0 10px 0 8px;
+        margin-left: 10px;
+        border-radius: 7px 9px 0 0;
+        background: var(--dnb-card);
+        border: 1px solid var(--dnb-border);
+        border-bottom: none;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--dnb-text-2);
+        letter-spacing: 0.02em;
+      }
+      .dnb-cabinet-drawer[data-open="1"] .dnb-folder-ear {
+        border-color: var(--dnb-border-strong);
+        color: var(--dnb-text);
+      }
+      .dnb-drawer-box {
+        border-radius: 11px 13px 13px 13px;
+        background: var(--dnb-card);
+        border: 1px solid var(--dnb-border);
+        overflow: hidden;
+        transition: border-color 0.16s ease, background 0.16s ease;
+      }
+      .dnb-cabinet-drawer[data-open="1"] .dnb-drawer-box {
+        border-color: var(--dnb-border-strong);
+      }
+      .dnb-drawer-front {
+        display: flex;
+        align-items: center;
+        gap: 9px;
+        padding: 9px 11px;
+        cursor: pointer;
+        user-select: none;
+        transition: background 0.14s ease;
+      }
+      .dnb-drawer-front:hover {
+        background: var(--dnb-card-hover);
+      }
+      .dnb-drawer-spine {
+        width: 3.5px;
+        height: 28px;
+        border-radius: 99px;
+        flex-shrink: 0;
+      }
+      .dnb-drawer-handle {
+        width: 24px;
+        height: 20px;
+        border-radius: 6px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-fill);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--dnb-text-2);
+        flex-shrink: 0;
+        transition: border-color 0.15s ease, color 0.15s ease;
+      }
+      .dnb-cabinet-drawer[data-open="1"] .dnb-drawer-handle {
+        border-color: var(--dnb-border-strong);
+        color: var(--dnb-text);
+      }
+      .dnb-drawer-well {
+        border-top: 1px solid var(--dnb-border);
+        padding: 8px 9px 10px;
+        background: rgba(128, 128, 136, 0.04);
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        animation: dnb-drawer-slide 0.18s ease-out;
+      }
+
+      /* Paperclipped Dossier Card */
+      .dnb-dossier-card {
+        position: relative;
+        border-radius: 11px;
+        background: var(--dnb-elevated);
+        border: 1px solid var(--dnb-border);
+        margin-top: 3px;
+        transition: border-color 0.15s ease;
+        animation: dnb-drawer-slide 0.18s ease-out both;
+      }
+      .dnb-dossier-card:hover {
+        border-color: var(--dnb-border-strong);
+      }
+      .dnb-dossier-card[data-open="1"] {
+        border-color: rgba(10, 132, 255, 0.42);
+      }
+      .dnb-dossier-card[data-out="1"] {
+        border-color: rgba(245, 158, 11, 0.48);
+      }
+      .dnb-paperclip-pin {
+        position: absolute;
+        top: -6px;
+        left: 10px;
+        width: 20px;
+        height: 24px;
+        border: none;
+        padding: 0;
+        background: transparent;
+        cursor: pointer;
+        z-index: 2;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 0.15s ease;
+      }
+      .dnb-paperclip-pin:hover {
+        transform: translateY(-1.5px) scale(1.08);
+      }
+      .dnb-dossier-head {
+        padding: 9px 10px 8px 33px;
+        cursor: pointer;
+      }
+      .dnb-dossier-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        flex-wrap: wrap;
+        padding: 0 10px 8px 33px;
+      }
+
+      /* Structured Memory Points & Sub-point Details */
+      .dnb-points-sheet {
+        border-top: 1px dashed var(--dnb-border-strong);
+        padding: 8px 10px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        animation: dnb-point-open 0.16s ease-out;
+      }
+      .dnb-mem-point {
+        border-radius: 9px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-card);
+        overflow: hidden;
+        transition: border-color 0.14s ease, background 0.14s ease;
+      }
+      .dnb-mem-point:hover {
+        border-color: var(--dnb-border-strong);
+      }
+      .dnb-mem-point[data-open="1"] {
+        border-color: rgba(10, 132, 255, 0.36);
+      }
+      .dnb-mem-point-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 7px;
+        padding: 7px 9px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .dnb-mem-point-idx {
+        min-width: 20px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 5px;
+        background: var(--dnb-fill);
+        color: var(--dnb-text-2);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 10.5px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+      .dnb-mem-point[data-open="1"] .dnb-mem-point-idx {
+        background: rgba(10, 132, 255, 0.16);
+        color: var(--dnb-accent);
+      }
+      .dnb-subpoint-detail {
+        border-top: 1px solid var(--dnb-border);
+        padding: 8px 10px;
+        background: rgba(128, 128, 136, 0.05);
+        font-size: 11.5px;
+        line-height: 1.58;
+        color: var(--dnb-text);
+        white-space: pre-wrap;
+        word-break: break-word;
+        animation: dnb-point-open 0.15s ease-out;
+      }
+      .dnb-mini-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 22px;
+        padding: 0 8px;
+        border-radius: 99px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-card);
+        color: var(--dnb-text-2);
+        font-size: 10.5px;
+        font-weight: 500;
+        cursor: pointer;
+        transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+      }
+      .dnb-mini-btn:hover {
+        border-color: var(--dnb-border-strong);
+        color: var(--dnb-text);
+        background: var(--dnb-card-hover);
+      }
+      .dnb-mini-btn[data-tone="amber"] {
+        border-color: rgba(245, 158, 11, 0.45);
+        background: rgba(245, 158, 11, 0.12);
+        color: #f59e0b;
+      }
+      .dnb-mini-btn[data-tone="accent"] {
+        border-color: rgba(10, 132, 255, 0.42);
+        background: rgba(10, 132, 255, 0.11);
+        color: var(--dnb-accent);
+      }
+    `
+
+    function Style() {
+      return h('style', { 'data-dnb': '3' }, CSS)
+    }
+
+    function Switch({ checked, onChange }) {
+      return h(
+        'button',
+        {
+          type: 'button',
+          role: 'switch',
+          'aria-checked': checked ? 'true' : 'false',
+          className: 'dnb-switch',
+          'data-on': checked ? '1' : '0',
+          onClick: () => onChange(!checked),
+        },
+        h('span', { className: 'dnb-switch-thumb' }),
+      )
+    }
+
+    /* ---------------------------------------------------- Spotlight Search */
+
+    function SearchDrawer({ view }) {
+      if (!view.searchOpen) return null
+      const run = () => {
+        const text = (view.askText || '').trim()
+        if (!text) return
+        const hits = searchBoard(text)
+        patch({ askHits: hits, askNote: '' })
+      }
+      const askModel = () => {
+        const text = (view.askText || '').trim()
+        if (!text) return
+        patch({ secInput: text, secTarget: 'auto', searchOpen: false, askHits: null })
+        void submitChiefBar()
+      }
+
+      return h(
+        'div',
+        { style: { padding: '0 12px 8px', flexShrink: 0 }, className: 'dnb-view' },
+        h(
+          'div',
+          { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+          h('input', {
+            className: 'dnb-input',
+            style: { borderRadius: 99, paddingLeft: 12, height: 30 },
+            placeholder: '搜索记忆、任务、协同信箱…',
+            autoFocus: true,
+            value: view.askText || '',
+            onChange: e => {
+              const val = e.target.value
+              patch({ askText: val, askHits: val.trim() ? searchBoard(val) : null })
+            },
+            onKeyDown: e => {
+              if (e.key === 'Enter') run()
+              if (e.key === 'Escape') patch({ searchOpen: false, askHits: null })
+            },
+          }),
+          (view.askText || '').trim()
+            ? h('button', {
+                className: 'dnb-pill',
+                style: { height: 30 },
+                disabled: view.archiveSearchBusy,
+                onClick: () => void searchColdArchives(view.askText),
+                title: '按需穿透搜索封存懒加载的长期工程档案柜',
+              }, h(Icon, { name: 'archive', size: 12 }), view.archiveSearchBusy ? '检索中…' : '搜档案柜')
+            : null,
+          (view.askText || '').trim()
+            ? h('button', {
+                className: 'dnb-pill dnb-pill-accent',
+                style: { height: 30 },
+                onClick: askModel,
+                title: '直接交给 DSH 参谋长回答或拆话',
+              }, h(Icon, { name: 'sparkles', size: 12 }), '问参谋长')
+            : null,
+        ),
+        Array.isArray(view.askHits)
+          ? h(
+              'div',
+              { className: 'dnb-group', style: { marginTop: 6, marginBottom: 0, maxHeight: 180, overflow: 'auto' } },
+              view.askHits.length
+                ? view.askHits.map((item, idx) =>
+                    h(
+                      'div',
+                      {
+                        key: item.id + '-' + idx,
+                        className: 'dnb-cell dnb-cell-hover',
+                        style: { cursor: 'pointer', padding: '7px 12px' },
+                        onClick: () => {
+                          const nextPatch = { tab: item.tab || 'chief', searchOpen: false }
+                          if (item.subTab) nextPatch.secSubTab = item.subTab
+                          if (item.showRawTurns) nextPatch.secShowRawTurns = true
+                          if (item.tab === 'tasks') nextPatch.selectedTaskId = item.id
+                          if (item.tab === 'archive' && item.archiveId) {
+                            nextPatch.archiveOpenFolders = { ...(store.archiveOpenFolders || {}), ...(item.folderId ? { [item.folderId]: true } : {}) }
+                            nextPatch.archiveOpenFiles = { ...(store.archiveOpenFiles || {}), [item.archiveId]: true }
+                            patch(nextPatch)
+                            void loadArchives(false)
+                            void loadArchiveDetail(item.archiveId, false)
+                            return
+                          }
+                          patch(nextPatch)
+                        },
+                      },
+                      h('span', { className: 'dnb-tag', style: { color: 'var(--dnb-accent)' } }, item.kind),
+                      h('div', { style: { flex: 1, minWidth: 0 } },
+                        h('div', { style: { fontWeight: 500, fontSize: 12, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.title),
+                        item.snippet ? h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.snippet) : null,
+                      ),
+                    ),
+                  )
+                : h('div', { style: { padding: '10px 12px', fontSize: 11.5, color: 'var(--dnb-text-3)', textAlign: 'center' } }, '无匹配结果'),
+            )
+          : null,
+      )
+    }
+
+    /* ----------------------------- Status Badge & Objective Radar Strip */
+
+    function StatusBadge({ status, style }) {
+      const st = STATUSES.includes(status) ? status : 'todo'
+      return h(
+        'span',
+        { className: 'dnb-status-badge', 'data-status': st, style },
+        st === 'doing'
+          ? h('span', { className: 'dnb-live-dot', style: { background: '#ff9f0a' } })
+          : null,
+        STATUS_BADGE[st] || STATUS_LABEL[st],
+      )
+    }
+
+    /**
+     * Prominent radar strip highlighting Advancing (`doing`) and Blocked (`blocked`) objectives.
+     * Clicking any card jumps straight to the Pyramid Tree view and frames the active subagents!
+     */
+    function ObjectiveRadarStrip({ board, compact = false }) {
+      const allTasks = (board && Array.isArray(board.tasks)) ? board.tasks.filter(Boolean) : []
+      const blockedTasks = allTasks.filter(t => t.status === 'blocked')
+      const doingTasks = allTasks.filter(t => t.status === 'doing')
+      const subagents = Array.isArray(store.subagents) ? store.subagents : []
+      const identity = store.agentIdentity || null
+
+      if (!blockedTasks.length && !doingTasks.length) return null
+
+      const items = [
+        ...blockedTasks.map(t => ({ task: t, kind: 'blocked' })),
+        ...doingTasks.map(t => ({ task: t, kind: 'doing' })),
+      ]
+
+      return h(
+        'div',
+        { className: 'dnb-radar-strip' },
+        items.slice(0, compact ? 3 : 6).map(({ task, kind }) => {
+          const isFocused = store.focusTaskId === task.id
+            && store.tab === 'tasks'
+            && (store.taskViewMode === 'graph' || store.taskViewMode === 'canvas')
+          const resolved = resolveTaskAgents(task, allTasks, subagents, identity)
+          const agentLabels = resolved.agentNames.length
+            ? resolved.agentNames.slice(0, 2).map(n => '@' + shortAgentName(n, true)).join('、')
+              + (resolved.agentNames.length > 2 ? ' 等 ' + resolved.agentNames.length + ' 代理' : '')
+            : '@主代理'
+          const subReason = kind === 'blocked' && (task.note || (board && board.cursor && board.cursor.blocked))
+            ? clampTitle(task.note || board.cursor.blocked, 20)
+            : ''
+
+          return h(
+            'div',
+            {
+              key: task.id,
+              className: 'dnb-radar-card',
+              'data-kind': kind,
+              'data-focused': isFocused ? '1' : '0',
+              title: kind === 'blocked'
+                ? '受阻目标：点击跳转金字塔视角定位负责子代理'
+                : '推进目标：点击跳转金字塔视角框选正在推进的子代理',
+              onClick: () => {
+                if (isFocused) {
+                  patch({ focusTaskId: '' })
+                } else {
+                  focusObjectiveInPyramid(task.id)
+                }
+              },
+            },
+            h(StatusBadge, { status: kind }),
+            h(
+              'div',
+              { style: { flex: 1, minWidth: 0 } },
+              h(
+                'div',
+                {
+                  style: {
+                    fontWeight: 600,
+                    fontSize: 12.5,
+                    color: 'var(--dnb-text)',
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  },
+                },
+                task.title || task.id,
+              ),
+              h(
+                'div',
+                {
+                  style: {
+                    fontSize: 11,
+                    color: kind === 'blocked' ? 'rgba(255, 110, 100, 0.92)' : 'var(--dnb-text-2)',
+                    marginTop: 1.5,
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap',
+                  },
+                },
+                (kind === 'blocked' ? '受阻关联：' : '推进代理：') + agentLabels + (subReason ? ' · ' + subReason : ''),
+              ),
+            ),
+            h(
+              'span',
+              {
+                className: 'dnb-pill',
+                style: {
+                  height: 23,
+                  padding: '0 8px',
+                  fontSize: 10.5,
+                  color: isFocused ? '#fff' : (kind === 'blocked' ? '#ff453a' : '#ff9f0a'),
+                  background: isFocused
+                    ? (kind === 'blocked' ? '#ff453a' : '#ff9f0a')
+                    : (kind === 'blocked' ? 'rgba(255,69,58,0.12)' : 'rgba(255,159,10,0.12)'),
+                  borderColor: kind === 'blocked' ? 'rgba(255,69,58,0.38)' : 'rgba(255,159,10,0.38)',
+                  flexShrink: 0,
+                },
+              },
+              h(Icon, { name: 'target', size: 11.5 }),
+              isFocused ? '已框选' : '看代理',
+            ),
+          )
+        }),
+      )
+    }
+
+    /* ---------------------------------------------------- Subagent Fleet Bar */
+
+    function SubagentFleetBar({ board }) {
+      const subagents = Array.isArray(store.subagents) ? store.subagents : []
+      const [steerAgent, setSteerAgent] = React.useState('')
+      const [steerText, setSteerText] = React.useState('')
+      const hier = buildAgentHierarchy(subagents, store.agentIdentity)
+      const children = hier.children
+      const runningCount = children.filter(a => a.status === 'running').length
+
+      const activeAgentObj = children.find(a => a.name === steerAgent) || null
+
+      const sendSteer = () => {
+        const msg = steerText.trim()
+        if (!steerAgent || !msg) return
+        setSteerText('')
+        void act({ action: 'team.steer', agent: steerAgent, message: msg })
+      }
+
+      if (!children.length && !store.showInternalProbes) return null
+
+      const isCollapsed = Boolean(store.fleetCollapsed)
+      const hasMany = children.length > 10
+      const showAll = Boolean(store.fleetShowAll)
+      const hasAnyProbe = hier.probeCount > 0 || (store.showInternalProbes && hier.allChildren.some(a => isInternalProbeName(a.name)))
+
+      // Determine visible pills when expanded in smart-compact mode
+      let visibleAgents = children
+      let hiddenCount = 0
+      if (!isCollapsed && hasMany && !showAll) {
+        const allTasks = (board && Array.isArray(board.tasks)) ? board.tasks : []
+        const busyNames = new Set(
+          allTasks
+            .filter(t => t && t.status !== 'done')
+            .map(t => {
+              const hit = hier.matchAgentRef(t.subagent || t.owner || t.session)
+              return hit ? hit.name : ''
+            })
+            .filter(Boolean),
+        )
+        const priority = children.filter(
+          a => a.status === 'running' || busyNames.has(a.name) || a.name === store.filterAgent || a.name === steerAgent,
+        )
+        visibleAgents = priority.length > 0 ? priority : children.slice(-3)
+        hiddenCount = Math.max(0, children.length - visibleAgents.length)
+      }
+
+      return h(
+        'div',
+        { className: 'dnb-group', style: { padding: isCollapsed ? '7px 10px' : '8px 10px', marginBottom: 10 } },
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: isCollapsed ? 0 : 6 } },
+          h(
+            'div',
+            {
+              style: {
+                display: 'flex',
+                alignItems: 'center',
+                gap: 6,
+                fontSize: 11.5,
+                fontWeight: 600,
+                color: 'var(--dnb-text-2)',
+                cursor: 'pointer',
+                minWidth: 0,
+              },
+              onClick: () => patch({ fleetCollapsed: !isCollapsed }),
+              title: isCollapsed ? '点击展开子代理团队' : '点击收起子代理团队',
+            },
+            h('span', {
+              className: runningCount > 0 ? 'dnb-live-dot' : undefined,
+              style: {
+                width: 7,
+                height: 7,
+                borderRadius: '50%',
+                background: runningCount > 0 ? '#30d158' : 'var(--dnb-text-3)',
+                flexShrink: 0,
+              },
+            }),
+            '子代理团队',
+            h(
+              'span',
+              { style: { color: runningCount > 0 ? '#30d158' : 'var(--dnb-text-3)', fontWeight: 500 } },
+              runningCount ? `${runningCount} 运行中 · 共 ${children.length}` : `共 ${children.length} 成员`,
+            ),
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
+            store.filterAgent
+              ? h('button', {
+                  className: 'dnb-pill',
+                  style: { height: 22, fontSize: 11, padding: '0 8px' },
+                  onClick: () => { patch({ filterAgent: '' }); setSteerAgent('') },
+                }, '清除筛选')
+              : null,
+            h('button', {
+              className: 'dnb-pill',
+              style: { height: 22, fontSize: 11, padding: '0 8px' },
+              onClick: () => patch({ fleetCollapsed: !isCollapsed }),
+            },
+              isCollapsed ? `展示 (${children.length})` : '收起',
+              h(Icon, {
+                name: 'chevron',
+                size: 11,
+                style: {
+                  transform: isCollapsed ? 'rotate(90deg)' : 'rotate(-90deg)',
+                  transition: 'transform 0.16s ease',
+                },
+              }),
+            ),
+          ),
+        ),
+        !isCollapsed
+          ? h(
+              'div',
+              { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
+              visibleAgents.map(agent => {
+                const isRunning = agent.status === 'running'
+                const isSelected = store.filterAgent === agent.name || steerAgent === agent.name
+                const pKey = hier.parentKeyOf.get(agent.name)
+                const isTier2 = pKey && pKey !== 'lead'
+                return h(
+                  'button',
+                  {
+                    key: agent.name,
+                    className: 'dnb-pill',
+                    'data-active': isSelected ? '1' : '0',
+                    style: {
+                      height: 25,
+                      padding: '0 9px',
+                      borderColor: isRunning && !isSelected ? 'rgba(48, 209, 88, 0.38)' : undefined,
+                    },
+                    title: '@' + agent.name + (isTier2 ? '（上级：@' + pKey + '）' : '') + (agent.description ? ' — ' + agent.description : ''),
+                    onClick: () => {
+                      const next = store.filterAgent === agent.name ? '' : agent.name
+                      patch({ filterAgent: next })
+                      setSteerAgent(steerAgent === agent.name ? '' : agent.name)
+                    },
+                  },
+                  h('span', {
+                    className: isRunning ? 'dnb-live-dot' : undefined,
+                    style: {
+                      width: 6.5,
+                      height: 6.5,
+                      borderRadius: '50%',
+                      background: isRunning ? '#30d158' : 'var(--dnb-text-3)',
+                    },
+                  }),
+                  '@' + shortAgentName(agent.name),
+                )
+              }),
+              hiddenCount > 0
+                ? h('button', {
+                    className: 'dnb-pill',
+                    style: { height: 25, padding: '0 9px', fontSize: 11, borderStyle: 'dashed', color: 'var(--dnb-text-3)' },
+                    title: '展示其余已结束/待命的子代理成员',
+                    onClick: () => patch({ fleetShowAll: true }),
+                  }, '+' + hiddenCount + ' 展示全部')
+                : (hasMany && showAll
+                    ? h('button', {
+                        className: 'dnb-pill',
+                        style: { height: 25, padding: '0 9px', fontSize: 11, color: 'var(--dnb-text-3)' },
+                        onClick: () => patch({ fleetShowAll: false }),
+                      }, '折叠空闲')
+                    : null),
+              hasAnyProbe
+                ? h('button', {
+                    className: 'dnb-pill',
+                    'data-active': store.showInternalProbes ? '1' : '0',
+                    style: { height: 24, padding: '0 8px', fontSize: 10.5, borderStyle: 'dashed', opacity: 0.78 },
+                    title: store.showInternalProbes ? '隐藏后台记忆检查点探针 (@mnemon-review)' : '显示后台记忆检查点探针 (@mnemon-review)',
+                    onClick: () => patch({ showInternalProbes: !store.showInternalProbes }),
+                  }, store.showInternalProbes ? '隐藏内部探针' : `内部探针 (${hier.probeCount})`)
+                : null,
+            )
+          : null,
+        !isCollapsed && steerAgent
+          ? h(
+              'div',
+              { style: { display: 'flex', gap: 6, alignItems: 'center', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--dnb-border)' } },
+              activeAgentObj && activeAgentObj.id
+                ? h('button', {
+                    className: 'dnb-pill',
+                    style: { height: 28 },
+                    title: '在分栏打开该子代理对话',
+                    onClick: () => {
+                      if (!openSubagentChat(activeAgentObj)) {
+                        patch({ notice: '当前子代理尚未建立独立会话视图' })
+                      }
+                    },
+                  }, h(Icon, { name: 'chat', size: 12 }), '对话')
+                : null,
+              h('input', {
+                className: 'dnb-input',
+                style: { flex: 1, height: 28, padding: '0 10px', borderRadius: 99, fontSize: 11.5 },
+                placeholder: '给 @' + shortAgentName(steerAgent) + ' 发指令…',
+                value: steerText,
+                onChange: e => setSteerText(e.target.value),
+                onKeyDown: e => { if (e.key === 'Enter') sendSteer() },
+              }),
+              h('button', {
+                className: 'dnb-primary-btn',
+                style: { height: 28, padding: '0 10px' },
+                disabled: !steerText.trim(),
+                onClick: sendSteer,
+              }, '发送'),
+              h('button', {
+                className: 'dnb-pill dnb-pill-danger',
+                style: { height: 28, padding: '0 8px' },
+                title: '停止当前轮次',
+                onClick: () => void act({ action: 'team.interrupt', agent: steerAgent }),
+              }, h(Icon, { name: 'stop', size: 11 })),
+            )
+          : null,
+      )
+    }
+
+    /* ----------------------------------------------- Bottom Sheet Inspector */
+
+    function openTaskEditor(task) {
+      if (!task) return
+      patch({
+        selectedTaskId: task.id,
+        editTaskId: task.id,
+        editTaskTitle: task.title || '',
+        editTaskNote: task.note || '',
+        editTaskIntent: task.intent || '',
+        editTaskEvidence: task.evidence || '',
+        editTaskParentId: task.parentId || '',
+        editTaskBlockedBy: Array.isArray(task.blockedBy) ? [...task.blockedBy] : [],
+      })
+    }
+
+    function TaskInspectorDrawer({ board, task }) {
+      const [dispatchAgent, setDispatchAgent] = React.useState('')
+      const [dispatchProvider, setDispatchProvider] = React.useState('spawn')
+      const [dispatchPrompt, setDispatchPrompt] = React.useState('')
+      const [newAssumption, setNewAssumption] = React.useState('')
+
+      React.useEffect(() => {
+        if (!task) return
+        const suggested = String(task.subagent || task.owner || '').trim()
+        const clean = suggested && !['agent', 'operator', 'user'].includes(suggested)
+          ? suggested
+          : ('worker-' + String(task.id || '').replace(/[^a-z0-9]/gi, '').slice(-4))
+        setDispatchAgent(clean)
+        setDispatchProvider(task.preset === 'fork' ? 'fork' : 'spawn')
+      }, [task && task.id, task && task.owner, task && task.subagent])
+
+      if (!task) return null
+      const allTasks = (board && Array.isArray(board.tasks)) ? board.tasks : []
+      const byId = new Map(allTasks.map(t => [t.id, t]))
+      const editing = store.editTaskId === task.id
+      const subagents = Array.isArray(store.subagents) ? store.subagents.filter(a => a && a.name && a.name !== 'lead') : []
+      const assignedName = task.subagent || task.owner || ''
+      const matchedAgent = subagents.find(a => a.name === assignedName) || null
+
+      const saveTask = () => {
+        const title = (store.editTaskTitle || '').trim()
+        if (!title) return
+        patch({ editTaskId: '' })
+        void act({
+          action: 'task.update',
+          id: task.id,
+          title,
+          note: store.editTaskNote || '',
+          intent: store.editTaskIntent || '',
+          evidence: store.editTaskEvidence || '',
+          parentId: store.editTaskParentId || '',
+          blockedBy: store.editTaskBlockedBy || [],
+        })
+      }
+
+      const triggerDispatch = (force = false) => {
+        const agentName = (dispatchAgent || '').trim() || ('worker-' + String(task.id).slice(-4))
+        const promptText = dispatchPrompt.trim()
+        setDispatchPrompt('')
+        void act({
+          action: 'task.dispatch',
+          id: task.id,
+          agent: agentName,
+          provider: dispatchProvider,
+          ...(promptText ? { prompt: promptText } : {}),
+          ...(force ? { force: true } : {}),
+        })
+      }
+
+      const unresolvedDeps = (Array.isArray(task.blockedBy) ? task.blockedBy : []).filter(depId => {
+        const d = byId.get(depId)
+        return d && d.status !== 'done'
+      })
+
+      const removeDep = depId => {
+        const next = (task.blockedBy || []).filter(id => id !== depId)
+        void act({ action: 'task.update', id: task.id, blockedBy: next })
+      }
+
+      const addDep = depId => {
+        if (!depId || depId === task.id) return
+        const cur = Array.isArray(task.blockedBy) ? task.blockedBy : []
+        if (!cur.includes(depId)) {
+          void act({ action: 'task.update', id: task.id, blockedBy: [...cur, depId] })
+        }
+      }
+
+      const addAssumption = () => {
+        const txt = newAssumption.trim()
+        if (!txt) return
+        setNewAssumption('')
+        void act({ action: 'task.update', id: task.id, assumption: txt })
+      }
+
+      return h(
+        'div',
+        { className: 'dnb-sheet' },
+        h('div', { className: 'dnb-sheet-handle' }),
+
+        // Title + Actions Header
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8, marginBottom: 8 } },
+          h(
+            'div',
+            { style: { flex: 1, minWidth: 0 } },
+            h('div', { style: { fontWeight: 600, fontSize: 13.5, lineHeight: 1.35 } }, task.title),
+            assignedName
+              ? h('div', { style: { fontSize: 11, color: 'var(--dnb-accent)', marginTop: 2 } }, '@' + assignedName)
+              : null,
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', gap: 4 } },
+            h('button', {
+              className: 'dnb-icon-btn',
+              title: editing ? '取消编辑' : '编辑详情',
+              'data-active': editing ? '1' : '0',
+              onClick: () => editing ? patch({ editTaskId: '' }) : openTaskEditor(task),
+            }, h(Icon, { name: 'edit', size: 13 })),
+            h('button', {
+              className: 'dnb-icon-btn',
+              style: { color: '#ff453a' },
+              title: '删除节点',
+              onClick: () => {
+                patch({ selectedTaskId: '', editTaskId: '' })
+                void act({ action: 'task.remove', id: task.id })
+              },
+            }, h(Icon, { name: 'trash', size: 13 })),
+            h('button', {
+              className: 'dnb-icon-btn',
+              title: '收起',
+              onClick: () => patch({ selectedTaskId: '', editTaskId: '' }),
+            }, h(Icon, { name: 'x', size: 14 })),
+          ),
+        ),
+
+        // Segmented Status Switcher
+        h(
+          'div',
+          { className: 'dnb-seg', style: { marginBottom: 10 } },
+          STATUSES.map(st =>
+            h('button', {
+              key: st,
+              className: 'dnb-seg-btn',
+              'data-active': task.status === st ? '1' : '0',
+              onClick: () => void act({ action: 'task.update', id: task.id, status: st }),
+            },
+              h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: STATUS_HEX[st] } }),
+              STATUS_LABEL[st],
+            ),
+          ),
+        ),
+
+        // Subagent Dispatch Capsule
+        h(
+          'div',
+          { className: 'dnb-group', style: { padding: '8px 10px', marginBottom: 8 } },
+          h(
+            'div',
+            { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
+            h('input', {
+              className: 'dnb-input',
+              style: { width: 108, height: 28, padding: '0 9px', borderRadius: 99, fontSize: 11.5 },
+              placeholder: '子代理名…',
+              value: dispatchAgent,
+              onChange: e => setDispatchAgent(e.target.value),
+            }),
+            h('select', {
+              className: 'dnb-input',
+              style: { width: 'auto', height: 28, padding: '0 8px', borderRadius: 99, fontSize: 11.5 },
+              value: dispatchProvider,
+              onChange: e => setDispatchProvider(e.target.value),
+            },
+              h('option', { value: 'spawn' }, '独立上下文'),
+              h('option', { value: 'fork' }, '继承上下文'),
+            ),
+            h('button', {
+              className: 'dnb-primary-btn',
+              style: { height: 28, marginLeft: 'auto' },
+              onClick: () => triggerDispatch(false),
+            }, h(Icon, { name: 'play', size: 11 }), task.status === 'doing' ? '唤醒' : '派发'),
+            unresolvedDeps.length > 0
+              ? h('button', {
+                  className: 'dnb-pill',
+                  style: { height: 28 },
+                  title: '忽略前置依赖直接启动',
+                  onClick: () => triggerDispatch(true),
+                }, '强制')
+              : null,
+            matchedAgent && matchedAgent.id
+              ? h('button', {
+                  className: 'dnb-pill',
+                  style: { height: 28 },
+                  onClick: () => openSubagentChat(matchedAgent),
+                }, h(Icon, { name: 'chat', size: 12 }), '对话')
+              : null,
+            task.status === 'doing' && assignedName
+              ? h('button', {
+                  className: 'dnb-pill dnb-pill-danger',
+                  style: { height: 28, padding: '0 8px' },
+                  onClick: () => void act({ action: 'team.interrupt', id: task.id, agent: assignedName }),
+                }, h(Icon, { name: 'stop', size: 11 }))
+              : null,
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', gap: 6, marginTop: 6 } },
+            h('input', {
+              className: 'dnb-input',
+              style: { flex: 1, height: 28, padding: '0 10px', borderRadius: 99, fontSize: 11.5 },
+              placeholder: '补充执行指令（回车发送）…',
+              value: dispatchPrompt,
+              onChange: e => setDispatchPrompt(e.target.value),
+              onKeyDown: e => {
+                if (e.key === 'Enter' && dispatchPrompt.trim()) {
+                  if (task.status === 'doing' && assignedName) {
+                    const msg = dispatchPrompt.trim()
+                    setDispatchPrompt('')
+                    void act({ action: 'team.steer', id: task.id, agent: assignedName, message: msg })
+                  } else {
+                    triggerDispatch(false)
+                  }
+                }
+              },
+            }),
+            assignedName && dispatchPrompt.trim()
+              ? h('button', {
+                  className: 'dnb-pill dnb-pill-accent',
+                  style: { height: 28 },
+                  onClick: () => {
+                    const msg = dispatchPrompt.trim()
+                    setDispatchPrompt('')
+                    void act({ action: 'team.steer', id: task.id, agent: assignedName, message: msg })
+                  },
+                }, '引导')
+              : null,
+          ),
+        ),
+
+        // Parent & Dependencies Pills
+        h(
+          'div',
+          { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginBottom: 6 } },
+          h('select', {
+            className: 'dnb-pill',
+            style: { height: 24, padding: '0 8px', maxWidth: 150 },
+            value: task.parentId || '',
+            onChange: e => void act({ action: 'task.update', id: task.id, parentId: e.target.value }),
+          },
+            h('option', { value: '' }, '顶层节点'),
+            allTasks
+              .filter(t => t.id !== task.id)
+              .map(t => h('option', { key: t.id, value: t.id }, '父级: ' + clampTitle(t.title, 10))),
+          ),
+          (task.blockedBy || []).map(depId => {
+            const dep = byId.get(depId)
+            const isDone = dep && dep.status === 'done'
+            return h(
+              'span',
+              {
+                key: depId,
+                className: 'dnb-tag',
+                style: {
+                  background: isDone ? STATUS_BG.done : STATUS_BG.doing,
+                  color: isDone ? STATUS_HEX.done : STATUS_HEX.doing,
+                  padding: '2px 8px',
+                },
+              },
+              (dep ? clampTitle(dep.title, 9) : depId.slice(-5)),
+              h('span', {
+                style: { cursor: 'pointer', marginLeft: 3, opacity: 0.75 },
+                onClick: () => removeDep(depId),
+              }, '×'),
+            )
+          }),
+          h('select', {
+            className: 'dnb-pill',
+            style: { height: 24, padding: '0 8px', maxWidth: 118 },
+            value: '',
+            onChange: e => addDep(e.target.value),
+          },
+            h('option', { value: '' }, '+ 前置依赖'),
+            allTasks
+              .filter(t => t.id !== task.id && !(task.blockedBy || []).includes(t.id))
+              .map(t => h('option', { key: t.id, value: t.id }, clampTitle(t.title, 11))),
+          ),
+        ),
+
+        // Edit Form or Clean Summary
+        editing
+          ? h(
+              'div',
+              { style: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 8 } },
+              h('input', {
+                className: 'dnb-input',
+                placeholder: '标题',
+                value: store.editTaskTitle,
+                onChange: e => patch({ editTaskTitle: e.target.value }),
+              }),
+              h('input', {
+                className: 'dnb-input',
+                placeholder: '意图 (Intent)',
+                value: store.editTaskIntent,
+                onChange: e => patch({ editTaskIntent: e.target.value }),
+              }),
+              h('input', {
+                className: 'dnb-input',
+                placeholder: '验收依据 (Evidence)',
+                value: store.editTaskEvidence,
+                onChange: e => patch({ editTaskEvidence: e.target.value }),
+              }),
+              h('textarea', {
+                className: 'dnb-area',
+                placeholder: '备注',
+                value: store.editTaskNote,
+                onChange: e => patch({ editTaskNote: e.target.value }),
+              }),
+              h(
+                'div',
+                { style: { display: 'flex', gap: 6, justifyContent: 'flex-end' } },
+                h('button', { className: 'dnb-pill', onClick: () => patch({ editTaskId: '' }) }, '取消'),
+                h('button', { className: 'dnb-primary-btn', onClick: saveTask }, '保存'),
+              ),
+            )
+          : h(
+              'div',
+              { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', display: 'flex', flexDirection: 'column', gap: 3 } },
+              task.intent ? h('div', null, '意图 · ' + task.intent) : null,
+              task.evidence ? h('div', { style: { color: '#30d158' } }, '结论 · ' + task.evidence) : null,
+              task.note ? h('div', null, task.note) : null,
+            ),
+
+        // Assumptions Checklist (shown when present or editing)
+        (Array.isArray(task.assumptions) && task.assumptions.length > 0) || editing
+          ? h(
+              'div',
+              { style: { marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--dnb-border)' } },
+              (task.assumptions || []).map((assum, idx) =>
+                h(
+                  'div',
+                  { key: idx, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 11.5 } },
+                  h('button', {
+                    className: 'dnb-ring',
+                    style: assum.verified ? { background: '#30d158', borderColor: '#30d158' } : { borderColor: '#ff9f0a' },
+                    onClick: () => {
+                      if (!assum.verified) void act({ action: 'task.verify', id: task.id, assumptionIndex: idx })
+                    },
+                  }, assum.verified ? h(Icon, { name: 'check', size: 10 }) : null),
+                  h('span', { style: assum.verified ? { textDecoration: 'line-through', opacity: 0.55 } : null }, assum.text),
+                ),
+              ),
+              editing
+                ? h(
+                    'div',
+                    { style: { display: 'flex', gap: 6, marginTop: 4 } },
+                    h('input', {
+                      className: 'dnb-input',
+                      style: { height: 26, fontSize: 11.5 },
+                      placeholder: '添加待验证假设…',
+                      value: newAssumption,
+                      onChange: e => setNewAssumption(e.target.value),
+                      onKeyDown: e => { if (e.key === 'Enter') addAssumption() },
+                    }),
+                    h('button', { className: 'dnb-pill', style: { height: 26 }, onClick: addAssumption }, '添加'),
+                  )
+                : null,
+            )
+          : null,
+      )
+    }
+
+    /* ------------------------------------------------------------ Tasks Tab */
+
+    function explainTaskMeaning(task, board) {
+      if (!task) return
+      const title = String(task.title || task.id || '').trim()
+      const goalCtx = (board && board.objective) ? `（当前长期目标：${String(board.objective).slice(0, 90)}）` : ''
+      const extraCtx = task.intent ? `\n补充已知意图：${task.intent}` : ''
+      void askLeadModel(
+        `请用通俗易懂的大白话给我解释一下任务节点「${title}」${goalCtx}：${extraCtx}\n1. 这条任务具体是什么意思？\n2. 为什么需要有这一步（它解决什么问题、在整体推进里起什么作用）？`,
+        '咨询任务含义',
+      )
+    }
+
+    function AddTask({ board }) {
+      const [text, setText] = React.useState('')
+      const [parentId, setParentId] = React.useState('')
+      const [ownerPick, setOwnerPick] = React.useState('')
+      const [customOwner, setCustomOwner] = React.useState('')
+      const [blockedById, setBlockedById] = React.useState('')
+      const allTasks = (board && Array.isArray(board.tasks)) ? board.tasks.filter(Boolean) : []
+      const openTasks = allTasks.filter(task => task.status !== 'done')
+      const hier = buildAgentHierarchy(store.subagents, store.agentIdentity)
+      const knownAgents = hier.children
+
+      const resolvedOwner = ownerPick === '__custom__' ? customOwner.trim().replace(/^@/, '') : ownerPick.trim().replace(/^@/, '')
+
+      const submit = () => {
+        const title = text.trim()
+        if (!title) return
+        setText('')
+        const args = { action: 'task.add', title }
+        if (parentId) args.parentId = parentId
+        if (resolvedOwner) {
+          args.owner = resolvedOwner
+          args.subagent = resolvedOwner
+        }
+        if (blockedById) args.blockedBy = [blockedById]
+        setBlockedById('')
+        void act(args)
+      }
+
+      return h(
+        'div',
+        { className: 'dnb-group', style: { padding: '9px 10px', marginBottom: 10 } },
+        h(
+          'div',
+          { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+          h('input', {
+            className: 'dnb-input',
+            style: { borderRadius: 99, paddingLeft: 13, height: 32, flex: 1 },
+            placeholder: '添加新任务或子目标（回车直接创建）…',
+            value: text,
+            onChange: e => setText(e.target.value),
+            onKeyDown: e => { if (e.key === 'Enter') submit() },
+          }),
+          h('button', {
+            className: 'dnb-primary-btn',
+            style: { height: 32, padding: '0 12px', flexShrink: 0 },
+            disabled: !text.trim(),
+            onClick: submit,
+          }, h(Icon, { name: 'plus', size: 12 }), '添加'),
+        ),
+        // All task association options laid out openly in one crisp row
+        h(
+          'div',
+          { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 7 } },
+          h('select', {
+            className: 'dnb-pill',
+            style: { flex: '1 1 112px', height: 26, padding: '0 8px', fontSize: 11 },
+            value: parentId,
+            title: '选择挂载在哪个父级任务之下',
+            onChange: e => setParentId(e.target.value),
+          },
+            h('option', { value: '' }, '父节点：顶层直属'),
+            allTasks.map(t => h('option', { key: t.id, value: t.id }, '父级 · ' + clampTitle(t.title, 13))),
+          ),
+          h('select', {
+            className: 'dnb-pill',
+            style: { flex: '1 1 112px', height: 26, padding: '0 8px', fontSize: 11 },
+            value: blockedById,
+            title: '选择需要先完成的前置依赖任务',
+            onChange: e => setBlockedById(e.target.value),
+          },
+            h('option', { value: '' }, '前置依赖：无'),
+            openTasks.map(t => h('option', { key: t.id, value: t.id }, '等待 · ' + clampTitle(t.title, 13))),
+          ),
+          knownAgents.length > 0
+            ? h('select', {
+                className: 'dnb-pill',
+                style: { flex: '1 1 110px', height: 26, padding: '0 8px', fontSize: 11 },
+                value: ownerPick,
+                title: '直接指派给现有子代理或自定义子代理',
+                onChange: e => setOwnerPick(e.target.value),
+              },
+                h('option', { value: '' }, '指派：@主代理'),
+                knownAgents.map(a => h('option', { key: a.name, value: a.name }, '指派：@' + shortAgentName(a.name, true))),
+                h('option', { value: '__custom__' }, '+ 自定义新子代理…'),
+              )
+            : null,
+          (knownAgents.length === 0 || ownerPick === '__custom__')
+            ? h('input', {
+                className: 'dnb-input',
+                style: { flex: '1 1 100px', minWidth: 96, height: 26, borderRadius: 99, padding: '0 10px', fontSize: 11 },
+                placeholder: '@指派子代理（选填）',
+                value: knownAgents.length === 0 ? ownerPick : customOwner,
+                onChange: e => knownAgents.length === 0 ? setOwnerPick(e.target.value) : setCustomOwner(e.target.value),
+                onKeyDown: e => { if (e.key === 'Enter') submit() },
+              })
+            : null,
+        ),
+      )
+    }
+
+    function TaskRow({ task, board, depth = 0 }) {
+      const next = STATUSES[(STATUSES.indexOf(task.status) + 1) % STATUSES.length]
+      const isSelected = store.selectedTaskId === task.id
+      const isFocused = store.focusTaskId === task.id
+      const isDone = task.status === 'done'
+      const isDoing = task.status === 'doing'
+      const isBlocked = task.status === 'blocked'
+      const color = STATUS_HEX[task.status] || STATUS_HEX.todo
+      const rawAgent = task.subagent || task.owner || ''
+      const showAgentTag = rawAgent && !GENERIC_OWNERS.has(String(rawAgent).toLowerCase())
+
+      return h(
+        'div',
+        {
+          className: 'dnb-cell dnb-cell-hover',
+          style: {
+            flexDirection: 'column',
+            alignItems: 'stretch',
+            gap: 6,
+            paddingLeft: 12 + depth * 18,
+            background: isSelected
+              ? 'var(--dnb-card-hover)'
+              : isBlocked
+                ? 'rgba(255, 69, 58, 0.05)'
+                : isDoing
+                  ? 'rgba(255, 159, 10, 0.04)'
+                  : undefined,
+            borderLeft: (isBlocked || isDoing) ? `3px solid ${color}` : '3px solid transparent',
+          },
+        },
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'flex-start', gap: 8, width: '100%' } },
+          h(
+            'button',
+            {
+              className: 'dnb-ring',
+              style: {
+                marginTop: 1,
+                ...(isDone
+                  ? { background: color, borderColor: color }
+                  : { borderColor: color, background: isDoing ? STATUS_BG.doing : isBlocked ? STATUS_BG.blocked : 'transparent' }),
+              },
+              title: '切换状态为 ' + STATUS_LABEL[next],
+              onClick: e => {
+                e.stopPropagation()
+                void act({ action: 'task.update', id: task.id, status: next })
+              },
+            },
+            isDone ? h(Icon, { name: 'check', size: 11 }) : null,
+          ),
+          h(
+            'div',
+            {
+              style: { flex: 1, minWidth: 0, cursor: 'pointer' },
+              onClick: () => patch({ selectedTaskId: isSelected ? '' : task.id }),
+            },
+            h(
+              'div',
+              {
+                style: {
+                  fontWeight: (isDoing || isBlocked) ? 600 : 500,
+                  fontSize: 12.5,
+                  lineHeight: 1.4,
+                  color: isDone ? 'var(--dnb-text-3)' : 'var(--dnb-text)',
+                  textDecoration: isDone ? 'line-through' : 'none',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  flexWrap: 'wrap',
+                  wordBreak: 'break-word',
+                },
+              },
+              task.title,
+              showAgentTag
+                ? h('span', { className: 'dnb-tag', style: { color: 'var(--dnb-accent)' } }, '@' + shortAgentName(rawAgent))
+                : null,
+            ),
+            task.intent
+              ? h('div', { style: { fontSize: 11, color: 'var(--dnb-text-2)', marginTop: 2 } }, '意图 · ' + task.intent)
+              : null,
+            task.evidence
+              ? h('div', { style: { fontSize: 11, color: '#30d158', marginTop: 2 } }, '结论 · ' + task.evidence)
+              : null,
+            (Array.isArray(task.blockedBy) && task.blockedBy.length && !isDone)
+              ? h('div', { style: { fontSize: 11, color: '#ff9f0a', marginTop: 2 } }, '等待前置 ' + task.blockedBy.length + ' 项')
+              : null,
+          ),
+          h(StatusBadge, { status: task.status }),
+        ),
+        // Laid-out status & action pills right inside list row too
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap', paddingLeft: 26 } },
+          h(
+            'div',
+            { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
+            STATUSES.map(st =>
+              h('button', {
+                key: st,
+                className: 'dnb-pyr-st-btn',
+                'data-st': st,
+                'data-active': task.status === st ? '1' : '0',
+                onClick: e => {
+                  e.stopPropagation()
+                  if (task.status !== st) void act({ action: 'task.update', id: task.id, status: st })
+                },
+              }, st === 'done' ? '✓ 完成' : STATUS_LABEL[st]),
+            ),
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
+            h('button', {
+              className: 'dnb-pyr-act-btn',
+              'data-accent': '1',
+              title: '让模型用大白话解释这条任务是什么意思、为什么需要这一步',
+              onClick: e => { e.stopPropagation(); explainTaskMeaning(task, board) },
+            }, h(Icon, { name: 'sparkles', size: 11 }), '解释'),
+            h('button', {
+              className: 'dnb-pyr-act-btn',
+              title: '派发或唤醒子代理执行此任务',
+              onClick: e => {
+                e.stopPropagation()
+                void act({
+                  action: 'task.dispatch',
+                  id: task.id,
+                  agent: task.subagent || task.owner || ('worker-' + String(task.id).slice(-4)),
+                })
+              },
+            }, h(Icon, { name: 'play', size: 10.5 }), isDoing ? '唤醒' : '派发'),
+            h('button', {
+              className: 'dnb-pyr-act-btn',
+              title: '在金字塔树中框选高亮负责推进此任务的代理',
+              onClick: e => { e.stopPropagation(); focusObjectiveInPyramid(isFocused ? '' : task.id) },
+            }, h(Icon, { name: 'target', size: 11 }), isFocused ? '取消框选' : '框选'),
+            h('button', {
+              className: 'dnb-pyr-act-btn',
+              onClick: e => {
+                e.stopPropagation()
+                if (isSelected && store.editTaskId === task.id) {
+                  patch({ selectedTaskId: '', editTaskId: '' })
+                } else {
+                  openTaskEditor(task)
+                }
+              },
+            }, h(Icon, { name: 'edit', size: 11 }), isSelected ? '收起' : '编辑'),
+            h('button', {
+              className: 'dnb-pyr-act-btn',
+              'data-danger': '1',
+              onClick: e => {
+                e.stopPropagation()
+                if (store.selectedTaskId === task.id) patch({ selectedTaskId: '', editTaskId: '' })
+                if (store.focusTaskId === task.id) patch({ focusTaskId: '' })
+                void act({ action: 'task.remove', id: task.id })
+              },
+            }, h(Icon, { name: 'trash', size: 11 }), '删除'),
+          ),
+        ),
+        isSelected ? h(TaskInspectorDrawer, { board, task }) : null,
+      )
+    }
+
+    function TasksTab({ board }) {
+      const allTasks = (board && Array.isArray(board.tasks)) ? board.tasks.filter(Boolean) : []
+      const allById = new Map(allTasks.map(t => [t.id, t]))
+      const filterAgent = store.filterAgent || ''
+      const statusFilter = store.taskStatusFilter || 'all'
+      const viewMode = store.taskViewMode || 'graph'
+      const subagentsRaw = Array.isArray(store.subagents) ? store.subagents : []
+      const hier = buildAgentHierarchy(subagentsRaw, store.agentIdentity)
+
+      const tasks = allTasks.filter(t => {
+        if (!t) return false
+        if (filterAgent) {
+          const hit = hier.matchAgentRef(t.subagent || t.owner || t.session)
+          const rawOwner = t.subagent || t.owner || ''
+          if ((hit ? hit.name : rawOwner) !== filterAgent) return false
+        }
+        if (statusFilter !== 'all' && t.status !== statusFilter) return false
+        return true
+      })
+
+      const childrenOf = id => tasks.filter(t => t.parentId === id && t.id !== id)
+      const ids = new Set(tasks.map(t => t.id))
+      const isRoot = task => !task.parentId || !ids.has(task.parentId) || task.parentId === task.id
+      const roots = [
+        ...tasks.filter(t => t.status === 'blocked' && isRoot(t)),
+        ...tasks.filter(t => t.status === 'doing' && isRoot(t)),
+        ...tasks.filter(t => t.status === 'todo' && isRoot(t)),
+        ...tasks.filter(t => t.status === 'done' && isRoot(t)),
+      ]
+
+      const focusedTask = store.focusTaskId ? (allTasks.find(t => t && t.id === store.focusTaskId) || null) : null
+      const focusInfo = focusedTask ? resolveTaskAgents(focusedTask, allTasks, subagentsRaw, store.agentIdentity) : null
+      const focusedAgentSet = new Set(focusInfo ? focusInfo.agentNames : [])
+      const focusedTaskScopeSet = new Set(focusInfo ? focusInfo.scopeTaskIds : [])
+
+      const AGENT_W = 196
+      const AGENT_H = 54
+      const LEAD_W = 204
+      const LEAD_H = 58
+      const TASK_W = 188
+      const TASK_H = 58
+      const FOLD_W = 152
+      const FOLD_H = 46
+      const H_GAP = 20
+      const V_GAP = 48
+      const NODE_R = 12
+      const isLR = store.graphDir === 'LR'
+
+      const [collapsed, setCollapsed] = React.useState(() => new Set())
+      const [zoom, setZoom] = React.useState(1)
+      const [hoveredId, setHoveredId] = React.useState('')
+      const [contextMenu, setContextMenu] = React.useState(null)
+      const pyrRootRef = React.useRef(null)
+      const canvasRef = React.useRef(null)
+      const panRef = React.useRef(null)
+
+      const toggleCollapse = nodeKey => {
+        setCollapsed(prev => {
+          const next = new Set(prev)
+          if (next.has(nodeKey)) next.delete(nodeKey)
+          else next.add(nodeKey)
+          return next
+        })
+      }
+
+      React.useEffect(() => {
+        if (!contextMenu) return undefined
+        const close = () => setContextMenu(null)
+        const onKey = e => { if (e.key === 'Escape') close() }
+        document.addEventListener('click', close)
+        document.addEventListener('keydown', onKey)
+        return () => {
+          document.removeEventListener('click', close)
+          document.removeEventListener('keydown', onKey)
+        }
+      }, [contextMenu])
+
+      // Group root tasks by owning agent ('lead' or subagent name) — shared by both Grand Pyramid & SVG Canvas
+      const tasksByAgent = new Map()
+      tasksByAgent.set('lead', [])
+      for (const a of hier.children) tasksByAgent.set(a.name, [])
+      const singleRunningAgent = (() => {
+        const running = hier.children.filter(a => a.status === 'running')
+        return running.length === 1 ? running[0] : null
+      })()
+      for (const t of roots) {
+        let ownerKey = 'lead'
+        const explicitHit = hier.matchAgentRef(t.subagent || t.owner || t.session)
+          || hier.children.find(a => a.taskId === t.id || (Array.isArray(a.tasks) && a.tasks.some(at => at && at.id === t.id)))
+        if (explicitHit) {
+          ownerKey = explicitHit.name
+        } else if (
+          singleRunningAgent
+          && (t.status === 'doing' || (focusedTask && focusedTask.id === t.id && focusInfo && focusInfo.inferredLive))
+        ) {
+          ownerKey = singleRunningAgent.name
+        }
+        if (!tasksByAgent.has(ownerKey)) tasksByAgent.set(ownerKey, [])
+        tasksByAgent.get(ownerKey).push(t)
+      }
+
+      // Build SVG Canvas Pyramid Coordinates (used when `viewMode === 'canvas'`)
+      const layoutPyramidTree = () => {
+        const pNodes = []
+        const pNodeById = new Map()
+        const taskNodeByTaskId = new Map()
+        const agentNodeByName = new Map()
+        const visitedTasks = new Set()
+        const visitedAgents = new Set()
+
+        const buildTaskSubtree = (task, tier) => {
+          if (!task || visitedTasks.has(task.id)) return null
+          visitedTasks.add(task.id)
+          const nodeKey = 'task:' + task.id
+          const allKids = childrenOf(task.id)
+          const isCol = collapsed.has(nodeKey)
+          const childNodes = isCol
+            ? []
+            : allKids.map(k => buildTaskSubtree(k, tier + 1)).filter(Boolean)
+
+          const isHighlighted = focusedTaskScopeSet.has(task.id)
+            || task.status === 'doing'
+            || task.status === 'blocked'
+
+          const node = {
+            id: nodeKey,
+            kind: 'task',
+            task,
+            tier,
+            w: TASK_W,
+            h: TASK_H,
+            x: 0,
+            y: 0,
+            span: 0,
+            kidCount: allKids.length,
+            hiddenKids: isCol ? allKids.length : 0,
+            childNodes,
+            activeBranch: isHighlighted || childNodes.some(c => c.activeBranch),
+            focusBranch: focusedTaskScopeSet.has(task.id) || childNodes.some(c => c.focusBranch),
+          }
+          pNodeById.set(nodeKey, node)
+          taskNodeByTaskId.set(task.id, node)
+          pNodes.push(node)
+          return node
+        }
+
+        const buildAgentSubtree = (agentObj, tier) => {
+          if (!agentObj || visitedAgents.has(agentObj.name)) return null
+          visitedAgents.add(agentObj.name)
+          const nodeKey = 'agent:' + agentObj.name
+          const isCol = collapsed.has(nodeKey)
+
+          const rawSubAgents = (hier.kidsMap.get(agentObj.name) || []).filter(a => !visitedAgents.has(a.name))
+          const directTasks = tasksByAgent.get(agentObj.name) || []
+
+          let childNodes = []
+          if (!isCol) {
+            const subAgentNodes = buildAgentTierChildren(agentObj.name, rawSubAgents, tier + 1)
+            const taskNodes = directTasks.map(t => buildTaskSubtree(t, tier + 1)).filter(Boolean)
+            childNodes = [...subAgentNodes, ...taskNodes]
+          }
+
+          const totalKids = rawSubAgents.length + directTasks.length
+          const isAgentFocused = focusedAgentSet.has(agentObj.name)
+          const isRunning = agentObj.status === 'running'
+
+          const node = {
+            id: nodeKey,
+            kind: 'agent',
+            agent: agentObj,
+            tier,
+            w: AGENT_W,
+            h: AGENT_H,
+            x: 0,
+            y: 0,
+            span: 0,
+            kidCount: totalKids,
+            hiddenKids: isCol ? totalKids : 0,
+            childNodes,
+            activeBranch: isRunning || isAgentFocused || childNodes.some(c => c.activeBranch),
+            focusBranch: isAgentFocused || childNodes.some(c => c.focusBranch),
+          }
+          pNodeById.set(nodeKey, node)
+          agentNodeByName.set(agentObj.name, node)
+          pNodes.push(node)
+          return node
+        }
+
+        function buildAgentTierChildren(parentKey, agentList, tier) {
+          if (!agentList.length) return []
+          const sorted = [...agentList].sort((a, b) => {
+            const fa = focusedAgentSet.has(a.name) ? 1 : 0
+            const fb = focusedAgentSet.has(b.name) ? 1 : 0
+            if (fa !== fb) return fb - fa
+            const ra = a.status === 'running' ? 1 : 0
+            const rb = b.status === 'running' ? 1 : 0
+            if (ra !== rb) return rb - ra
+            const ta = (tasksByAgent.get(a.name) || []).length
+            const tb = (tasksByAgent.get(b.name) || []).length
+            return tb - ta
+          })
+
+          if (store.pyramidShowAllAgents || sorted.length <= 8) {
+            return sorted.map(a => buildAgentSubtree(a, tier)).filter(Boolean)
+          }
+
+          const isImportant = a => (
+            a.status === 'running'
+            || focusedAgentSet.has(a.name)
+            || (filterAgent && a.name === filterAgent)
+            || (tasksByAgent.get(a.name) || []).length > 0
+            || (hier.kidsMap.get(a.name) || []).length > 0
+          )
+          const important = sorted.filter(isImportant)
+          const shownAgents = important.length > 0 ? important : sorted.slice(0, 4)
+          const hiddenIdle = sorted.filter(a => !shownAgents.includes(a))
+          const out = shownAgents.map(a => buildAgentSubtree(a, tier)).filter(Boolean)
+
+          if (hiddenIdle.length > 0) {
+            const foldId = 'fold:' + parentKey
+            const foldNode = {
+              id: foldId,
+              kind: 'fold',
+              parentKey,
+              hiddenAgents: hiddenIdle,
+              tier,
+              w: FOLD_W,
+              h: FOLD_H,
+              x: 0,
+              y: 0,
+              span: 0,
+              kidCount: 0,
+              hiddenKids: 0,
+              childNodes: [],
+              activeBranch: false,
+              focusBranch: false,
+            }
+            pNodeById.set(foldId, foldNode)
+            pNodes.push(foldNode)
+            out.push(foldNode)
+          }
+          return out
+        }
+
+        const tier1Agents = !filterAgent
+          ? (hier.kidsMap.get('lead') || [])
+          : hier.children.filter(a => a.name === filterAgent)
+        const leadDirectTasks = tasksByAgent.get('lead') || []
+        const leadCollapsed = collapsed.has('agent:lead')
+        const leadAgentKids = leadCollapsed ? [] : buildAgentTierChildren('lead', tier1Agents, 1)
+        const leadTaskKids = leadCollapsed ? [] : leadDirectTasks.map(t => buildTaskSubtree(t, 1)).filter(Boolean)
+
+        if (!leadCollapsed) {
+          for (const t of tasks) {
+            if (!visitedTasks.has(t.id)) {
+              const extra = buildTaskSubtree(t, 1)
+              if (extra) leadTaskKids.push(extra)
+            }
+          }
+        }
+
+        const leadChildren = [...leadAgentKids, ...leadTaskKids]
+        const leadTotalKids = tier1Agents.length + leadDirectTasks.length
+        const isLeadFocused = Boolean(focusInfo && focusInfo.includeLead)
+
+        const apexNode = {
+          id: 'agent:lead',
+          kind: 'lead',
+          agent: hier.leadEntry || { name: 'lead', status: hier.children.some(a => a.status === 'running') ? 'running' : 'idle' },
+          tier: 0,
+          w: LEAD_W,
+          h: LEAD_H,
+          x: 0,
+          y: 0,
+          span: 0,
+          kidCount: leadTotalKids,
+          hiddenKids: leadCollapsed ? leadTotalKids : 0,
+          childNodes: leadChildren,
+          activeBranch: true,
+          focusBranch: isLeadFocused || leadChildren.some(c => c.focusBranch),
+        }
+        pNodeById.set(apexNode.id, apexNode)
+        agentNodeByName.set('lead', apexNode)
+        pNodes.push(apexNode)
+
+        const measureSpan = node => {
+          const ownBreadth = isLR ? node.h : node.w
+          const gap = isLR ? 16 : H_GAP
+          if (!node.childNodes || !node.childNodes.length) {
+            node.span = ownBreadth
+            return node.span
+          }
+          let childrenSpan = 0
+          node.childNodes.forEach((c, idx) => {
+            if (idx > 0) childrenSpan += gap
+            childrenSpan += measureSpan(c)
+          })
+          node.span = Math.max(ownBreadth, childrenSpan)
+          return node.span
+        }
+        measureSpan(apexNode)
+
+        const padBreadth = 24
+        const padDepth = 22
+        const placeSubtree = (node, startBreadth, depthPx) => {
+          const ownBreadth = isLR ? node.h : node.w
+          const ownDepth = isLR ? node.w : node.h
+          const gap = isLR ? 16 : H_GAP
+          const centerB = startBreadth + node.span / 2
+
+          if (isLR) {
+            node.x = depthPx
+            node.y = Math.round(centerB - ownBreadth / 2)
+          } else {
+            node.x = Math.round(centerB - ownBreadth / 2)
+            node.y = depthPx
+          }
+
+          if (node.childNodes && node.childNodes.length) {
+            const totalKidsSpan = node.childNodes.reduce((acc, c) => acc + c.span, 0) + gap * (node.childNodes.length - 1)
+            let curB = centerB - totalKidsSpan / 2
+            const nextDepthPx = depthPx + ownDepth + V_GAP
+            for (const c of node.childNodes) {
+              placeSubtree(c, curB, nextDepthPx)
+              curB += c.span + gap
+            }
+          }
+        }
+        placeSubtree(apexNode, padBreadth, padDepth)
+
+        const depEdges = []
+        for (const node of pNodes) {
+          if (node.kind !== 'task' || !node.task) continue
+          const deps = Array.isArray(node.task.blockedBy) ? node.task.blockedBy : []
+          for (const depId of deps) {
+            const fromNode = taskNodeByTaskId.get(depId)
+            if (fromNode && fromNode !== node) {
+              depEdges.push({
+                from: fromNode,
+                to: node,
+                satisfied: fromNode.task.status === 'done',
+              })
+            }
+          }
+        }
+
+        let spotlight = null
+        if (focusedTask && focusInfo) {
+          let framedNodes = pNodes.filter(n => n.kind === 'agent' && focusedAgentSet.has(n.agent.name))
+          if (framedNodes.length === 0 && focusInfo.includeLead) {
+            const ftNode = taskNodeByTaskId.get(focusedTask.id)
+            framedNodes = [apexNode, ...(ftNode ? [ftNode] : [])]
+          }
+          if (framedNodes.length > 0) {
+            const minX = Math.min(...framedNodes.map(n => n.x)) - 14
+            const minY = Math.min(...framedNodes.map(n => n.y)) - 28
+            const maxX = Math.max(...framedNodes.map(n => n.x + n.w)) + 14
+            const maxY = Math.max(...framedNodes.map(n => n.y + n.h)) + 12
+            const isBlockedFocus = focusedTask.status === 'blocked'
+            const agentCount = framedNodes.filter(n => n.kind === 'agent').length
+            const badgeLabel = (isBlockedFocus ? '⚠ 受阻关联 · ' : '🎯 正在推进 · ')
+              + (agentCount > 0 ? `${agentCount} 名子代理` : '主代理直管')
+              + ' ▸ ' + clampTitle(focusedTask.title || focusedTask.id, 12)
+            spotlight = {
+              x: minX,
+              y: minY,
+              w: Math.max(196, maxX - minX),
+              h: maxY - minY,
+              color: isBlockedFocus ? '#ff453a' : '#ff9f0a',
+              isBlocked: isBlockedFocus,
+              badgeLabel,
+              agentCount,
+            }
+          }
+        }
+
+        return { pNodes, apexNode, depEdges, spotlight }
+      }
+
+      const hasPyramidContent = tasks.length > 0 || hier.children.length > 0 || Boolean(board && board.objective)
+      const { pNodes, depEdges, spotlight } = (hasPyramidContent && viewMode === 'canvas')
+        ? layoutPyramidTree()
+        : { pNodes: [], depEdges: [], spotlight: null }
+
+      const maxX = Math.max(...pNodes.map(n => n.x + n.w), spotlight ? spotlight.x + spotlight.w : 0, 0)
+      const maxY = Math.max(...pNodes.map(n => n.y + n.h), spotlight ? spotlight.y + spotlight.h : 0, 0)
+      const svgW = Math.max(maxX + 26, 332)
+      const svgH = Math.max(maxY + 26, 150)
+
+      const fitZoom = React.useCallback(() => {
+        const el = canvasRef.current
+        if (!el || !svgW) {
+          setZoom(1)
+          return
+        }
+        const avail = Math.max(240, el.clientWidth - 20)
+        const ratio = avail < svgW ? Math.max(0.42, avail / svgW) : 1
+        setZoom(+ratio.toFixed(2))
+      }, [svgW])
+
+      // Auto-fit SVG canvas width on open/resize so even Canvas mode doesn't clip horizontally
+      React.useEffect(() => {
+        if (viewMode !== 'canvas' || !canvasRef.current) return undefined
+        fitZoom()
+        if (typeof ResizeObserver === 'function') {
+          const ro = new ResizeObserver(() => fitZoom())
+          ro.observe(canvasRef.current)
+          return () => ro.disconnect()
+        }
+        return undefined
+      }, [viewMode, svgW, fitZoom])
+
+      // Smoothly scroll spotlighted branch/card into view in Grand Pyramid OR SVG Canvas
+      React.useEffect(() => {
+        if (!store.focusTaskId) return
+        if (viewMode === 'graph' && pyrRootRef.current) {
+          const targetEl = pyrRootRef.current.querySelector('[data-pyr-spotlight="1"]')
+          if (targetEl && typeof targetEl.scrollIntoView === 'function') {
+            try {
+              targetEl.scrollIntoView({ behavior: 'smooth', block: 'center' })
+            } catch {}
+          }
+          return
+        }
+        if (viewMode === 'canvas' && spotlight && canvasRef.current) {
+          const el = canvasRef.current
+          const targetLeft = Math.max(0, (spotlight.x + spotlight.w / 2) * zoom - el.clientWidth / 2)
+          const targetTop = Math.max(0, (spotlight.y + spotlight.h / 2) * zoom - el.clientHeight / 2)
+          try {
+            el.scrollTo({ left: targetLeft, top: targetTop, behavior: 'smooth' })
+          } catch {
+            el.scrollLeft = targetLeft
+            el.scrollTop = targetTop
+          }
+        }
+      }, [store.focusTaskId, viewMode, spotlight ? spotlight.x : 0, spotlight ? spotlight.y : 0])
+
+      const selectedTask = allTasks.find(t => t && t.id === store.selectedTaskId) || null
+      const doneTotal = allTasks.filter(t => t && t.status === 'done').length
+      const doingTotal = allTasks.filter(t => t && t.status === 'doing').length
+      const blockedTotal = allTasks.filter(t => t && t.status === 'blocked').length
+      const todoTotal = allTasks.filter(t => t && t.status === 'todo').length
+
+      const triggerAiPlanGraph = () => {
+        const goal = (board && board.objective ? `针对「${board.objective.slice(0, 80)}」，` : '')
+        const sent = sendToComposer(goal + '请调用 chief_board 的 graph.plan 拆解金字塔可视化任务图，并用 task.dispatch 调度子代理团队并行推进。')
+        patch({ notice: sent || '请在对话中让模型规划任务图' })
+      }
+
+      /* ---------------- Grand Full-Width Zero-Drag Pyramid Renderers ---------------- */
+
+      const renderGrandTaskCard = (task, visitedTaskIds) => {
+        if (!task || visitedTaskIds.has(task.id)) return null
+        visitedTaskIds.add(task.id)
+        const nodeKey = 'task:' + task.id
+        const kids = childrenOf(task.id)
+        const isCol = collapsed.has(nodeKey)
+        const isSelected = store.selectedTaskId === task.id
+        const isFocusedTarget = store.focusTaskId === task.id
+        const inFocusScope = focusedTaskScopeSet.has(task.id)
+        const isDoing = task.status === 'doing'
+        const isBlocked = task.status === 'blocked'
+        const isDone = task.status === 'done'
+
+        const rawAgent = task.subagent || task.owner || ''
+        const showAgentTag = rawAgent && !GENERIC_OWNERS.has(String(rawAgent).toLowerCase())
+        const matchedAgent = hier.matchAgentRef(rawAgent)
+        const deps = Array.isArray(task.blockedBy) ? task.blockedBy : []
+        const unresolvedDeps = deps.map(id => allById.get(id) || { id, title: id }).filter(d => !d.status || d.status !== 'done')
+        const doneDeps = deps.map(id => allById.get(id)).filter(d => d && d.status === 'done')
+
+        const spotlightKind = (focusedTask && inFocusScope)
+          ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing')
+          : ''
+        const dimmed = focusedTask && !inFocusScope && !kids.some(k => focusedTaskScopeSet.has(k.id))
+
+        return h(
+          'div',
+          {
+            key: nodeKey,
+            'data-pyr-spotlight': isFocusedTarget ? '1' : undefined,
+            style: { minWidth: 0, opacity: dimmed ? 0.42 : 1, transition: 'opacity 0.2s ease' },
+          },
+          h(
+            'div',
+            {
+              className: 'dnb-pyr-task-card',
+              'data-status': task.status || 'todo',
+              'data-spotlight': spotlightKind || undefined,
+              onContextMenu: e => {
+                e.preventDefault()
+                e.stopPropagation()
+                setContextMenu({ taskId: task.id, task, x: e.clientX, y: e.clientY })
+              },
+            },
+            // Header row: full wrapping title + prominent status badge
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 } },
+              h(
+                'div',
+                {
+                  style: {
+                    flex: 1,
+                    minWidth: 0,
+                    fontWeight: (isDoing || isBlocked) ? 600 : 500,
+                    fontSize: 12.8,
+                    lineHeight: 1.44,
+                    color: isDone ? 'var(--dnb-text-2)' : 'var(--dnb-text)',
+                    wordBreak: 'break-word',
+                  },
+                },
+                task.title || task.id,
+              ),
+              h(StatusBadge, { status: task.status }),
+            ),
+
+            // Owner / Dependency / Intent / Evidence / Assumptions details
+            (showAgentTag || unresolvedDeps.length > 0 || doneDeps.length > 0 || task.intent || task.evidence || task.note || (Array.isArray(task.assumptions) && task.assumptions.length > 0))
+              ? h(
+                  'div',
+                  { style: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 } },
+                  (showAgentTag || unresolvedDeps.length > 0 || doneDeps.length > 0)
+                    ? h(
+                        'div',
+                        { style: { display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' } },
+                        showAgentTag
+                          ? h('span', {
+                              className: 'dnb-tag',
+                              style: { color: 'var(--dnb-accent)', fontWeight: 600, fontSize: 10.5 },
+                            }, '@' + shortAgentName(rawAgent))
+                          : null,
+                        unresolvedDeps.map(d =>
+                          h('span', {
+                            key: d.id,
+                            className: 'dnb-tag',
+                            style: { background: STATUS_BG.doing, color: '#ff9f0a', fontSize: 10.5 },
+                          }, '⏳ 等待前置：' + clampTitle(d.title || d.id, 14)),
+                        ),
+                        doneDeps.map(d =>
+                          h('span', {
+                            key: d.id,
+                            className: 'dnb-tag',
+                            style: { background: STATUS_BG.done, color: '#30d158', fontSize: 10.5 },
+                          }, '✓ 前置就绪：' + clampTitle(d.title || d.id, 12)),
+                        ),
+                      )
+                    : null,
+                  task.intent
+                    ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, '意图 · ' + task.intent)
+                    : null,
+                  task.evidence
+                    ? h('div', { style: { fontSize: 11.5, color: '#30d158', lineHeight: 1.42, wordBreak: 'break-word' } }, '结论 · ' + task.evidence)
+                    : null,
+                  task.note
+                    ? h('div', { style: { fontSize: 11.5, color: isBlocked ? '#ff6961' : 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, task.note)
+                    : null,
+                  Array.isArray(task.assumptions) && task.assumptions.length > 0
+                    ? h(
+                        'div',
+                        { style: { display: 'flex', flexDirection: 'column', gap: 3, marginTop: 2 } },
+                        task.assumptions.map((assum, idx) =>
+                          h(
+                            'div',
+                            { key: idx, style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 } },
+                            h('button', {
+                              className: 'dnb-ring',
+                              style: {
+                                width: 15,
+                                height: 15,
+                                ...(assum.verified ? { background: '#30d158', borderColor: '#30d158' } : { borderColor: '#ff9f0a' }),
+                              },
+                              onClick: e => {
+                                e.stopPropagation()
+                                if (!assum.verified) void act({ action: 'task.verify', id: task.id, assumptionIndex: idx })
+                              },
+                            }, assum.verified ? h(Icon, { name: 'check', size: 9 }) : null),
+                            h('span', { style: assum.verified ? { textDecoration: 'line-through', opacity: 0.58 } : null }, assum.text),
+                          ),
+                        ),
+                      )
+                    : null,
+                )
+              : null,
+
+            // Row 1 of Open Options: Direct 4-State Status Switcher Pills
+            h(
+              'div',
+              { className: 'dnb-pyr-st-row' },
+              STATUSES.map(st =>
+                h(
+                  'button',
+                  {
+                    key: st,
+                    type: 'button',
+                    className: 'dnb-pyr-st-btn',
+                    'data-st': st,
+                    'data-active': task.status === st ? '1' : '0',
+                    onClick: e => {
+                      e.stopPropagation()
+                      if (task.status !== st) void act({ action: 'task.update', id: task.id, status: st })
+                    },
+                  },
+                  h('span', {
+                    style: {
+                      width: 5.5,
+                      height: 5.5,
+                      borderRadius: '50%',
+                      background: STATUS_HEX[st],
+                    },
+                  }),
+                  st === 'done' ? '已完成' : STATUS_LABEL[st],
+                ),
+              ),
+            ),
+
+            // Row 2 of Open Options: All Action Buttons Laid Out Openly
+            h(
+              'div',
+              { className: 'dnb-pyr-act-row' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dnb-pyr-act-btn',
+                  'data-accent': '1',
+                  title: '让模型用通俗大白话解释这条任务是什么意思、为什么需要这一步',
+                  onClick: e => { e.stopPropagation(); explainTaskMeaning(task, board) },
+                },
+                h(Icon, { name: 'sparkles', size: 11 }),
+                '解释',
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dnb-pyr-act-btn',
+                  title: '派发或唤醒子代理推进此任务',
+                  onClick: e => {
+                    e.stopPropagation()
+                    void act({
+                      action: 'task.dispatch',
+                      id: task.id,
+                      agent: rawAgent || ('worker-' + String(task.id).slice(-4)),
+                    })
+                  },
+                },
+                h(Icon, { name: 'play', size: 10.5 }),
+                isDoing ? '唤醒' : '派发',
+              ),
+              isDoing && showAgentTag
+                ? h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dnb-pyr-act-btn',
+                      'data-danger': '1',
+                      title: '停止该子代理当前轮次',
+                      onClick: e => {
+                        e.stopPropagation()
+                        void act({ action: 'team.interrupt', id: task.id, agent: rawAgent })
+                      },
+                    },
+                    h(Icon, { name: 'stop', size: 10.5 }),
+                    '停止',
+                  )
+                : null,
+              matchedAgent && matchedAgent.id
+                ? h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dnb-pyr-act-btn',
+                      title: '在分屏打开负责该任务的子代理实时会话',
+                      onClick: e => {
+                        e.stopPropagation()
+                        if (!openSubagentChat(matchedAgent)) patch({ notice: '该子代理暂无独立会话面板' })
+                      },
+                    },
+                    h(Icon, { name: 'chat', size: 11 }),
+                    '对话',
+                  )
+                : null,
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dnb-pyr-act-btn',
+                  title: isFocusedTarget ? '退出聚光灯框选' : '框选高亮负责推进此任务的代理链路',
+                  style: isFocusedTarget ? { borderColor: '#ff9f0a', color: '#ff9f0a', background: 'rgba(255,159,10,0.14)' } : undefined,
+                  onClick: e => {
+                    e.stopPropagation()
+                    focusObjectiveInPyramid(isFocusedTarget ? '' : task.id)
+                  },
+                },
+                h(Icon, { name: 'target', size: 11 }),
+                isFocusedTarget ? '已框选' : '框选',
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dnb-pyr-act-btn',
+                  title: '展开编辑详情、前置依赖与自定义派发指令',
+                  onClick: e => {
+                    e.stopPropagation()
+                    if (isSelected) {
+                      patch({ selectedTaskId: '', editTaskId: '' })
+                    } else {
+                      openTaskEditor(task)
+                    }
+                  },
+                },
+                h(Icon, { name: 'edit', size: 11 }),
+                isSelected ? '收起' : '编辑',
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dnb-pyr-act-btn',
+                  'data-danger': '1',
+                  title: '删除此任务节点',
+                  onClick: e => {
+                    e.stopPropagation()
+                    if (store.selectedTaskId === task.id) patch({ selectedTaskId: '', editTaskId: '' })
+                    if (store.focusTaskId === task.id) patch({ focusTaskId: '' })
+                    void act({ action: 'task.remove', id: task.id })
+                  },
+                },
+                h(Icon, { name: 'trash', size: 11 }),
+                '删除',
+              ),
+              kids.length > 0
+                ? h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dnb-pyr-act-btn',
+                      style: { marginLeft: 'auto' },
+                      onClick: e => {
+                        e.stopPropagation()
+                        toggleCollapse(nodeKey)
+                      },
+                    },
+                    isCol ? `+ 展开子项 (${kids.length})` : `− 收起子项 (${kids.length})`,
+                  )
+                : null,
+            ),
+
+            // Inline Drawer right inside the card when selected for editing/custom dispatch!
+            isSelected ? h(TaskInspectorDrawer, { board, task }) : null,
+          ),
+
+          // Child Sub-tasks connected with vertical spine (`竖线连接`)
+          (!isCol && kids.length > 0)
+            ? h(
+                'div',
+                {
+                  className: 'dnb-pyr-subtree',
+                  'data-tone': isBlocked ? 'blocked' : isDoing ? 'doing' : undefined,
+                },
+                kids.map(kid => {
+                  const kTone = kid.status === 'blocked' ? 'blocked' : kid.status === 'doing' ? 'doing' : kid.status === 'done' ? 'done' : undefined
+                  return h(
+                    'div',
+                    { key: kid.id, className: 'dnb-pyr-subitem', 'data-tone': kTone },
+                    renderGrandTaskCard(kid, visitedTaskIds),
+                  )
+                }),
+              )
+            : null,
+        )
+      }
+
+      const renderGrandAgentSubtree = (agentObj, tier, visitedAgents, visitedTaskIds) => {
+        if (!agentObj || visitedAgents.has(agentObj.name)) return null
+        visitedAgents.add(agentObj.name)
+
+        const nodeKey = 'agent:' + agentObj.name
+        const isCol = collapsed.has(nodeKey)
+        const isRunning = agentObj.status === 'running'
+        const isAgentFocused = focusedAgentSet.has(agentObj.name)
+        const isFiltered = store.filterAgent === agentObj.name
+        const subAgents = (hier.kidsMap.get(agentObj.name) || []).filter(a => !visitedAgents.has(a.name))
+        const directTasks = tasksByAgent.get(agentObj.name) || []
+        const totalKids = subAgents.length + directTasks.length
+        const tierLabel = tier === 1 ? '一级代理' : `${tier}级代理`
+        const desc = agentObj.taskTitle || agentObj.description || (isRunning ? '正在推进分配任务…' : (directTasks.length ? `挂载 ${directTasks.length} 项任务` : '待命 / 已完成回报'))
+
+        const focusTone = isAgentFocused
+          ? (focusedTask && focusedTask.status === 'blocked' ? 'blocked' : 'doing')
+          : ''
+        const spineTone = focusTone || (isRunning ? 'live' : undefined)
+
+        return h(
+          'div',
+          { key: nodeKey, style: { minWidth: 0 } },
+          h(
+            'div',
+            {
+              className: 'dnb-pyr-agent-card',
+              'data-running': isRunning ? '1' : '0',
+              'data-focused': focusTone || undefined,
+            },
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' } },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
+                h('span', {
+                  className: isRunning ? 'dnb-live-dot' : undefined,
+                  style: {
+                    width: 8,
+                    height: 8,
+                    borderRadius: '50%',
+                    background: isRunning ? '#30d158' : (focusTone === 'blocked' ? '#ff453a' : focusTone === 'doing' ? '#ff9f0a' : 'var(--dnb-text-3)'),
+                    flexShrink: 0,
+                  },
+                }),
+                h('span', {
+                  style: { fontWeight: 700, fontSize: 13, color: 'var(--dnb-text)', wordBreak: 'break-all' },
+                }, '@' + shortAgentName(agentObj.name, tier > 1)),
+              ),
+              h(
+                'span',
+                {
+                  className: 'dnb-tag',
+                  style: {
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    color: isRunning ? '#30d158' : (focusTone ? (focusTone === 'blocked' ? '#ff453a' : '#ff9f0a') : 'var(--dnb-text-2)'),
+                  },
+                },
+                isRunning ? `${tierLabel} · 运行中` : tierLabel,
+              ),
+            ),
+            desc
+              ? h('div', {
+                  style: { fontSize: 11.5, color: isRunning ? '#30d158' : 'var(--dnb-text-2)', marginTop: 4, lineHeight: 1.4, wordBreak: 'break-word' },
+                }, desc)
+              : null,
+            // Openly laid-out subagent actions right on the agent card
+            h(
+              'div',
+              { className: 'dnb-pyr-act-row', style: { marginTop: 8 } },
+              agentObj.id
+                ? h('button', {
+                    type: 'button',
+                    className: 'dnb-pyr-act-btn',
+                    'data-accent': '1',
+                    title: '在分屏打开该子代理独立会话视图',
+                    onClick: () => {
+                      if (!openSubagentChat(agentObj)) patch({ notice: '该子代理暂无独立会话视图' })
+                    },
+                  }, h(Icon, { name: 'chat', size: 11 }), '分屏对话')
+                : null,
+              h('button', {
+                type: 'button',
+                className: 'dnb-pyr-act-btn',
+                title: '锁定底部参谋长输入栏直接给该子代理递话或插话',
+                onClick: () => {
+                  patch({
+                    secTarget: agentObj.name,
+                    secMode: isRunning ? 'steer' : 'followup',
+                    notice: '已在下方锁定 @' + shortAgentName(agentObj.name, true) + '，输入指令回车即达',
+                  })
+                  focusSecInput()
+                },
+              }, h(Icon, { name: 'send', size: 10.5 }), '@递话'),
+              h('button', {
+                type: 'button',
+                className: 'dnb-pyr-act-btn',
+                style: isFiltered ? { borderColor: 'var(--dnb-accent)', color: 'var(--dnb-accent)' } : undefined,
+                onClick: () => patch({ filterAgent: isFiltered ? '' : agentObj.name }),
+              }, isFiltered ? '显示全员' : '只看TA'),
+              isRunning
+                ? h('button', {
+                    type: 'button',
+                    className: 'dnb-pyr-act-btn',
+                    'data-danger': '1',
+                    onClick: () => void act({ action: 'team.interrupt', agent: agentObj.name }),
+                  }, h(Icon, { name: 'stop', size: 10.5 }), '停止')
+                : null,
+              totalKids > 0
+                ? h('button', {
+                    type: 'button',
+                    className: 'dnb-pyr-act-btn',
+                    style: { marginLeft: 'auto' },
+                    onClick: () => toggleCollapse(nodeKey),
+                  }, isCol ? `+ 展开 (${totalKids})` : `− 收起 (${totalKids})`)
+                : null,
+            ),
+          ),
+
+          // Vertical Tree Spine connecting Tier-2+ subagents & this agent's assigned tasks
+          (!isCol && totalKids > 0)
+            ? h(
+                'div',
+                { className: 'dnb-pyr-subtree', 'data-tone': spineTone },
+                subAgents.map(sa =>
+                  h(
+                    'div',
+                    {
+                      key: 'sa-' + sa.name,
+                      className: 'dnb-pyr-subitem',
+                      'data-tone': focusedAgentSet.has(sa.name) ? (focusedTask && focusedTask.status === 'blocked' ? 'blocked' : 'doing') : undefined,
+                    },
+                    renderGrandAgentSubtree(sa, tier + 1, visitedAgents, visitedTaskIds),
+                  ),
+                ),
+                directTasks.map(t => {
+                  const tTone = t.status === 'blocked' ? 'blocked' : t.status === 'doing' ? 'doing' : t.status === 'done' ? 'done' : undefined
+                  return h(
+                    'div',
+                    { key: 'st-' + t.id, className: 'dnb-pyr-subitem', 'data-tone': tTone },
+                    renderGrandTaskCard(t, visitedTaskIds),
+                  )
+                }),
+              )
+            : null,
+        )
+      }
+
+      const renderGrandPyramid = () => {
+        const visitedAgents = new Set()
+        const visitedTaskIds = new Set()
+
+        const rawTier1Agents = !filterAgent
+          ? (hier.kidsMap.get('lead') || [])
+          : hier.children.filter(a => a.name === filterAgent)
+        const sortedTier1Agents = [...rawTier1Agents].sort((a, b) => {
+          const fa = focusedAgentSet.has(a.name) ? 1 : 0
+          const fb = focusedAgentSet.has(b.name) ? 1 : 0
+          if (fa !== fb) return fb - fa
+          const ra = a.status === 'running' ? 1 : 0
+          const rb = b.status === 'running' ? 1 : 0
+          if (ra !== rb) return rb - ra
+          const ta = (tasksByAgent.get(a.name) || []).length
+          const tb = (tasksByAgent.get(b.name) || []).length
+          return tb - ta
+        })
+
+        // Pre-mark tasks claimed by subagents so leftover tasks under Lead are crisp & deduplicated
+        const claimedTaskIds = new Set()
+        const markSubtreeClaimed = taskList => {
+          for (const t of taskList) {
+            if (!t || claimedTaskIds.has(t.id)) continue
+            claimedTaskIds.add(t.id)
+            markSubtreeClaimed(childrenOf(t.id))
+          }
+        }
+        for (const a of hier.children) {
+          markSubtreeClaimed(tasksByAgent.get(a.name) || [])
+        }
+        const leadDirectRoots = [
+          ...(tasksByAgent.get('lead') || []),
+          ...tasks.filter(t => !claimedTaskIds.has(t.id) && !(tasksByAgent.get('lead') || []).includes(t) && isRoot(t)),
+        ]
+
+        const runningKidsCount = hier.children.filter(a => a.status === 'running').length
+        const leadCollapsed = collapsed.has('agent:lead')
+        const isLeadSpotlight = Boolean(focusedTask && focusInfo && focusInfo.includeLead && focusedAgentSet.size === 0)
+        const apexSpotlightTone = isLeadSpotlight ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing') : ''
+        const trunkTone = focusedTask
+          ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing')
+          : (blockedTotal > 0 ? 'blocked' : doingTotal > 0 ? 'doing' : runningKidsCount > 0 ? 'live' : '')
+
+        // Build Tier-1 columns under the Apex
+        const columns = []
+
+        for (const ag of sortedTier1Agents) {
+          const descAgents = hier.descendantsOf(ag.name)
+          const branchHasSpotlight = Boolean(
+            focusedTask && (focusedAgentSet.has(ag.name) || descAgents.some(d => focusedAgentSet.has(d.name))),
+          )
+          const spotTone = branchHasSpotlight
+            ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing')
+            : ''
+          const colTone = spotTone || (ag.status === 'running' ? 'live' : '')
+          const dimmedBranch = Boolean(focusedTask && !branchHasSpotlight)
+
+          columns.push(
+            h(
+              'div',
+              {
+                key: 'col-agent-' + ag.name,
+                className: 'dnb-pyr-branch',
+                'data-tone': colTone || undefined,
+                'data-pyr-spotlight': branchHasSpotlight ? '1' : undefined,
+                style: { opacity: dimmedBranch ? 0.38 : 1 },
+              },
+              h(
+                'div',
+                {
+                  className: 'dnb-pyr-branch-box',
+                  'data-spotlight': spotTone || undefined,
+                },
+                branchHasSpotlight
+                  ? h(
+                      'div',
+                      { className: 'dnb-pyr-spot-tag', 'data-blocked': spotTone === 'blocked' ? '1' : '0' },
+                      spotTone === 'blocked' ? '⚠ 受阻关联代理 · @' + shortAgentName(ag.name, true) : '🎯 正在推进 · @' + shortAgentName(ag.name, true),
+                    )
+                  : null,
+                renderGrandAgentSubtree(ag, 1, visitedAgents, visitedTaskIds),
+              ),
+            ),
+          )
+        }
+
+        if (leadDirectRoots.length > 0) {
+          if (sortedTier1Agents.length === 0) {
+            // Pure Lead tasks: lay out each root phase/objective as its own clean Tier-1 pyramid branch!
+            for (const rt of leadDirectRoots) {
+              const inSpot = Boolean(focusedTask && focusedTaskScopeSet.has(rt.id))
+              const spotTone = inSpot ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing') : ''
+              const colTone = spotTone || (rt.status === 'blocked' ? 'blocked' : rt.status === 'doing' ? 'doing' : '')
+              columns.push(
+                h(
+                  'div',
+                  {
+                    key: 'col-task-' + rt.id,
+                    className: 'dnb-pyr-branch',
+                    'data-tone': colTone || undefined,
+                  },
+                  renderGrandTaskCard(rt, visitedTaskIds),
+                ),
+              )
+            }
+          } else {
+            // Hybrid mode (Subagent columns + Lead's direct phase tasks): group Lead's direct tasks into a clear sibling column
+            const leadGroupInSpot = Boolean(focusedTask && leadDirectRoots.some(t => focusedTaskScopeSet.has(t.id)))
+            const spotTone = leadGroupInSpot ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing') : ''
+            const groupColKey = 'agent:lead-direct'
+            const groupCollapsed = collapsed.has(groupColKey)
+            columns.push(
+              h(
+                'div',
+                {
+                  key: 'col-lead-direct',
+                  className: 'dnb-pyr-branch',
+                  'data-tone': spotTone || undefined,
+                  'data-pyr-spotlight': leadGroupInSpot ? '1' : undefined,
+                  style: { opacity: (focusedTask && !leadGroupInSpot) ? 0.42 : 1 },
+                },
+                h(
+                  'div',
+                  {
+                    className: 'dnb-pyr-branch-box',
+                    'data-spotlight': spotTone || undefined,
+                  },
+                  leadGroupInSpot
+                    ? h(
+                        'div',
+                        { className: 'dnb-pyr-spot-tag', 'data-blocked': spotTone === 'blocked' ? '1' : '0' },
+                        spotTone === 'blocked' ? '⚠ 受阻 · 主代理直管' : '🎯 正在推进 · 主代理直管',
+                      )
+                    : null,
+                  h(
+                    'div',
+                    { className: 'dnb-pyr-agent-card' },
+                    h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+                      h('span', { style: { fontWeight: 700, fontSize: 12.8, color: 'var(--dnb-text)' } }, '📋 主代理直管阶段'),
+                      h('span', { className: 'dnb-tag', style: { fontSize: 10.5 } }, `${leadDirectRoots.length} 项任务`),
+                    ),
+                    h(
+                      'div',
+                      { className: 'dnb-pyr-act-row', style: { marginTop: 7 } },
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-pyr-act-btn',
+                        onClick: () => {
+                          patch({
+                            secTarget: 'lead',
+                            secMode: 'steer',
+                            notice: '已在下方锁定 @主对话',
+                          })
+                          focusSecInput()
+                        },
+                      }, h(Icon, { name: 'send', size: 10.5 }), '@主对话'),
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-pyr-act-btn',
+                        style: { marginLeft: 'auto' },
+                        onClick: () => toggleCollapse(groupColKey),
+                      }, groupCollapsed ? `+ 展开 (${leadDirectRoots.length})` : `− 收起 (${leadDirectRoots.length})`),
+                    ),
+                  ),
+                  !groupCollapsed
+                    ? h(
+                        'div',
+                        { className: 'dnb-pyr-subtree', 'data-tone': spotTone || undefined },
+                        leadDirectRoots.map(rt => {
+                          const tTone = rt.status === 'blocked' ? 'blocked' : rt.status === 'doing' ? 'doing' : rt.status === 'done' ? 'done' : undefined
+                          return h(
+                            'div',
+                            { key: 'ld-' + rt.id, className: 'dnb-pyr-subitem', 'data-tone': tTone },
+                            renderGrandTaskCard(rt, visitedTaskIds),
+                          )
+                        }),
+                      )
+                    : null,
+                ),
+              ),
+            )
+          }
+        }
+
+        // Catch any cycle/leftover tasks so nothing ever disappears
+        const leftovers = tasks.filter(t => !visitedTaskIds.has(t.id))
+        for (const lf of leftovers) {
+          columns.push(
+            h(
+              'div',
+              { key: 'col-lf-' + lf.id, className: 'dnb-pyr-branch' },
+              renderGrandTaskCard(lf, visitedTaskIds),
+            ),
+          )
+        }
+
+        return h(
+          'div',
+          { ref: pyrRootRef, className: 'dnb-pyr-root' },
+          // Tier 0 Apex Hero Card (`👑 主代理 · 总指挥`)
+          h(
+            'div',
+            {
+              className: 'dnb-pyr-apex',
+              'data-spotlight': apexSpotlightTone || undefined,
+            },
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' } },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+                h('span', {
+                  style: {
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    height: 22,
+                    padding: '0 9px',
+                    borderRadius: 99,
+                    background: 'rgba(10, 132, 255, 0.2)',
+                    color: '#409cff',
+                    fontSize: 11.5,
+                    fontWeight: 700,
+                  },
+                }, '👑 主代理 · 总指挥'),
+                runningKidsCount > 0
+                  ? h('span', {
+                      className: 'dnb-tag',
+                      style: { background: 'rgba(48, 209, 88, 0.16)', color: '#30d158', fontWeight: 600 },
+                    }, `${runningKidsCount} 子代理运行中`)
+                  : null,
+                doingTotal > 0
+                  ? h('span', { className: 'dnb-tag', style: { background: STATUS_BG.doing, color: '#ff9f0a', fontWeight: 600 } }, `推进 ${doingTotal}`)
+                  : null,
+                blockedTotal > 0
+                  ? h('span', { className: 'dnb-tag', style: { background: STATUS_BG.blocked, color: '#ff453a', fontWeight: 600 } }, `受阻 ${blockedTotal}`)
+                  : null,
+                doneTotal > 0
+                  ? h('span', { className: 'dnb-tag', style: { background: STATUS_BG.done, color: '#30d158' } }, `完成 ${doneTotal}/${allTasks.length}`)
+                  : null,
+              ),
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pill dnb-pill-accent',
+                  style: { height: 24, padding: '0 9px', fontSize: 11 },
+                  title: '让主对话模型将目标拆解为金字塔任务图并调度子代理',
+                  onClick: triggerAiPlanGraph,
+                }, h(Icon, { name: 'sparkles', size: 11.5 }), '拆解任务图'),
+                columns.length > 0
+                  ? h('button', {
+                      type: 'button',
+                      className: 'dnb-pill',
+                      style: { height: 24, padding: '0 8px', fontSize: 11 },
+                      onClick: () => toggleCollapse('agent:lead'),
+                    }, leadCollapsed ? `+ 展开金字塔 (${columns.length})` : '− 收起下级')
+                  : null,
+              ),
+            ),
+            h(
+              'div',
+              {
+                style: {
+                  marginTop: 8,
+                  fontSize: 13,
+                  fontWeight: 600,
+                  lineHeight: 1.46,
+                  color: 'var(--dnb-text)',
+                  wordBreak: 'break-word',
+                },
+              },
+              (board && board.objective)
+                ? board.objective
+                : (allTasks.length
+                    ? `共 ${allTasks.length} 项任务节点（推进中 ${doingTotal} · 受阻 ${blockedTotal} · 待推进 ${todoTotal} · 已完成 ${doneTotal}）`
+                    : '尚未设定长期目标（可在「规划」页签设定 /goal，或点右上「拆解任务图」）'),
+            ),
+          ),
+
+          // Orthogonal Pyramid Spine + Crossbar + Multi-Column Responsive Branches
+          (!leadCollapsed && columns.length > 0)
+            ? h(
+                React.Fragment,
+                null,
+                h('div', { className: 'dnb-pyr-trunk', 'data-tone': trunkTone || undefined }),
+                columns.length > 1
+                  ? h('div', { className: 'dnb-pyr-crossbar', 'data-tone': trunkTone || undefined })
+                  : null,
+                h(
+                  'div',
+                  {
+                    className: 'dnb-pyr-grid',
+                    'data-single': columns.length === 1 ? '1' : '0',
+                  },
+                  columns,
+                ),
+              )
+            : null,
+        )
+      }
+
+      /* ---------------- Optional SVG Zoom Canvas Renderers ---------------- */
+
+      const isNodeInSpotlight = node => {
+        if (!focusedTask) return true
+        if (node.kind === 'lead') return Boolean(focusInfo && (focusInfo.includeLead || focusInfo.agentNames.length > 0))
+        if (node.kind === 'agent') return focusedAgentSet.has(node.agent.name)
+        if (node.kind === 'task') return focusedTaskScopeSet.has(node.task.id)
+        return false
+      }
+
+      const renderPyramidConnectors = parent => {
+        const kids = parent.childNodes || []
+        if (!kids.length) return null
+        const els = []
+
+        if (!isLR) {
+          const px = Math.round(parent.x + parent.w / 2)
+          const py = parent.y + parent.h
+          const minCy = Math.min(...kids.map(k => k.y))
+          const midY = Math.round(py + (minCy - py) * 0.5)
+          const firstCx = Math.round(kids[0].x + kids[0].w / 2)
+          const lastCx = Math.round(kids[kids.length - 1].x + kids[kids.length - 1].w / 2)
+          const baseDim = focusedTask && !parent.focusBranch
+
+          els.push(h('path', {
+            key: `stem-${parent.id}`,
+            d: `M ${px} ${py} V ${midY}`,
+            fill: 'none',
+            stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
+            strokeWidth: 1.65,
+            opacity: baseDim ? 0.25 : 0.9,
+          }))
+
+          const barMinX = Math.min(px, firstCx)
+          const barMaxX = Math.max(px, lastCx)
+          if (barMaxX - barMinX > 1) {
+            els.push(h('path', {
+              key: `bar-${parent.id}`,
+              d: `M ${barMinX} ${midY} H ${barMaxX}`,
+              fill: 'none',
+              stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
+              strokeWidth: 1.65,
+              opacity: baseDim ? 0.25 : 0.9,
+            }))
+          }
+
+          for (const kid of kids) {
+            const cx = Math.round(kid.x + kid.w / 2)
+            const cy = kid.y
+            const isFocusEdge = Boolean(focusedTask && kid.focusBranch)
+            const isLiveEdge = !focusedTask && (
+              (kid.kind === 'agent' && kid.agent.status === 'running')
+              || (kid.kind === 'task' && (kid.task.status === 'doing' || kid.task.status === 'blocked'))
+            )
+
+            els.push(h('path', {
+              key: `drop-${parent.id}-${kid.id}`,
+              d: `M ${cx} ${midY} V ${cy}`,
+              fill: 'none',
+              stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
+              strokeWidth: 1.65,
+              opacity: (focusedTask && !isFocusEdge) ? 0.22 : 0.9,
+            }))
+
+            if (isFocusEdge || isLiveEdge) {
+              const hiColor = isFocusEdge
+                ? (focusedTask.status === 'blocked' ? '#ff453a' : '#ff9f0a')
+                : (kid.kind === 'task' && kid.task.status === 'blocked' ? '#ff453a' : kid.kind === 'agent' ? '#30d158' : '#ff9f0a')
+              els.push(h('path', {
+                key: `hi-${parent.id}-${kid.id}`,
+                d: `M ${px} ${py} V ${midY} H ${cx} V ${cy}`,
+                fill: 'none',
+                stroke: hiColor,
+                strokeWidth: 2.3,
+                strokeLinejoin: 'round',
+                opacity: 0.95,
+              }))
+            }
+
+            els.push(h('circle', {
+              key: `dot-${kid.id}`,
+              cx,
+              cy,
+              r: isFocusEdge ? 3.2 : 2.3,
+              fill: isFocusEdge
+                ? (focusedTask.status === 'blocked' ? '#ff453a' : '#ff9f0a')
+                : 'var(--dnb-border-strong, rgba(165,165,178,0.75))',
+              opacity: (focusedTask && !isFocusEdge) ? 0.25 : 1,
+            }))
+          }
+        } else {
+          const px = parent.x + parent.w
+          const py = Math.round(parent.y + parent.h / 2)
+          const minCx = Math.min(...kids.map(k => k.x))
+          const midX = Math.round(px + (minCx - px) * 0.5)
+          const firstCy = Math.round(kids[0].y + kids[0].h / 2)
+          const lastCy = Math.round(kids[kids.length - 1].y + kids[kids.length - 1].h / 2)
+          const barMinY = Math.min(py, firstCy)
+          const barMaxY = Math.max(py, lastCy)
+
+          els.push(h('path', {
+            key: `stem-lr-${parent.id}`,
+            d: `M ${px} ${py} H ${midX}`,
+            fill: 'none',
+            stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
+            strokeWidth: 1.6,
+          }))
+          if (barMaxY - barMinY > 1) {
+            els.push(h('path', {
+              key: `bar-lr-${parent.id}`,
+              d: `M ${midX} ${barMinY} V ${barMaxY}`,
+              fill: 'none',
+              stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
+              strokeWidth: 1.6,
+            }))
+          }
+          for (const kid of kids) {
+            const cx = kid.x
+            const cy = Math.round(kid.y + kid.h / 2)
+            const isFocusEdge = Boolean(focusedTask && kid.focusBranch)
+            els.push(h('path', {
+              key: `drop-lr-${parent.id}-${kid.id}`,
+              d: `M ${midX} ${cy} H ${cx}`,
+              fill: 'none',
+              stroke: isFocusEdge ? '#ff9f0a' : 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
+              strokeWidth: isFocusEdge ? 2.2 : 1.6,
+            }))
+          }
+        }
+        return els
+      }
+
+      const renderDepEdge = edge => {
+        const { from, to, satisfied } = edge
+        const dimmed = focusedTask && !(focusedTaskScopeSet.has(from.task.id) || focusedTaskScopeSet.has(to.task.id))
+        const sameRow = Math.abs(from.y - to.y) < 14
+        const x1 = sameRow ? (from.x < to.x ? from.x + from.w : from.x) : from.x + from.w / 2
+        const y1 = sameRow ? from.y + from.h / 2 : from.y + from.h
+        const x2 = sameRow ? (from.x < to.x ? to.x : to.x + to.w) : to.x + to.w / 2
+        const y2 = sameRow ? to.y + to.h / 2 : to.y
+        const d = sameRow
+          ? `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${Math.min(y1, y2) - 22}, ${x2} ${y2}`
+          : `M ${x1} ${y1} C ${x1 + 18} ${(y1 + y2) / 2}, ${x2 - 18} ${(y1 + y2) / 2}, ${x2} ${y2}`
+        return h('path', {
+          key: 'dep-' + from.id + '-' + to.id,
+          d,
+          fill: 'none',
+          stroke: satisfied ? '#30d158' : '#ff9f0a',
+          strokeWidth: 1.5,
+          strokeDasharray: satisfied ? '3 2.5' : '5 3.5',
+          markerEnd: satisfied ? 'url(#dnb-arrow-done)' : 'url(#dnb-arrow-wait)',
+          opacity: dimmed ? 0.18 : 0.88,
+        })
+      }
+
+      const renderPyramidNode = node => {
+        const { x, y, w, h: nh, kidCount, hiddenKids } = node
+        const isCol = collapsed.has(node.id)
+        const dimmed = focusedTask && !isNodeInSpotlight(node)
+
+        if (node.kind === 'lead') {
+          const objTitle = (board && board.objective)
+            ? clampTitle(board.objective, 13.5)
+            : `推进 ${doingTotal} · 受阻 ${blockedTotal} · 完成 ${doneTotal}`
+          const runningKids = hier.children.filter(a => a.status === 'running').length
+
+          return h(
+            'g',
+            {
+              key: node.id,
+              opacity: dimmed ? 0.35 : 1,
+              style: { cursor: 'pointer', transition: 'opacity 0.2s ease' },
+              onClick: e => {
+                e.stopPropagation()
+                if (store.filterAgent || store.focusTaskId) patch({ filterAgent: '', focusTaskId: '' })
+              },
+            },
+            h('rect', {
+              x, y, width: w, height: nh, rx: NODE_R + 2,
+              fill: 'var(--dnb-elevated, #2a2a30)',
+              stroke: 'rgba(10, 132, 255, 0.58)',
+              strokeWidth: 1.8,
+            }),
+            h('rect', {
+              x: x + 10, y: y + 9, width: 64, height: 17, rx: 8.5,
+              fill: 'rgba(10, 132, 255, 0.18)',
+            }),
+            h('text', {
+              x: x + 42, y: y + 21,
+              textAnchor: 'middle',
+              fill: '#409cff',
+              fontSize: 10.5,
+              fontWeight: 700,
+            }, '👑 主代理'),
+            runningKids > 0
+              ? h('text', {
+                  x: x + w - 12, y: y + 21,
+                  textAnchor: 'end',
+                  fill: '#30d158',
+                  fontSize: 10,
+                  fontWeight: 600,
+                }, `${runningKids} 运行中`)
+              : null,
+            h('text', {
+              x: x + 12, y: y + 43,
+              fill: 'var(--dnb-text, #f2f2f7)',
+              fontSize: 11.5,
+              fontWeight: 500,
+            }, objTitle),
+            kidCount > 0
+              ? h(
+                  'g',
+                  { onClick: e => { e.stopPropagation(); toggleCollapse(node.id) } },
+                  h('rect', {
+                    x: x + w - 32, y: y + 32, width: 24, height: 16, rx: 8,
+                    fill: 'var(--dnb-fill, rgba(120,120,128,0.24))',
+                  }),
+                  h('text', {
+                    x: x + w - 20, y: y + 43,
+                    textAnchor: 'middle',
+                    fill: 'var(--dnb-text-2, #ebebf5)',
+                    fontSize: 10,
+                    fontWeight: 600,
+                  }, (isCol ? '+' : '−') + (hiddenKids || kidCount)),
+                )
+              : null,
+          )
+        }
+
+        if (node.kind === 'fold') {
+          return h(
+            'g',
+            {
+              key: node.id,
+              opacity: dimmed ? 0.22 : 0.9,
+              style: { cursor: 'pointer' },
+              onClick: e => { e.stopPropagation(); patch({ pyramidShowAllAgents: true }) },
+            },
+            h('rect', {
+              x, y, width: w, height: nh, rx: NODE_R,
+              fill: 'var(--dsw-alias-bg-layer-2, #202024)',
+              stroke: 'var(--dnb-border-strong, rgba(140,140,150,0.45))',
+              strokeWidth: 1.2,
+              strokeDasharray: '4 3',
+            }),
+            h('text', {
+              x: x + w / 2, y: y + 20,
+              textAnchor: 'middle',
+              fill: 'var(--dnb-text-2, #aeaeb2)',
+              fontSize: 11.5,
+              fontWeight: 600,
+            }, `+${node.hiddenAgents.length} 名空闲子代理`),
+            h('text', {
+              x: x + w / 2, y: y + 35,
+              textAnchor: 'middle',
+              fill: 'var(--dnb-accent, #0a84ff)',
+              fontSize: 10,
+            }, '点击展开全部'),
+          )
+        }
+
+        if (node.kind === 'agent') {
+          const ag = node.agent
+          const isRunning = ag.status === 'running'
+          const isAgentFocused = focusedAgentSet.has(ag.name)
+          const isFiltered = store.filterAgent === ag.name
+          const tierLabel = node.tier === 1 ? '一级代理' : `${node.tier}级代理`
+          const accent = isAgentFocused
+            ? (focusedTask && focusedTask.status === 'blocked' ? '#ff453a' : '#ff9f0a')
+            : isRunning
+              ? '#30d158'
+              : 'var(--dnb-border-strong, rgba(140,140,150,0.4))'
+          const desc = ag.taskTitle || ag.description || (isRunning ? '正在执行任务…' : '待命 / 已完成')
+
+          return h(
+            'g',
+            {
+              key: node.id,
+              opacity: dimmed ? 0.24 : 1,
+              style: { cursor: 'pointer', transition: 'opacity 0.2s ease' },
+              onMouseEnter: () => setHoveredId(node.id),
+              onMouseLeave: () => setHoveredId(''),
+              onClick: e => {
+                e.stopPropagation()
+                if (ag.id && e.detail === 2) {
+                  openSubagentChat(ag)
+                  return
+                }
+                patch({ filterAgent: isFiltered ? '' : ag.name })
+              },
+            },
+            (isRunning || isAgentFocused)
+              ? h('rect', {
+                  className: 'dnb-pulse-ring',
+                  x: x - 2.5, y: y - 2.5, width: w + 5, height: nh + 5, rx: NODE_R + 2,
+                  fill: 'none',
+                  stroke: isAgentFocused ? accent : '#30d158',
+                  strokeWidth: 1.8,
+                })
+              : null,
+            h('rect', {
+              x, y, width: w, height: nh, rx: NODE_R,
+              fill: isAgentFocused
+                ? (focusedTask && focusedTask.status === 'blocked' ? 'rgba(255,69,58,0.12)' : 'rgba(255,159,10,0.12)')
+                : 'var(--dsw-alias-bg-layer-2, #232328)',
+              stroke: isAgentFocused || isRunning || isFiltered ? accent : 'var(--dnb-border)',
+              strokeWidth: isAgentFocused ? 2.1 : (isRunning || isFiltered ? 1.6 : 1.1),
+            }),
+            h('circle', {
+              cx: x + 13, cy: y + 18, r: 4,
+              fill: isRunning ? '#30d158' : (isAgentFocused ? accent : 'var(--dnb-text-3)'),
+            }),
+            h('text', {
+              x: x + 23, y: y + 22,
+              fill: 'var(--dnb-text, #f2f2f7)',
+              fontSize: 11.5,
+              fontWeight: 600,
+            }, '@' + clampTitle(shortAgentName(ag.name, true), 8.2)),
+            h('text', {
+              x: x + w - 9, y: y + 21,
+              textAnchor: 'end',
+              fill: isAgentFocused ? accent : 'var(--dnb-text-3, #8e8e93)',
+              fontSize: 9.5,
+              fontWeight: 600,
+            }, tierLabel),
+            h('text', {
+              x: x + 12, y: y + 40,
+              fill: isRunning ? '#30d158' : 'var(--dnb-text-2, #98989d)',
+              fontSize: 10.5,
+            }, clampTitle(desc, 12)),
+            kidCount > 0
+              ? h(
+                  'g',
+                  { onClick: e => { e.stopPropagation(); toggleCollapse(node.id) } },
+                  h('rect', {
+                    x: x + w - 32, y: y + 30, width: 24, height: 15, rx: 7.5,
+                    fill: 'var(--dnb-fill, rgba(120,120,128,0.22))',
+                  }),
+                  h('text', {
+                    x: x + w - 20, y: y + 41,
+                    textAnchor: 'middle',
+                    fill: 'var(--dnb-text-2, #ebebf5)',
+                    fontSize: 9.5,
+                    fontWeight: 600,
+                  }, (isCol ? '+' : '−') + (hiddenKids || kidCount)),
+                )
+              : null,
+          )
+        }
+
+        const { task } = node
+        const color = STATUS_HEX[task.status] || STATUS_HEX.todo
+        const badgeBg = STATUS_BG[task.status] || STATUS_BG.todo
+        const badgeText = STATUS_BADGE[task.status] || STATUS_LABEL[task.status] || task.status
+        const isSelected = store.selectedTaskId === task.id
+        const isFocusedTarget = store.focusTaskId === task.id
+        const isDoing = task.status === 'doing'
+        const isBlocked = task.status === 'blocked'
+        const isDone = task.status === 'done'
+        const unresolvedDepCount = (Array.isArray(task.blockedBy) ? task.blockedBy : []).filter(id => {
+          const d = allById.get(id)
+          return d && d.status !== 'done'
+        }).length
+
+        return h(
+          'g',
+          {
+            key: node.id,
+            opacity: dimmed ? 0.25 : 1,
+            onMouseEnter: () => setHoveredId(node.id),
+            onMouseLeave: () => setHoveredId(''),
+            onClick: e => {
+              e.stopPropagation()
+              const nextSel = isSelected ? '' : task.id
+              if (isDoing || isBlocked) {
+                patch({
+                  selectedTaskId: nextSel,
+                  focusTaskId: isFocusedTarget && !nextSel ? '' : task.id,
+                })
+              } else {
+                patch({ selectedTaskId: nextSel })
+              }
+            },
+            onContextMenu: e => {
+              e.preventDefault()
+              e.stopPropagation()
+              patch({ selectedTaskId: task.id })
+              setContextMenu({ taskId: task.id, task, x: e.clientX, y: e.clientY })
+            },
+            style: { cursor: 'pointer', transition: 'opacity 0.2s ease' },
+          },
+          (isDoing || isBlocked)
+            ? h('rect', {
+                className: 'dnb-pulse-ring',
+                x: x - 3, y: y - 3, width: w + 6, height: nh + 6, rx: NODE_R + 3,
+                fill: 'none', stroke: color, strokeWidth: 2,
+              })
+            : null,
+          h('rect', {
+            x, y, width: w, height: nh, rx: NODE_R,
+            fill: isBlocked
+              ? 'rgba(255, 69, 58, 0.11)'
+              : isDoing
+                ? 'rgba(255, 159, 10, 0.09)'
+                : isSelected
+                  ? 'var(--dnb-elevated, #2c2c2e)'
+                  : 'var(--dsw-alias-bg-layer-2, #222225)',
+            stroke: (isSelected || isFocusedTarget || isDoing || isBlocked)
+              ? color
+              : (hoveredId === node.id ? 'var(--dnb-border-strong)' : 'var(--dnb-border)'),
+            strokeWidth: (isSelected || isFocusedTarget) ? 2.2 : ((isDoing || isBlocked) ? 1.6 : 1),
+          }),
+          h('rect', {
+            x: x + 9, y: y + 8, width: isBlocked ? 52 : 60, height: 16, rx: 8,
+            fill: badgeBg,
+          }),
+          h('text', {
+            x: x + (isBlocked ? 35 : 39), y: y + 19.5,
+            textAnchor: 'middle',
+            fill: color,
+            fontSize: 9.5,
+            fontWeight: 700,
+          }, badgeText),
+          unresolvedDepCount > 0
+            ? h('text', {
+                x: x + w - 10, y: y + 19.5,
+                textAnchor: 'end',
+                fill: '#ff9f0a',
+                fontSize: 9.5,
+                fontWeight: 600,
+              }, `等 ${unresolvedDepCount}`)
+            : null,
+          h('text', {
+            x: x + 11,
+            y: y + 43,
+            fill: isDone ? 'var(--dnb-text-3, #8e8e93)' : 'var(--dnb-text, #f2f2f7)',
+            fontSize: 11.8,
+            fontWeight: (isDoing || isBlocked) ? 600 : 500,
+          }, clampTitle(task.title || task.id, 12.2)),
+          kidCount > 0
+            ? h(
+                'g',
+                { onClick: e => { e.stopPropagation(); toggleCollapse(node.id) } },
+                h('rect', {
+                  x: x + w - 33, y: y + 33, width: 25, height: 16, rx: 8,
+                  fill: 'var(--dnb-fill, rgba(120,120,128,0.22))',
+                }),
+                h('text', {
+                  x: x + w - 20.5, y: y + 44,
+                  textAnchor: 'middle',
+                  fill: 'var(--dnb-text-2, #ebebf5)',
+                  fontSize: 10,
+                  fontWeight: 600,
+                }, (isCol ? '+' : '−') + (hiddenKids || kidCount)),
+              )
+            : null,
+        )
+      }
+
+      const renderSpotlightFrame = sp => {
+        if (!sp) return null
+        const pillW = Math.min(Math.max(158, sp.w - 8), 268)
+        return h(
+          'g',
+          { key: 'pyramid-spotlight', style: { pointerEvents: 'none' } },
+          h('rect', {
+            className: 'dnb-spotlight-halo',
+            x: sp.x - 4, y: sp.y - 4, width: sp.w + 8, height: sp.h + 8, rx: 18,
+            fill: sp.isBlocked ? 'rgba(255, 69, 58, 0.08)' : 'rgba(255, 159, 10, 0.08)',
+            stroke: sp.color,
+            strokeWidth: 1,
+            opacity: 0.55,
+          }),
+          h('rect', {
+            x: sp.x, y: sp.y, width: sp.w, height: sp.h, rx: 15,
+            fill: sp.isBlocked ? 'rgba(255, 69, 58, 0.05)' : 'rgba(255, 159, 10, 0.05)',
+            stroke: sp.color,
+            strokeWidth: 2.3,
+          }),
+          h('rect', {
+            className: 'dnb-spotlight-dash',
+            x: sp.x + 3.5, y: sp.y + 3.5, width: Math.max(0, sp.w - 7), height: Math.max(0, sp.h - 7), rx: 12,
+            fill: 'none',
+            stroke: sp.color,
+            strokeWidth: 1.3,
+            opacity: 0.85,
+          }),
+          h('rect', {
+            x: sp.x + 10, y: sp.y - 11, width: pillW, height: 22, rx: 11,
+            fill: sp.color,
+          }),
+          h('text', {
+            x: sp.x + 10 + pillW / 2,
+            y: sp.y + 3.5,
+            textAnchor: 'middle',
+            fill: '#ffffff',
+            fontSize: 10.5,
+            fontWeight: 700,
+          }, sp.badgeLabel),
+        )
+      }
+
+      const renderListTree = (list, depth = 0, seen = new Set()) => {
+        const out = []
+        for (const t of list) {
+          if (!t || seen.has(t.id)) continue
+          seen.add(t.id)
+          out.push(h(TaskRow, { key: t.id, task: t, board, depth }))
+          const kids = childrenOf(t.id)
+          if (kids.length) out.push(...renderListTree(kids, depth + 1, seen))
+        }
+        return out
+      }
+
+      const STATUS_FILTERS = [
+        { key: 'all', label: '全部', count: allTasks.length },
+        { key: 'doing', label: '推进中', count: doingTotal, color: '#ff9f0a' },
+        { key: 'blocked', label: '受阻', count: blockedTotal, color: '#ff453a' },
+        { key: 'todo', label: '待推进', count: todoTotal, color: '#0a84ff' },
+        { key: 'done', label: '已完成', count: doneTotal, color: '#30d158' },
+      ]
+
+      return h(
+        'div',
+        { className: 'dnb-view' },
+        h(SubagentFleetBar, { board }),
+        h(ObjectiveRadarStrip, { board }),
+        h(AddTask, { board }),
+
+        // Progress + Open Filter Bar + Open View Switcher
+        hasPyramidContent
+          ? h(
+              'div',
+              { style: { marginBottom: 10 } },
+              allTasks.length > 0
+                ? h(
+                    'div',
+                    { className: 'dnb-progress', style: { marginBottom: 8 } },
+                    doneTotal ? h('div', { style: { width: (doneTotal / allTasks.length) * 100 + '%', background: '#30d158', transition: 'width 0.3s ease' } }) : null,
+                    doingTotal ? h('div', { style: { width: (doingTotal / allTasks.length) * 100 + '%', background: '#ff9f0a', transition: 'width 0.3s ease' } }) : null,
+                    blockedTotal ? h('div', { style: { width: (blockedTotal / allTasks.length) * 100 + '%', background: '#ff453a', transition: 'width 0.3s ease' } }) : null,
+                  )
+                : null,
+
+              // Open Status Filter Strip (all options laid out!)
+              allTasks.length > 0
+                ? h(
+                    'div',
+                    { style: { display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 } },
+                    STATUS_FILTERS.map(f =>
+                      h(
+                        'button',
+                        {
+                          key: f.key,
+                          type: 'button',
+                          className: 'dnb-pill',
+                          'data-active': statusFilter === f.key ? '1' : '0',
+                          style: { height: 24, padding: '0 8.5px', fontSize: 11 },
+                          onClick: () => patch({ taskStatusFilter: f.key }),
+                        },
+                        f.color
+                          ? h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: f.color } })
+                          : null,
+                        `${f.label} ${f.count}`,
+                      ),
+                    ),
+                    (statusFilter !== 'all' || filterAgent || store.focusTaskId)
+                      ? h(
+                          'button',
+                          {
+                            type: 'button',
+                            className: 'dnb-pill',
+                            style: { height: 24, padding: '0 8px', fontSize: 11, color: 'var(--dnb-text-3)' },
+                            onClick: () => patch({ taskStatusFilter: 'all', filterAgent: '', focusTaskId: '' }),
+                          },
+                          '重置筛选 ×',
+                        )
+                      : null,
+                  )
+                : null,
+
+              // Open View Mode & Layout Controls Row
+              h(
+                'div',
+                { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+                h(
+                  'div',
+                  { style: { display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' } },
+                  h(
+                    'div',
+                    { className: 'dnb-seg', style: { padding: 2 } },
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-seg-btn',
+                      style: { padding: '3px 9px', fontSize: 11.5 },
+                      'data-active': viewMode === 'graph' ? '1' : '0',
+                      title: '零横向拖拽、自适应铺开的大气金字塔树',
+                      onClick: () => patch({ taskViewMode: 'graph' }),
+                    }, h(Icon, { name: 'network', size: 12 }), '金字塔'),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-seg-btn',
+                      style: { padding: '3px 9px', fontSize: 11.5 },
+                      'data-active': viewMode === 'canvas' ? '1' : '0',
+                      title: '可自由缩放的全景 SVG 画布',
+                      onClick: () => patch({ taskViewMode: 'canvas' }),
+                    }, '缩放画布'),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-seg-btn',
+                      style: { padding: '3px 9px', fontSize: 11.5 },
+                      'data-active': viewMode === 'list' ? '1' : '0',
+                      onClick: () => patch({ taskViewMode: 'list' }),
+                    }, h(Icon, { name: 'list', size: 12 }), '列表'),
+                  ),
+                  viewMode === 'canvas'
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-pill',
+                        style: { height: 24, padding: '0 8px', fontSize: 11 },
+                        onClick: () => patch({ graphDir: isLR ? 'TD' : 'LR' }),
+                      }, isLR ? '横向树' : '竖向树')
+                    : null,
+                  collapsed.size > 0
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-pill',
+                        style: { height: 24, padding: '0 8px', fontSize: 11 },
+                        onClick: () => setCollapsed(new Set()),
+                      }, '展开全部分支')
+                    : null,
+                ),
+                viewMode === 'canvas'
+                  ? h(
+                      'div',
+                      { style: { display: 'flex', gap: 3, alignItems: 'center' } },
+                      h('button', { className: 'dnb-pill', style: { height: 24, padding: '0 7px' }, onClick: () => setZoom(z => Math.max(0.42, +(z - 0.12).toFixed(2))) }, '−'),
+                      h('button', { className: 'dnb-pill', style: { height: 24, padding: '0 7px', fontSize: 11 }, onClick: fitZoom, title: '点击自动适配当前宽度' }, Math.round(zoom * 100) + '%'),
+                      h('button', { className: 'dnb-pill', style: { height: 24, padding: '0 7px' }, onClick: () => setZoom(z => Math.min(1.6, +(z + 0.12).toFixed(2))) }, '+'),
+                    )
+                  : null,
+              ),
+            )
+          : null,
+
+        // Active Focus Banner above Pyramid when spotlighting an objective
+        focusedTask && (viewMode === 'graph' || viewMode === 'canvas')
+          ? h(
+              'div',
+              { className: 'dnb-focus-banner', 'data-blocked': focusedTask.status === 'blocked' ? '1' : '0' },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
+                h(Icon, { name: 'target', size: 13 }),
+                h('span', { style: { wordBreak: 'break-word' } },
+                  (focusedTask.status === 'blocked' ? '已框选受阻关联代理：' : '已框选正在推进的子代理：')
+                  + (focusInfo && focusInfo.agentNames.length
+                      ? focusInfo.agentNames.map(n => '@' + shortAgentName(n, true)).join('、')
+                      : '@主代理')),
+              ),
+              h(
+                'div',
+                { style: { display: 'flex', gap: 5, flexShrink: 0 } },
+                h('button', {
+                  className: 'dnb-pill',
+                  style: { height: 21, padding: '0 7px', fontSize: 10.5 },
+                  onClick: () => patch({ selectedTaskId: store.selectedTaskId === focusedTask.id ? '' : focusedTask.id }),
+                }, '详情'),
+                h('button', {
+                  className: 'dnb-pill',
+                  style: { height: 21, padding: '0 7px', fontSize: 10.5 },
+                  onClick: () => patch({ focusTaskId: '' }),
+                }, '退出框选 ×'),
+              ),
+            )
+          : null,
+
+        // Main Task Body: Grand Zero-Drag Pyramid ('graph') | Auto-Fit SVG Canvas ('canvas') | List ('list')
+        hasPyramidContent
+          ? viewMode === 'list'
+            ? (tasks.length
+                ? h('div', { className: 'dnb-group' }, renderListTree(roots))
+                : h('div', { className: 'dnb-empty' }, '当前筛选下暂无任务条目'))
+            : viewMode === 'canvas'
+              ? h(
+                  React.Fragment,
+                  null,
+                  h(
+                    'div',
+                    {
+                      ref: canvasRef,
+                      className: 'dnb-canvas',
+                      style: {
+                        padding: 8,
+                        textAlign: 'center',
+                        cursor: 'grab',
+                      },
+                      onWheel: e => {
+                        if (e.ctrlKey || e.metaKey) {
+                          e.preventDefault()
+                          const delta = e.deltaY < 0 ? 0.1 : -0.1
+                          setZoom(z => Math.min(1.6, Math.max(0.42, +(z + delta).toFixed(2))))
+                        }
+                      },
+                      onMouseDown: e => {
+                        if (e.button !== 0 || e.target.closest('g')) return
+                        const el = canvasRef.current
+                        if (!el) return
+                        panRef.current = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop }
+                        const onMove = ev => {
+                          if (!panRef.current) return
+                          el.scrollLeft = panRef.current.sl - (ev.clientX - panRef.current.x)
+                          el.scrollTop = panRef.current.st - (ev.clientY - panRef.current.y)
+                        }
+                        const onUp = () => {
+                          panRef.current = null
+                          window.removeEventListener('mousemove', onMove)
+                          window.removeEventListener('mouseup', onUp)
+                        }
+                        window.addEventListener('mousemove', onMove)
+                        window.addEventListener('mouseup', onUp)
+                      },
+                      onClick: () => {
+                        if (store.selectedTaskId || store.focusTaskId) {
+                          patch({ selectedTaskId: '', editTaskId: '', focusTaskId: '' })
+                        }
+                      },
+                    },
+                    h(
+                      'svg',
+                      {
+                        width: Math.round(svgW * zoom),
+                        height: Math.round(svgH * zoom),
+                        viewBox: `0 0 ${svgW} ${svgH}`,
+                        style: { display: 'inline-block', userSelect: 'none' },
+                      },
+                      h(
+                        'defs',
+                        null,
+                        h('marker', {
+                          id: 'dnb-arrow-wait', viewBox: '0 0 10 10', refX: '8', refY: '5',
+                          markerWidth: '5.5', markerHeight: '5.5', orient: 'auto-start-reverse',
+                        }, h('path', { d: 'M 0 1.5 L 9 5 L 0 8.5 z', fill: '#ff9f0a' })),
+                        h('marker', {
+                          id: 'dnb-arrow-done', viewBox: '0 0 10 10', refX: '8', refY: '5',
+                          markerWidth: '5.5', markerHeight: '5.5', orient: 'auto-start-reverse',
+                        }, h('path', { d: 'M 0 1.5 L 9 5 L 0 8.5 z', fill: '#30d158' })),
+                      ),
+                      pNodes.map(renderPyramidConnectors),
+                      depEdges.map(renderDepEdge),
+                      renderSpotlightFrame(spotlight),
+                      pNodes.map(renderPyramidNode),
+                    ),
+                  ),
+                  selectedTask ? h(TaskInspectorDrawer, { board, task: selectedTask }) : null,
+                )
+              : renderGrandPyramid()
+          : h(
+              'div',
+              { className: 'dnb-empty' },
+              h('div', { style: { marginBottom: 10 } }, '暂无任务节点'),
+              h('button', {
+                className: 'dnb-pill dnb-pill-accent',
+                onClick: triggerAiPlanGraph,
+              }, h(Icon, { name: 'sparkles', size: 13 }), '让模型规划任务图'),
+            ),
+
+        // Right-click Context Menu (still supported as bonus shortcut alongside open buttons!)
+        contextMenu && contextMenu.task
+          ? h(
+              'div',
+              {
+                className: 'dnb-menu',
+                style: {
+                  left: Math.min(contextMenu.x, (typeof window !== 'undefined' ? window.innerWidth : 800) - 180),
+                  top: Math.min(contextMenu.y, (typeof window !== 'undefined' ? window.innerHeight : 600) - 240),
+                },
+              },
+              h('div', {
+                className: 'dnb-menu-item',
+                onClick: () => {
+                  const t = contextMenu.task
+                  setContextMenu(null)
+                  focusObjectiveInPyramid(t.id)
+                },
+              }, h(Icon, { name: 'target', size: 13 }), '框选负责代理'),
+              h('div', {
+                className: 'dnb-menu-item',
+                style: { color: 'var(--dnb-accent)', fontWeight: 500 },
+                onClick: () => {
+                  const t = contextMenu.task
+                  setContextMenu(null)
+                  explainTaskMeaning(t, board)
+                },
+              }, h(Icon, { name: 'sparkles', size: 13 }), '问含义与原因'),
+              h('div', {
+                className: 'dnb-menu-item',
+                onClick: () => {
+                  const t = contextMenu.task
+                  setContextMenu(null)
+                  void act({
+                    action: 'task.dispatch',
+                    id: t.id,
+                    agent: t.subagent || t.owner || ('worker-' + String(t.id).slice(-4)),
+                  })
+                },
+              }, h(Icon, { name: 'play', size: 13 }), '派发子代理'),
+              h('div', {
+                className: 'dnb-menu-item',
+                onClick: () => {
+                  const t = contextMenu.task
+                  setContextMenu(null)
+                  openTaskEditor(t)
+                },
+              }, h(Icon, { name: 'edit', size: 13 }), '编辑节点'),
+              contextMenu.task.status !== 'done'
+                ? h('div', {
+                    className: 'dnb-menu-item',
+                    onClick: () => {
+                      const id = contextMenu.taskId
+                      setContextMenu(null)
+                      void act({ action: 'task.update', id, status: 'done' })
+                    },
+                  }, h(Icon, { name: 'check', size: 13 }), '标记完成')
+                : null,
+              contextMenu.task.status === 'doing' && (contextMenu.task.subagent || contextMenu.task.owner)
+                ? h('div', {
+                    className: 'dnb-menu-item',
+                    style: { color: '#ff9f0a' },
+                    onClick: () => {
+                      const t = contextMenu.task
+                      setContextMenu(null)
+                      void act({ action: 'team.interrupt', id: t.id, agent: t.subagent || t.owner })
+                    },
+                  }, h(Icon, { name: 'stop', size: 13 }), '停止子代理')
+                : null,
+              h('div', {
+                className: 'dnb-menu-item',
+                style: { color: '#ff453a' },
+                onClick: () => {
+                  const id = contextMenu.taskId
+                  setContextMenu(null)
+                  if (store.selectedTaskId === id) patch({ selectedTaskId: '' })
+                  if (store.focusTaskId === id) patch({ focusTaskId: '' })
+                  void act({ action: 'task.remove', id })
+                },
+              }, h(Icon, { name: 'trash', size: 13 }), '删除'),
+            )
+          : null,
+      )
+    }
+
+    /* ------------------------------------------------------------- Plan Tab */
+
+    function PlanTab({ board }) {
+      const [objective, setObjective] = React.useState(null)
+      const [contextMenu, setContextMenu] = React.useState(null)
+      const [consultIdx, setConsultIdx] = React.useState(-1)
+      const [consultDraft, setConsultDraft] = React.useState('')
+      const [secAnswers, setSecAnswers] = React.useState({})
+      const [secAskingIdx, setSecAskingIdx] = React.useState(-1)
+      const [newStepText, setNewStepText] = React.useState('')
+
+      const current = objective === null ? ((board && board.objective) || '') : objective
+      const steps = (board && Array.isArray(board.plan)) ? board.plan : []
+      const doneCount = steps.filter(s => s && s.done).length
+      const isGoalMode = (board && board.mode) === 'goal'
+
+      const saveObjective = () => {
+        if (objective === null) return
+        const nextVal = objective
+        setObjective(null)
+        void act({ action: 'plan.set', objective: nextVal })
+        patch({ notice: '长期目标已保存' })
+      }
+
+      const toggleGoalMode = () => {
+        const nextMode = isGoalMode ? 'plan' : 'goal'
+        void act({ action: 'mode.set', mode: nextMode })
+        patch({
+          notice: nextMode === 'goal'
+            ? '已开启 /goal 持续督导：每轮核验长期目标是否实质推进'
+            : '已切回常规推进模式：按小任务板逐步勾选推进',
+        })
+      }
+
+      const keepIds = list => list.map(s => ({ id: s.id, text: s.text, done: s.done }))
+      const pushSteps = next => void act({ action: 'plan.set', steps: next })
+
+      const buildExplainPrompt = (stepText, idx) => {
+        const goalCtx = (current || '').trim() ? `（当前长期目标：${String(current).trim().slice(0, 90)}）` : ''
+        return `请用通俗易懂的大白话给我解释一下小任务板第 ${idx + 1} 步「${String(stepText || '').slice(0, 80)}」${goalCtx}：\n1. 这条具体是什么意思？\n2. 为什么需要有这个步骤（它解决什么问题、不做会怎样）？`
+      }
+
+      const askStepViaChief = async (idx, stepText, customQuestion = '') => {
+        setSecAskingIdx(idx)
+        try {
+          const goalCtx = (current || '').trim() ? `当前长期目标：「${String(current).trim().slice(0, 100)}」。` : ''
+          const q = customQuestion
+            ? `${goalCtx}针对小任务板第 ${idx + 1} 步「${String(stepText || '').slice(0, 90)}」，用户咨询：${customQuestion}。请结合当前会话上下文，用通俗简明的分点大白话直接解答（不要派活或改状态）。`
+            : `${goalCtx}请结合当前会话上下文，用通俗易懂的分点大白话向用户解释小任务板第 ${idx + 1} 步「${String(stepText || '').slice(0, 90)}」：1) 这句话是什么意思；2) 为什么要有这一步；3) 目前这一步做到了什么程度或结论。`
+          const out = await call('chief/ask', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({ session: store.sessionId, text: q }),
+          })
+          const reply = (out && (out.reply || out.answer || out.text)) || '暂无更多上下文记录，可点「问主模型」由主对话直接解答。'
+          setSecAnswers(prev => ({ ...prev, [idx]: reply }))
+        } catch (error) {
+          patch({ error: String((error && error.message) || error) })
+        } finally {
+          setSecAskingIdx(-1)
+        }
+      }
+
+      const addNewStep = () => {
+        const clean = newStepText.trim()
+        if (!clean) return
+        setNewStepText('')
+        const next = keepIds(steps).concat([{ text: clean, done: false }])
+        pushSteps(next)
+      }
+
+      React.useEffect(() => {
+        if (!contextMenu) return undefined
+        const close = () => setContextMenu(null)
+        const onKey = e => { if (e.key === 'Escape') close() }
+        document.addEventListener('click', close)
+        document.addEventListener('keydown', onKey)
+        return () => {
+          document.removeEventListener('click', close)
+          document.removeEventListener('keydown', onKey)
+        }
+      }, [contextMenu])
+
+      return h(
+        'div',
+        { className: 'dnb-view' },
+        h(ObjectiveRadarStrip, { board, compact: true }),
+
+        // ==================== Zone 1: Long-Term /goal Objective Box ====================
+        h(
+          'div',
+          {
+            className: 'dnb-section-head',
+            style: { alignItems: 'center', gap: 6, marginBottom: 6 },
+          },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
+            h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, '长期目标'),
+            h('span', {
+              style: {
+                padding: '1px 6px',
+                borderRadius: 6,
+                fontSize: 10.5,
+                fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
+                fontWeight: 600,
+                background: isGoalMode ? 'rgba(255, 159, 10, 0.16)' : 'rgba(10, 132, 255, 0.12)',
+                color: isGoalMode ? '#ff9f0a' : 'var(--dnb-accent)',
+              },
+            }, '/goal'),
+            board && board.objectiveAt && objective === null
+              ? h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, timeLabel(board.objectiveAt))
+              : null,
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
+            h('button', {
+              className: 'dnb-pill',
+              style: {
+                height: 23,
+                padding: '0 8px',
+                fontSize: 11,
+                borderColor: isGoalMode ? 'rgba(255, 159, 10, 0.45)' : undefined,
+                background: isGoalMode ? 'rgba(255, 159, 10, 0.12)' : undefined,
+                color: isGoalMode ? '#ff9f0a' : 'var(--dnb-text-2)',
+                fontWeight: isGoalMode ? 600 : 400,
+              },
+              title: isGoalMode
+                ? '已开启 /goal 持续目标督导：防空转守卫每轮核验长期目标是否实质推进（点击切回常规模式）'
+                : '点击开启 /goal 持续目标督导：盯紧上方长期总目标，防止模型只改步骤原地空转',
+              onClick: toggleGoalMode,
+            }, isGoalMode ? '🎯 持续督导中' : '持续督导'),
+            h('button', {
+              className: 'dnb-pill dnb-pill-accent',
+              style: { height: 23, padding: '0 9px', fontSize: 11 },
+              title: '根据长期目标让模型拆解可视化金字塔任务图并派发子代理',
+              onClick: () => {
+                const goalText = (current || '').trim()
+                const prompt = (goalText ? `针对长期目标「${goalText.slice(0, 100)}」，` : '')
+                  + '请调用 chief_board 的 graph.plan 拆解带 parentId 与 blockedBy 的可视化任务图，并用 task.dispatch 将就绪节点并行派发给子代理团队。'
+                void askLeadModel(prompt, '拆解任务图')
+                patch({ tab: 'tasks' })
+              },
+            }, h(Icon, { name: 'sparkles', size: 12 }), '拆解任务图'),
+          ),
+        ),
+        h(
+          'div',
+          {
+            className: 'dnb-group',
+            style: isGoalMode
+              ? {
+                  borderColor: 'rgba(255, 159, 10, 0.38)',
+                  boxShadow: '0 0 0 1px rgba(255, 159, 10, 0.10)',
+                }
+              : undefined,
+          },
+          h('textarea', {
+            className: 'dnb-bare-area',
+            placeholder: '输入或由 /goal 自动同步长期总目标…',
+            value: current,
+            onChange: e => setObjective(e.target.value),
+            onBlur: saveObjective,
+            onKeyDown: e => {
+              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                e.preventDefault()
+                saveObjective()
+              }
+            },
+          }),
+          (isGoalMode || objective !== null || (current || '').trim())
+            ? h(
+                'div',
+                {
+                  style: {
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'space-between',
+                    gap: 8,
+                    padding: '5px 10px 7px',
+                    borderTop: '1px solid var(--dnb-border)',
+                    fontSize: 11,
+                    color: isGoalMode ? '#ff9f0a' : 'var(--dnb-text-3)',
+                  },
+                },
+                h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                  isGoalMode
+                    ? '🎯 正在按 /goal 长期目标持续推进督导'
+                    : '与对话 /goal 长期目标实时双向同步'),
+                h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
+                  objective !== null
+                    ? h('button', {
+                        className: 'dnb-pill dnb-pill-accent',
+                        style: { height: 21, padding: '0 8px', fontSize: 10.5 },
+                        onClick: saveObjective,
+                      }, '保存')
+                    : null,
+                  (current || '').trim()
+                    ? h('button', {
+                        className: 'dnb-pill',
+                        style: { height: 21, padding: '0 8px', fontSize: 10.5 },
+                        title: '让模型用大白话解释这个长期目标的核心问题与解决思路',
+                        onClick: () => {
+                          void askLeadModel(
+                            `请用通俗易懂的大白话给我解释一下当前长期目标「${String(current).trim().slice(0, 120)}」：核心卡点是什么、整体打算怎么解决？`,
+                            '咨询长期目标',
+                          )
+                        },
+                      }, '咨询目标')
+                    : null,
+                ),
+              )
+            : null,
+        ),
+
+        // ==================== Zone 2: Small Task Board (Steps + Consultation) ====================
+        h(
+          'div',
+          { className: 'dnb-section-head', style: { marginTop: 14, alignItems: 'baseline' } },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'baseline', gap: 6 } },
+            h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, '小任务板'),
+            h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } }, '点条目可问含义与原因'),
+          ),
+          steps.length ? h('span', null, `${doneCount} / ${steps.length}`) : null,
+        ),
+        steps.length > 0
+          ? h(
+              React.Fragment,
+              null,
+              h(
+                'div',
+                { className: 'dnb-progress', style: { marginBottom: 8 } },
+                h('div', { style: { width: (doneCount / steps.length) * 100 + '%', background: '#30d158', transition: 'width 0.3s ease' } }),
+              ),
+              h(
+                'div',
+                { className: 'dnb-group' },
+                steps.map((step, i) => {
+                  const isConsulting = consultIdx === i
+                  const secReply = secAnswers[i] || ''
+                  const isSecAsking = secAskingIdx === i
+
+                  return h(
+                    React.Fragment,
+                    { key: step.id || i },
+                    h(
+                      'div',
+                      {
+                        className: 'dnb-cell dnb-cell-hover',
+                        style: { cursor: 'pointer' },
+                        title: '点击打开咨询与操作菜单（可问这条是什么意思、为什么有这步）',
+                        onClick: e => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setContextMenu({ stepIndex: i, x: e.clientX, y: e.clientY })
+                        },
+                        onContextMenu: e => {
+                          e.preventDefault()
+                          e.stopPropagation()
+                          setContextMenu({ stepIndex: i, x: e.clientX, y: e.clientY })
+                        },
+                      },
+                      h(
+                        'span',
+                        {
+                          className: 'dnb-ring',
+                          title: step.done ? '点击标回未完成' : '点击标记已完成',
+                          style: step.done
+                            ? { background: '#30d158', borderColor: '#30d158', cursor: 'pointer' }
+                            : { cursor: 'pointer' },
+                          onClick: e => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            const next = keepIds(steps)
+                            next[i] = { ...next[i], done: !step.done }
+                            pushSteps(next)
+                          },
+                        },
+                        step.done ? h(Icon, { name: 'check', size: 11 }) : null,
+                      ),
+                      h(
+                        'span',
+                        {
+                          style: {
+                            flex: 1,
+                            fontSize: 12.5,
+                            color: step.done ? 'var(--dnb-text-3)' : 'var(--dnb-text)',
+                            textDecoration: step.done ? 'line-through' : 'none',
+                          },
+                        },
+                        step.text || '',
+                      ),
+                      h(
+                        'span',
+                        { className: 'dnb-row-actions', style: { gap: 4 } },
+                        h('button', {
+                          className: 'dnb-pill',
+                          style: { height: 22, padding: '0 7px', fontSize: 11, color: 'var(--dnb-accent)' },
+                          title: '让模型用大白话解释这条是什么意思、为什么有这个步骤',
+                          onClick: e => {
+                            e.stopPropagation()
+                            void askLeadModel(buildExplainPrompt(step.text, i), '咨询步骤含义')
+                          },
+                        }, '解释'),
+                        h('button', {
+                          className: 'dnb-pill',
+                          'data-active': isConsulting ? '1' : '0',
+                          style: { height: 22, padding: '0 7px', fontSize: 11 },
+                          title: '展开咨询框，自由提问关于这一步的任何疑问',
+                          onClick: e => {
+                            e.stopPropagation()
+                            setConsultIdx(isConsulting ? -1 : i)
+                            setConsultDraft('')
+                          },
+                        }, '咨询'),
+                      ),
+                    ),
+
+                    // Inline Consultation Drawer for this step
+                    isConsulting
+                      ? h(
+                          'div',
+                          {
+                            style: {
+                              padding: '8px 11px 9px',
+                              background: 'rgba(10, 132, 255, 0.05)',
+                              borderTop: '1px solid var(--dnb-border)',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 6,
+                            },
+                            onClick: e => e.stopPropagation(),
+                          },
+                          h(
+                            'div',
+                            { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
+                            [
+                              { label: '这条是什么意思？', q: '这条具体是什么意思？请用通俗大白话解释一下。' },
+                              { label: '为什么要有这步？', q: '为什么需要有这个步骤？它在整体方案里解决什么问题？' },
+                              { label: step.done ? '具体改了什么？' : '目前卡在哪？', q: step.done ? '这一步具体查出了什么结论、做了什么修改？' : '这一步目前进展到哪了，有没有卡点？' },
+                            ].map((preset, pi) =>
+                              h('button', {
+                                key: pi,
+                                className: 'dnb-sec-chip',
+                                style: { fontSize: 10.5, height: 21, padding: '0 7px' },
+                                onClick: () => {
+                                  const goalCtx = (current || '').trim() ? `（长期目标：${String(current).trim().slice(0, 80)}）` : ''
+                                  void askLeadModel(
+                                    `关于小任务板第 ${i + 1} 步「${String(step.text || '').slice(0, 80)}」${goalCtx}：${preset.q}`,
+                                    '咨询小任务步骤',
+                                  )
+                                  setConsultIdx(-1)
+                                },
+                              }, preset.label),
+                            ),
+                          ),
+                          h(
+                            'div',
+                            { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+                            h('input', {
+                              className: 'dnb-input',
+                              style: { flex: 1, height: 27, fontSize: 11.5 },
+                              autoFocus: true,
+                              placeholder: '自由输入对这一步的疑问（回车问主模型）…',
+                              value: consultDraft,
+                              onChange: e => setConsultDraft(e.target.value),
+                              onKeyDown: e => {
+                                if (e.key === 'Enter' && consultDraft.trim()) {
+                                  e.preventDefault()
+                                  const q = consultDraft.trim()
+                                  setConsultDraft('')
+                                  setConsultIdx(-1)
+                                  void askLeadModel(
+                                    `关于小任务板第 ${i + 1} 步「${String(step.text || '').slice(0, 80)}」：${q}`,
+                                    '咨询小任务步骤',
+                                  )
+                                } else if (e.key === 'Escape') {
+                                  setConsultIdx(-1)
+                                }
+                              },
+                            }),
+                            h('button', {
+                              className: 'dnb-primary-btn',
+                              style: { height: 27, padding: '0 9px', fontSize: 11, flexShrink: 0 },
+                              disabled: !consultDraft.trim(),
+                              onClick: () => {
+                                const q = consultDraft.trim()
+                                if (!q) return
+                                setConsultDraft('')
+                                setConsultIdx(-1)
+                                void askLeadModel(
+                                  `关于小任务板第 ${i + 1} 步「${String(step.text || '').slice(0, 80)}」：${q}`,
+                                  '咨询小任务步骤',
+                                )
+                              },
+                            }, '问模型'),
+                            h('button', {
+                              className: 'dnb-pill',
+                              style: { height: 27, padding: '0 8px', fontSize: 11, flexShrink: 0, color: 'var(--dnb-accent)' },
+                              disabled: isSecAsking,
+                              title: '不打断主对话，让 DSH 参谋长结合上下文直接在此处下方给出通俗解答',
+                              onClick: () => {
+                                const q = consultDraft.trim()
+                                setConsultDraft('')
+                                setConsultIdx(-1)
+                                void askStepViaChief(i, step.text, q)
+                              },
+                            }, isSecAsking ? '解答中…' : '✦ 问参谋长'),
+                          ),
+                        )
+                      : null,
+
+                    // Inline Chief Answer Card (when requested without interrupting main chat)
+                    (isSecAsking || secReply)
+                      ? h(
+                          'div',
+                          {
+                            style: {
+                              padding: '8px 11px 9px',
+                              background: 'rgba(128, 128, 136, 0.08)',
+                              borderTop: '1px solid var(--dnb-border)',
+                              fontSize: 11.5,
+                              color: 'var(--dnb-text-2)',
+                              lineHeight: 1.5,
+                            },
+                            onClick: e => e.stopPropagation(),
+                          },
+                          h(
+                            'div',
+                            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 } },
+                            h('span', { style: { fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-accent)' } },
+                              isSecAsking ? '✦ DSH 参谋长正在结合上下文解读此步…' : '✦ DSH 参谋长步骤解读'),
+                            !isSecAsking
+                              ? h('button', {
+                                  className: 'dnb-icon-btn',
+                                  style: { width: 18, height: 18 },
+                                  title: '收起解读',
+                                  onClick: () => setSecAnswers(prev => {
+                                    const copy = { ...prev }
+                                    delete copy[i]
+                                    return copy
+                                  }),
+                                }, h(Icon, { name: 'x', size: 11 }))
+                              : null,
+                          ),
+                          isSecAsking ? null : renderStructuredText(secReply),
+                        )
+                      : null,
+                  )
+                }),
+
+                // Quick append step input at bottom of Small Task Board
+                h(
+                  'div',
+                  {
+                    className: 'dnb-cell',
+                    style: { padding: '6px 11px', gap: 6 },
+                  },
+                  h(Icon, { name: 'plus', size: 13, style: { color: 'var(--dnb-text-3)' } }),
+                  h('input', {
+                    className: 'dnb-input',
+                    style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1, fontSize: 12 },
+                    placeholder: '添加一条小任务步骤（回车新增）…',
+                    value: newStepText,
+                    onChange: e => setNewStepText(e.target.value),
+                    onKeyDown: e => {
+                      if (e.key === 'Enter' && newStepText.trim()) {
+                        e.preventDefault()
+                        addNewStep()
+                      }
+                    },
+                  }),
+                  newStepText.trim()
+                    ? h('button', {
+                        className: 'dnb-pill dnb-pill-accent',
+                        style: { height: 22, padding: '0 8px', fontSize: 11 },
+                        onClick: addNewStep,
+                      }, '添加')
+                    : null,
+                ),
+              ),
+            )
+          : h(
+              'div',
+              { className: 'dnb-group' },
+              h('div', { className: 'dnb-empty', style: { padding: '16px 12px 10px' } }, '小任务板暂无步骤（模型调用 todo_write / plan.set 时会自动同步到这里）'),
+              h(
+                'div',
+                {
+                  className: 'dnb-cell',
+                  style: { padding: '6px 11px', gap: 6, borderTop: '1px solid var(--dnb-border)' },
+                },
+                h(Icon, { name: 'plus', size: 13, style: { color: 'var(--dnb-text-3)' } }),
+                h('input', {
+                  className: 'dnb-input',
+                  style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1, fontSize: 12 },
+                  placeholder: '手动添加一条小任务步骤（回车新增）…',
+                  value: newStepText,
+                  onChange: e => setNewStepText(e.target.value),
+                  onKeyDown: e => {
+                    if (e.key === 'Enter' && newStepText.trim()) {
+                      e.preventDefault()
+                      addNewStep()
+                    }
+                  },
+                }),
+              ),
+            ),
+
+        // Upgraded Step Consultation & Action Context Menu
+        contextMenu && contextMenu.stepIndex !== undefined
+          ? (() => {
+              const idx = contextMenu.stepIndex
+              const s = steps[idx]
+              const stepTitle = String((s && s.text) || '').slice(0, 80)
+              const isDone = Boolean(s && s.done)
+              return h(
+                'div',
+                {
+                  className: 'dnb-menu',
+                  style: {
+                    minWidth: 214,
+                    left: Math.min(contextMenu.x, (typeof window !== 'undefined' ? window.innerWidth : 800) - 226),
+                    top: Math.min(contextMenu.y, (typeof window !== 'undefined' ? window.innerHeight : 600) - 240),
+                  },
+                },
+                h('div', {
+                  className: 'dnb-menu-item',
+                  style: { color: 'var(--dnb-accent)', fontWeight: 600 },
+                  onClick: () => {
+                    setContextMenu(null)
+                    void askLeadModel(buildExplainPrompt(stepTitle, idx), '咨询步骤含义')
+                  },
+                }, h(Icon, { name: 'sparkles', size: 13 }), '这条是什么意思 / 为什么有这步'),
+                h('div', {
+                  className: 'dnb-menu-item',
+                  onClick: () => {
+                    setContextMenu(null)
+                    void askStepViaChief(idx, stepTitle)
+                  },
+                }, '✦ 让参谋长当场解读（不打断主对话）'),
+                h('div', {
+                  className: 'dnb-menu-item',
+                  onClick: () => {
+                    setContextMenu(null)
+                    setConsultIdx(idx)
+                    setConsultDraft('')
+                  },
+                }, '💬 针对此步自由提问…'),
+                h('div', {
+                  className: 'dnb-menu-item',
+                  style: { borderTop: '1px solid var(--dnb-border)', marginTop: 3, paddingTop: 6 },
+                  onClick: () => {
+                    setContextMenu(null)
+                    const q = isDone
+                      ? `小任务板第 ${idx + 1} 步「${stepTitle}」已标记完成，请简明告诉我这一步具体查出了什么结论、改了哪里？`
+                      : `小任务板第 ${idx + 1} 步「${stepTitle}」目前进展如何，有没有遇到卡点？`
+                    void askLeadModel(q, '询问步骤进展')
+                  },
+                }, isDone ? '询问这步具体结果' : '询问进度'),
+                isDone
+                  ? h('div', {
+                      className: 'dnb-menu-item',
+                      onClick: () => {
+                        setContextMenu(null)
+                        const next = keepIds(steps)
+                        next[idx] = { ...next[idx], done: false }
+                        pushSteps(next)
+                      },
+                    }, '标回未完成')
+                  : h('div', {
+                      className: 'dnb-menu-item',
+                      onClick: () => {
+                        setContextMenu(null)
+                        void askLeadModel(
+                          `请核验小任务板第 ${idx + 1} 步「${stepTitle}」是否已完成，若已完成请勾选并记录验证依据。`,
+                          '核验勾选步骤',
+                        )
+                      },
+                    }, '请模型勾选完成'),
+                h('div', {
+                  className: 'dnb-menu-item',
+                  style: { color: '#ff453a', borderTop: '1px solid var(--dnb-border)', marginTop: 3, paddingTop: 6 },
+                  onClick: () => {
+                    setContextMenu(null)
+                    const next = keepIds(steps)
+                    next.splice(idx, 1)
+                    pushSteps(next)
+                  },
+                }, '删除步骤'),
+              )
+            })()
+          : null,
+      )
+    }
+
+    /* ----------------------------------------------------------- Memory Tab */
+
+    function MemoryCard({ item }) {
+      const open = store.memOpen === item.id
+      const body = String(item.text || '')
+      return h(
+        'div',
+        { className: 'dnb-cell dnb-cell-hover', style: { alignItems: 'flex-start', flexDirection: 'column', gap: 4 } },
+        h(
+          'div',
+          { style: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+            h('span', { className: 'dnb-tag' }, item.turn ? '第 ' + item.turn + ' 轮' : '手动'),
+            h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, timeLabel(item.at)),
+          ),
+          h(
+            'div',
+            { className: 'dnb-row-actions' },
+            body.length > 140
+              ? h('button', {
+                  className: 'dnb-pill',
+                  style: { height: 22, padding: '0 7px', fontSize: 11 },
+                  onClick: () => patch({ memOpen: open ? '' : item.id }),
+                }, open ? '收起' : '展开')
+              : null,
+            h('button', {
+              className: 'dnb-icon-btn',
+              style: { width: 22, height: 22, color: '#ff453a' },
+              onClick: () => void removeMemory(item.id),
+            }, h(Icon, { name: 'trash', size: 12 })),
+          ),
+        ),
+        item.title ? h('div', { style: { fontWeight: 600, fontSize: 12.5 } }, item.title) : null,
+        h(
+          'div',
+          { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5, whiteSpace: 'pre-wrap' } },
+          open || body.length <= 140 ? body : body.slice(0, 140) + '…',
+        ),
+      )
+    }
+
+    function MemoryTab() {
+      React.useEffect(() => {
+        if (!store.memSections.length && !store.memBusy) void loadMemory()
+      }, [store.sessionId])
+
+      const runAsk = () => {
+        if (!(store.memAsk || '').trim()) return
+        void askMemory(store.memAsk)
+      }
+
+      const sections = Array.isArray(store.memSections) ? store.memSections : []
+
+      return h(
+        'div',
+        { className: 'dnb-view' },
+        // Top Search & Add Bar
+        h(
+          'div',
+          { style: { display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 } },
+          h('input', {
+            className: 'dnb-input',
+            style: { borderRadius: 99, paddingLeft: 12, height: 32 },
+            placeholder: '检索记忆…',
+            value: store.memAsk || '',
+            onChange: e => patch({ memAsk: e.target.value, memReply: '', memHits: null, memNote: '' }),
+            onKeyDown: e => { if (e.key === 'Enter') runAsk() },
+          }),
+          (store.memAsk || '').trim()
+            ? h('button', { className: 'dnb-primary-btn', style: { height: 30 }, onClick: runAsk }, '查询')
+            : null,
+          h('button', {
+            className: 'dnb-pill',
+            style: { height: 30 },
+            'data-active': store.memComposerOpen ? '1' : '0',
+            onClick: () => patch({ memComposerOpen: !store.memComposerOpen }),
+          }, h(Icon, { name: 'plus', size: 13 }), '记录'),
+        ),
+
+        store.memReply
+          ? h('div', { className: 'dnb-group' }, h('pre', { className: 'dnb-pre' }, store.memReply))
+          : null,
+
+        // Collapsible New Memory Composer
+        store.memComposerOpen
+          ? h(
+              'div',
+              { className: 'dnb-group', style: { padding: 10, marginBottom: 12 } },
+              h(
+                'div',
+                { style: { display: 'flex', gap: 6, marginBottom: 6 } },
+                h('input', {
+                  className: 'dnb-input',
+                  placeholder: '标题（选填）',
+                  value: store.memTitle || '',
+                  onChange: e => patch({ memTitle: e.target.value }),
+                }),
+                h('select', {
+                  className: 'dnb-input',
+                  style: { width: 118, flexShrink: 0 },
+                  value: store.memSection || 'other',
+                  onChange: e => patch({ memSection: e.target.value }),
+                }, MEMORY_SECTIONS.map(s => h('option', { key: s.key, value: s.key }, s.label))),
+              ),
+              h('textarea', {
+                className: 'dnb-area',
+                placeholder: '输入需要持久记住的结论或约束…',
+                value: store.memText || '',
+                onChange: e => patch({ memText: e.target.value }),
+              }),
+              h(
+                'div',
+                { style: { display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 8 } },
+                h('button', { className: 'dnb-pill', onClick: () => patch({ memComposerOpen: false }) }, '取消'),
+                h('button', { className: 'dnb-primary-btn', disabled: !(store.memText || '').trim(), onClick: () => void addMemory() }, '保存'),
+              ),
+            )
+          : null,
+
+        sections.length
+          ? sections.map(section =>
+              h(
+                'div',
+                { key: section.key, style: { marginBottom: 10 } },
+                h('div', { className: 'dnb-section-head' }, h('span', null, section.label), h('span', null, (section.items || []).length)),
+                h('div', { className: 'dnb-group' }, (section.items || []).map(item => h(MemoryCard, { item, key: item.id }))),
+              ),
+            )
+          : h('div', { className: 'dnb-empty' }, '暂无记忆条目'),
+      )
+    }
+
+    /* ------------------------------------------------------------ Notes Tab */
+
+    function NoteEditor({ note }) {
+      const isNew = !note
+      const submit = () => {
+        if (!(store.editNoteTitle || '').trim() && !(store.editNoteBody || '').trim()) return
+        const tags = String(store.editNoteTags || '').split(/[,，]/).map(t => t.trim()).filter(Boolean)
+        const payload = { action: 'note.write', title: store.editNoteTitle, body: store.editNoteBody, tags }
+        if (!isNew) {
+          payload.noteId = note.id
+          if (note.shared) payload.scope = 'shared'
+        }
+        patch({ editNoteId: '', newNote: false, notice: '笔记已保存' })
+        void act(payload)
+      }
+      return h(
+        'div',
+        { className: 'dnb-group', style: { padding: 10, marginBottom: 12 } },
+        h('input', {
+          className: 'dnb-input',
+          placeholder: '标题',
+          value: store.editNoteTitle || '',
+          onChange: e => patch({ editNoteTitle: e.target.value }),
+        }),
+        h('div', { style: { height: 6 } }),
+        h('textarea', {
+          className: 'dnb-area',
+          style: { minHeight: 84 },
+          placeholder: '写点笔记…',
+          value: store.editNoteBody || '',
+          onChange: e => patch({ editNoteBody: e.target.value }),
+          onKeyDown: e => {
+            if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+              e.preventDefault()
+              submit()
+            }
+          },
+        }),
+        h('div', { style: { height: 6 } }),
+        h('input', {
+          className: 'dnb-input',
+          placeholder: '标签（逗号分隔）',
+          value: store.editNoteTags || '',
+          onChange: e => patch({ editNoteTags: e.target.value }),
+          onKeyDown: e => { if (e.key === 'Enter') { e.preventDefault(); submit() } },
+        }),
+        h(
+          'div',
+          { style: { display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 8 } },
+          h('button', { className: 'dnb-pill', onClick: () => patch({ editNoteId: '', newNote: false }) }, '取消'),
+          h('button', {
+            className: 'dnb-primary-btn',
+            disabled: !(store.editNoteTitle || '').trim() && !(store.editNoteBody || '').trim(),
+            onClick: submit,
+          }, '保存'),
+        ),
+      )
+    }
+
+    function NotesTab({ board }) {
+      const notes = (board && Array.isArray(board.notes)) ? board.notes : []
+      const editing = store.editNoteId ? notes.find(n => n && n.id === store.editNoteId) : null
+
+      return h(
+        'div',
+        { className: 'dnb-view' },
+        h(
+          'div',
+          { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 } },
+          h('span', { style: { fontSize: 12, color: 'var(--dnb-text-2)', fontWeight: 500 } }, notes.length ? `共 ${notes.length} 篇` : ''),
+          h('button', {
+            className: 'dnb-primary-btn',
+            onClick: () => patch({ newNote: true, editNoteId: '', editNoteTitle: '', editNoteBody: '', editNoteTags: '' }),
+          }, h(Icon, { name: 'plus', size: 13 }), '新建笔记'),
+        ),
+        store.newNote ? h(NoteEditor, { note: null }) : null,
+        editing ? h(NoteEditor, { note: editing }) : null,
+        notes.length
+          ? notes.map(note => {
+              const pinned = note.pinned === true || (note.tags || []).some(t => String(t).toLowerCase() === 'anchor')
+              return h(
+                'div',
+                {
+                  key: note.id,
+                  className: 'dnb-group dnb-note-card',
+                  style: {
+                    padding: '10px 12px',
+                    borderColor: pinned ? 'rgba(10, 132, 255, 0.35)' : undefined,
+                  },
+                },
+                h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
+                  h(
+                    'div',
+                    { style: { fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+                    pinned ? h(Icon, { name: 'pin', size: 12, style: { color: 'var(--dnb-accent)' } }) : null,
+                    note.title || '无标题',
+                    (note.tags || []).map(tag => h('span', { className: 'dnb-tag', key: tag }, tag)),
+                  ),
+                  h(
+                    'div',
+                    { className: 'dnb-row-actions' },
+                    h('button', {
+                      className: 'dnb-icon-btn',
+                      style: { width: 24, height: 24 },
+                      title: pinned ? '取消置顶' : '置顶',
+                      onClick: () => void act({ action: note.pinned ? 'note.unpin' : 'note.pin', noteId: note.id }),
+                    }, h(Icon, { name: 'pin', size: 12 })),
+                    h('button', {
+                      className: 'dnb-icon-btn',
+                      style: { width: 24, height: 24 },
+                      title: '编辑',
+                      onClick: () => patch({
+                        editNoteId: note.id,
+                        newNote: false,
+                        editNoteTitle: note.title || '',
+                        editNoteBody: note.body || '',
+                        editNoteTags: (note.tags || []).join(', '),
+                        editNoteShared: note.shared === true,
+                      }),
+                    }, h(Icon, { name: 'edit', size: 12 })),
+                    h('button', {
+                      className: 'dnb-icon-btn',
+                      style: { width: 24, height: 24, color: '#ff453a' },
+                      title: '删除',
+                      onClick: () => {
+                        if (!confirm('删除笔记「' + clampTitle(note.title || note.body, 16) + '」？')) return
+                        void act({ action: 'note.remove', noteId: note.id, scope: note.shared ? 'shared' : '' })
+                      },
+                    }, h(Icon, { name: 'trash', size: 12 })),
+                  ),
+                ),
+                note.body
+                  ? h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.55, whiteSpace: 'pre-wrap', marginTop: 5, maxHeight: 180, overflow: 'auto' } }, note.body)
+                  : null,
+                h(
+                  'div',
+                  { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, fontSize: 11, color: 'var(--dnb-text-3)' } },
+                  note.shared ? h('span', null, '共享') : null,
+                  h('span', null, timeLabel(note.updatedAt)),
+                ),
+              )
+            })
+          : h('div', { className: 'dnb-empty' }, '暂无工作笔记'),
+      )
+    }
+
+    /* -------------------------------------- Engineering Memory Archive Tab (档案柜) */
+
+    const PAPERCLIP_META = {
+      gold: {
+        color: '#ffe033',
+        pinStroke: '#ffe44d',
+        glow: 'drop-shadow(0 0 3.5px rgba(255, 224, 51, 0.62))',
+        bg: 'rgba(255, 224, 51, 0.17)',
+        border: 'rgba(255, 224, 51, 0.56)',
+        label: '璀璨金针',
+        short: '核心',
+        tip: '亮金曲别针：核心工程坐标与关键锚点（点击切换曲别针等级）',
+      },
+      silver: {
+        color: '#cbd5e1',
+        pinStroke: '#cbd5e1',
+        glow: 'none',
+        bg: 'rgba(203, 213, 225, 0.13)',
+        border: 'rgba(203, 213, 225, 0.38)',
+        label: '标准银针',
+        short: '实录',
+        tip: '亮银曲别针：标准排障与工程实录（点击切换曲别针等级）',
+      },
+      copper: {
+        color: '#9a583b',
+        pinStroke: '#7c4329',
+        glow: 'none',
+        bg: 'rgba(124, 67, 41, 0.18)',
+        border: 'rgba(124, 67, 41, 0.44)',
+        label: '暗古铜针',
+        short: '归档',
+        tip: '暗古铜曲别针：历史阶段沉淀备查（点击切换曲别针等级）',
+      },
+    }
+
+    const FOLDER_EAR_TAG = {
+      coords: 'COORDS · 坐标',
+      incidents: 'CASE · 实录',
+      contracts: 'SPEC · 契约',
+      ops: 'OPS · 运维',
+      plans: 'PLAN · 蓝图',
+      inbox: 'INBOX · 待分拣',
+    }
+
+    function PaperclipPin({ paperclip = 'silver', onClick }) {
+      const meta = PAPERCLIP_META[paperclip] || PAPERCLIP_META.silver
+      return h(
+        'button',
+        {
+          type: 'button',
+          className: 'dnb-paperclip-pin',
+          title: meta.tip,
+          onClick: e => {
+            e.stopPropagation()
+            if (onClick) onClick()
+          },
+        },
+        h(
+          'svg',
+          {
+            width: 18,
+            height: 23,
+            viewBox: '0 0 18 24',
+            fill: 'none',
+            stroke: meta.pinStroke || meta.color,
+            strokeWidth: paperclip === 'gold' ? 2.25 : 1.95,
+            strokeLinecap: 'round',
+            strokeLinejoin: 'round',
+            style: meta.glow && meta.glow !== 'none' ? { filter: meta.glow } : undefined,
+            'aria-hidden': true,
+          },
+          h('path', {
+            d: 'M6 7.5v8.8a3.2 3.2 0 0 0 6.4 0V5.6a4.6 4.6 0 0 0-9.2 0v11.2a6 6 0 0 0 12 0V8.5',
+          }),
+          paperclip === 'gold'
+            ? h('circle', { cx: 14.8, cy: 3.6, r: 1.35, fill: '#fff7b2', stroke: 'none' })
+            : null,
+        ),
+      )
+    }
+
+    function ArchiveEditorCard({ folders, editor }) {
+      if (!editor) return null
+      const isEdit = Boolean(editor.id)
+      const folderList = Array.isArray(folders) && folders.length
+        ? folders
+        : [{ id: 'coords', label: '工程坐标与部署锚点' }, { id: 'incidents', label: '排障实录与硬事实' }, { id: 'inbox', label: '待分拣工作便签' }]
+
+      const updateField = (patchObj) => {
+        patch({ archiveEditor: { ...editor, ...patchObj } })
+      }
+
+      const saveDossier = async () => {
+        const title = String(editor.title || '').trim()
+        const body = String(editor.body || '').trim()
+        if (!title && !body) return
+        const out = await mutateArchiveApi({
+          op: 'save',
+          archiveId: editor.id || '',
+          title,
+          summary: String(editor.summary || '').trim(),
+          folder: editor.folder || 'coords',
+          paperclip: editor.paperclip || 'silver',
+          tags: String(editor.tags || '').split(/[,，]/).map(s => s.trim()).filter(Boolean),
+          body,
+          upsertByTitle: !isEdit ? false : undefined,
+        }, isEdit ? '工程卷宗已更新' : '新卷宗已分块归入档案柜')
+        if (out && out.ok) {
+          const savedItem = out.item
+          const nextOpenFolders = { ...(store.archiveOpenFolders || {}) }
+          const nextOpenFiles = { ...(store.archiveOpenFiles || {}) }
+          if (savedItem && savedItem.folder) nextOpenFolders[savedItem.folder] = true
+          if (savedItem && savedItem.id) nextOpenFiles[savedItem.id] = true
+          patch({
+            archiveEditor: null,
+            archiveOpenFolders: nextOpenFolders,
+            archiveOpenFiles: nextOpenFiles,
+          })
+        }
+      }
+
+      return h(
+        'div',
+        {
+          className: 'dnb-group',
+          style: {
+            padding: 11,
+            marginBottom: 10,
+            borderColor: 'rgba(10, 132, 255, 0.4)',
+          },
+        },
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 } },
+          h('span', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-accent)' } },
+            isEdit ? '✎ 编辑工程档案卷宗' : '📎 新建工程档案卷宗（默认封存懒加载）'),
+          h('button', {
+            className: 'dnb-icon-btn',
+            style: { width: 22, height: 22 },
+            onClick: () => patch({ archiveEditor: null }),
+          }, h(Icon, { name: 'x', size: 13 })),
+        ),
+        h(
+          'div',
+          { style: { display: 'flex', gap: 6, marginBottom: 7, flexWrap: 'wrap' } },
+          h('select', {
+            className: 'dnb-input',
+            style: { flex: 1, minWidth: 140, height: 29, fontSize: 11.5, padding: '0 8px' },
+            value: editor.folder || 'coords',
+            onChange: e => updateField({ folder: e.target.value }),
+          }, folderList.map(f => h('option', { key: f.id, value: f.id }, '抽屉：' + f.label))),
+          h('select', {
+            className: 'dnb-input',
+            style: { width: 118, height: 29, fontSize: 11.5, padding: '0 8px' },
+            value: editor.paperclip || 'silver',
+            onChange: e => updateField({ paperclip: e.target.value }),
+          },
+            h('option', { value: 'gold' }, '📎 核心金针'),
+            h('option', { value: 'silver' }, '📎 标准银针'),
+            h('option', { value: 'copper' }, '📎 历史铜针'),
+          ),
+        ),
+        h('input', {
+          className: 'dnb-input',
+          style: { marginBottom: 6, fontWeight: 600 },
+          placeholder: '卷宗标题（如：DSH 反代链路端口与部署坐标）',
+          value: editor.title || '',
+          onChange: e => updateField({ title: e.target.value }),
+        }),
+        h('input', {
+          className: 'dnb-input',
+          style: { marginBottom: 6, fontSize: 11.5 },
+          placeholder: '一句话卷宗提要（选填，留空自动提炼）',
+          value: editor.summary || '',
+          onChange: e => updateField({ summary: e.target.value }),
+        }),
+        h('textarea', {
+          className: 'dnb-textarea',
+          rows: 6,
+          style: { marginBottom: 6, fontSize: 12, lineHeight: 1.55 },
+          placeholder: '支持用 ## 小标题、键：值、或分段记录工程细节。保存后自动拆成可逐层点开的「记忆点 → 小点记忆」，也可随时请参谋长精编收纳…',
+          value: editor.body || '',
+          onChange: e => updateField({ body: e.target.value }),
+        }),
+        h('input', {
+          className: 'dnb-input',
+          style: { marginBottom: 8, fontSize: 11.5 },
+          placeholder: '标签（逗号分隔，如：anchor, 部署, sing-box）',
+          value: editor.tags || '',
+          onChange: e => updateField({ tags: e.target.value }),
+        }),
+        h(
+          'div',
+          { style: { display: 'flex', justifyContent: 'flex-end', gap: 6 } },
+          h('button', { className: 'dnb-pill', onClick: () => patch({ archiveEditor: null }) }, '取消'),
+          h('button', {
+            className: 'dnb-primary-btn',
+            disabled: !(editor.title || '').trim() && !(editor.body || '').trim(),
+            onClick: () => void saveDossier(),
+          }, isEdit ? '保存修改' : '封存入柜'),
+        ),
+      )
+    }
+
+    function ArchiveDossierCard({ item, idx, folders, view }) {
+      const isOpen = Boolean(view.archiveOpenFiles && view.archiveOpenFiles[item.id])
+      const detail = view.archiveDetails && view.archiveDetails[item.id] ? view.archiveDetails[item.id] : null
+      const loadingDetail = Boolean(view.archiveDetailLoading && view.archiveDetailLoading[item.id])
+      const showRaw = Boolean(view.archiveRawView && view.archiveRawView[item.id])
+      const movingThis = view.archiveMoveId === item.id
+      const clip = PAPERCLIP_META[item.paperclip] || PAPERCLIP_META.silver
+      const points = detail && Array.isArray(detail.points) ? detail.points : []
+      const pointCount = points.length || item.pointCount || 0
+
+      const toggleOpenFile = () => {
+        const nextOpen = !isOpen
+        patch({
+          archiveOpenFiles: {
+            ...(view.archiveOpenFiles || {}),
+            [item.id]: nextOpen,
+          },
+        })
+        if (nextOpen && !detail) {
+          void loadArchiveDetail(item.id, false)
+        }
+      }
+
+      const allPointsExpanded = points.length > 0 && points.every((pt, pIdx) => {
+        const pKey = item.id + ':' + (pt.id || ('pt-' + (pIdx + 1)))
+        return Boolean(view.archiveOpenPoints && view.archiveOpenPoints[pKey])
+      })
+
+      const toggleAllPoints = () => {
+        if (!points.length) return
+        const nextMap = { ...(view.archiveOpenPoints || {}) }
+        for (let i = 0; i < points.length; i += 1) {
+          const pKey = item.id + ':' + (points[i].id || ('pt-' + (i + 1)))
+          if (allPointsExpanded) delete nextMap[pKey]
+          else nextMap[pKey] = true
+        }
+        patch({ archiveOpenPoints: nextMap })
+      }
+
+      const openEditorForThis = async () => {
+        const full = detail || (await loadArchiveDetail(item.id, false))
+        if (!full) return
+        patch({
+          archiveEditor: {
+            id: full.id,
+            title: full.title || '',
+            summary: full.summary || '',
+            folder: full.folder || item.folder || 'coords',
+            paperclip: full.paperclip || item.paperclip || 'silver',
+            tags: (full.tags || []).join(', '),
+            body: full.body || '',
+          },
+        })
+      }
+
+      return h(
+        'div',
+        {
+          className: 'dnb-dossier-card',
+          'data-open': isOpen ? '1' : '0',
+          'data-out': item.takenOut ? '1' : '0',
+          style: { animationDelay: Math.min(idx * 24, 140) + 'ms' },
+        },
+        // Clipped Paperclip Pin on Top-Left Edge
+        h(PaperclipPin, {
+          paperclip: item.paperclip,
+          onClick: () => void mutateArchiveApi({ op: 'cycleClip', archiveId: item.id }, '已切换卷宗曲别针等级'),
+        }),
+
+        // Clickable Dossier Header (Unfolds Structured Memory Points)
+        h(
+          'div',
+          {
+            className: 'dnb-dossier-head',
+            onClick: toggleOpenFile,
+            title: isOpen ? '点击合上此卷宗' : '点击展开此卷宗的分块记忆点',
+          },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 } },
+            h(
+              'div',
+              { style: { fontWeight: 600, fontSize: 12.5, color: 'var(--dnb-text)', lineHeight: 1.4, flex: 1, minWidth: 0 } },
+              item.title || '未命名工程卷宗',
+            ),
+            h(
+              'span',
+              {
+                style: {
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 3,
+                  fontSize: 10.5,
+                  color: isOpen ? 'var(--dnb-accent)' : 'var(--dnb-text-3)',
+                  flexShrink: 0,
+                  marginTop: 1,
+                },
+              },
+              pointCount ? (pointCount + ' 记忆点') : '展开',
+              h(Icon, {
+                name: 'chevron',
+                size: 12,
+                style: {
+                  transform: isOpen ? 'rotate(90deg)' : 'none',
+                  transition: 'transform 0.16s ease',
+                },
+              }),
+            ),
+          ),
+          item.summary
+            ? h('div', {
+                style: {
+                  fontSize: 11.5,
+                  color: 'var(--dnb-text-2)',
+                  lineHeight: 1.45,
+                  marginTop: 3,
+                  display: '-webkit-box',
+                  WebkitLineClamp: isOpen ? 3 : 2,
+                  WebkitBoxOrient: 'vertical',
+                  overflow: 'hidden',
+                },
+              }, item.summary)
+            : null,
+          ((item.tags && item.tags.length) || item.organizedBy === 'chief')
+            ? h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap', marginTop: 5 } },
+                item.organizedBy === 'chief'
+                  ? h('span', {
+                      className: 'dnb-tag',
+                      style: { fontSize: 10, color: 'var(--dnb-accent)', background: 'rgba(10, 132, 255, 0.12)' },
+                    }, '✦ 参谋长已精编')
+                  : null,
+                (item.tags || []).slice(0, 5).map(t => h('span', { key: t, className: 'dnb-tag', style: { fontSize: 10 } }, t)),
+              )
+            : null,
+        ),
+
+        // Always-Visible Flat Action Strip (Take Out / Put Back + Deliver to Chat)
+        h(
+          'div',
+          { className: 'dnb-dossier-actions' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: 'var(--dnb-text-3)' } },
+            h('span', {
+              style: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 3,
+                padding: '0 6px',
+                height: 18,
+                borderRadius: 99,
+                background: clip.bg,
+                border: '1px solid ' + clip.border,
+                color: clip.color,
+                fontSize: 10,
+                fontWeight: 600,
+              },
+            }, clip.short),
+            h('span', null, item.takenOut ? '桌面备查中' : '封存懒加载'),
+            item.updatedAt ? h('span', null, timeLabel(item.updatedAt)) : null,
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-mini-btn',
+              'data-tone': item.takenOut ? 'amber' : undefined,
+              title: item.takenOut
+                ? '当前已取出挂在本会话桌面（注入本会话参考）；点击放回档案柜恢复冷封存'
+                : '将此卷宗临时取出摆到当前会话桌面（仅本会话生效，其他会话仍保持零注入）',
+              onClick: e => {
+                e.stopPropagation()
+                void mutateArchiveApi(
+                  { op: item.takenOut ? 'putBack' : 'takeOut', archiveId: item.id },
+                  item.takenOut ? '已放回档案柜封存（停止自动注入）' : '📎 已取出摆到本会话桌面备查',
+                )
+              },
+            },
+              h(Icon, { name: item.takenOut ? 'trayIn' : 'trayOut', size: 11 }),
+              item.takenOut ? '放回封存' : '取出备查',
+            ),
+            h('button', {
+              type: 'button',
+              className: 'dnb-mini-btn',
+              title: '把这份卷宗的提要与结构化记忆点直接递给主对话模型查阅',
+              onClick: e => {
+                e.stopPropagation()
+                void deliverArchiveToChat(detail || item, null)
+              },
+            }, h(Icon, { name: 'send', size: 10.5 }), '递对话'),
+          ),
+        ),
+
+        // Tier-3 Unfolded Sheet: Structured Memory Points -> Click to Expand Sub-Point Detail
+        isOpen
+          ? h(
+              'div',
+              { className: 'dnb-points-sheet' },
+              // Dossier Curation & Inspection Toolbar
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5, flexWrap: 'wrap' } },
+                h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' } },
+                  points.length > 1
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        onClick: toggleAllPoints,
+                      }, allPointsExpanded ? '收起全部小点' : '展开全部小点')
+                    : null,
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    'data-tone': 'accent',
+                    disabled: view.archiveOrganizing,
+                    title: '请 DSH 参谋长重新精炼本卷摘要并拆分为清晰的分条记忆点与小点记忆（原文 100% 保留）',
+                    onClick: () => void requestOrganizeArchives({ ids: [item.id], scope: 'selected' }),
+                  },
+                    h(Icon, { name: 'sparkles', size: 10.5 }),
+                    view.archiveOrganizing ? '整理中…' : '请参谋长重拆此卷',
+                  ),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    onClick: () => patch({
+                      archiveRawView: { ...(view.archiveRawView || {}), [item.id]: !showRaw },
+                    }),
+                  }, showRaw ? '收起原文' : '原文对照'),
+                ),
+                h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', gap: 4 } },
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    title: '移入其他档案柜抽屉',
+                    onClick: () => patch({ archiveMoveId: movingThis ? '' : item.id }),
+                  }, h(Icon, { name: 'folder', size: 10.5 }), '移抽屉'),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-icon-btn',
+                    style: { width: 22, height: 22 },
+                    title: '编辑卷宗',
+                    onClick: () => void openEditorForThis(),
+                  }, h(Icon, { name: 'edit', size: 11.5 })),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-icon-btn',
+                    style: { width: 22, height: 22, color: '#ff453a' },
+                    title: '删除此卷宗',
+                    onClick: () => {
+                      if (!confirm('确认从档案柜删除卷宗《' + clampTitle(item.title, 20) + '》？')) return
+                      void mutateArchiveApi({ op: 'delete', archiveId: item.id }, '已删除工程卷宗')
+                    },
+                  }, h(Icon, { name: 'trash', size: 11.5 })),
+                ),
+              ),
+
+              // Inline Folder Switcher Pills (when `移抽屉` clicked)
+              movingThis
+                ? h(
+                    'div',
+                    {
+                      style: {
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 5,
+                        flexWrap: 'wrap',
+                        padding: '6px 8px',
+                        borderRadius: 8,
+                        background: 'var(--dnb-card)',
+                        border: '1px solid var(--dnb-border)',
+                      },
+                    },
+                    h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, '移至抽屉：'),
+                    (folders || []).map(f =>
+                      h('button', {
+                        key: f.id,
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        'data-tone': f.id === item.folder ? 'accent' : undefined,
+                        onClick: () => {
+                          patch({
+                            archiveMoveId: '',
+                            archiveOpenFolders: { ...(view.archiveOpenFolders || {}), [f.id]: true },
+                          })
+                          void mutateArchiveApi({ op: 'moveFolder', archiveId: item.id, folder: f.id }, '已移入「' + f.label + '」抽屉')
+                        },
+                      }, f.label),
+                    ),
+                  )
+                : null,
+
+              // Loading state vs Structured Memory Points
+              loadingDetail && !detail
+                ? h(
+                    'div',
+                    { style: { padding: '8px 4px', fontSize: 11.5, color: 'var(--dnb-text-3)', display: 'flex', alignItems: 'center', gap: 6 } },
+                    h(Icon, { name: 'refresh', size: 12, style: { animation: 'dnb-spin 0.9s linear infinite' } }),
+                    '正在按需调阅卷宗记忆点…',
+                  )
+                : points.length
+                  ? points.map((pt, pIdx) => {
+                      const ptId = pt.id || ('pt-' + (pIdx + 1))
+                      const pKey = item.id + ':' + ptId
+                      const ptOpen = Boolean(view.archiveOpenPoints && view.archiveOpenPoints[pKey])
+                      const numBadge = String(pIdx + 1).padStart(2, '0')
+                      return h(
+                        'div',
+                        {
+                          key: ptId,
+                          className: 'dnb-mem-point',
+                          'data-open': ptOpen ? '1' : '0',
+                        },
+                        h(
+                          'div',
+                          {
+                            className: 'dnb-mem-point-row',
+                            onClick: () => patch({
+                              archiveOpenPoints: {
+                                ...(view.archiveOpenPoints || {}),
+                                [pKey]: !ptOpen,
+                              },
+                            }),
+                            title: ptOpen ? '点击收起小点记忆' : '点击展开此条小点记忆详情',
+                          },
+                          h('span', { className: 'dnb-mem-point-idx' }, numBadge),
+                          h(
+                            'div',
+                            { style: { flex: 1, minWidth: 0 } },
+                            h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)', lineHeight: 1.4 } },
+                              pt.title || ('记忆点 ' + (pIdx + 1))),
+                            !ptOpen && pt.cue && pt.cue !== pt.title
+                              ? h('div', {
+                                  style: {
+                                    fontSize: 11,
+                                    color: 'var(--dnb-text-3)',
+                                    marginTop: 2,
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    whiteSpace: 'nowrap',
+                                  },
+                                }, pt.cue)
+                              : null,
+                          ),
+                          h(Icon, {
+                            name: 'chevron',
+                            size: 12,
+                            style: {
+                              color: ptOpen ? 'var(--dnb-accent)' : 'var(--dnb-text-3)',
+                              marginTop: 3,
+                              transform: ptOpen ? 'rotate(90deg)' : 'none',
+                              transition: 'transform 0.15s ease',
+                            },
+                          }),
+                        ),
+                        ptOpen
+                          ? h(
+                              'div',
+                              { className: 'dnb-subpoint-detail' },
+                              h('div', null, pt.detail || pt.cue || pt.title),
+                              h(
+                                'div',
+                                { style: { display: 'flex', justifyContent: 'flex-end', gap: 5, marginTop: 7 } },
+                                h('button', {
+                                  type: 'button',
+                                  className: 'dnb-mini-btn',
+                                  onClick: () => copyText(
+                                    `【${item.title} · ${pt.title}】\n${pt.detail || pt.cue || ''}`,
+                                    '已复制此条小点记忆',
+                                  ),
+                                }, h(Icon, { name: 'copy', size: 10.5 }), '复制小点'),
+                                h('button', {
+                                  type: 'button',
+                                  className: 'dnb-mini-btn',
+                                  'data-tone': 'accent',
+                                  onClick: () => void deliverArchiveToChat(detail || item, pt),
+                                }, h(Icon, { name: 'send', size: 10.5 }), '递给对话'),
+                              ),
+                            )
+                          : null,
+                      )
+                    })
+                  : h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)', padding: '4px 2px' } }, '暂无结构化记忆点，可点击「请参谋长重拆此卷」自动梳理。'),
+
+              // Lossless Raw Body Viewer
+              showRaw && detail
+                ? h(
+                    'div',
+                    {
+                      style: {
+                        marginTop: 4,
+                        borderRadius: 9,
+                        border: '1px solid var(--dnb-border)',
+                        background: 'var(--dnb-card)',
+                        overflow: 'hidden',
+                      },
+                    },
+                    h(
+                      'div',
+                      {
+                        style: {
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'space-between',
+                          padding: '5px 10px',
+                          borderBottom: '1px solid var(--dnb-border)',
+                          fontSize: 10.5,
+                          color: 'var(--dnb-text-3)',
+                        },
+                      },
+                      h('span', null, `无损原始正文（${(detail.body || '').length} 字）`),
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        style: { height: 20 },
+                        onClick: () => copyText(detail.body || '', '已复制完整原文'),
+                      }, h(Icon, { name: 'copy', size: 10 }), '复制全文'),
+                    ),
+                    h('pre', { className: 'dnb-pre', style: { maxHeight: 240 } }, detail.body || '（此卷无附加原始正文）'),
+                  )
+                : null,
+            )
+          : null,
+      )
+    }
+
+    function ArchiveTab({ board, view }) {
+      // Lazy-load folder & file headers ONLY when user actually enters the `档案` tab
+      React.useEffect(() => {
+        void loadArchives(false)
+      }, [view.sessionId])
+
+      const meta = view.archiveMeta || {}
+      const folders = Array.isArray(view.archiveFolders) ? view.archiveFolders : []
+      const items = Array.isArray(view.archiveItems) ? view.archiveItems : []
+      const tempNotes = (board && Array.isArray(board.notes)) ? board.notes : []
+      const query = String(view.archiveQuery || '').trim().toLowerCase()
+      const clipFilter = view.archiveFilterClip || 'all'
+
+      // Filter headers client-side for instant zero-lag drawer filtering
+      const filteredItems = items.filter(it => {
+        if (!it) return false
+        if (clipFilter !== 'all' && it.paperclip !== clipFilter) return false
+        if (!query) return true
+        const hay = [
+          it.title,
+          it.summary,
+          (it.tags || []).join(' '),
+          (it.pointPreviews || []).join(' '),
+        ].join(' ').toLowerCase()
+        return hay.includes(query)
+      })
+
+      const takenOutItems = items.filter(it => it && it.takenOut)
+      const byFolder = new Map()
+      for (const f of folders) byFolder.set(f.id, [])
+      for (const it of filteredItems) {
+        const fId = it.folder || 'inbox'
+        if (!byFolder.has(fId)) byFolder.set(fId, [])
+        byFolder.get(fId).push(it)
+      }
+
+      // Build ordered folder drawers (include any orphan folder id gracefully)
+      const drawerList = [...folders]
+      for (const fId of byFolder.keys()) {
+        if (!drawerList.some(f => f.id === fId)) {
+          drawerList.push({ id: fId, label: fId, hint: '工程记忆抽屉', accent: '#64748b', count: byFolder.get(fId).length })
+        }
+      }
+
+      const visibleDrawers = (query || clipFilter !== 'all')
+        ? drawerList.filter(f => (byFolder.get(f.id) || []).length > 0)
+        : drawerList
+
+      const anyDrawerOpen = visibleDrawers.some(f => Boolean(view.archiveOpenFolders && view.archiveOpenFolders[f.id]))
+      const toggleAllDrawers = () => {
+        const next = {}
+        if (!anyDrawerOpen) {
+          for (const f of visibleDrawers) {
+            if ((byFolder.get(f.id) || []).length > 0) next[f.id] = true
+          }
+        }
+        patch({ archiveOpenFolders: next })
+      }
+
+      const submitNewFolder = async () => {
+        const name = String(view.archiveNewFolderName || '').trim()
+        if (!name) return
+        const out = await mutateArchiveApi({ op: 'createFolder', label: name }, '已新增档案柜抽屉「' + name + '」')
+        if (out && out.ok && out.folder) {
+          patch({
+            archiveNewFolderOpen: false,
+            archiveNewFolderName: '',
+            archiveOpenFolders: { ...(view.archiveOpenFolders || {}), [out.folder.id]: true },
+          })
+        }
+      }
+
+      const totalCount = items.length || meta.totalCount || 0
+
+      return h(
+        'div',
+        { className: 'dnb-view' },
+
+        // 1. Top Vault Status & Chief Curation Bar
+        h(
+          'div',
+          { className: 'dnb-vault-banner' },
+          h(
+            'div',
+            { style: { minWidth: 0 } },
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } },
+              h(Icon, { name: 'archive', size: 13.5, style: { color: '#f59e0b' } }),
+              `工程档案柜 · ${totalCount} 卷`,
+            ),
+            h(
+              'div',
+              { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
+              takenOutItems.length > 0
+                ? `已取出 ${takenOutItems.length} 卷供本会话参考 · 其余封存懒加载`
+                : '默认冷存储封存 · 懒加载不占上下文，仅在点阅或取出时调取',
+            ),
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill dnb-pill-accent',
+              style: { height: 26, padding: '0 9px', fontSize: 11 },
+              disabled: view.archiveOrganizing,
+              title: '请 DSH 参谋长把档案按抽屉分类、打曲别针等级，并拆成可展开的记忆点与小点记忆',
+              onClick: () => patch({ archiveOrganizeOpen: !view.archiveOrganizeOpen }),
+            },
+              view.archiveOrganizing
+                ? h(Icon, { name: 'refresh', size: 11.5, style: { animation: 'dnb-spin 0.9s linear infinite' } })
+                : h(Icon, { name: 'sparkles', size: 11.5 }),
+              view.archiveOrganizing ? '参谋长收纳中…' : '请参谋长整理收纳',
+            ),
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 26, padding: '0 9px', fontSize: 11 },
+              onClick: () => patch({
+                archiveEditor: {
+                  id: '',
+                  title: '',
+                  summary: '',
+                  folder: 'coords',
+                  paperclip: 'silver',
+                  tags: '',
+                  body: '',
+                },
+              }),
+            }, h(Icon, { name: 'plus', size: 11.5 }), '建卷宗'),
+          ),
+        ),
+
+        // 2. Collapsible Chief Organize Command Deck
+        view.archiveOrganizeOpen
+          ? h(
+              'div',
+              {
+                className: 'dnb-group',
+                style: {
+                  padding: '9px 11px',
+                  marginBottom: 9,
+                  borderColor: 'rgba(10, 132, 255, 0.36)',
+                },
+              },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 } },
+                h('span', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-accent)' } }, '✦ 吩咐 DSH 参谋长整理收纳档案柜'),
+                h('button', {
+                  className: 'dnb-icon-btn',
+                  style: { width: 20, height: 20 },
+                  onClick: () => patch({ archiveOrganizeOpen: false }),
+                }, h(Icon, { name: 'x', size: 12 })),
+              ),
+              h('div', { style: { fontSize: 11, color: 'var(--dnb-text-2)', lineHeight: 1.45, marginBottom: 7 } },
+                '参谋长会自动归纳文件夹抽屉、标记金/银/铜曲别针、提炼一句话提要，并将长文拆解为层次清晰的「记忆点 → 小点记忆」，同时 100% 无损保留原始正文。'),
+              h(
+                'div',
+                { style: { display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 7 } },
+                [
+                  { key: 'unorganized', label: '整理待精编卷宗' + (meta.unorganizedCount ? ` (${meta.unorganizedCount})` : '') },
+                  { key: 'all', label: '全柜重新梳理' },
+                ].map(opt =>
+                  h('button', {
+                    key: opt.key,
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    'data-tone': (view.archiveOrganizeScope || 'unorganized') === opt.key ? 'accent' : undefined,
+                    onClick: () => patch({ archiveOrganizeScope: opt.key }),
+                  }, opt.label),
+                ),
+              ),
+              h(
+                'div',
+                { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+                h('input', {
+                  className: 'dnb-input',
+                  style: { height: 28, fontSize: 11.5, borderRadius: 99, padding: '0 11px' },
+                  placeholder: '可选补充要求（如：把命令与路径单独拆成小点）…',
+                  value: view.archiveOrganizePrompt || '',
+                  onChange: e => patch({ archiveOrganizePrompt: e.target.value }),
+                  onKeyDown: e => {
+                    if (e.key === 'Enter') void requestOrganizeArchives({})
+                  },
+                }),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-primary-btn',
+                  style: { height: 28, padding: '0 12px', fontSize: 11.5, flexShrink: 0 },
+                  disabled: view.archiveOrganizing,
+                  onClick: () => void requestOrganizeArchives({}),
+                }, view.archiveOrganizing ? '整理中…' : '立即整理'),
+              ),
+            )
+          : null,
+
+        // 3. Inline Dossier Creator / Editor
+        view.archiveEditor ? h(ArchiveEditorCard, { folders: drawerList, editor: view.archiveEditor }) : null,
+
+        // 4. Temporary Session Notes Precipitation Banner (if any active un-archived notes exist on board.notes)
+        tempNotes.length > 0
+          ? h(
+              'div',
+              {
+                className: 'dnb-group',
+                style: {
+                  padding: '8px 11px',
+                  marginBottom: 9,
+                  borderColor: 'rgba(16, 185, 129, 0.38)',
+                  background: 'rgba(16, 185, 129, 0.07)',
+                },
+              },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+                h(
+                  'div',
+                  { style: { fontSize: 11.5, color: 'var(--dnb-text)', lineHeight: 1.45 } },
+                  h('strong', { style: { color: '#10b981' } }, `发现 ${tempNotes.length} 篇本轮临时便签`),
+                  ' · 沉淀入档案柜后即可分抽屉封存，不再每轮挤占提示词。',
+                ),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  style: { borderColor: 'rgba(16, 185, 129, 0.45)', color: '#10b981', flexShrink: 0 },
+                  onClick: () => void mutateArchiveApi({ op: 'precipitateNotes' }, '已将临时便签沉淀封存入档案柜'),
+                }, h(Icon, { name: 'archive', size: 11 }), '一键沉淀入柜'),
+              ),
+            )
+          : null,
+
+        // 5. Active Desk Tray: Dossiers Explicitly Taken Out for Current Session
+        takenOutItems.length > 0
+          ? h(
+              'div',
+              { className: 'dnb-desk-tray' },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 6 } },
+                h(
+                  'span',
+                  { style: { fontSize: 11.5, fontWeight: 600, color: '#f59e0b', display: 'inline-flex', alignItems: 'center', gap: 5 } },
+                  h(Icon, { name: 'paperclip', size: 12 }),
+                  `本会话桌面备查（${takenOutItems.length} 卷生效中）`,
+                ),
+                takenOutItems.length > 1
+                  ? h('button', {
+                      type: 'button',
+                      className: 'dnb-mini-btn',
+                      onClick: async () => {
+                        for (const it of takenOutItems) {
+                          await mutateArchiveApi({ op: 'putBack', archiveId: it.id })
+                        }
+                        patch({ notice: '已全部放回档案柜恢复冷封存' })
+                      },
+                    }, '全部放回封存')
+                  : null,
+              ),
+              h(
+                'div',
+                { style: { display: 'flex', flexDirection: 'column', gap: 5 } },
+                takenOutItems.map(it =>
+                  h(
+                    'div',
+                    {
+                      key: 'desk-' + it.id,
+                      style: {
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 6,
+                        padding: '5px 8px',
+                        borderRadius: 8,
+                        background: 'var(--dnb-elevated)',
+                        border: '1px solid var(--dnb-border)',
+                      },
+                    },
+                    h(
+                      'div',
+                      {
+                        style: { fontSize: 11.5, fontWeight: 500, color: 'var(--dnb-text)', cursor: 'pointer', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+                        title: '点击在抽屉中展开查看此卷宗',
+                        onClick: () => {
+                          patch({
+                            archiveOpenFolders: { ...(view.archiveOpenFolders || {}), [it.folder]: true },
+                            archiveOpenFiles: { ...(view.archiveOpenFiles || {}), [it.id]: true },
+                          })
+                          void loadArchiveDetail(it.id, false)
+                        },
+                      },
+                      '📎 ' + it.title,
+                    ),
+                    h(
+                      'div',
+                      { style: { display: 'flex', gap: 4, flexShrink: 0 } },
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        onClick: () => void deliverArchiveToChat(it, null),
+                      }, '递对话'),
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        'data-tone': 'amber',
+                        onClick: () => void mutateArchiveApi({ op: 'putBack', archiveId: it.id }, '已放回档案柜封存'),
+                      }, '放回'),
+                    ),
+                  ),
+                ),
+              ),
+            )
+          : null,
+
+        // 6. Filter, Clip Selector & Drawer Master Controls
+        h(
+          'div',
+          { style: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 } },
+          h(
+            'div',
+            { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+            h('input', {
+              className: 'dnb-input',
+              style: { height: 28, borderRadius: 99, padding: '0 11px', fontSize: 11.5 },
+              placeholder: '筛选档案标题、标签、记忆点线索…',
+              value: view.archiveQuery || '',
+              onChange: e => patch({ archiveQuery: e.target.value }),
+            }),
+            view.archiveQuery
+              ? h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  onClick: () => patch({ archiveQuery: '' }),
+                }, '清空')
+              : null,
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5, flexWrap: 'wrap' } },
+            h(
+              'div',
+              { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
+              [
+                { key: 'all', label: '全部' },
+                { key: 'gold', label: '📎 核心金针' },
+                { key: 'silver', label: '标准银针' },
+                { key: 'copper', label: '历史铜针' },
+              ].map(c =>
+                h('button', {
+                  key: c.key,
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  'data-tone': clipFilter === c.key ? 'accent' : undefined,
+                  onClick: () => patch({ archiveFilterClip: c.key }),
+                }, c.label),
+              ),
+            ),
+            h(
+              'div',
+              { style: { display: 'flex', gap: 4, alignItems: 'center' } },
+              h('button', {
+                type: 'button',
+                className: 'dnb-mini-btn',
+                onClick: () => patch({ archiveNewFolderOpen: !view.archiveNewFolderOpen }),
+              }, '+ 抽屉'),
+              h('button', {
+                type: 'button',
+                className: 'dnb-mini-btn',
+                onClick: toggleAllDrawers,
+              }, anyDrawerOpen ? '合上抽屉' : '拉开抽屉'),
+            ),
+          ),
+          view.archiveNewFolderOpen
+            ? h(
+                'div',
+                { style: { display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 } },
+                h('input', {
+                  className: 'dnb-input',
+                  style: { height: 27, fontSize: 11.5, borderRadius: 99, padding: '0 11px' },
+                  placeholder: '新文件夹抽屉名称（如：云端网关与反代）…',
+                  value: view.archiveNewFolderName || '',
+                  onChange: e => patch({ archiveNewFolderName: e.target.value }),
+                  onKeyDown: e => { if (e.key === 'Enter') void submitNewFolder() },
+                }),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-primary-btn',
+                  style: { height: 27, padding: '0 11px', fontSize: 11 },
+                  onClick: () => void submitNewFolder(),
+                }, '创建'),
+              )
+            : null,
+        ),
+
+        // 7. Filing Cabinet Folder Drawers -> Pull Drawer to Unfold Paperclipped Dossiers
+        view.archiveLoading && !view.archiveLoaded
+          ? h(
+              'div',
+              { className: 'dnb-empty' },
+              h(Icon, { name: 'refresh', size: 14, style: { animation: 'dnb-spin 0.9s linear infinite', marginRight: 6 } }),
+              '正在打开工程档案柜…',
+            )
+          : visibleDrawers.length === 0
+            ? h('div', { className: 'dnb-empty' }, query || clipFilter !== 'all' ? '没有匹配的工程档案卷宗' : '档案柜暂空，可点击右上角「建卷宗」收纳长期工程记忆')
+            : visibleDrawers.map(folder => {
+                const fItems = byFolder.get(folder.id) || []
+                const autoOpen = Boolean(query || clipFilter !== 'all')
+                const drawerOpen = autoOpen || Boolean(view.archiveOpenFolders && view.archiveOpenFolders[folder.id])
+                const accent = folder.accent || '#0a84ff'
+                const earTag = FOLDER_EAR_TAG[folder.id] || 'CABINET · 抽屉'
+                const goldCount = fItems.filter(it => it.paperclip === 'gold').length
+
+                return h(
+                  'div',
+                  {
+                    key: folder.id,
+                    className: 'dnb-cabinet-drawer',
+                    'data-open': drawerOpen ? '1' : '0',
+                  },
+                  // Raised Manilla Folder Tab Ear
+                  h(
+                    'div',
+                    { className: 'dnb-folder-ear' },
+                    h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: accent } }),
+                    earTag,
+                  ),
+                  h(
+                    'div',
+                    { className: 'dnb-drawer-box' },
+                    // Drawer Front Handle Bar
+                    h(
+                      'div',
+                      {
+                        className: 'dnb-drawer-front',
+                        onClick: () => patch({
+                          archiveOpenFolders: {
+                            ...(view.archiveOpenFolders || {}),
+                            [folder.id]: !drawerOpen,
+                          },
+                        }),
+                        title: drawerOpen ? '点击推回合上抽屉' : '点击拉开抽屉逐条查看卷宗',
+                      },
+                      h('span', { className: 'dnb-drawer-spine', style: { background: accent } }),
+                      h(Icon, {
+                        name: drawerOpen ? 'folderOpen' : 'folder',
+                        size: 16,
+                        style: { color: accent },
+                      }),
+                      h(
+                        'div',
+                        { style: { flex: 1, minWidth: 0 } },
+                        h(
+                          'div',
+                          { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+                          h('span', { style: { fontWeight: 600, fontSize: 13, color: 'var(--dnb-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, folder.label),
+                          goldCount > 0
+                            ? h('span', {
+                                style: {
+                                  fontSize: 10,
+                                  padding: '0 5px',
+                                  borderRadius: 99,
+                                  background: 'rgba(245, 158, 11, 0.14)',
+                                  color: '#f59e0b',
+                                  fontWeight: 600,
+                                  flexShrink: 0,
+                                },
+                              }, '📎 ' + goldCount)
+                            : null,
+                        ),
+                        folder.hint
+                          ? h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 } }, folder.hint)
+                          : null,
+                      ),
+                      h('span', { className: 'dnb-tag', style: { fontWeight: 600, flexShrink: 0 } }, fItems.length + ' 卷'),
+                      h(
+                        'span',
+                        { className: 'dnb-drawer-handle' },
+                        h(Icon, {
+                          name: 'chevron',
+                          size: 12,
+                          style: {
+                            transform: drawerOpen ? 'rotate(90deg)' : 'none',
+                            transition: 'transform 0.18s ease',
+                          },
+                        }),
+                      ),
+                    ),
+
+                    // Pulled-Open Drawer Well containing Paperclipped Dossiers
+                    drawerOpen
+                      ? h(
+                          'div',
+                          { className: 'dnb-drawer-well' },
+                          h(
+                            'div',
+                            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '0 2px 2px' } },
+                            h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
+                              fItems.length ? '点击文件展开记忆点 · 再点记忆点展开小点记忆' : '此抽屉暂无卷宗'),
+                            h(
+                              'div',
+                              { style: { display: 'flex', gap: 5 } },
+                              fItems.length > 0
+                                ? h('button', {
+                                    type: 'button',
+                                    className: 'dnb-mini-btn',
+                                    'data-tone': 'accent',
+                                    disabled: view.archiveOrganizing,
+                                    onClick: () => void requestOrganizeArchives({ folder: folder.id, scope: 'folder' }),
+                                  }, h(Icon, { name: 'sparkles', size: 10 }), '整理本抽屉')
+                                : null,
+                              h('button', {
+                                type: 'button',
+                                className: 'dnb-mini-btn',
+                                onClick: () => patch({
+                                  archiveEditor: {
+                                    id: '',
+                                    title: '',
+                                    summary: '',
+                                    folder: folder.id,
+                                    paperclip: 'silver',
+                                    tags: '',
+                                    body: '',
+                                  },
+                                }),
+                              }, h(Icon, { name: 'plus', size: 10 }), '在此建卷'),
+                            ),
+                          ),
+                          fItems.map((it, idx) =>
+                            h(ArchiveDossierCard, {
+                              key: it.id,
+                              item: it,
+                              idx,
+                              folders: drawerList,
+                              view,
+                            }),
+                          ),
+                        )
+                      : null,
+                  ),
+                )
+              }),
+      )
+    }
+
+    /* ---------------------------------------------------------- Handoff Tab */
+
+    function HandoffTab({ view }) {
+      React.useEffect(() => {
+        if (!store.handoffText) void loadHandoff()
+        void loadTargets()
+      }, [view.sessionId])
+
+      const targets = Array.isArray(view.targets) ? view.targets : []
+      const options = [{ id: 'new', label: '新建会话并交接' }].concat(
+        targets
+          .filter(item => item && item.id !== view.sessionId)
+          .map(item => ({
+            id: item.id,
+            label: [item.name || shortSession(item.id), timeLabel(item.lastSeen)].filter(Boolean).join(' · '),
+          })),
+      )
+      const target = options.some(i => i.id === view.target) ? view.target : 'new'
+
+      const copyPacket = async () => {
+        const text = store.handoffText || (await loadHandoff())
+        if (text) copyText(text, '交接单已复制')
+      }
+
+      const exportMd = () => {
+        const text = store.handoffText || ''
+        if (!text) return
+        const blob = new Blob([text], { type: 'text/markdown' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = 'handoff-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.md'
+        a.click()
+        URL.revokeObjectURL(url)
+        patch({ notice: '已导出 Markdown' })
+      }
+
+      return h(
+        'div',
+        { className: 'dnb-view' },
+        // Card 1: Quick Actions
+        h('div', { className: 'dnb-section-head' }, h('span', null, '会话交接')),
+        h(
+          'div',
+          { className: 'dnb-group', style: { padding: 10 } },
+          h(
+            'div',
+            { style: { display: 'flex', gap: 8, marginBottom: 8 } },
+            h('button', {
+              className: 'dnb-primary-btn',
+              style: { flex: 1 },
+              disabled: view.handoffBusy,
+              onClick: () => void copyPacket(),
+            }, h(Icon, { name: 'copy', size: 13 }), view.handoffBusy ? '生成中…' : '复制交接单'),
+            h('button', {
+              className: 'dnb-pill dnb-pill-accent',
+              style: { flex: 1, height: 30 },
+              disabled: view.handoffBusy,
+              onClick: () => void transfer('create'),
+            }, '新会话接力'),
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', gap: 6 } },
+            h('select', {
+              className: 'dnb-input',
+              style: { flex: 1, height: 30, padding: '0 10px', borderRadius: 99, fontSize: 12 },
+              value: target,
+              onChange: e => patch({ target: e.target.value }),
+            }, options.map(i => h('option', { key: i.id, value: i.id }, i.label))),
+            h('button', {
+              className: 'dnb-pill',
+              style: { height: 30 },
+              disabled: view.handoffBusy,
+              onClick: () => void transfer(target === 'new' ? 'create' : target),
+            }, '投递'),
+          ),
+        ),
+
+        // Card 2: Packet Preview
+        h(
+          'div',
+          { className: 'dnb-section-head', style: { marginTop: 12 } },
+          h('span', null, '交接单预览'),
+          h(
+            'div',
+            { style: { display: 'flex', gap: 4 } },
+            h('button', { className: 'dnb-pill', style: { height: 22, fontSize: 11 }, onClick: () => void loadHandoff() }, '刷新'),
+            h('button', {
+              className: 'dnb-pill',
+              style: { height: 22, fontSize: 11 },
+              onClick: () => {
+                if (view.handoffEdit === null || view.handoffEdit === undefined) {
+                  patch({ handoffEdit: view.handoffText || '' })
+                } else {
+                  patch({ handoffText: view.handoffEdit, handoffEdit: null, notice: '已更新预览' })
+                }
+              },
+            }, view.handoffEdit === null || view.handoffEdit === undefined ? '编辑' : '完成'),
+            h('button', { className: 'dnb-pill', style: { height: 22, fontSize: 11 }, onClick: exportMd }, '导出'),
+          ),
+        ),
+        h(
+          'div',
+          { className: 'dnb-group' },
+          view.handoffEdit === null || view.handoffEdit === undefined
+            ? h('pre', { className: 'dnb-pre', style: { maxHeight: 220 } }, view.handoffText || '暂无内容')
+            : h('textarea', {
+                className: 'dnb-bare-area',
+                style: { minHeight: 180, fontFamily: 'monospace', fontSize: 11.5 },
+                value: view.handoffEdit,
+                onChange: e => patch({ handoffEdit: e.target.value }),
+              }),
+        ),
+
+        // Card 3: iOS Settings Switches
+        h('div', { className: 'dnb-section-head', style: { marginTop: 12 } }, h('span', null, '自动化偏好')),
+        h(
+          'div',
+          { className: 'dnb-group' },
+          h(
+            'div',
+            { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
+            h('span', { style: { fontSize: 12.5 } }, '每轮自动注入摘要'),
+            h(Switch, {
+              checked: !!view.autoInject,
+              onChange: on => {
+                patch({ autoInject: on })
+                void act({ action: 'settings.set', autoInject: on })
+              },
+            }),
+          ),
+          h(
+            'div',
+            { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
+            h('span', { style: { fontSize: 12.5 } }, '空转自动提醒'),
+            h(Switch, {
+              checked: !!view.guardIdle,
+              onChange: on => {
+                patch({ guardIdle: on })
+                void act({ action: 'settings.set', guardIdle: on })
+              },
+            }),
+          ),
+          h(
+            'div',
+            { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
+            h('span', { style: { fontSize: 12.5 } }, '单会话提醒上限'),
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+              h('button', {
+                className: 'dnb-pill',
+                style: { width: 24, height: 24, padding: 0 },
+                onClick: () => {
+                  const next = Math.max(0, Number(view.guardMaxPerSession || 0) - 1)
+                  patch({ guardMaxPerSession: next })
+                  void act({ action: 'settings.set', guardMaxPerSession: next })
+                },
+              }, '−'),
+              h('span', { style: { minWidth: 18, textAlign: 'center', fontWeight: 500 } }, String(view.guardMaxPerSession)),
+              h('button', {
+                className: 'dnb-pill',
+                style: { width: 24, height: 24, padding: 0 },
+                onClick: () => {
+                  const next = Math.min(20, Number(view.guardMaxPerSession || 0) + 1)
+                  patch({ guardMaxPerSession: next })
+                  void act({ action: 'settings.set', guardMaxPerSession: next })
+                },
+              }, '+'),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
+            h('span', { style: { fontSize: 12.5 } }, '短回复字数线'),
+            h('input', {
+              type: 'number',
+              className: 'dnb-input',
+              style: { width: 72, height: 26, textAlign: 'right', padding: '0 8px', borderRadius: 8 },
+              min: 0,
+              max: 10000,
+              value: String(view.guardShortAnswer),
+              onChange: e => {
+                const next = Math.max(0, Math.min(10000, Math.round(Number(e.target.value) || 0)))
+                patch({ guardShortAnswer: next })
+                void act({ action: 'settings.set', guardShortAnswer: next })
+              },
+            }),
+          ),
+        ),
+      )
+    }
+
+    /* -------------------------------------------------------- Boundaries Tab */
+
+    async function addBoundRule(field, item, pinned = false) {
+      const res = await act({ action: 'bounds.add', field, item, pinned: Boolean(pinned) })
+      if (!res || store.error) return
+      patch({
+        boundDraft: { ...store.boundDraft, [field]: '' },
+        notice: pinned ? '📌 已添加并定住为全局共享边界' : '已添加至当前任务边界（点击前方的图钉可定住全局）',
+      })
+    }
+
+    async function toggleBoundPin(field, item, nextPinned) {
+      const res = await act({ action: 'bounds.pin', field, item, pinned: Boolean(nextPinned) })
+      if (!res || store.error) return
+      patch({
+        notice: nextPinned
+          ? '📌 已盖上小图钉 · 定住为跨任务全局共享边界'
+          : '已取下小图钉 · 改为仅当前任务生效',
+      })
+    }
+
+    async function removeBoundRule(field, item) {
+      const nextSel = { ...(store.boundSelected || { allowed: [], forbidden: [], notes: [] }) }
+      if (Array.isArray(nextSel[field])) {
+        nextSel[field] = nextSel[field].filter(x => x !== item)
+        patch({ boundSelected: nextSel })
+      }
+      await act({ action: 'bounds.remove', field, item })
+    }
+
+    async function editBoundRule(field, oldItem, nextItem) {
+      const trimmed = String(nextItem || '').trim()
+      if (!trimmed || trimmed === oldItem) return
+      const res = await act({ action: 'bounds.edit', field, oldItem, item: trimmed })
+      if (res && !store.error) patch({ notice: '已更新边界条文' })
+    }
+
+    function toggleBoundSelect(field, item) {
+      const curMap = store.boundSelected || { allowed: [], forbidden: [], notes: [] }
+      const cur = Array.isArray(curMap[field]) ? curMap[field] : []
+      const next = cur.includes(item) ? cur.filter(x => x !== item) : cur.concat(item)
+      patch({ boundSelected: { ...curMap, [field]: next } })
+    }
+
+    function BoundCard({ field, label, dot, items, pinnedItems }) {
+      const [editingItem, setEditingItem] = React.useState('')
+      const [editingVal, setEditingVal] = React.useState('')
+
+      const draft = (store.boundDraft && store.boundDraft[field]) || ''
+      const pinDraft = Boolean(store.boundPinDraft && store.boundPinDraft[field])
+      const list = Array.isArray(items) ? items : []
+      const pinnedSet = new Set(Array.isArray(pinnedItems) ? pinnedItems : [])
+      const selected = ((store.boundSelected && store.boundSelected[field]) || []).filter(x => list.includes(x))
+      const full = list.length >= BOUND_CAP
+      const isConsolidatingCol = store.boundConsolidating === field
+
+      const commit = () => {
+        const text = draft.trim()
+        if (!text || full) return
+        if (!list.includes(text)) void addBoundRule(field, text, pinDraft)
+        else patch({ boundDraft: { ...store.boundDraft, [field]: '' } })
+      }
+
+      const saveInlineEdit = () => {
+        const nextText = editingVal.trim()
+        const prevText = editingItem
+        setEditingItem('')
+        setEditingVal('')
+        if (prevText && nextText && nextText !== prevText) {
+          void editBoundRule(field, prevText, nextText)
+        }
+      }
+
+      const pinnedCountInCol = list.filter(x => pinnedSet.has(x)).length
+
+      return h(
+        'div',
+        { style: { marginBottom: 12 } },
+        h(
+          'div',
+          { className: 'dnb-section-head' },
+          h(
+            'span',
+            { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } },
+            h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: dot } }),
+            label,
+            pinnedCountInCol > 0
+              ? h('span', { style: { fontSize: 10.5, color: '#ff9f0a', fontWeight: 600 } }, `📌${pinnedCountInCol}`)
+              : null,
+          ),
+          h(
+            'div',
+            { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } },
+            list.length >= 2
+              ? h('button', {
+                  className: 'dnb-pill',
+                  style: {
+                    height: 21,
+                    padding: '0 7px',
+                    fontSize: 10.5,
+                    color: selected.length >= 2 ? '#fff' : 'var(--dnb-accent)',
+                    background: selected.length >= 2 ? 'var(--dnb-accent)' : 'rgba(10, 132, 255, 0.1)',
+                    borderColor: 'rgba(10, 132, 255, 0.24)',
+                  },
+                  disabled: Boolean(store.secBusy),
+                  title: selected.length >= 2
+                    ? `请参谋长将勾选的 ${selected.length} 条零散规则总结成一条`
+                    : `请参谋长将【${label}】下的 ${list.length} 条零散规则浓缩总结成一条`,
+                  onClick: () => void requestConsolidateBounds(field, selected.length >= 2 ? selected : []),
+                },
+                h(Icon, { name: 'sparkles', size: 10.5 }),
+                isConsolidatingCol
+                  ? '浓缩中…'
+                  : (selected.length >= 2 ? `${selected.length} 条合一` : '总结成一条'))
+              : null,
+            list.length ? h('span', null, String(list.length)) : null,
+          ),
+        ),
+        h(
+          'div',
+          { className: 'dnb-group' },
+          list.map((item, idx) => {
+            const isPinned = pinnedSet.has(item)
+            const isChecked = selected.includes(item)
+            const isRowEditing = editingItem === item
+
+            return h(
+              'div',
+              {
+                key: idx + ':' + item,
+                className: 'dnb-cell dnb-cell-hover',
+                style: {
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  background: isPinned ? 'linear-gradient(90deg, rgba(255, 159, 10, 0.08) 0%, transparent 65%)' : undefined,
+                },
+              },
+              // Front Pushpin Stamp (小图钉戳)
+              h('button', {
+                className: 'dnb-pin-stamp',
+                'data-pinned': isPinned ? '1' : '0',
+                title: isPinned
+                  ? '📌 已定住（全局跨任务共享）· 点击取下图钉改为仅本任务有效'
+                  : '仅当前任务生效 · 点击盖上小图钉定住为全局共享',
+                onClick: () => void toggleBoundPin(field, item, !isPinned),
+              }, h(Icon, { name: 'pinStamp', size: 13 })),
+
+              isRowEditing
+                ? h('input', {
+                    className: 'dnb-input',
+                    style: { flex: 1, height: 26, fontSize: 12, padding: '0 7px' },
+                    autoFocus: true,
+                    value: editingVal,
+                    onChange: e => setEditingVal(e.target.value),
+                    onBlur: saveInlineEdit,
+                    onKeyDown: e => {
+                      if (e.key === 'Enter') saveInlineEdit()
+                      else if (e.key === 'Escape') {
+                        setEditingItem('')
+                        setEditingVal('')
+                      }
+                    },
+                  })
+                : h(
+                    'div',
+                    {
+                      style: { display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 },
+                      onDoubleClick: () => {
+                        setEditingItem(item)
+                        setEditingVal(item)
+                      },
+                    },
+                    isPinned ? h('span', { className: 'dnb-pin-badge' }, '全局') : null,
+                    h('span', {
+                      style: {
+                        fontSize: 12.5,
+                        wordBreak: 'break-word',
+                        flex: 1,
+                        fontWeight: isPinned ? 500 : 400,
+                      },
+                    }, item),
+                  ),
+
+              h(
+                'div',
+                { style: { display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 } },
+                list.length >= 2 && !isRowEditing
+                  ? h('button', {
+                      className: 'dnb-bound-check',
+                      'data-checked': isChecked ? '1' : '0',
+                      title: isChecked ? '已选入待合并零散边界' : '勾选以挑出多条零散边界合并成一条',
+                      onClick: () => toggleBoundSelect(field, item),
+                    }, h(Icon, { name: 'check', size: 10.5 }))
+                  : null,
+                !isRowEditing
+                  ? h('button', {
+                      className: 'dnb-icon-btn dnb-row-actions',
+                      style: { width: 22, height: 22 },
+                      title: '编辑条文',
+                      onClick: () => {
+                        setEditingItem(item)
+                        setEditingVal(item)
+                      },
+                    }, h(Icon, { name: 'edit', size: 11.5 }))
+                  : null,
+                h('button', {
+                  className: 'dnb-icon-btn dnb-row-actions',
+                  style: { width: 22, height: 22, color: '#ff453a' },
+                  title: '删除此条边界',
+                  onClick: () => void removeBoundRule(field, item),
+                }, h(Icon, { name: 'x', size: 12 })),
+              ),
+            )
+          }),
+          h(
+            'div',
+            { className: 'dnb-cell', style: { padding: '6px 10px', gap: 7 } },
+            h('button', {
+              className: 'dnb-pin-stamp',
+              'data-pinned': pinDraft ? '1' : '0',
+              title: pinDraft ? '📌 新增时直接定住为全局共享（点击切换为仅本任务）' : '新增时仅本任务有效（点击小图钉切换为全局共享）',
+              onClick: () => patch({ boundPinDraft: { ...(store.boundPinDraft || {}), [field]: !pinDraft } }),
+            }, h(Icon, { name: 'pinStamp', size: 12.5 })),
+            h('input', {
+              className: 'dnb-input',
+              style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1 },
+              placeholder: full
+                ? '已达上限'
+                : (pinDraft ? '添加全局共享规则（跨任务生效）…' : '添加当前任务规则（点左侧图钉可定住全局）…'),
+              disabled: full,
+              value: draft,
+              onChange: e => patch({ boundDraft: { ...store.boundDraft, [field]: e.target.value } }),
+              onKeyDown: e => { if (e.key === 'Enter') commit() },
+            }),
+            draft.trim()
+              ? h('button', {
+                  className: 'dnb-pill dnb-pill-accent',
+                  style: { height: 24 },
+                  onClick: commit,
+                }, pinDraft ? '📌 定住添加' : '添加')
+              : null,
+          ),
+        ),
+      )
+    }
+
+    function BoundariesTab({ store: view }) {
+      const [showEnv, setShowEnv] = React.useState(false)
+      const subTab = view.boundSubTab || 'rules'
+      const bounds = (view.board && view.board.bounds) || {}
+      const pinnedBounds = (view.board && view.board.pinnedBounds) || {}
+      const hasConsolidatableCol = BOUND_LISTS.some(b => ((bounds[b.field] || []).length >= 2))
+      const totalPinnedCount = BOUND_LISTS.reduce((acc, b) => acc + ((pinnedBounds[b.field] || []).length), 0)
+      const info = view.boundaries || {}
+      const rows = [
+        ['工作目录', info.sessionWorkingDirectory || info.workingDirectory],
+        ['沙箱模式', info.sessionSandboxMode || info.sandboxMode],
+        ['可写路径', info.workspaceRoot],
+        ['数据文件', info.boardFile],
+        ['会话 ID', view.sessionId],
+      ].filter(([, val]) => val)
+
+      return h(
+        'div',
+        { className: 'dnb-view' },
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 10, flexWrap: 'wrap' } },
+          h(
+            'div',
+            { style: { display: 'flex', gap: 6 } },
+            h('button', {
+              className: 'dnb-pill',
+              'data-active': subTab === 'rules' ? '1' : '0',
+              onClick: () => patch({ boundSubTab: 'rules' }),
+            }, '红线边界'),
+            h('button', {
+              className: 'dnb-pill',
+              'data-active': subTab === 'handoff' ? '1' : '0',
+              onClick: () => patch({ boundSubTab: 'handoff' }),
+            }, '会话交接 & 守护'),
+          ),
+          subTab === 'rules'
+            ? h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
+                hasConsolidatableCol
+                  ? h('button', {
+                      className: 'dnb-pill',
+                      style: {
+                        height: 25,
+                        padding: '0 9px',
+                        fontSize: 11,
+                        color: '#ff9f0a',
+                        background: 'rgba(255, 159, 10, 0.12)',
+                        borderColor: 'rgba(255, 159, 10, 0.32)',
+                      },
+                      disabled: view.secBusy,
+                      title: '请 DSH 参谋长把当前零散、重复的多条重要边界浓缩合并成一条高密度总则',
+                      onClick: () => void requestConsolidateBounds('', []),
+                    }, h(Icon, { name: 'sparkles', size: 11 }), view.boundConsolidating === 'all' ? '浓缩中…' : '零散总结成一条')
+                  : null,
+                h('button', {
+                  className: 'dnb-pill dnb-pill-accent',
+                  style: { height: 25, padding: '0 9px', fontSize: 11 },
+                  disabled: view.secBusy,
+                  title: '让 DSH 参谋长结合当前撞墙记录与会话纪律提炼新边界，并发起请示供你拍板',
+                  onClick: () => {
+                    void submitChiefBar('请结合当前会话的踩坑撞墙记录、工具权限约束与工作约定，简明分点总结工作边界，并向我发起边界注入请示（boundProposals）。')
+                  },
+                }, h(Icon, { name: 'sparkles', size: 11.5 }), view.secBusy && !view.boundConsolidating ? '提炼中…' : '提炼新边界'),
+              )
+            : null,
+        ),
+        subTab === 'handoff'
+          ? h(HandoffTab, { view })
+          : h(
+              React.Fragment,
+              null,
+              h(
+                'div',
+                {
+                  style: {
+                    padding: '7px 10px',
+                    marginBottom: 10,
+                    borderRadius: 10,
+                    background: 'rgba(10, 132, 255, 0.07)',
+                    border: '1px solid rgba(10, 132, 255, 0.18)',
+                    fontSize: 11,
+                    color: 'var(--dnb-text-2)',
+                    lineHeight: 1.48,
+                  },
+                },
+                `🏛 点击规则前的「小图钉戳」即可定住为跨任务全局共享（当前已定住 ${totalPinnedCount} 条）；未定住规则仅在本任务跑。多条零散规则可勾选或直点「总结成一条」请参谋长浓缩合并。`,
+              ),
+              BOUND_LISTS.map(b =>
+                h(BoundCard, {
+                  key: b.field,
+                  field: b.field,
+                  label: b.label,
+                  dot: b.dot,
+                  items: bounds[b.field] || [],
+                  pinnedItems: pinnedBounds[b.field] || [],
+                }),
+              ),
+              h(
+                'div',
+                { className: 'dnb-group', style: { marginTop: 6 } },
+                h(
+                  'div',
+                  {
+                    className: 'dnb-cell dnb-cell-hover',
+                    style: { cursor: 'pointer', justifyContent: 'space-between' },
+                    onClick: () => setShowEnv(v => !v),
+                  },
+                  h('span', { style: { fontSize: 12.5, color: 'var(--dnb-text-2)', fontWeight: 500 } }, '运行环境信息'),
+                  h(Icon, {
+                    name: 'chevron',
+                    size: 13,
+                    style: {
+                      color: 'var(--dnb-text-3)',
+                      transform: showEnv ? 'rotate(90deg)' : 'none',
+                      transition: 'transform 0.18s ease',
+                    },
+                  }),
+                ),
+                showEnv
+                  ? rows.map(([k, v]) =>
+                      h(
+                        'div',
+                        {
+                          key: k,
+                          className: 'dnb-cell dnb-cell-hover',
+                          style: { justifyContent: 'space-between', cursor: 'pointer' },
+                          title: '点击复制',
+                          onClick: () => copyText(v, '已复制 ' + k),
+                        },
+                        h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)', flexShrink: 0 } }, k),
+                        h('span', {
+                          style: {
+                            fontSize: 11,
+                            color: 'var(--dnb-text-2)',
+                            fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                            maxWidth: '68%',
+                          },
+                        }, String(v)),
+                      ),
+                    )
+                  : null,
+              ),
+            ),
+      )
+    }
+
+    /* ------------------------------------------- DSH Chief Core Views */
+
+    let secInputEl = null
+
+    function focusSecInput() {
+      setTimeout(() => {
+        try {
+          if (secInputEl && typeof secInputEl.focus === 'function') secInputEl.focus()
+        } catch {}
+      }, 30)
+    }
+
+    function classifyBulletTagTone(tag) {
+      const t = String(tag || '')
+      if (/禁止|红线|受阻|风险|告警|错误|撞墙/.test(t)) {
+        return { bg: 'rgba(255, 69, 58, 0.15)', fg: '#ff453a' }
+      }
+      if (/推进|进行|待验|注意|提醒/.test(t)) {
+        return { bg: 'rgba(255, 159, 10, 0.16)', fg: '#ff9f0a' }
+      }
+      if (/完成|结论|允许|已解|就绪|已执行|已处理/.test(t)) {
+        return { bg: 'rgba(48, 209, 88, 0.15)', fg: '#30d158' }
+      }
+      return { bg: 'rgba(10, 132, 255, 0.14)', fg: '#409cff' }
+    }
+
+    function splitTaggedBullet(rawLine) {
+      const clean = String(rawLine || '')
+        .replace(/\[dsh-mnemon:[^\]]*\][\s\S]*/gi, '')
+        .replace(/^[-*•]\s+/, '')
+        .replace(/^\d+[.)、]\s+/, '')
+        .trim()
+      if (!clean) return null
+      const m = clean.match(/^【([^】]{1,12})】\s*(.*)$/)
+      if (m) {
+        return { badge: m[1].trim(), body: m[2].trim() || m[1].trim() }
+      }
+      return { badge: '', body: clean }
+    }
+
+    function parseNarrativeBlocks(raw) {
+      const text = String(raw || '').trim()
+      if (!text) return []
+      const lines = text.split(/\r?\n/)
+      const blocks = []
+      let current = null
+
+      const ensureBlock = () => {
+        if (!current) current = { heading: '', items: [] }
+        return current
+      }
+
+      for (const rawLine of lines) {
+        const line = rawLine.trim()
+        if (!line) continue
+        if (/^\[dsh-mnemon:/i.test(line)) continue
+        const headingMatch = line.match(/^#{1,3}\s+(.+)$/)
+        if (headingMatch) {
+          if (current && (current.heading || current.items.length)) blocks.push(current)
+          current = { heading: headingMatch[1].trim(), items: [] }
+          continue
+        }
+        if (/^(?:[-*•]|\d+[.)、])\s+/.test(line) || /^【[^】]{1,12}】/.test(line)) {
+          const parsed = splitTaggedBullet(line)
+          if (parsed) ensureBlock().items.push({ kind: 'bullet', ...parsed })
+        } else {
+          const cleanedPara = line
+            .replace(/\[dsh-mnemon:[^\]]*\][\s\S]*/gi, '')
+            .trim()
+          if (!cleanedPara) continue
+          ensureBlock().items.push({ kind: 'para', body: cleanedPara })
+        }
+      }
+      if (current && (current.heading || current.items.length)) blocks.push(current)
+      return blocks
+    }
+
+    function renderStructuredItem(item, key) {
+      if (!item) return null
+      if (item.kind === 'bullet') {
+        const tone = item.badge ? classifyBulletTagTone(item.badge) : null
+        return h(
+          'div',
+          {
+            key,
+            style: {
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 7,
+              padding: '3.5px 0',
+              fontSize: 12.2,
+              lineHeight: 1.52,
+              color: 'var(--dnb-text)',
+            },
+          },
+          item.badge
+            ? h(
+                'span',
+                {
+                  style: {
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    padding: '1px 6.5px',
+                    borderRadius: 6,
+                    fontSize: 10.5,
+                    fontWeight: 700,
+                    background: tone.bg,
+                    color: tone.fg,
+                    flexShrink: 0,
+                    marginTop: 1.5,
+                  },
+                },
+                item.badge,
+              )
+            : h('span', {
+                style: {
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  background: 'var(--dnb-accent)',
+                  flexShrink: 0,
+                  marginTop: 7,
+                },
+              }),
+          h('span', { style: { flex: 1, minWidth: 0, wordBreak: 'break-word' } }, item.body),
+        )
+      }
+      return h('p', { key, className: 'dnb-prose-p' }, item.body)
+    }
+
+    function renderStructuredText(rawText) {
+      const blocks = parseNarrativeBlocks(rawText)
+      if (!blocks.length) {
+        return h('div', { style: { whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, String(rawText || ''))
+      }
+      return h(
+        'div',
+        { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+        blocks.map((blk, bi) =>
+          h(
+            'div',
+            { key: bi, style: { marginTop: bi === 0 ? 0 : 6 } },
+            blk.heading
+              ? h('div', { style: { fontSize: 11.5, fontWeight: 700, color: 'var(--dnb-text-2)', marginBottom: 2 } }, blk.heading)
+              : null,
+            blk.items.map((it, ii) => renderStructuredItem(it, `${bi}-${ii}`)),
+          ),
+        ),
+      )
+    }
+
+    function ChiefTab({ board, view }) {
+      const [showHistory, setShowHistory] = React.useState(false)
+      const [editingFactId, setEditingFactId] = React.useState('')
+      const [editingFactText, setEditingFactText] = React.useState('')
+
+      React.useEffect(() => {
+        void loadChiefView(false)
+      }, [view.sessionId])
+
+      const sec = view.secView || {}
+      const subTab = view.secSubTab || 'digest'
+      const narrative = sec.narrative || {}
+      const facts = Array.isArray(sec.facts) ? sec.facts : []
+      const chat = Array.isArray(sec.chat) ? sec.chat : []
+      const notes = (board && Array.isArray(board.notes)) ? board.notes : []
+      const blocks = parseNarrativeBlocks(narrative.text || '')
+
+      const submitNewFact = () => {
+        const txt = String(view.secNewFactText || '').trim()
+        if (!txt) return
+        const cat = view.secNewFactCat || 'discipline'
+        patch({ secNewFactText: '' })
+        void mutateFact({ op: 'add', text: txt, category: cat })
+      }
+
+      return h(
+        'div',
+        { className: 'dnb-view' },
+        // Sub-view Segmented Pills
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 10 } },
+          h(
+            'div',
+            { style: { display: 'flex', gap: 5 } },
+            h('button', {
+              className: 'dnb-pill',
+              'data-active': subTab === 'digest' ? '1' : '0',
+              onClick: () => patch({ secSubTab: 'digest' }),
+            }, '摘要'),
+            h('button', {
+              className: 'dnb-pill',
+              'data-active': subTab !== 'digest' ? '1' : '0',
+              onClick: () => patch({ secSubTab: 'facts' }),
+            }, '纪律与条目', facts.length ? h('span', { className: 'dnb-seg-dot' }, String(facts.length)) : null),
+          ),
+          subTab === 'digest'
+            ? h('button', {
+                className: 'dnb-pill',
+                style: {
+                  height: 24,
+                  padding: '0 9px',
+                  fontSize: 11,
+                  gap: 4,
+                  borderColor: (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
+                    ? 'rgba(10, 132, 255, 0.45)'
+                    : undefined,
+                  color: (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
+                    ? 'var(--dnb-accent)'
+                    : undefined,
+                },
+                disabled: view.secRegenerating || narrative.summarizing,
+                title: narrative.hasUnsummarizedChanges
+                  ? '上下文有新进展，点击让参谋长按需提炼最新摘要（平时后台不空转耗费 Token）'
+                  : '立即让参谋长提炼结构化摘要',
+                onClick: () => void loadChiefView(true),
+              },
+                (view.secRegenerating || narrative.summarizing)
+                  ? h(Icon, { name: 'refresh', size: 11.5, style: { animation: 'dnb-spin 0.9s linear infinite' } })
+                  : h(Icon, { name: 'sparkles', size: 11.5 }),
+                (view.secRegenerating || narrative.summarizing) ? '提炼中…' : '提炼摘要',
+                (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
+                  ? h('span', {
+                      style: {
+                        width: 5.5,
+                        height: 5.5,
+                        borderRadius: '50%',
+                        background: 'var(--dnb-accent)',
+                        flexShrink: 0,
+                      },
+                    })
+                  : null,
+              )
+            : null,
+        ),
+
+        // Sub-view 1: Concise Structured Bullet Digest (`摘要`)
+        subTab === 'digest'
+          ? h(
+              React.Fragment,
+              null,
+              h(
+                'div',
+                { className: 'dnb-prose-card' },
+                h(
+                  'div',
+                  { className: 'dnb-prose-meta' },
+                  h(
+                    'div',
+                    { style: { display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0, flexWrap: 'wrap' } },
+                    h('span', { style: { fontWeight: 600, fontSize: 13.5, color: 'var(--dnb-text)' } }, '摘要'),
+                    h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } },
+                      (narrative.summarizing || view.secRegenerating)
+                        ? '正在提炼最新上下文…'
+                        : narrative.isLiveZeroToken
+                          ? '实时看板速览 · 零 Token（按需点右上角提炼）'
+                          : ((narrative.at ? '更新于 ' + relativeTimeLabel(narrative.at) : '已提炼')
+                              + (narrative.hasUnsummarizedChanges ? ' · 有新进展待提炼' : ''))),
+                  ),
+                  narrative.byModel
+                    ? h('span', {
+                        className: 'dnb-tag',
+                        style: { fontSize: 10.5 },
+                        title: narrative.byModel,
+                      }, shortModelName(narrative.byModel, view.secModelsCatalog || (secView && secView.models), true))
+                    : null,
+                ),
+                blocks.length
+                  ? blocks.map((blk, i) =>
+                      h(
+                        'div',
+                        { key: i, style: { marginTop: i === 0 ? 0 : 12 } },
+                        blk.heading ? h('div', { className: 'dnb-prose-h2', style: { marginTop: 0, marginBottom: 4 } }, blk.heading) : null,
+                        (blk.items || []).map((it, j) => renderStructuredItem(it, `${i}-${j}`)),
+                      ),
+                    )
+                  : h('p', { className: 'dnb-prose-p' },
+                      '当前会话尚未沉淀持久规矩或阶段结论。你可以在下方参谋栏直接立规矩、查进展，或用自然语言拆话安排主对话与各个子代理。'),
+              ),
+
+              // Collapsible Recent Chief Receipts
+              chat.length > 0
+                ? h(
+                    'div',
+                    { className: 'dnb-group' },
+                    h(
+                      'div',
+                      {
+                        className: 'dnb-cell dnb-cell-hover',
+                        style: { cursor: 'pointer', justifyContent: 'space-between', padding: '8px 12px' },
+                        onClick: () => setShowHistory(v => !v),
+                      },
+                      h('span', { style: { fontSize: 12, color: 'var(--dnb-text-2)', fontWeight: 500 } },
+                        '近期参谋长问答与拆话回执 (' + Math.ceil(chat.length / 2) + ')'),
+                      h(Icon, {
+                        name: 'chevron',
+                        size: 13,
+                        style: {
+                          color: 'var(--dnb-text-3)',
+                          transform: showHistory ? 'rotate(90deg)' : 'none',
+                          transition: 'transform 0.18s ease',
+                        },
+                      }),
+                    ),
+                    showHistory
+                      ? chat.slice(-8).map(item =>
+                          h(
+                            'div',
+                            { key: item.id, className: 'dnb-cell', style: { flexDirection: 'column', alignItems: 'flex-start', gap: 4 } },
+                            h(
+                              'div',
+                              { style: { display: 'flex', width: '100%', justifyContent: 'space-between', fontSize: 11, color: 'var(--dnb-text-3)' } },
+                              h('span', { style: { fontWeight: 600, color: item.role === 'chief' ? 'var(--dnb-accent)' : 'var(--dnb-text-2)' } },
+                                item.role === 'chief' ? '✦ DSH 参谋长' : '你'),
+                              h('span', null, timeLabel(item.at)),
+                            ),
+                            item.role === 'chief'
+                              ? renderStructuredText(item.text)
+                              : h('div', { style: { fontSize: 12, color: 'var(--dnb-text)', lineHeight: 1.5, whiteSpace: 'pre-wrap' } }, item.text),
+                            Array.isArray(item.actions) && item.actions.length
+                              ? h(
+                                  'div',
+                                  { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2 } },
+                                  item.actions.map((actTag, idx) =>
+                                    h('span', { key: idx, className: 'dnb-tag', style: { color: 'var(--dnb-accent)' } }, actTag)),
+                                )
+                              : null,
+                          ),
+                        )
+                      : null,
+                  )
+                : null,
+            )
+          : h(
+              React.Fragment,
+              null,
+              // Quick Add Durable Fact
+                h(
+                  'div',
+                  { className: 'dnb-group', style: { padding: 8, marginBottom: 10 } },
+                  h(
+                    'div',
+                    { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+                    h('select', {
+                      className: 'dnb-input',
+                      style: { width: 74, height: 28, padding: '0 6px', borderRadius: 99, fontSize: 11.5, flexShrink: 0 },
+                      value: view.secNewFactCat || 'discipline',
+                      onChange: e => patch({ secNewFactCat: e.target.value }),
+                    }, FACT_CATEGORIES.map(c => h('option', { key: c.key, value: c.key }, c.label))),
+                    h('input', {
+                      className: 'dnb-input',
+                      style: { height: 28, borderRadius: 99, padding: '0 11px', fontSize: 12 },
+                      placeholder: '立一条长期规矩或团队约定…',
+                      value: view.secNewFactText || '',
+                      onChange: e => patch({ secNewFactText: e.target.value }),
+                      onKeyDown: e => { if (e.key === 'Enter') submitNewFact() },
+                    }),
+                    (view.secNewFactText || '').trim()
+                      ? h('button', { className: 'dnb-primary-btn', style: { height: 28, padding: '0 10px' }, onClick: submitNewFact }, '记住')
+                      : null,
+                  ),
+                ),
+
+                facts.length
+                  ? h(
+                      'div',
+                      { className: 'dnb-group' },
+                      facts.map(fact => {
+                        const isEditing = editingFactId === fact.id
+                        return h(
+                          'div',
+                          { key: fact.id, className: 'dnb-cell dnb-cell-hover', style: { flexDirection: 'column', alignItems: 'flex-start', gap: 5 } },
+                          h(
+                            'div',
+                            { style: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
+                            h(
+                              'div',
+                              { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+                              fact.pinned ? h(Icon, { name: 'pin', size: 11.5, style: { color: 'var(--dnb-accent)' } }) : null,
+                              h('span', { className: 'dnb-tag' }, FACT_CAT_LABEL[fact.category] || '条目'),
+                              h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, relativeTimeLabel(fact.updatedAt || fact.addedAt)),
+                            ),
+                            h(
+                              'div',
+                              { className: 'dnb-row-actions' },
+                              h('button', {
+                                className: 'dnb-icon-btn',
+                                style: { width: 22, height: 22, color: fact.pinned ? 'var(--dnb-accent)' : undefined },
+                                title: fact.pinned ? '取消锁定（允许参谋长自动修订）' : '锁定置顶',
+                                onClick: () => void mutateFact({ op: 'pin', id: fact.id, pinned: !fact.pinned }),
+                              }, h(Icon, { name: 'pin', size: 11.5 })),
+                              h('button', {
+                                className: 'dnb-icon-btn',
+                                style: { width: 22, height: 22 },
+                                title: '编辑',
+                                onClick: () => {
+                                  setEditingFactId(isEditing ? '' : fact.id)
+                                  setEditingFactText(fact.text || '')
+                                },
+                              }, h(Icon, { name: 'edit', size: 11.5 })),
+                              h('button', {
+                                className: 'dnb-icon-btn',
+                                style: { width: 22, height: 22, color: '#ff453a' },
+                                title: '删除',
+                                onClick: () => void mutateFact({ op: 'remove', id: fact.id }),
+                              }, h(Icon, { name: 'trash', size: 11.5 })),
+                            ),
+                          ),
+                          isEditing
+                            ? h(
+                                'div',
+                                { style: { display: 'flex', width: '100%', gap: 6, marginTop: 2 } },
+                                h('input', {
+                                  className: 'dnb-input',
+                                  style: { height: 28, fontSize: 12 },
+                                  value: editingFactText,
+                                  onChange: e => setEditingFactText(e.target.value),
+                                  onKeyDown: e => {
+                                    if (e.key === 'Enter' && editingFactText.trim()) {
+                                      void mutateFact({ op: 'edit', id: fact.id, text: editingFactText.trim(), category: fact.category })
+                                      setEditingFactId('')
+                                    }
+                                  },
+                                }),
+                                h('button', {
+                                  className: 'dnb-primary-btn',
+                                  style: { height: 28, padding: '0 10px' },
+                                  onClick: () => {
+                                    if (!editingFactText.trim()) return
+                                    void mutateFact({ op: 'edit', id: fact.id, text: editingFactText.trim(), category: fact.category })
+                                    setEditingFactId('')
+                                  },
+                                }, '保存'),
+                              )
+                            : h('div', { style: { fontSize: 12.5, color: 'var(--dnb-text)', lineHeight: 1.55, wordBreak: 'break-word' } }, fact.text),
+                        )
+                      }),
+                    )
+                  : h('div', { className: 'dnb-empty', style: { padding: '18px 12px' } }, '暂无持久纪律条目'),
+
+                // Collapsible Raw Turn Memory (Original MemoryTab)
+                h(
+                  'div',
+                  { className: 'dnb-group', style: { marginTop: 10 } },
+                  h(
+                    'div',
+                    {
+                      className: 'dnb-cell dnb-cell-hover',
+                      style: { cursor: 'pointer', justifyContent: 'space-between' },
+                      onClick: () => patch({ secShowRawTurns: !view.secShowRawTurns }),
+                    },
+                    h('span', { style: { fontSize: 12, color: 'var(--dnb-text-2)', fontWeight: 500 } },
+                      '每轮原始自动流水记录' + (view.memCount ? ' (' + view.memCount + ')' : '')),
+                    h(Icon, {
+                      name: 'chevron',
+                      size: 13,
+                      style: {
+                        color: 'var(--dnb-text-3)',
+                        transform: view.secShowRawTurns ? 'rotate(90deg)' : 'none',
+                        transition: 'transform 0.18s ease',
+                      },
+                    }),
+                  ),
+                ),
+                view.secShowRawTurns ? h(MemoryTab, { board }) : null,
+              ),
+      )
+    }
+
+    /* ------------------------------------------- Cross-Conversation Peers Tab */
+
+    function PeersTab({ view }) {
+      React.useEffect(() => {
+        void loadChiefView(false)
+      }, [view.sessionId])
+
+      const sec = view.secView || {}
+      const rawPeers = Array.isArray(sec.peers) ? sec.peers : []
+      const hiddenProbePeers = view.showInternalProbes
+        ? []
+        : rawPeers.filter(p => p && p.kind === 'subagent' && p.status !== 'running' && isInternalProbeName(p.name || p.key))
+      const hiddenProbeSet = new Set(hiddenProbePeers)
+      const peers = rawPeers.filter(p => !hiddenProbeSet.has(p))
+      const otherSessions = Array.isArray(sec.otherSessions) ? sec.otherSessions : []
+      const mailbox = Array.isArray(sec.mailbox) ? sec.mailbox : []
+
+      return h(
+        'div',
+        { className: 'dnb-view' },
+        // Section 1: Active Interconnected Peers (Lead + Subagents + Linked Windows)
+        h(
+          'div',
+          { className: 'dnb-section-head' },
+          h('span', null, '当前互通对话网络'),
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+            (hiddenProbePeers.length > 0 || (view.showInternalProbes && rawPeers.some(p => p && isInternalProbeName(p.name || p.key))))
+              ? h('button', {
+                  className: 'dnb-pill',
+                  style: { height: 22, fontSize: 10.5, padding: '0 7px', borderStyle: 'dashed' },
+                  onClick: () => patch({ showInternalProbes: !view.showInternalProbes }),
+                }, view.showInternalProbes ? '隐藏内部探针' : `内部探针 (${hiddenProbePeers.length})`)
+              : null,
+            peers.length > 1
+              ? h('button', {
+                  className: 'dnb-pill dnb-pill-accent',
+                  style: { height: 22, fontSize: 11, padding: '0 8px' },
+                  onClick: () => {
+                    patch({ secTarget: 'all', secMode: 'steer', notice: '已选择向全体成员广播递话' })
+                    focusSecInput()
+                  },
+                }, '@全体广播')
+              : null,
+          ),
+        ),
+        peers.length
+          ? h(
+              'div',
+              { className: 'dnb-group' },
+              peers.map(peer => {
+                const isRunning = peer.status === 'running'
+                const kindBadge = peer.kind === 'lead' ? '主对话' : peer.kind === 'peer-session' ? '联动窗口' : '子代理'
+                const isSelected = view.secTarget === peer.key
+                return h(
+                  'div',
+                  { key: peer.key, className: 'dnb-cell dnb-cell-hover', style: { justifyContent: 'space-between', gap: 8 } },
+                  h(
+                    'div',
+                    { style: { flex: 1, minWidth: 0 } },
+                    h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+                      h('span', {
+                        style: {
+                          width: 7.5,
+                          height: 7.5,
+                          borderRadius: '50%',
+                          background: isRunning ? '#30d158' : 'var(--dnb-text-3)',
+                          boxShadow: isRunning ? '0 0 0 3px rgba(48, 209, 88, 0.18)' : 'none',
+                          flexShrink: 0,
+                        },
+                      }),
+                      h('span', { style: { fontWeight: 600, fontSize: 12.5 } }, peer.name),
+                      h('span', { className: 'dnb-tag', style: { fontSize: 10.5 } }, kindBadge),
+                    ),
+                    peer.taskTitle
+                      ? h('div', {
+                          style: {
+                            fontSize: 11.5,
+                            color: 'var(--dnb-text-2)',
+                            marginTop: 3,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          },
+                        }, peer.taskTitle)
+                      : null,
+                  ),
+                  h(
+                    'div',
+                    { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
+                    peer.kind === 'subagent' && peer.id
+                      ? h('button', {
+                          className: 'dnb-pill',
+                          style: { height: 25, padding: '0 8px', fontSize: 11 },
+                          title: '在分栏打开子代理实时流',
+                          onClick: () => {
+                            if (!openSubagentChat(peer)) patch({ notice: '该子代理暂无独立面板视图' })
+                          },
+                        }, h(Icon, { name: 'chat', size: 11.5 }), '分屏')
+                      : null,
+                    h('button', {
+                      className: 'dnb-pill',
+                      'data-active': isSelected ? '1' : '0',
+                      style: { height: 25, padding: '0 9px', fontSize: 11 },
+                      onClick: () => {
+                        patch({
+                          secTarget: peer.key,
+                          secMode: isRunning ? 'steer' : 'followup',
+                          notice: '已在下方锁定 @' + peer.name,
+                        })
+                        focusSecInput()
+                      },
+                    }, '@递话'),
+                  ),
+                )
+              }),
+            )
+          : h('div', { className: 'dnb-group' }, h('div', { className: 'dnb-empty', style: { padding: '16px 12px' } }, '等待会话连接…')),
+
+        // Section 2: Cross-Window Federation Switches
+        h(
+          'div',
+          { className: 'dnb-section-head', style: { marginTop: 12 } },
+          h(
+            'span',
+            { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
+            h(Icon, { name: 'link', size: 12 }),
+            '跨窗口独立会话联动',
+          ),
+          otherSessions.length ? h('span', null, otherSessions.filter(s => s.linked).length + '/' + otherSessions.length) : null,
+        ),
+        otherSessions.length
+          ? h(
+              'div',
+              { className: 'dnb-group' },
+              otherSessions.map(sess =>
+                h(
+                  'div',
+                  { key: sess.id, className: 'dnb-cell', style: { justifyContent: 'space-between', gap: 10 } },
+                  h(
+                    'div',
+                    { style: { flex: 1, minWidth: 0 } },
+                    h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+                      h('span', {
+                        style: {
+                          width: 6.5,
+                          height: 6.5,
+                          borderRadius: '50%',
+                          background: sess.status === 'running' ? '#30d158' : 'var(--dnb-text-3)',
+                        },
+                      }),
+                      h('span', { style: { fontWeight: 500, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, sess.name),
+                      sess.openTasks ? h('span', { className: 'dnb-tag', style: { fontSize: 10 } }, sess.openTasks + ' 待办') : null,
+                    ),
+                    sess.objective
+                      ? h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, sess.objective)
+                      : null,
+                  ),
+                  h(Switch, {
+                    checked: Boolean(sess.linked),
+                    onChange: on => void togglePeerSessionLink(sess.id, on),
+                  }),
+                ),
+              ),
+            )
+          : h(
+              'div',
+              { className: 'dnb-group' },
+              h('div', { style: { padding: '12px 14px', fontSize: 11.5, color: 'var(--dnb-text-3)', lineHeight: 1.5 } },
+                '当你同时打开多个独立主对话窗口时，这里会出现联动开关——轻轻一拨即可把它们接入同一个参谋长协同频道，互相递话与共享记忆。'),
+            ),
+
+        // Section 3: Cross-Session Mailbox Timeline
+        h(
+          'div',
+          { className: 'dnb-section-head', style: { marginTop: 12 } },
+          h(
+            'span',
+            { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
+            h(Icon, { name: 'mail', size: 12 }),
+            '参谋部协同信箱',
+          ),
+          mailbox.length ? h('span', null, String(mailbox.length)) : null,
+        ),
+        mailbox.length
+          ? h(
+              'div',
+              { className: 'dnb-group' },
+              mailbox.slice(0, 20).map(mail => {
+                const modeLabel = mail.mode === 'steer' ? '⚡ 插话' : mail.mode === 'silent' ? '📌 备忘' : '📨 递话'
+                return h(
+                  'div',
+                  { key: mail.id, className: 'dnb-cell', style: { flexDirection: 'column', alignItems: 'flex-start', gap: 4 } },
+                  h(
+                    'div',
+                    { style: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+                    h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600 } },
+                      h('span', { style: { color: 'var(--dnb-text-2)' } }, mail.from || '参谋长'),
+                      h('span', { style: { color: 'var(--dnb-text-3)' } }, '→'),
+                      h('span', { style: { color: 'var(--dnb-accent)' } }, '@' + (mail.to || 'lead')),
+                      h('span', { className: 'dnb-tag', style: { fontSize: 10, fontWeight: 500 } }, modeLabel),
+                    ),
+                    h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, relativeTimeLabel(mail.at)),
+                  ),
+                  mail.subject ? h('div', { style: { fontSize: 12, fontWeight: 600 } }, mail.subject) : null,
+                  h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, mail.text),
+                )
+              }),
+            )
+          : h('div', { className: 'dnb-group' }, h('div', { className: 'dnb-empty', style: { padding: '18px 12px' } }, '暂无跨对话通信记录')),
+      )
+    }
+
+    /* ------------------------------------ Header Model Popover & Suggestions */
+
+    function ModelPickerPopover({ view }) {
+      if (!view.secModelMenuOpen) return null
+      const catalog = view.secModelsCatalog || (view.secView && view.secView.models) || null
+      const currentRef = (view.chiefMeta && view.chiefMeta.modelRef) || ''
+      const followRef = (catalog && (catalog.followRef || catalog.defaultRef))
+        || (view.chiefMeta && view.chiefMeta.followModelRef)
+        || ''
+      const followProvider = followRef.includes('/') ? followRef.split('/')[0] : ''
+      const followSubtitle = (catalog && catalog.followLabel) || fullModelWithChannel(followRef, catalog)
+
+      const providers = []
+      if (catalog && Array.isArray(catalog.providers) && catalog.providers.length) {
+        providers.push(...catalog.providers)
+      } else if (catalog && Array.isArray(catalog.models)) {
+        const byProv = new Map()
+        for (const item of catalog.models) {
+          if (!item || !item.ref) continue
+          const pid = item.provider || item.ref.split('/')[0] || 'default'
+          if (!byProv.has(pid)) {
+            byProv.set(pid, { id: pid, label: item.providerName || pid, needsKey: Boolean(item.needsKey), models: [] })
+          }
+          const group = byProv.get(pid)
+          if (!item.needsKey) group.needsKey = false
+          group.models.push({
+            ref: item.ref,
+            id: item.id || item.ref,
+            label: item.name || item.label || item.id || item.ref,
+            isCurrentLead: Boolean(item.isCurrentLead) || item.ref === followRef,
+            needsKey: Boolean(item.needsKey),
+          })
+        }
+        providers.push(...byProv.values())
+        // Float the main conversation's active provider to the very top, sink unkeyed providers to the bottom
+        providers.sort((a, b) => {
+          const aLead = a.id === followProvider ? 1 : 0
+          const bLead = b.id === followProvider ? 1 : 0
+          if (aLead !== bLead) return bLead - aLead
+          const aUnkeyed = a.needsKey ? 1 : 0
+          const bUnkeyed = b.needsKey ? 1 : 0
+          return aUnkeyed - bUnkeyed
+        })
+      }
+
+      return h(
+        React.Fragment,
+        null,
+        h('div', {
+          style: { position: 'fixed', inset: 0, zIndex: 9998 },
+          onClick: () => patch({ secModelMenuOpen: false }),
+        }),
+        h(
+          'div',
+          {
+            className: 'dnb-menu',
+            style: {
+              position: 'absolute',
+              top: 42,
+              right: 12,
+              minWidth: 244,
+              maxWidth: 310,
+              maxHeight: 340,
+              overflowY: 'auto',
+              zIndex: 9999,
+            },
+          },
+          h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } }, '选择参谋长专职模型'),
+          h(
+            'div',
+            {
+              className: 'dnb-menu-item',
+              style: { justifyContent: 'space-between', gap: 8, fontWeight: !currentRef ? 600 : 400, color: !currentRef ? 'var(--dnb-accent)' : undefined },
+              onClick: () => {
+                patch({ secModelMenuOpen: false })
+                void updateSecConfig({ modelRef: '' })
+              },
+            },
+            h('div', { style: { minWidth: 0, flex: 1 } },
+              h('div', null, '✦ 自动跟随主对话模型'),
+              followSubtitle
+                ? h('div', {
+                    style: { fontSize: 10.5, color: 'var(--dnb-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+                    title: followRef,
+                  }, followSubtitle)
+                : null,
+            ),
+            !currentRef ? h(Icon, { name: 'check', size: 13 }) : null,
+          ),
+          providers.map(prov =>
+            h(
+              'div',
+              { key: prov.id, style: { marginTop: 4, paddingTop: 4, borderTop: '1px solid var(--dnb-border)', opacity: prov.needsKey ? 0.6 : 1 } },
+              h(
+                'div',
+                { style: { padding: '3px 10px', fontSize: 10.5, color: 'var(--dnb-text-3)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
+                h('span', null, prov.label || prov.id),
+                prov.id === followProvider
+                  ? h('span', { style: { fontSize: 9.5, color: 'var(--dnb-accent)', fontWeight: 600 } }, '主对话渠道')
+                  : (prov.needsKey ? h('span', { style: { fontSize: 9.5 } }, '未配密钥') : null),
+              ),
+              (prov.models || []).map(mod => {
+                const active = currentRef === mod.ref
+                return h(
+                  'div',
+                  {
+                    key: mod.ref,
+                    className: 'dnb-menu-item',
+                    title: mod.ref,
+                    style: { justifyContent: 'space-between', gap: 6, fontWeight: active ? 600 : 400, color: active ? 'var(--dnb-accent)' : undefined },
+                    onClick: () => {
+                      patch({ secModelMenuOpen: false })
+                      void updateSecConfig({ modelRef: mod.ref })
+                    },
+                  },
+                  h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', flex: 1 } }, mod.label || mod.id),
+                  mod.isCurrentLead
+                    ? h('span', {
+                        style: {
+                          fontSize: 9.5,
+                          padding: '1px 5px',
+                          borderRadius: 99,
+                          background: 'rgba(10,132,255,0.14)',
+                          color: 'var(--dnb-accent)',
+                          flexShrink: 0,
+                        },
+                      }, '主对话')
+                    : null,
+                  active ? h(Icon, { name: 'check', size: 13 }) : null,
+                )
+              }),
+            ),
+          ),
+          !providers.length
+            ? h('div', { style: { padding: '8px 10px', fontSize: 11, color: 'var(--dnb-text-3)' } },
+                catalog ? '未检测到额外模型提供商，将自动跟随主对话模型。' : '加载模型列表中…')
+            : null,
+        ),
+      )
+    }
+
+    function PacePickerPopover({ view }) {
+      if (!view.secPaceMenuOpen) return null
+      const meta = view.chiefMeta || {}
+      const currentPace = meta.paceMode || (meta.autoPilot ? 'auto' : 'manual')
+      const PACE_OPTIONS = [
+        {
+          key: 'manual',
+          title: '⏸ 按需手动（默认 · 省 Token）',
+          desc: '开着面板绝不后台自动总结或空转；仅在你点「提炼摘要」、浓缩边界或在下方参谋栏发话时才调模型。',
+        },
+        {
+          key: 'smart',
+          title: '👁 关键巡检（智能节流）',
+          desc: '摘要仍由你手动点；仅在代理撞墙报错或多代理关键节点冷却巡检（忽略内部检查点）。',
+        },
+        {
+          key: 'auto',
+          title: '⚡ 全自动托管',
+          desc: '带冷却节流（5分钟）自动刷新阶段摘要、巡检进度并跨窗口自动递话。',
+        },
+      ]
+      return h(
+        React.Fragment,
+        null,
+        h('div', {
+          style: { position: 'fixed', inset: 0, zIndex: 9998 },
+          onClick: () => patch({ secPaceMenuOpen: false }),
+        }),
+        h(
+          'div',
+          {
+            className: 'dnb-menu',
+            style: {
+              position: 'absolute',
+              top: 42,
+              right: 12,
+              width: 268,
+              zIndex: 9999,
+            },
+          },
+          h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } }, '参谋长工作节奏控制'),
+          PACE_OPTIONS.map(opt => {
+            const active = currentPace === opt.key
+            return h(
+              'div',
+              {
+                key: opt.key,
+                className: 'dnb-menu-item',
+                style: {
+                  alignItems: 'flex-start',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  padding: '7px 10px',
+                  color: active ? 'var(--dnb-accent)' : undefined,
+                },
+                onClick: () => {
+                  patch({ secPaceMenuOpen: false })
+                  void updateSecConfig({ paceMode: opt.key })
+                },
+              },
+              h('div', { style: { minWidth: 0, flex: 1 } },
+                h('div', { style: { fontSize: 12, fontWeight: active ? 600 : 500, marginBottom: 2 } }, opt.title),
+                h('div', { style: { fontSize: 10.5, lineHeight: 1.4, color: 'var(--dnb-text-3)', whiteSpace: 'normal' } }, opt.desc),
+              ),
+              active ? h(Icon, { name: 'check', size: 13, style: { marginTop: 2 } }) : null,
+            )
+          }),
+        ),
+      )
+    }
+
+    function SuggestionBanner({ view }) {
+      const rawSuggestions = (view.secView && Array.isArray(view.secView.suggestions))
+        ? view.secView.suggestions.filter(s => s && s.status === 'pending')
+        : []
+      // Prioritize Prime Minister boundary proposals first so wall-hits never get buried
+      const suggestions = [
+        ...rawSuggestions.filter(s => s.kind === 'bound'),
+        ...rawSuggestions.filter(s => s.kind !== 'bound'),
+      ]
+      const [expandedId, setExpandedId] = React.useState('')
+      const [editingId, setEditingId] = React.useState('')
+      const [editDraft, setEditDraft] = React.useState('')
+      const [editBoundCol, setEditBoundCol] = React.useState('forbidden')
+
+      if (!suggestions.length) return null
+
+      const BOUND_FIELD_META = {
+        forbidden: { label: '禁止红线', color: '#ff453a', bg: 'rgba(255, 69, 58, 0.14)' },
+        allowed: { label: '允许范围', color: '#30d158', bg: 'rgba(48, 209, 88, 0.14)' },
+        notes: { label: '注意事项', color: '#ff9f0a', bg: 'rgba(255, 159, 10, 0.14)' },
+      }
+
+      return h(
+        React.Fragment,
+        null,
+        suggestions.slice(0, 2).map(sug => {
+          const isBound = sug.kind === 'bound'
+          const openDraft = expandedId === sug.id
+          const isEditing = editingId === sug.id
+
+          if (isBound) {
+            const activeCol = isEditing ? editBoundCol : (sug.boundField || 'forbidden')
+            const colMeta = BOUND_FIELD_META[activeCol] || BOUND_FIELD_META.forbidden
+            const rulePreview = sug.draftText || sug.title
+            const replacesList = Array.isArray(sug.replaces) ? sug.replaces.filter(Boolean) : []
+            const isConsolidation = replacesList.length > 0
+
+            return h(
+              'div',
+              {
+                key: sug.id,
+                className: 'dnb-sug-card',
+                style: {
+                  background: 'rgba(255, 159, 10, 0.08)',
+                  borderColor: 'rgba(255, 159, 10, 0.34)',
+                },
+              },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 5 } },
+                h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: '#ff9f0a', flexWrap: 'wrap' } },
+                  isConsolidation ? `🏛 参谋长边界浓缩请示 · ${replacesList.length} 合 1` : '🏛 参谋长边界请示',
+                  h(
+                    'span',
+                    {
+                      style: {
+                        padding: '1px 6px',
+                        borderRadius: 6,
+                        background: colMeta.bg,
+                        color: colMeta.color,
+                        fontSize: 10,
+                        fontWeight: 700,
+                      },
+                    },
+                    colMeta.label,
+                  ),
+                  sug.fromAgent
+                    ? h('span', { style: { fontSize: 10.5, fontWeight: 500, color: 'var(--dnb-text-3)' } },
+                        shortAgentName(sug.fromAgent))
+                    : null,
+                ),
+                h('button', {
+                  className: 'dnb-icon-btn',
+                  style: { width: 20, height: 20 },
+                  title: '驳回此条边界请示',
+                  onClick: () => void decideSuggestion(sug, 'dismiss'),
+                }, h(Icon, { name: 'x', size: 12 })),
+              ),
+              isEditing
+                ? h(
+                    'div',
+                    { style: { display: 'flex', flexDirection: 'column', gap: 5, marginBottom: 7 } },
+                    h(
+                      'div',
+                      { style: { display: 'flex', gap: 5 } },
+                      ['forbidden', 'allowed', 'notes'].map(colKey => {
+                        const m = BOUND_FIELD_META[colKey]
+                        return h('button', {
+                          key: colKey,
+                          className: 'dnb-pill',
+                          'data-active': editBoundCol === colKey ? '1' : '0',
+                          style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+                          onClick: () => setEditBoundCol(colKey),
+                        }, m.label)
+                      }),
+                    ),
+                    h('input', {
+                      className: 'dnb-input',
+                      style: { height: 28, fontSize: 12 },
+                      value: editDraft,
+                      onChange: e => setEditDraft(e.target.value),
+                    }),
+                  )
+                : h(
+                    'div',
+                    {
+                      style: {
+                        padding: '6px 9px',
+                        marginBottom: 5,
+                        borderRadius: 8,
+                        background: 'var(--dnb-card)',
+                        border: '1px solid var(--dnb-border)',
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: 'var(--dnb-text)',
+                        lineHeight: 1.45,
+                      },
+                    },
+                    rulePreview,
+                  ),
+              isConsolidation
+                ? h(
+                    'div',
+                    {
+                      style: {
+                        padding: '5px 8px',
+                        marginBottom: 5,
+                        borderRadius: 7,
+                        background: 'rgba(128, 128, 136, 0.08)',
+                        fontSize: 10.5,
+                        color: 'var(--dnb-text-3)',
+                        lineHeight: 1.4,
+                      },
+                    },
+                    `将整合替代 ${replacesList.length} 条零散旧规：` + replacesList.slice(0, 3).map(r => '「' + clampTitle(r, 16) + '」').join('、') + (replacesList.length > 3 ? ` 等 ${replacesList.length} 条` : ''),
+                  )
+                : null,
+              sug.reason
+                ? h('div', { style: { fontSize: 11, color: 'var(--dnb-text-2)', lineHeight: 1.4, marginBottom: 7 } },
+                    (isConsolidation ? '浓缩依据：' : '撞墙/提报背景：') + sug.reason)
+                : null,
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
+                h('button', {
+                  className: 'dnb-primary-btn',
+                  style: { height: 25, padding: '0 10px', fontSize: 11.5, background: '#ff9f0a', color: '#111', gap: 4 },
+                  disabled: view.secBusy,
+                  title: '批准并盖上小图钉，作为跨任务全局共享边界生效',
+                  onClick: () => {
+                    const finalText = isEditing ? editDraft.trim() : ''
+                    const finalCol = isEditing ? editBoundCol : (sug.boundField || 'forbidden')
+                    setEditingId('')
+                    void decideSuggestion(sug, 'approve', finalText, finalCol, true)
+                  },
+                }, h(Icon, { name: 'pinStamp', size: 12 }), isConsolidation ? '批准替换并定住全局' : '定住全局'),
+                h('button', {
+                  className: 'dnb-pill',
+                  style: { height: 25, padding: '0 9px', fontSize: 11.5, fontWeight: 600 },
+                  disabled: view.secBusy,
+                  title: '批准但仅在当前任务会话树中生效，不带入其他任务',
+                  onClick: () => {
+                    const finalText = isEditing ? editDraft.trim() : ''
+                    const finalCol = isEditing ? editBoundCol : (sug.boundField || 'forbidden')
+                    setEditingId('')
+                    void decideSuggestion(sug, 'approve', finalText, finalCol, false)
+                  },
+                }, isConsolidation ? '仅本任务替换' : '仅本任务'),
+                h('button', {
+                  className: 'dnb-pill',
+                  style: { height: 25, padding: '0 8px', fontSize: 11 },
+                  onClick: () => {
+                    if (isEditing) {
+                      setEditingId('')
+                    } else {
+                      setEditingId(sug.id)
+                      setEditDraft(rulePreview)
+                      setEditBoundCol(sug.boundField || 'forbidden')
+                    }
+                  },
+                }, isEditing ? '取消微调' : '微调'),
+                h('button', {
+                  className: 'dnb-pill',
+                  style: { height: 25, padding: '0 8px', fontSize: 11, marginLeft: 'auto', color: 'var(--dnb-text-3)' },
+                  onClick: () => void decideSuggestion(sug, 'dismiss'),
+                }, '驳回'),
+              ),
+            )
+          }
+
+          return h(
+            'div',
+            { key: sug.id, className: 'dnb-sug-card' },
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 4 } },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 600, color: 'var(--dnb-accent)' } },
+                h(Icon, { name: 'sparkles', size: 12 }),
+                '参谋长协同建议 · @' + shortAgentName(sug.targetLabel || sug.target),
+              ),
+              h('button', {
+                className: 'dnb-icon-btn',
+                style: { width: 20, height: 20 },
+                title: '忽略此条建议',
+                onClick: () => void decideSuggestion(sug, 'dismiss'),
+              }, h(Icon, { name: 'x', size: 12 })),
+            ),
+            h('div', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)', marginBottom: 2 } }, sug.title),
+            sug.reason
+              ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.45, marginBottom: 6 } }, sug.reason)
+              : null,
+            openDraft && sug.draftText
+              ? h('div', {
+                  style: {
+                    padding: '6px 9px',
+                    marginBottom: 7,
+                    borderRadius: 9,
+                    background: 'var(--dnb-card)',
+                    border: '1px solid var(--dnb-border)',
+                    fontSize: 11.5,
+                    color: 'var(--dnb-text-2)',
+                  },
+                }, renderStructuredText(sug.draftText))
+              : null,
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+              h('button', {
+                className: 'dnb-primary-btn',
+                style: { height: 25, padding: '0 10px', fontSize: 11.5 },
+                disabled: view.secBusy,
+                onClick: () => void decideSuggestion(sug, 'approve'),
+              }, '一键递话'),
+              h('button', {
+                className: 'dnb-pill',
+                style: { height: 25, padding: '0 9px', fontSize: 11.5 },
+                onClick: () => {
+                  prefillSuggestion(sug)
+                  focusSecInput()
+                },
+              }, '填入微调'),
+              sug.draftText
+                ? h('button', {
+                    className: 'dnb-pill',
+                    style: { height: 25, padding: '0 8px', fontSize: 11, marginLeft: 'auto' },
+                    onClick: () => setExpandedId(openDraft ? '' : sug.id),
+                  }, openDraft ? '收起草稿' : '预览草稿')
+                : null,
+            ),
+          )
+        }),
+      )
+    }
+
+    function ChiefComposerBar({ view }) {
+      const peers = (view.secView && Array.isArray(view.secView.peers)) ? view.secView.peers : []
+      const fallbackChildren = Array.isArray(view.subagents)
+        ? view.subagents.filter(a => a && a.name && a.name !== 'lead').map(a => ({
+            key: a.name,
+            name: a.name,
+            kind: 'subagent',
+            status: a.status,
+          }))
+        : []
+      const rawTargetChips = peers.length
+        ? peers
+        : [{ key: 'lead', name: '主对话', kind: 'lead', status: 'idle' }, ...fallbackChildren]
+      // Keep running & lead targets first, and hide idle internal mnemon probes so horizontal bar stays crisp
+      const targetChips = [...rawTargetChips]
+        .filter(p => p.key === 'lead' || p.status === 'running' || p.key === (view.secTarget || '') || !/^mnemon-review/i.test(String(p.name || p.key || '')))
+        .sort((a, b) => {
+          if (a.key === 'lead') return -1
+          if (b.key === 'lead') return 1
+          const ra = a.status === 'running' ? 1 : 0
+          const rb = b.status === 'running' ? 1 : 0
+          return rb - ra
+        })
+
+      const activeTarget = view.secTarget || 'auto'
+      const activePeer = targetChips.find(p => p.key === activeTarget) || null
+      const modeObj = RELAY_MODES.find(m => m.key === (view.secMode || 'steer')) || RELAY_MODES[0]
+      const placeholder = activeTarget === 'auto'
+        ? '问实时进展、诊卡点、浓缩边界，或吩咐参谋长拆话调度…'
+        : activeTarget === 'all'
+          ? '向全体成员广播（' + modeObj.label + '）…'
+          : ('给 @' + shortAgentName(activePeer ? activePeer.name : activeTarget, true) + ' ' + modeObj.label + '…')
+
+      return h(
+        'div',
+        { className: 'dnb-sec-bar' },
+        // Dismissible Structured Latest Reply Bubble
+        view.secLatestReply
+          ? h(
+              'div',
+              { className: 'dnb-sec-reply' },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 } },
+                h(
+                  'div',
+                  { style: { flex: 1, minWidth: 0 } },
+                  renderStructuredText(view.secLatestReply.text),
+                  Array.isArray(view.secLatestReply.actions) && view.secLatestReply.actions.length
+                    ? h(
+                        'div',
+                        { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 5 } },
+                        view.secLatestReply.actions.map((actStr, idx) =>
+                          h('span', { key: idx, className: 'dnb-tag', style: { color: 'var(--dnb-accent)', fontSize: 10.5 } }, actStr)),
+                      )
+                    : null,
+                ),
+                h('button', {
+                  className: 'dnb-icon-btn',
+                  style: { width: 20, height: 20, flexShrink: 0 },
+                  onClick: () => patch({ secLatestReply: null }),
+                }, h(Icon, { name: 'x', size: 12 })),
+              ),
+            )
+          : null,
+
+        // Compact Target & Posture Strip
+        h(
+          'div',
+          { className: 'dnb-sec-targets' },
+          h('button', {
+            className: 'dnb-sec-chip',
+            'data-active': activeTarget === 'auto' ? '1' : '0',
+            title: '由 DSH 参谋长研判实时进展、诊断卡点、浓缩边界，或自动拆话递给对应成员',
+            onClick: () => patch({ secTarget: 'auto' }),
+          }, '✦ 参谋/拆话'),
+          targetChips.map(p =>
+            h('button', {
+              key: p.key,
+              className: 'dnb-sec-chip',
+              'data-active': activeTarget === p.key ? '1' : '0',
+              onClick: () => patch({
+                secTarget: activeTarget === p.key ? 'auto' : p.key,
+                secMode: p.status === 'running' ? 'steer' : 'followup',
+              }),
+            },
+              p.status === 'running'
+                ? h('span', { style: { width: 5.5, height: 5.5, borderRadius: '50%', background: '#30d158' } })
+                : null,
+              '@' + clampTitle(p.key === 'lead' ? '主对话' : shortAgentName(p.name, true), 9.5),
+            ),
+          ),
+          targetChips.length > 1
+            ? h('button', {
+                className: 'dnb-sec-chip',
+                'data-active': activeTarget === 'all' ? '1' : '0',
+                onClick: () => patch({ secTarget: activeTarget === 'all' ? 'auto' : 'all' }),
+              }, '@全体')
+            : null,
+          activeTarget !== 'auto'
+            ? h('button', {
+                className: 'dnb-sec-chip',
+                style: { marginLeft: 'auto', color: 'var(--dnb-text-2)', borderColor: 'var(--dnb-border-strong)' },
+                title: modeObj.hint + '（点击切换）',
+                onClick: () => {
+                  const idx = RELAY_MODES.findIndex(m => m.key === modeObj.key)
+                  const next = RELAY_MODES[(idx + 1) % RELAY_MODES.length]
+                  patch({ secMode: next.key })
+                },
+              }, modeObj.label + ' ↻')
+            : null,
+        ),
+
+        // DS-Bot Style Rounded Pill Input + Up-Arrow Send Button
+        h(
+          'div',
+          { className: 'dnb-sec-shell' },
+          h('input', {
+            ref: el => { secInputEl = el },
+            className: 'dnb-sec-input',
+            placeholder: view.secBusy ? '参谋长正在处理…' : placeholder,
+            disabled: view.secBusy,
+            value: view.secInput || '',
+            onChange: e => patch({ secInput: e.target.value }),
+            onKeyDown: e => {
+              if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault()
+                void submitChiefBar()
+              }
+            },
+          }),
+          h('button', {
+            type: 'button',
+            className: 'dnb-sec-send',
+            disabled: view.secBusy || !(view.secInput || '').trim(),
+            title: '发送给 DSH 参谋长',
+            onClick: () => void submitChiefBar(),
+          },
+            view.secBusy
+              ? h(Icon, { name: 'refresh', size: 13, style: { animation: 'dnb-spin 0.9s linear infinite' } })
+              : h(Icon, { name: 'arrowUp', size: 15 }),
+          ),
+        ),
+      )
+    }
+
+    /* ----------------------------------------------------------- Main Panel */
+
+    function PanelInner(props) {
+      const view = useStore()
+      const isPage = !!(props && props.variant === 'main')
+      const isDock = !!(props && props.variant === 'dock')
+      const selfRef = React.useRef(null)
+
+      React.useEffect(() => {
+        const host = isDock || isPage || view.open ? selfRef.current : null
+        if (!host) return undefined
+        const measure = () => {
+          try {
+            const reserve = reserveCornerSpace(host)
+            const key = reserve.top + '/' + reserve.bottom
+            if (key === host.dataset.dnbReserve) return
+            host.dataset.dnbReserve = key
+            host.style.setProperty('--dnb-safe-top', reserve.top + 'px')
+            host.style.setProperty('--dnb-safe-bottom', reserve.bottom + 'px')
+          } catch {}
+        }
+        const timer = setInterval(measure, 3500)
+        const first = setTimeout(measure, 450)
+        return () => {
+          clearInterval(timer)
+          clearTimeout(first)
+        }
+      }, [view.open, isDock, isPage])
+
+      if (!isPage && !isDock && !view.open) return null
+
+      const board = view.board
+      const tasks = (board && Array.isArray(board.tasks)) ? board.tasks : []
+      const openCount = tasks.filter(t => t && t.status !== 'done').length
+      const meta = view.chiefMeta || {}
+      const subagentChildrenCount = Array.isArray(view.subagents)
+        ? view.subagents.filter(a => (
+            a
+            && a.name
+            && a.name !== 'lead'
+            && (view.showInternalProbes || a.status === 'running' || !isInternalProbeName(a.name))
+          )).length
+        : 0
+      const peersBadge = subagentChildrenCount + (meta.linkedPeersCount || 0)
+      const secBadge = (meta.pendingSuggestions || 0)
+      const archMeta = view.archiveMeta || {}
+      const archiveBadge = archMeta.takenOutCount || 0
+
+      const body = view.tab === 'chief'
+        ? h(ChiefTab, { board, view })
+        : view.tab === 'peers'
+          ? h(PeersTab, { view })
+          : view.tab === 'plan'
+            ? h(PlanTab, { board })
+            : view.tab === 'archive'
+              ? h(ArchiveTab, { board, view })
+              : view.tab === 'boundaries'
+                ? h(BoundariesTab, { store: view })
+                : h(TasksTab, { board, view })
+
+      const cursorText = board && board.cursor && (board.cursor.next || board.cursor.step || board.cursor.blocked)
+        ? (board.cursor.blocked ? '受阻 · ' + board.cursor.blocked : (board.cursor.next || board.cursor.step))
+        : ''
+
+      return h(
+        React.Fragment,
+        null,
+        h(Style, null),
+        h(
+          'div',
+          {
+            className: isDock ? 'dnb-panel dnb-main dnb-dock' : isPage ? 'dnb-panel dnb-main' : 'dnb-panel',
+            role: isPage || isDock ? 'region' : 'dialog',
+            'aria-label': BRAND_NAME,
+            ref: node => {
+              panelEl = node
+              selfRef.current = node
+            },
+          },
+          // Clean iOS Header with Chief Model Picker & Auto-Pilot Switch
+          h(
+            'div',
+            { className: 'dnb-head', style: { position: 'relative' } },
+            h('span', { className: 'dnb-title', style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
+              h(Icon, { name: 'sparkles', size: 14, style: { color: 'var(--dnb-accent)' } }),
+              BRAND_NAME,
+            ),
+            view.sessionId
+              ? h('span', { className: 'dnb-session-chip' }, shortSession(view.sessionId))
+              : null,
+            meta.linkedPeersCount > 0
+              ? h('button', {
+                  className: 'dnb-head-pill',
+                  style: { height: 21, padding: '0 6px', fontSize: 10.5, color: 'var(--dnb-accent)' },
+                  title: '已串联跨窗口会话，点击查看协同网络',
+                  onClick: () => patch({ tab: 'peers' }),
+                }, h(Icon, { name: 'link', size: 10.5 }), String(meta.linkedPeersCount))
+              : null,
+            h(
+              'div',
+              { className: 'dnb-head-actions' },
+              h('button', {
+                className: 'dnb-head-pill',
+                title: (() => {
+                  const cat = view.secModelsCatalog || (view.secView && view.secView.models) || null
+                  const eff = meta.modelRef || meta.resolvedModelRef || meta.followModelRef || ''
+                  const label = fullModelWithChannel(eff, cat)
+                  if (!meta.modelRef) {
+                    return '正在自动跟随主对话模型' + (label ? '：' + label + ' [' + eff + ']' : '') + '（点击可切换专职参谋长模型）'
+                  }
+                  return '已固定参谋长专职模型：' + (label || eff) + ' [' + eff + ']（点击可切回跟随主对话）'
+                })(),
+                onClick: () => {
+                  const nextOpen = !view.secModelMenuOpen
+                  patch({ secModelMenuOpen: nextOpen, secPaceMenuOpen: false })
+                  if (nextOpen) void loadChiefModels(true)
+                },
+              }, (() => {
+                const cat = view.secModelsCatalog || (view.secView && view.secView.models) || null
+                const eff = meta.modelRef || meta.resolvedModelRef || meta.followModelRef || ''
+                if (!eff) return '✦ 自动跟随'
+                const tag = shortModelName(eff, cat, true)
+                return meta.modelRef ? '✦ ' + tag : '✦ 跟随·' + clampTitle(tag, 15)
+              })()),
+              h('button', {
+                className: 'dnb-head-pill',
+                'data-pilot': (meta.paceMode === 'auto') ? '1' : '0',
+                style: meta.paceMode === 'smart'
+                  ? { borderColor: 'rgba(10, 132, 255, 0.38)', color: 'var(--dnb-accent)' }
+                  : undefined,
+                title: (() => {
+                  const pm = meta.paceMode || 'manual'
+                  if (pm === 'auto') return '当前节奏：全自动托管（节流自动巡检、递话与摘要 · 点击切换节奏）'
+                  if (pm === 'smart') return '当前节奏：关键巡检（仅撞墙/阶段节点节流巡检，摘要按需手动 · 点击切换节奏）'
+                  return '当前节奏：按需手动（后台零自动总结，省 Token 不空转 · 点击切换节奏）'
+                })(),
+                onClick: () => patch({ secPaceMenuOpen: !view.secPaceMenuOpen, secModelMenuOpen: false }),
+              },
+                meta.paceMode === 'auto' ? h(Icon, { name: 'bolt', size: 11 }) : null,
+                meta.paceMode === 'auto' ? '托管' : meta.paceMode === 'smart' ? '👁 巡检' : '⏸ 按需',
+              ),
+              h('button', {
+                className: 'dnb-icon-btn',
+                'data-active': view.searchOpen ? '1' : '0',
+                title: '搜索与问参谋长',
+                onClick: () => patch({ searchOpen: !view.searchOpen, askHits: null }),
+              }, h(Icon, { name: 'search', size: 15 })),
+              h('button', {
+                className: 'dnb-icon-btn',
+                title: '同步刷新',
+                onClick: () => {
+                  void refresh()
+                  if (view.tab === 'archive') void loadArchives(true)
+                  else void loadChiefView(false)
+                },
+              }, h(Icon, { name: 'refresh', size: 15, style: view.busy ? { animation: 'dnb-spin 0.9s linear infinite' } : undefined })),
+              isDock
+                ? null
+                : h('button', {
+                    className: 'dnb-icon-btn',
+                    title: isPage ? '返回会话' : '收起',
+                    onClick: () => {
+                      if (isPage) {
+                        selectPanel(null)
+                        return
+                      }
+                      patch({ open: false })
+                    },
+                  }, h(Icon, { name: 'x', size: 15 })),
+            ),
+            h(ModelPickerPopover, { view }),
+            h(PacePickerPopover, { view }),
+          ),
+
+          // Live Cursor Pill (only when active; clickable to spotlight advancing/blocked subagents)
+          cursorText
+            ? h(
+                'div',
+                { style: { padding: '0 12px 8px', flexShrink: 0 } },
+                h(
+                  'div',
+                  {
+                    style: {
+                      padding: '5px 10px',
+                      borderRadius: 10,
+                      background: board.cursor.blocked ? STATUS_BG.blocked : 'rgba(255, 159, 10, 0.12)',
+                      color: board.cursor.blocked ? '#ff453a' : '#ff9f0a',
+                      fontSize: 11.5,
+                      fontWeight: 600,
+                      overflow: 'hidden',
+                      textOverflow: 'ellipsis',
+                      whiteSpace: 'nowrap',
+                      cursor: 'pointer',
+                    },
+                    title: '点击跳转金字塔视角查看推进/受阻子代理',
+                    onClick: () => {
+                      const targetTask = (board.cursor.expectedTaskId && tasks.find(t => t && t.id === board.cursor.expectedTaskId))
+                        || tasks.find(t => t && (board.cursor.blocked ? t.status === 'blocked' : t.status === 'doing'))
+                      if (targetTask) focusObjectiveInPyramid(targetTask.id)
+                      else patch({ tab: 'tasks', taskViewMode: 'graph' })
+                    },
+                  },
+                  (board.cursor.blocked ? '⚠ ' : '▶ ') + cursorText,
+                ),
+              )
+            : null,
+
+          // Proactive Suggestion Capsule Banner
+          h(SuggestionBanner, { view }),
+
+          h(SearchDrawer, { view }),
+
+          // iOS Segmented Tab Strip (5 Clean Two-Char Tabs)
+          h(
+            'div',
+            { className: 'dnb-seg-wrap' },
+            h(
+              'div',
+              { className: 'dnb-seg' },
+              TABS.map(tab => {
+                const count = tab.key === 'tasks'
+                  ? openCount
+                  : tab.key === 'peers'
+                    ? peersBadge
+                    : tab.key === 'chief'
+                      ? secBadge
+                      : tab.key === 'archive'
+                        ? archiveBadge
+                        : 0
+                return h(
+                  'button',
+                  {
+                    key: tab.key,
+                    className: 'dnb-seg-btn',
+                    'data-active': view.tab === tab.key ? '1' : '0',
+                    onClick: () => patch({ tab: tab.key }),
+                  },
+                  tab.label,
+                  count
+                    ? h('span', {
+                        className: 'dnb-seg-dot',
+                        style: tab.key === 'chief'
+                          ? { color: 'var(--dnb-accent)', opacity: 1, fontWeight: 700 }
+                          : tab.key === 'archive'
+                            ? { color: '#f59e0b', opacity: 1, fontWeight: 700 }
+                            : undefined,
+                      }, String(count))
+                    : null,
+                )
+              }),
+            ),
+          ),
+
+          // Error Banner (only on API failure)
+          view.error
+            ? h(
+                'div',
+                {
+                  style: {
+                    margin: '0 12px 8px',
+                    padding: '6px 10px',
+                    borderRadius: 10,
+                    background: STATUS_BG.blocked,
+                    color: '#ff453a',
+                    fontSize: 11.5,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                  },
+                },
+                h('span', null, view.error),
+                h('span', { style: { cursor: 'pointer', paddingLeft: 8 }, onClick: () => patch({ error: '' }) }, '×'),
+              )
+            : null,
+
+          // Tab Body Protected by Error Boundary
+          h(
+            'div',
+            { className: 'dnb-body' },
+            h(ChiefErrorBoundary, { key: view.tab + ':' + (view.sessionId || 'none') }, body),
+          ),
+
+          // Persistent Bottom Chief Input & Relay Bar
+          h(ChiefComposerBar, { view }),
+
+          // Floating iOS Toast
+          view.notice ? h('div', { className: 'dnb-toast' }, view.notice) : null,
+        ),
+      )
+    }
+
+    function Panel(props) {
+      return h(ChiefErrorBoundary, null, h(PanelInner, props))
+    }
+
+    /* -------------------------------------------------- Session & Triggers */
+
+    const SESSION_SOURCES = new Map()
+
+    function adoptSession(source, sessionId, inputActions) {
+      if (sessionId) SESSION_SOURCES.set(source, sessionId)
+      else SESSION_SOURCES.delete(source)
+      if (inputActions && inputActions !== store.inputActions) store.inputActions = inputActions
+
+      let next = ''
+      for (const value of SESSION_SOURCES.values()) {
+        if (value) next = value
+      }
+      // Keep last known sessionId if all probes transiently unmount during layout switch
+      if (!next && store.sessionId) return
+      if (next === store.sessionId) return
+
+      const switchedConversation = Boolean(store.sessionId && next && store.sessionId !== next)
+      store.sessionId = next
+      patch({
+        sessionId: next,
+        open: false,
+        ...(switchedConversation
+          ? {
+              board: null,
+              secView: null,
+              secLatestReply: null,
+              secTarget: 'auto',
+              selectedTaskId: '',
+              focusTaskId: '',
+              fleetShowAll: false,
+              pyramidShowAllAgents: false,
+              editTaskId: '',
+              editNoteId: '',
+              newNote: false,
+              askHits: null,
+              handoffText: '',
+              handoffEdit: null,
+              memSections: [],
+              memCount: 0,
+              memDigest: '',
+              memReply: '',
+              memHits: null,
+              memOpen: '',
+            }
+          : {}),
+      })
+      void refresh()
+    }
+
+    function SessionProbe(props) {
+      const sessionId = props && props.sessionId ? String(props.sessionId) : ''
+      const inputActions = props ? props.inputActions : null
+      React.useEffect(() => {
+        if (!sessionId) return undefined
+        adoptSession('header', sessionId, inputActions)
+        return () => adoptSession('header', '')
+      }, [sessionId, inputActions])
+      return null
+    }
+
+    const DOCK_POLL_MS = 600
+    function useDockShown() {
+      const view = useStore()
+      const [expanded, setExpanded] = React.useState(() => rightbarExpanded())
+      React.useEffect(() => {
+        const read = () => {
+          const next = rightbarExpanded()
+          setExpanded(prev => (prev === next ? prev : next))
+        }
+        read()
+        const timer = setInterval(read, DOCK_POLL_MS)
+        return () => clearInterval(timer)
+      }, [])
+      return !!(view.dock && expanded)
+    }
+
+    function ChiefIcon(props) {
+      const size = props && typeof props.size === 'number' && props.size > 0 ? props.size : 18
+      const active = !!(props && props.active)
+      return h(
+        'svg',
+        {
+          width: size,
+          height: size,
+          viewBox: '0 0 24 24',
+          fill: 'none',
+          stroke: 'currentColor',
+          strokeWidth: active ? 2 : 1.65,
+          strokeLinecap: 'round',
+          strokeLinejoin: 'round',
+          'aria-hidden': true,
+          focusable: false,
+          style: { display: 'block' },
+        },
+        h('path', { d: 'M13 3.5H7.5A2.5 2.5 0 0 0 5 6v12a2.5 2.5 0 0 0 2.5 2.5h9A2.5 2.5 0 0 0 19 18v-5.5' }),
+        h('path', { d: 'M8.5 10h5.5M8.5 13.5h7M8.5 17h4' }),
+        h('path', { d: 'M18 3l.9 2.1L21 6l-2.1.9L18 9l-.9-2.1L15 6l2.1-.9L18 3z' }),
+      )
+    }
+
+    function TriggerButton(props) {
+      const view = useStore()
+      const tasks = (view.board && Array.isArray(view.board.tasks)) ? view.board.tasks : []
+      const openCount = tasks.filter(t => t && t.status !== 'done').length
+      const pendingSug = (view.chiefMeta && view.chiefMeta.pendingSuggestions) || 0
+      const badgeCount = openCount + pendingSug
+      const dockShown = useDockShown()
+      const showing = view.panel === SIDE_ID || dockShown
+      const compact = !!(props && props.compact)
+      return h(
+        'button',
+        {
+          className: 'dnb-btn',
+          'data-active': showing || view.open ? '1' : '0',
+          title: BRAND_NAME,
+          'aria-label': BRAND_NAME,
+          'aria-expanded': showing || view.open ? 'true' : 'false',
+          onClick: () => {
+            if (view.panel === SIDE_ID) {
+              selectPanel(SIDE_ID)
+              return
+            }
+            if (openChief()) return
+            patch({ open: true })
+          },
+        },
+        h(ChiefIcon, { size: 16, active: showing || view.open }),
+        compact ? null : h('span', null, BRAND_NAME),
+        badgeCount ? h('span', { className: 'dnb-count' }, String(badgeCount)) : null,
+      )
+    }
+
+    function ComposerEntry(props) {
+      const sessionId = props && props.sessionId ? String(props.sessionId) : ''
+      const inputActions = props ? props.inputActions : null
+      React.useEffect(() => {
+        if (!sessionId) return undefined
+        adoptSession('composer', sessionId, inputActions)
+        return () => adoptSession('composer', '')
+      }, [sessionId, inputActions])
+      return h(React.Fragment, null, h(Style, null), h(TriggerButton, { compact: true }))
+    }
+
+    function CornerTrigger() {
+      const view = useStore()
+      const dockShown = useDockShown()
+      const showing = view.open || view.panel === SIDE_ID || dockShown
+      if (showing) return null
+      return h(
+        'button',
+        {
+          className: 'dnb-btn',
+          title: '打开 ' + BRAND_NAME,
+          'aria-label': BRAND_NAME,
+          onClick: () => {
+            if (openChief()) return
+            patch({ open: true })
+          },
+          style: {
+            position: 'fixed',
+            right: '16px',
+            bottom: '88px',
+            zIndex: 30,
+            width: '36px',
+            height: '36px',
+            borderRadius: '18px',
+            border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,136,0.25))',
+            background: 'var(--dsw-alias-bg-elevated, rgba(38,38,42,0.9))',
+            backdropFilter: 'blur(12px)',
+            boxShadow: '0 4px 14px rgba(0,0,0,0.2)',
+            color: 'var(--dsw-alias-label-primary)',
+          },
+        },
+        h(ChiefIcon, { size: 17 }),
+      )
+    }
+
+    function MainPanel() {
+      React.useEffect(() => {
+        patch({ panel: SIDE_ID })
+        return () => {
+          if (store.panel === SIDE_ID) patch({ panel: '' })
+        }
+      }, [])
+      return h('div', { className: 'dnb-page' }, h(Panel, { variant: 'main' }))
+    }
+
+    function SidebarChiefTab(props) {
+      const sessionId = props && props.sessionId ? String(props.sessionId) : ''
+      React.useEffect(() => {
+        dockMountCount += 1
+        patch({ dock: true })
+        return () => {
+          dockMountCount = Math.max(0, dockMountCount - 1)
+          if (dockMountCount === 0 && store.dock) patch({ dock: false })
+        }
+      }, [])
+      React.useEffect(() => {
+        if (!sessionId) return undefined
+        adoptSession('dock', sessionId, null)
+        return () => adoptSession('dock', '')
+      }, [sessionId])
+      return h('div', { className: 'dnb-page dnb-dock-page' }, h(Panel, { variant: 'dock' }))
+    }
+
+    /* ---------------------------------------------------------- Plugin Init */
+
+    return {
+      inject: ['slots', 'uiWorkspace', 'layout', 'sidebarRight', 'sidebarRightTabs'],
+      apply(ctx) {
+        hostCtx = ctx
+        navigation = ctx.uiWorkspace || null
+        layout = ctx.layout || null
+
+        ctx.effect(() => {
+          void refresh()
+          const timer = setInterval(() => void refresh(), 4000)
+          return () => clearInterval(timer)
+        }, 'dsh-chief: board poll')
+
+        ctx.effect(() => {
+          const trySeed = () => {
+            try {
+              seedRightbarIfEmpty()
+            } catch {}
+          }
+          const timer = setInterval(trySeed, 3200)
+          const first = setTimeout(trySeed, 1200)
+          return () => {
+            clearInterval(timer)
+            clearTimeout(first)
+          }
+        }, 'dsh-chief: claim an empty right sidebar')
+
+        ctx.effect(() => {
+          const tabs = service('sidebarRightTabs')
+          if (!tabs || typeof tabs.register !== 'function') return undefined
+          return tabs.register({
+            id: SIDE_ID,
+            kind: SIDE_ID,
+            priority: 'extension',
+            title: () => BRAND_NAME,
+            guide: [
+              {
+                id: SIDE_ID,
+                order: 40,
+                title: () => BRAND_NAME,
+                description: () => '摘要 · 金字塔任务拓扑 · 跨对话协同 · 工程档案柜 · 宰相边界',
+                icon: ChiefIcon,
+              },
+            ],
+          })
+        }, 'dsh-chief: right-sidebar tab type')
+
+        ctx.effect(
+          () =>
+            ctx.slots.inject('sidebar.right.pane.tab', () =>
+              ctx.slots.register({ name: 'sidebar.right.pane.tab', key: SIDE_ID, order: 100 }, SidebarChiefTab),
+            ),
+          'dsh-chief: right-sidebar tab body',
+        )
+
+        ctx.effect(
+          () => ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: SIDE_ID, locale: 'zh-CN' }, MainPanel)),
+          'dsh-chief: main-area page',
+        )
+
+        ctx.effect(
+          () =>
+            ctx.slots.inject('sidebar.panellist', () =>
+              ctx.slots.register({ name: 'sidebar.panellist', id: SIDE_ID, order: 40, label: () => BRAND_NAME }, ChiefIcon),
+            ),
+          'dsh-chief: sidebar entry',
+        )
+
+        ctx.effect(() => {
+          const onDown = event => {
+            if (!store.open) return
+            const target = event.target
+            if (panelEl && target && panelEl.contains(target)) return
+            if (target && typeof target.closest === 'function' && target.closest('.dnb-btn')) return
+            patch({ open: false })
+          }
+          const onKey = event => {
+            if (String(event.key) === 'Escape' && store.open) patch({ open: false })
+          }
+          document.addEventListener('pointerdown', onDown, true)
+          document.addEventListener('keydown', onKey, true)
+          return () => {
+            document.removeEventListener('pointerdown', onDown, true)
+            document.removeEventListener('keydown', onKey, true)
+            panelEl = null
+          }
+        }, 'dsh-chief: dismiss on outside click')
+
+        ctx.effect(
+          () =>
+            ctx.slots.inject('conversation.input.right', () =>
+              ctx.slots.register(
+                { name: 'conversation.input.right', id: 'chief-composer-entry', order: 20, locale: 'zh-CN' },
+                ComposerEntry,
+              ),
+            ),
+          'dsh-chief: composer entry',
+        )
+
+        ctx.effect(
+          () =>
+            ctx.slots.inject('shell.overlay', () =>
+              ctx.slots.register({ name: 'shell.overlay', id: 'corner-chief-panel', order: 40 }, Panel),
+            ),
+          'dsh-chief: floating panel',
+        )
+
+        ctx.effect(
+          () =>
+            ctx.slots.inject('shell.overlay', () =>
+              ctx.slots.register({ name: 'shell.overlay', id: 'corner-chief-trigger', order: 30 }, CornerTrigger),
+            ),
+          'dsh-chief: corner trigger',
+        )
+
+        ctx.effect(
+          () =>
+            ctx.slots.inject('conversation.session.header.utilities', () =>
+              ctx.slots.register(
+                { name: 'conversation.session.header.utilities', id: 'corner-chief-session-probe', order: 99 },
+                SessionProbe,
+              ),
+            ),
+          'dsh-chief: session probe',
+        )
+      },
+    }
+  },
+})
