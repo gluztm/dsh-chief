@@ -22,16 +22,16 @@ window.__ModuleLoader__.load({
 
     const STATUSES = ['todo', 'doing', 'blocked', 'done']
     const STATUS_LABEL = { todo: '待推进', doing: '推进中', blocked: '受阻', done: '已完成' }
-    const STATUS_BADGE = { todo: '○ 待推进', doing: '▶ 推进中', blocked: '⚠ 受阻', done: '✓ 已完成' }
+    const STATUS_BADGE = { todo: '○ 待推进', doing: '推进中', blocked: '⚠ 受阻', done: '✓ 已完成' }
     const STATUS_HEX = {
-      todo: '#0a84ff',
-      doing: '#ff9f0a',
+      todo: '#8e8e93',
+      doing: '#0a84ff',
       blocked: '#ff453a',
       done: '#30d158',
     }
     const STATUS_BG = {
-      todo: 'rgba(10, 132, 255, 0.14)',
-      doing: 'rgba(255, 159, 10, 0.18)',
+      todo: 'rgba(142, 142, 147, 0.16)',
+      doing: 'rgba(10, 132, 255, 0.16)',
       blocked: 'rgba(255, 69, 58, 0.18)',
       done: 'rgba(48, 209, 88, 0.15)',
     }
@@ -56,6 +56,13 @@ window.__ModuleLoader__.load({
       acc[c.key] = c.label
       return acc
     }, {})
+    const FACT_CAT_TONE = {
+      discipline: { bg: 'rgba(245, 158, 11, 0.16)', fg: '#fbbf24', border: 'rgba(245, 158, 11, 0.34)' },
+      preference: { bg: 'rgba(245, 158, 11, 0.16)', fg: '#fbbf24', border: 'rgba(245, 158, 11, 0.34)' },
+      architecture: { bg: 'rgba(10, 132, 255, 0.14)', fg: '#409cff', border: 'rgba(10, 132, 255, 0.30)' },
+      team: { bg: 'rgba(10, 132, 255, 0.14)', fg: '#409cff', border: 'rgba(10, 132, 255, 0.30)' },
+      progress: { bg: 'rgba(10, 132, 255, 0.14)', fg: '#409cff', border: 'rgba(10, 132, 255, 0.30)' },
+    }
 
     const RELAY_MODES = [
       { key: 'steer', label: '插话', hint: '正在运行时立即在下一步切入' },
@@ -79,7 +86,7 @@ window.__ModuleLoader__.load({
     const BOUND_LISTS = [
       { field: 'allowed', label: '允许事项', dot: '#30d158' },
       { field: 'forbidden', label: '禁止红线', dot: '#ff453a' },
-      { field: 'notes', label: '注意事项', dot: '#ff9f0a' },
+      { field: 'notes', label: '注意事项', dot: '#f59e0b' },
     ]
     const BOUND_CAP = 20
 
@@ -175,6 +182,8 @@ window.__ModuleLoader__.load({
       secRegenerating: false,
       secSubTab: 'digest',
       secInput: '',
+      secImages: [],
+      secDragOver: false,
       secTarget: 'auto',
       secMode: 'steer',
       secLatestReply: null,
@@ -720,47 +729,48 @@ window.__ModuleLoader__.load({
       return tapAddTab(empty)
     }
 
-    /** Fast corner-overlay clearance check (queries media elements only, never `querySelectorAll('*')`). */
-    function reserveCornerSpace(node) {
-      const none = { top: 0, bottom: 0 }
-      if (!node || typeof document === 'undefined') return none
-      const rect = node.getBoundingClientRect()
+    /**
+     * Horizontal-only clearance for fixed bottom-right desktop mascots overlapping the composer bar.
+     * Never reserves vertical top/bottom padding (fixes body center jump & bottom void bugs).
+     */
+    function reserveCornerSpace(panelNode, secBarNode) {
+      const none = { right: 0 }
+      if (!panelNode || typeof document === 'undefined' || typeof window === 'undefined') return none
+      const rect = panelNode.getBoundingClientRect()
       if (!rect.width || !rect.height) return none
 
-      const rootOf = el => {
+      const barRect = secBarNode && typeof secBarNode.getBoundingClientRect === 'function'
+        ? secBarNode.getBoundingClientRect()
+        : { top: rect.bottom - 120, bottom: rect.bottom, left: rect.left, right: rect.right }
+
+      const winW = window.innerWidth || document.documentElement.clientWidth || 0
+      const winH = window.innerHeight || document.documentElement.clientHeight || 0
+      const isFixedOverlay = el => {
         for (let p = el; p && p !== document.body; p = p.parentElement) {
           const s = getComputedStyle(p)
-          if (s.position === 'fixed' && Number(s.zIndex) >= 20) return p
+          if (s.position === 'fixed' && (Number(s.zIndex) >= 10 || s.zIndex === 'auto')) return true
         }
-        return null
+        return false
       }
 
-      let top = 0
-      let bottom = 0
-      const candidates = document.body.querySelectorAll('img, video, canvas')
+      let right = 0
+      const candidates = document.body.querySelectorAll('img, video, canvas, [data-mascot], [class*="mascot"], [class*="pet"]')
       for (const el of candidates) {
-        if (node.contains(el)) continue
+        if (panelNode.contains(el)) continue
         const er = el.getBoundingClientRect()
-        if (!er.width || !er.height) continue
-        if (er.width * er.height > rect.width * rect.height * 0.55) continue
-        const left = Math.max(er.left, rect.left)
-        const right = Math.min(er.right, rect.right)
-        const yTop = Math.max(er.top, rect.top)
-        const yBot = Math.min(er.bottom, rect.bottom)
-        if (!(left < right && yTop < yBot)) continue
+        if (er.width < 28 || er.height < 28 || er.width > 320 || er.height > 320) continue
+        if (er.bottom < winH - 60 || er.right < winW - 80) continue
+        const yOverlap = Math.min(er.bottom, barRect.bottom) - Math.max(er.top, barRect.top - 4)
+        if (yOverlap <= 0) continue
+        if (er.left >= rect.right - 4 || er.right <= rect.left) continue
         const cs = getComputedStyle(el)
         if (cs.display === 'none' || cs.visibility === 'hidden' || Number(cs.opacity) < 0.05) continue
-        const root = rootOf(el)
-        if (!root) continue
-        if (er.top < rect.top + rect.height * 0.5) {
-          top = Math.max(top, Math.round(er.bottom - rect.top))
-        } else {
-          bottom = Math.max(bottom, Math.round(rect.bottom - er.top))
-        }
+        if (!isFixedOverlay(el)) continue
+        const needed = Math.ceil(rect.right - er.left + 8)
+        if (needed > right) right = needed
       }
       return {
-        top: Math.max(0, Math.min(top, Math.round(rect.height * 0.3))),
-        bottom: Math.max(0, Math.min(bottom, 160)),
+        right: Math.max(0, Math.min(right, Math.round(rect.width * 0.36), 148)),
       }
     }
 
@@ -1020,12 +1030,122 @@ window.__ModuleLoader__.load({
       }
     }
 
+    const SEC_IMAGE_MIMES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+    const SEC_MAX_IMAGES = 4
+
+    function readBlobAsDataUrl(blob) {
+      return new Promise((resolve, reject) => {
+        const reader = new FileReader()
+        reader.onload = () => resolve(String(reader.result || ''))
+        reader.onerror = () => reject(reader.error || new Error('读取图片失败'))
+        reader.readAsDataURL(blob)
+      })
+    }
+
+    function encodeImageForChief(file) {
+      return readBlobAsDataUrl(file).then(rawUrl => new Promise((resolve, reject) => {
+        const matchedMime = rawUrl.match(/^data:([^;]+);base64,/i)?.[1]
+        const rawType = (String(file.type || '').toLowerCase() === 'image/jpg' ? 'image/jpeg' : String(file.type || '').toLowerCase())
+          || (matchedMime || 'image/png').toLowerCase()
+        const normType = rawType === 'image/jpg' ? 'image/jpeg' : rawType
+        const extractB64 = url => {
+          const m = String(url || '').match(/^data:([^;]+);base64,(.+)$/is)
+          return m ? { mediaType: m[1].toLowerCase() === 'image/jpg' ? 'image/jpeg' : m[1].toLowerCase(), data: m[2] } : null
+        }
+        const makeItem = (parsed, previewUrl, fallbackName) => ({
+          id: 'img-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6),
+          name: fallbackName || file.name || 'image.png',
+          mediaType: parsed.mediaType,
+          data: parsed.data,
+          previewUrl,
+        })
+        if (normType === 'image/gif' || typeof Image === 'undefined') {
+          const parsed = extractB64(rawUrl)
+          if (!parsed) return reject(new Error('图片编码解析失败'))
+          return resolve(makeItem(parsed, rawUrl, file.name || 'image.gif'))
+        }
+        const img = new Image()
+        img.onload = () => {
+          const w = img.naturalWidth || img.width || 0
+          const h = img.naturalHeight || img.height || 0
+          const maxSide = 2048
+          const tooBigDim = w > maxSide || h > maxSide
+          const tooHeavy = (file.size || 0) > 3.5 * 1024 * 1024
+          if (!tooBigDim && !tooHeavy) {
+            const parsed = extractB64(rawUrl)
+            if (parsed) return resolve(makeItem(parsed, rawUrl))
+          }
+          try {
+            const scale = tooBigDim ? Math.min(1, maxSide / Math.max(w, h)) : 1
+            const tw = Math.max(1, Math.round(w * scale))
+            const th = Math.max(1, Math.round(h * scale))
+            const canvas = document.createElement('canvas')
+            canvas.width = tw
+            canvas.height = th
+            const ctx = canvas.getContext('2d')
+            if (!ctx) throw new Error('no 2d ctx')
+            ctx.drawImage(img, 0, 0, tw, th)
+            const outUrl = canvas.toDataURL('image/jpeg', 0.88)
+            const parsed = extractB64(outUrl)
+            if (!parsed) throw new Error('canvas encode empty')
+            resolve(makeItem(parsed, outUrl, (file.name || 'image').replace(/\.[^.]+$/, '') + '.jpg'))
+          } catch {
+            const parsed = extractB64(rawUrl)
+            if (!parsed) return reject(new Error('图片压缩失败'))
+            resolve(makeItem(parsed, rawUrl))
+          }
+        }
+        img.onerror = () => {
+          const parsed = extractB64(rawUrl)
+          if (parsed) resolve(makeItem(parsed, rawUrl))
+          else reject(new Error('无法加载图片文件'))
+        }
+        img.src = rawUrl
+      }))
+    }
+
+    async function ingestSecImageFiles(fileList) {
+      const incoming = Array.from(fileList || []).filter(f => {
+        if (!f) return false
+        const t = String(f.type || '').toLowerCase()
+        if (t === 'image/jpg' || SEC_IMAGE_MIMES.has(t)) return true
+        return /\.(png|jpe?g|webp|gif)$/i.test(String(f.name || ''))
+      })
+      if (!incoming.length) {
+        patch({ notice: '仅支持 PNG / JPEG / WebP / GIF 格式图片' })
+        return
+      }
+      const existing = Array.isArray(store.secImages) ? store.secImages : []
+      const slots = Math.max(0, SEC_MAX_IMAGES - existing.length)
+      if (!slots) {
+        patch({ notice: `最多一次上传 ${SEC_MAX_IMAGES} 张图片` })
+        return
+      }
+      const picked = incoming.slice(0, slots)
+      if (incoming.length > slots) {
+        patch({ notice: `单次最多 ${SEC_MAX_IMAGES} 张，已截取前 ${slots} 张` })
+      }
+      const encoded = []
+      for (const file of picked) {
+        try {
+          encoded.push(await encodeImageForChief(file))
+        } catch (err) {
+          patch({ error: String((err && err.message) || err) })
+        }
+      }
+      if (encoded.length) {
+        const latest = Array.isArray(store.secImages) ? store.secImages : []
+        patch({ secImages: [...latest, ...encoded].slice(0, SEC_MAX_IMAGES) })
+      }
+    }
+
     async function submitChiefBar(overrideText = '') {
       const text = String(overrideText || store.secInput || '').trim()
-      if (!text || store.secBusy) return
+      const imgs = overrideText ? [] : (Array.isArray(store.secImages) ? store.secImages : [])
+      if ((!text && !imgs.length) || store.secBusy) return
       const target = overrideText ? 'auto' : (store.secTarget || 'auto')
       const mode = store.secMode || 'steer'
-      patch({ secBusy: true, ...(overrideText ? {} : { secInput: '' }), error: '' })
+      patch({ secBusy: true, ...(overrideText ? {} : { secInput: '', secImages: [] }), error: '' })
       try {
         const value = await call('chief/ask', {
           method: 'POST',
@@ -1035,6 +1155,7 @@ window.__ModuleLoader__.load({
             text,
             target,
             mode,
+            images: imgs.map(({ name, mediaType, data }) => ({ name, mediaType, data })),
           }),
         })
         if (value) {
@@ -1060,7 +1181,7 @@ window.__ModuleLoader__.load({
         }
       } catch (error) {
         patch({
-          ...(overrideText ? {} : { secInput: text }),
+          ...(overrideText ? {} : { secInput: text, secImages: imgs }),
           error: String((error && error.message) || error),
         })
       } finally {
@@ -1699,6 +1820,12 @@ window.__ModuleLoader__.load({
           return h('svg', props,
             h('path', { d: 'm21.44 11.05-9.19 9.19a6 6 0 0 1-8.49-8.49l9.19-9.19a4 4 0 0 1 5.66 5.66l-9.2 9.19a2 2 0 0 1-2.83-2.83l8.49-8.48' }),
           )
+        case 'image':
+          return h('svg', props,
+            h('rect', { x: 3, y: 4, width: 18, height: 16, rx: 2.5 }),
+            h('circle', { cx: 8.5, cy: 9.5, r: 1.5 }),
+            h('path', { d: 'm21 15-4.8-4.8a1.5 1.5 0 0 0-2.1 0L6 18.3' }),
+          )
         case 'archive':
           return h('svg', props,
             h('rect', { x: 3, y: 4, width: 18, height: 5, rx: 1.5 }),
@@ -1975,7 +2102,7 @@ window.__ModuleLoader__.load({
 
       /* Scrollable body */
       .dnb-body {
-        padding: calc(4px + var(--dnb-safe-top, 0px)) 12px calc(16px + var(--dnb-safe-bottom, 0px));
+        padding: 4px 12px 14px;
         overflow-y: auto;
         overflow-x: hidden;
         flex: 1 1 auto;
@@ -2216,8 +2343,8 @@ window.__ModuleLoader__.load({
         transition: border-color 0.2s ease, box-shadow 0.2s ease;
       }
       .dnb-pyr-apex[data-spotlight="doing"] {
-        border-color: #ff9f0a;
-        box-shadow: 0 0 0 2.5px rgba(255, 159, 10, 0.28), 0 8px 24px rgba(0, 0, 0, 0.18);
+        border-color: #0a84ff;
+        box-shadow: 0 0 0 2.5px rgba(10, 132, 255, 0.28), 0 8px 24px rgba(0, 0, 0, 0.18);
       }
       .dnb-pyr-apex[data-spotlight="blocked"] {
         border-color: #ff453a;
@@ -2231,9 +2358,9 @@ window.__ModuleLoader__.load({
         flex-shrink: 0;
         transition: background 0.2s ease;
       }
-      .dnb-pyr-trunk[data-tone="doing"] { background: #ff9f0a; }
+      .dnb-pyr-trunk[data-tone="doing"] { background: #0a84ff; }
       .dnb-pyr-trunk[data-tone="blocked"] { background: #ff453a; }
-      .dnb-pyr-trunk[data-tone="live"] { background: #30d158; }
+      .dnb-pyr-trunk[data-tone="live"] { background: #0a84ff; }
 
       .dnb-pyr-crossbar {
         height: 2px;
@@ -2241,7 +2368,7 @@ window.__ModuleLoader__.load({
         background: var(--dnb-border-strong, rgba(155, 155, 168, 0.52));
         border-radius: 2px;
       }
-      .dnb-pyr-crossbar[data-tone="doing"] { background: linear-gradient(90deg, rgba(255,159,10,0.45), #ff9f0a, rgba(255,159,10,0.45)); }
+      .dnb-pyr-crossbar[data-tone="doing"] { background: linear-gradient(90deg, rgba(10,132,255,0.45), #0a84ff, rgba(10,132,255,0.45)); }
       .dnb-pyr-crossbar[data-tone="blocked"] { background: linear-gradient(90deg, rgba(255,69,58,0.45), #ff453a, rgba(255,69,58,0.45)); }
 
       .dnb-pyr-grid {
@@ -2283,11 +2410,11 @@ window.__ModuleLoader__.load({
         background: var(--dnb-border-strong, rgba(165, 165, 178, 0.85));
       }
       .dnb-pyr-branch[data-tone="doing"]::before,
-      .dnb-pyr-branch[data-tone="doing"]::after { background: #ff9f0a; }
+      .dnb-pyr-branch[data-tone="doing"]::after { background: #0a84ff; }
       .dnb-pyr-branch[data-tone="blocked"]::before,
       .dnb-pyr-branch[data-tone="blocked"]::after { background: #ff453a; }
       .dnb-pyr-branch[data-tone="live"]::before,
-      .dnb-pyr-branch[data-tone="live"]::after { background: #30d158; }
+      .dnb-pyr-branch[data-tone="live"]::after { background: #0a84ff; }
 
       .dnb-pyr-branch-box {
         position: relative;
@@ -2298,9 +2425,9 @@ window.__ModuleLoader__.load({
       .dnb-pyr-branch-box[data-spotlight="doing"] {
         padding: 10px 9px 9px;
         margin-top: 4px;
-        border: 2px solid #ff9f0a;
-        background: rgba(255, 159, 10, 0.06);
-        box-shadow: 0 0 0 3px rgba(255, 159, 10, 0.16), 0 8px 24px rgba(0, 0, 0, 0.18);
+        border: 2px solid #0a84ff;
+        background: rgba(10, 132, 255, 0.06);
+        box-shadow: 0 0 0 3px rgba(10, 132, 255, 0.16), 0 8px 24px rgba(0, 0, 0, 0.18);
       }
       .dnb-pyr-branch-box[data-spotlight="blocked"] {
         padding: 10px 9px 9px;
@@ -2319,7 +2446,7 @@ window.__ModuleLoader__.load({
         font-size: 10.5px;
         font-weight: 700;
         color: #fff;
-        background: #ff9f0a;
+        background: #0a84ff;
         margin-bottom: 7px;
         box-shadow: 0 2px 8px rgba(0, 0, 0, 0.22);
       }
@@ -2336,11 +2463,11 @@ window.__ModuleLoader__.load({
         transition: border-color 0.18s ease, background 0.18s ease, box-shadow 0.18s ease;
       }
       .dnb-pyr-agent-card[data-running="1"] {
-        border-color: rgba(48, 209, 88, 0.52);
-        background: linear-gradient(135deg, rgba(48, 209, 88, 0.09) 0%, var(--dnb-elevated, #252529) 72%);
+        border-color: rgba(10, 132, 255, 0.52);
+        background: linear-gradient(135deg, rgba(10, 132, 255, 0.09) 0%, var(--dnb-elevated, #252529) 72%);
       }
       .dnb-pyr-agent-card[data-focused="doing"] {
-        border-color: rgba(255, 159, 10, 0.65);
+        border-color: rgba(10, 132, 255, 0.65);
       }
       .dnb-pyr-agent-card[data-focused="blocked"] {
         border-color: rgba(255, 69, 58, 0.68);
@@ -2359,13 +2486,13 @@ window.__ModuleLoader__.load({
         min-width: 0;
       }
       .dnb-pyr-subtree[data-tone="doing"] {
-        border-left-color: rgba(255, 159, 10, 0.68);
+        border-left-color: rgba(10, 132, 255, 0.68);
       }
       .dnb-pyr-subtree[data-tone="blocked"] {
         border-left-color: rgba(255, 69, 58, 0.72);
       }
       .dnb-pyr-subtree[data-tone="live"] {
-        border-left-color: rgba(48, 209, 88, 0.58);
+        border-left-color: rgba(10, 132, 255, 0.58);
       }
       .dnb-pyr-subitem {
         position: relative;
@@ -2391,7 +2518,7 @@ window.__ModuleLoader__.load({
         background: var(--dnb-border-strong, rgba(165, 165, 178, 0.78));
       }
       .dnb-pyr-subitem[data-tone="doing"]::before,
-      .dnb-pyr-subitem[data-tone="doing"]::after { background: #ff9f0a; }
+      .dnb-pyr-subitem[data-tone="doing"]::after { background: #0a84ff; }
       .dnb-pyr-subitem[data-tone="blocked"]::before,
       .dnb-pyr-subitem[data-tone="blocked"]::after { background: #ff453a; }
       .dnb-pyr-subitem[data-tone="done"]::after { background: #30d158; }
@@ -2409,10 +2536,10 @@ window.__ModuleLoader__.load({
         border-color: var(--dnb-border-strong);
       }
       .dnb-pyr-task-card[data-status="doing"] {
-        border-left-color: #ff9f0a;
-        border-color: rgba(255, 159, 10, 0.34);
+        border-left-color: #0a84ff;
+        border-color: rgba(10, 132, 255, 0.34);
         border-left-width: 3.5px;
-        background: linear-gradient(90deg, rgba(255, 159, 10, 0.08) 0%, var(--dnb-card) 64%);
+        background: linear-gradient(90deg, rgba(10, 132, 255, 0.08) 0%, var(--dnb-card) 64%);
       }
       .dnb-pyr-task-card[data-status="blocked"] {
         border-left-color: #ff453a;
@@ -2421,15 +2548,15 @@ window.__ModuleLoader__.load({
         background: linear-gradient(90deg, rgba(255, 69, 58, 0.1) 0%, var(--dnb-card) 64%);
       }
       .dnb-pyr-task-card[data-status="todo"] {
-        border-left-color: #0a84ff;
+        border-left-color: #8e8e93;
       }
       .dnb-pyr-task-card[data-status="done"] {
         border-left-color: #30d158;
         opacity: 0.92;
       }
       .dnb-pyr-task-card[data-spotlight="doing"] {
-        border-color: #ff9f0a;
-        box-shadow: 0 0 0 2px rgba(255, 159, 10, 0.34), 0 6px 18px rgba(0, 0, 0, 0.18);
+        border-color: #0a84ff;
+        box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.34), 0 6px 18px rgba(0, 0, 0, 0.18);
       }
       .dnb-pyr-task-card[data-spotlight="blocked"] {
         border-color: #ff453a;
@@ -2469,15 +2596,15 @@ window.__ModuleLoader__.load({
         background: var(--dnb-fill);
       }
       .dnb-pyr-st-btn[data-active="1"][data-st="todo"] {
-        color: #0a84ff;
-        border-color: rgba(10, 132, 255, 0.45);
-        background: rgba(10, 132, 255, 0.14);
+        color: #a1a1aa;
+        border-color: rgba(142, 142, 147, 0.45);
+        background: rgba(142, 142, 147, 0.16);
         font-weight: 600;
       }
       .dnb-pyr-st-btn[data-active="1"][data-st="doing"] {
-        color: #ff9f0a;
-        border-color: rgba(255, 159, 10, 0.5);
-        background: rgba(255, 159, 10, 0.16);
+        color: #409cff;
+        border-color: rgba(10, 132, 255, 0.5);
+        background: rgba(10, 132, 255, 0.16);
         font-weight: 600;
       }
       .dnb-pyr-st-btn[data-active="1"][data-st="blocked"] {
@@ -2576,6 +2703,23 @@ window.__ModuleLoader__.load({
         animation: dnb-live-dot 1.5s ease-in-out infinite;
       }
 
+      .dnb-spin-ring {
+        width: var(--dnb-spin-size, 10px);
+        height: var(--dnb-spin-size, 10px);
+        border-radius: 50%;
+        border: 1.65px solid rgba(161, 161, 170, 0.28);
+        border-top-color: currentColor;
+        display: inline-block;
+        flex-shrink: 0;
+        box-sizing: border-box;
+        animation: dnb-spin 0.85s linear infinite;
+      }
+      .dnb-svg-spin {
+        transform-box: fill-box;
+        transform-origin: center;
+        animation: dnb-spin 0.85s linear infinite;
+      }
+
       @keyframes dnb-spotlight-march {
         to { stroke-dashoffset: -28px; }
       }
@@ -2607,9 +2751,9 @@ window.__ModuleLoader__.load({
         border: 1px solid transparent;
       }
       .dnb-status-badge[data-status="doing"] {
-        background: rgba(255, 159, 10, 0.18);
-        border-color: rgba(255, 159, 10, 0.48);
-        color: #ff9f0a;
+        background: rgba(10, 132, 255, 0.16);
+        border-color: rgba(10, 132, 255, 0.44);
+        color: #409cff;
       }
       .dnb-status-badge[data-status="blocked"] {
         background: rgba(255, 69, 58, 0.2);
@@ -2617,9 +2761,9 @@ window.__ModuleLoader__.load({
         color: #ff453a;
       }
       .dnb-status-badge[data-status="todo"] {
-        background: rgba(10, 132, 255, 0.14);
-        border-color: rgba(10, 132, 255, 0.34);
-        color: #0a84ff;
+        background: rgba(142, 142, 147, 0.16);
+        border-color: rgba(142, 142, 147, 0.34);
+        color: #a1a1aa;
       }
       .dnb-status-badge[data-status="done"] {
         background: rgba(48, 209, 88, 0.14);
@@ -2653,10 +2797,10 @@ window.__ModuleLoader__.load({
         transform: scale(0.985);
       }
       .dnb-radar-card[data-kind="doing"] {
-        border-left: 3.5px solid #ff9f0a;
-        background: linear-gradient(90deg, rgba(255, 159, 10, 0.12) 0%, var(--dnb-card) 70%);
-        border-color: rgba(255, 159, 10, 0.34);
-        border-left-color: #ff9f0a;
+        border-left: 3.5px solid #0a84ff;
+        background: linear-gradient(90deg, rgba(10, 132, 255, 0.12) 0%, var(--dnb-card) 70%);
+        border-color: rgba(10, 132, 255, 0.34);
+        border-left-color: #0a84ff;
       }
       .dnb-radar-card[data-kind="blocked"] {
         border-left: 3.5px solid #ff453a;
@@ -2665,7 +2809,7 @@ window.__ModuleLoader__.load({
         border-left-color: #ff453a;
       }
       .dnb-radar-card[data-focused="1"] {
-        box-shadow: 0 0 0 2px rgba(255, 159, 10, 0.36), 0 6px 16px rgba(0, 0, 0, 0.18);
+        box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.36), 0 6px 16px rgba(0, 0, 0, 0.18);
       }
       .dnb-radar-card[data-kind="blocked"][data-focused="1"] {
         box-shadow: 0 0 0 2px rgba(255, 69, 58, 0.42), 0 6px 16px rgba(0, 0, 0, 0.18);
@@ -2680,8 +2824,8 @@ window.__ModuleLoader__.load({
         padding: 7px 10px;
         margin-bottom: 8px;
         border-radius: 11px;
-        border: 1px solid rgba(255, 159, 10, 0.45);
-        background: rgba(255, 159, 10, 0.13);
+        border: 1px solid rgba(10, 132, 255, 0.45);
+        background: rgba(10, 132, 255, 0.13);
         font-size: 11.5px;
         animation: dnb-enter 0.18s ease-out;
       }
@@ -2707,10 +2851,10 @@ window.__ModuleLoader__.load({
         transition: transform 0.16s cubic-bezier(0.32, 0.72, 0, 1), background 0.16s ease, color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
       }
       .dnb-pin-stamp:hover {
-        color: #ff9f0a;
+        color: #fbbf24;
         border-style: solid;
-        border-color: rgba(255, 159, 10, 0.48);
-        background: rgba(255, 159, 10, 0.1);
+        border-color: rgba(245, 158, 11, 0.48);
+        background: rgba(245, 158, 11, 0.1);
         transform: scale(1.06) rotate(-4deg);
       }
       .dnb-pin-stamp:active {
@@ -2718,10 +2862,10 @@ window.__ModuleLoader__.load({
       }
       .dnb-pin-stamp[data-pinned="1"] {
         border-style: solid;
-        border-color: rgba(255, 159, 10, 0.58);
-        background: linear-gradient(135deg, rgba(255, 159, 10, 0.26) 0%, rgba(255, 107, 0, 0.16) 100%);
-        color: #ff9f0a;
-        box-shadow: 0 2px 7px rgba(255, 159, 10, 0.22), inset 0 0.5px 0 rgba(255, 255, 255, 0.22);
+        border-color: rgba(245, 158, 11, 0.58);
+        background: linear-gradient(135deg, rgba(245, 158, 11, 0.26) 0%, rgba(217, 119, 6, 0.16) 100%);
+        color: #fbbf24;
+        box-shadow: 0 2px 7px rgba(245, 158, 11, 0.22), inset 0 0.5px 0 rgba(255, 255, 255, 0.22);
       }
       .dnb-pin-badge {
         display: inline-flex;
@@ -2732,9 +2876,9 @@ window.__ModuleLoader__.load({
         font-size: 9.5px;
         font-weight: 700;
         letter-spacing: 0.2px;
-        color: #ff9f0a;
-        background: rgba(255, 159, 10, 0.15);
-        border: 1px solid rgba(255, 159, 10, 0.34);
+        color: #fbbf24;
+        background: rgba(245, 158, 11, 0.15);
+        border: 1px solid rgba(245, 158, 11, 0.34);
         flex-shrink: 0;
       }
       .dnb-bound-check {
@@ -2876,14 +3020,40 @@ window.__ModuleLoader__.load({
         border-bottom: 1px solid var(--dnb-border);
       }
       .dnb-prose-h2 {
-        font-size: 14px;
-        font-weight: 600;
+        font-size: 13.5px;
+        font-weight: 700;
         color: var(--dnb-text);
         margin: 14px 0 6px;
         letter-spacing: -0.1px;
       }
       .dnb-prose-h2:first-child {
         margin-top: 0;
+      }
+      .dnb-struct-head {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 3px 8px;
+        margin: 12px 0 6px;
+        border-radius: 7px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: -0.1px;
+        line-height: 1.35;
+      }
+      .dnb-struct-head[data-compact="1"] {
+        font-size: 11.8px;
+        padding: 2px 7px;
+        margin: 6px 0 4px;
+      }
+      .dnb-struct-bar {
+        width: 3px;
+        height: 13px;
+        border-radius: 2px;
+        flex-shrink: 0;
+      }
+      .dnb-struct-head[data-compact="1"] .dnb-struct-bar {
+        height: 11px;
       }
       .dnb-prose-p {
         font-size: 12.8px;
@@ -2901,8 +3071,8 @@ window.__ModuleLoader__.load({
         margin: 0 12px 8px;
         padding: 9px 11px;
         border-radius: 13px;
-        background: linear-gradient(135deg, rgba(10, 132, 255, 0.11), rgba(255, 159, 10, 0.08));
-        border: 1px solid rgba(10, 132, 255, 0.28);
+        background: linear-gradient(135deg, rgba(245, 158, 11, 0.11), rgba(10, 132, 255, 0.08));
+        border: 1px solid rgba(245, 158, 11, 0.30);
         flex-shrink: 0;
         animation: dnb-enter 0.2s cubic-bezier(0.32, 0.72, 0, 1);
       }
@@ -2910,10 +3080,61 @@ window.__ModuleLoader__.load({
       /* Persistent Bottom Chief Input Bar (DS-Bot + iOS Style) */
       .dnb-sec-bar {
         flex-shrink: 0;
-        padding: 7px 12px calc(10px + var(--dnb-safe-bottom, 0px));
+        padding: 7px calc(12px + var(--dnb-safe-right, 0px)) 10px 12px;
         border-top: 1px solid var(--dnb-border);
         background: var(--dsw-alias-bg-layer-2, rgba(28, 28, 31, 0.65));
         backdrop-filter: blur(16px);
+        transition: border-color 0.16s ease, background 0.16s ease;
+      }
+      .dnb-sec-bar[data-dragover="1"] {
+        border-top-color: var(--dnb-accent);
+        background: rgba(10, 132, 255, 0.10);
+      }
+      .dnb-sec-img-strip {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        overflow-x: auto;
+        padding: 2px 2px 7px;
+        scrollbar-width: none;
+      }
+      .dnb-sec-img-strip::-webkit-scrollbar { display: none; }
+      .dnb-sec-img-thumb {
+        position: relative;
+        width: 44px;
+        height: 44px;
+        border-radius: 9px;
+        overflow: hidden;
+        border: 1px solid var(--dnb-border-strong);
+        background: var(--dnb-card);
+        flex-shrink: 0;
+      }
+      .dnb-sec-img-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      .dnb-sec-img-rm {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
+        border: none;
+        background: rgba(0, 0, 0, 0.72);
+        color: #fff;
+        font-size: 11px;
+        line-height: 1;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+      .dnb-sec-img-rm:hover {
+        background: #ff453a;
       }
       .dnb-sec-targets {
         display: flex;
@@ -2954,7 +3175,7 @@ window.__ModuleLoader__.load({
         display: flex;
         align-items: center;
         gap: 6px;
-        padding: 4px 5px 4px 13px;
+        padding: 4px 5px 4px 7px;
         border-radius: 20px;
         border: 1px solid var(--dnb-border-strong);
         background: var(--dnb-card);
@@ -2963,6 +3184,44 @@ window.__ModuleLoader__.load({
       .dnb-sec-shell:focus-within {
         border-color: var(--dnb-accent);
         box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.14);
+      }
+      .dnb-sec-attach {
+        position: relative;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        border: none;
+        background: transparent;
+        color: var(--dnb-text-2);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+      .dnb-sec-attach:hover:not(:disabled) {
+        background: var(--dnb-fill);
+        color: var(--dnb-accent);
+      }
+      .dnb-sec-attach:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .dnb-sec-attach-badge {
+        position: absolute;
+        top: -1px;
+        right: -1px;
+        min-width: 13px;
+        height: 13px;
+        padding: 0 3px;
+        border-radius: 99px;
+        background: var(--dnb-accent);
+        color: #fff;
+        font-size: 9px;
+        font-weight: 700;
+        line-height: 13px;
+        text-align: center;
       }
       .dnb-sec-input {
         flex: 1;
@@ -3418,7 +3677,7 @@ window.__ModuleLoader__.load({
         'span',
         { className: 'dnb-status-badge', 'data-status': st, style },
         st === 'doing'
-          ? h('span', { className: 'dnb-live-dot', style: { background: '#ff9f0a' } })
+          ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9.5px', color: '#409cff' } })
           : null,
         STATUS_BADGE[st] || STATUS_LABEL[st],
       )
@@ -3517,11 +3776,11 @@ window.__ModuleLoader__.load({
                   height: 23,
                   padding: '0 8px',
                   fontSize: 10.5,
-                  color: isFocused ? '#fff' : (kind === 'blocked' ? '#ff453a' : '#ff9f0a'),
+                  color: isFocused ? '#fff' : (kind === 'blocked' ? '#ff453a' : '#409cff'),
                   background: isFocused
-                    ? (kind === 'blocked' ? '#ff453a' : '#ff9f0a')
-                    : (kind === 'blocked' ? 'rgba(255,69,58,0.12)' : 'rgba(255,159,10,0.12)'),
-                  borderColor: kind === 'blocked' ? 'rgba(255,69,58,0.38)' : 'rgba(255,159,10,0.38)',
+                    ? (kind === 'blocked' ? '#ff453a' : '#0a84ff')
+                    : (kind === 'blocked' ? 'rgba(255,69,58,0.12)' : 'rgba(10,132,255,0.12)'),
+                  borderColor: kind === 'blocked' ? 'rgba(255,69,58,0.38)' : 'rgba(10,132,255,0.38)',
                   flexShrink: 0,
                 },
               },
@@ -3602,20 +3861,21 @@ window.__ModuleLoader__.load({
               onClick: () => patch({ fleetCollapsed: !isCollapsed }),
               title: isCollapsed ? '点击展开子代理团队' : '点击收起子代理团队',
             },
-            h('span', {
-              className: runningCount > 0 ? 'dnb-live-dot' : undefined,
-              style: {
-                width: 7,
-                height: 7,
-                borderRadius: '50%',
-                background: runningCount > 0 ? '#30d158' : 'var(--dnb-text-3)',
-                flexShrink: 0,
-              },
-            }),
+            runningCount > 0
+              ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#409cff' } })
+              : h('span', {
+                  style: {
+                    width: 7,
+                    height: 7,
+                    borderRadius: '50%',
+                    background: 'var(--dnb-text-3)',
+                    flexShrink: 0,
+                  },
+                }),
             '子代理团队',
             h(
               'span',
-              { style: { color: runningCount > 0 ? '#30d158' : 'var(--dnb-text-3)', fontWeight: 500 } },
+              { style: { color: runningCount > 0 ? '#409cff' : 'var(--dnb-text-3)', fontWeight: 500 } },
               runningCount ? `${runningCount} 运行中 · 共 ${children.length}` : `共 ${children.length} 成员`,
             ),
           ),
@@ -3664,7 +3924,7 @@ window.__ModuleLoader__.load({
                     style: {
                       height: 25,
                       padding: '0 9px',
-                      borderColor: isRunning && !isSelected ? 'rgba(48, 209, 88, 0.38)' : undefined,
+                      borderColor: isRunning && !isSelected ? 'rgba(10, 132, 255, 0.38)' : undefined,
                     },
                     title: '@' + agent.name + (isTier2 ? '（上级：@' + pKey + '）' : '') + (agent.description ? ' — ' + agent.description : ''),
                     onClick: () => {
@@ -3673,15 +3933,16 @@ window.__ModuleLoader__.load({
                       setSteerAgent(steerAgent === agent.name ? '' : agent.name)
                     },
                   },
-                  h('span', {
-                    className: isRunning ? 'dnb-live-dot' : undefined,
-                    style: {
-                      width: 6.5,
-                      height: 6.5,
-                      borderRadius: '50%',
-                      background: isRunning ? '#30d158' : 'var(--dnb-text-3)',
-                    },
-                  }),
+                  isRunning
+                    ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#409cff' } })
+                    : h('span', {
+                        style: {
+                          width: 6.5,
+                          height: 6.5,
+                          borderRadius: '50%',
+                          background: 'var(--dnb-text-3)',
+                        },
+                      }),
                   '@' + shortAgentName(agent.name),
                 )
               }),
@@ -4016,8 +4277,8 @@ window.__ModuleLoader__.load({
                 key: depId,
                 className: 'dnb-tag',
                 style: {
-                  background: isDone ? STATUS_BG.done : STATUS_BG.doing,
-                  color: isDone ? STATUS_HEX.done : STATUS_HEX.doing,
+                  background: isDone ? STATUS_BG.done : 'rgba(245, 158, 11, 0.16)',
+                  color: isDone ? STATUS_HEX.done : '#fbbf24',
                   padding: '2px 8px',
                 },
               },
@@ -4096,7 +4357,7 @@ window.__ModuleLoader__.load({
                   { key: idx, style: { display: 'flex', alignItems: 'center', gap: 8, padding: '3px 0', fontSize: 11.5 } },
                   h('button', {
                     className: 'dnb-ring',
-                    style: assum.verified ? { background: '#30d158', borderColor: '#30d158' } : { borderColor: '#ff9f0a' },
+                    style: assum.verified ? { background: '#30d158', borderColor: '#30d158' } : { borderColor: '#f59e0b' },
                     onClick: () => {
                       if (!assum.verified) void act({ action: 'task.verify', id: task.id, assumptionIndex: idx })
                     },
@@ -4262,7 +4523,7 @@ window.__ModuleLoader__.load({
               : isBlocked
                 ? 'rgba(255, 69, 58, 0.05)'
                 : isDoing
-                  ? 'rgba(255, 159, 10, 0.04)'
+                  ? 'rgba(10, 132, 255, 0.05)'
                   : undefined,
             borderLeft: (isBlocked || isDoing) ? `3px solid ${color}` : '3px solid transparent',
           },
@@ -4278,7 +4539,10 @@ window.__ModuleLoader__.load({
                 marginTop: 1,
                 ...(isDone
                   ? { background: color, borderColor: color }
-                  : { borderColor: color, background: isDoing ? STATUS_BG.doing : isBlocked ? STATUS_BG.blocked : 'transparent' }),
+                  : {
+                      borderColor: isDoing ? 'rgba(10, 132, 255, 0.34)' : color,
+                      background: isDoing ? 'rgba(10, 132, 255, 0.10)' : isBlocked ? STATUS_BG.blocked : 'transparent',
+                    }),
               },
               title: '切换状态为 ' + STATUS_LABEL[next],
               onClick: e => {
@@ -4286,7 +4550,11 @@ window.__ModuleLoader__.load({
                 void act({ action: 'task.update', id: task.id, status: next })
               },
             },
-            isDone ? h(Icon, { name: 'check', size: 11 }) : null,
+            isDone
+              ? h(Icon, { name: 'check', size: 11 })
+              : isDoing
+                ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '10px', color: '#409cff' } })
+                : null,
           ),
           h(
             'div',
@@ -4322,7 +4590,7 @@ window.__ModuleLoader__.load({
               ? h('div', { style: { fontSize: 11, color: '#30d158', marginTop: 2 } }, '结论 · ' + task.evidence)
               : null,
             (Array.isArray(task.blockedBy) && task.blockedBy.length && !isDone)
-              ? h('div', { style: { fontSize: 11, color: '#ff9f0a', marginTop: 2 } }, '等待前置 ' + task.blockedBy.length + ' 项')
+              ? h('div', { style: { fontSize: 11, color: '#fbbf24', marginTop: 2 } }, '等待前置 ' + task.blockedBy.length + ' 项')
               : null,
           ),
           h(StatusBadge, { status: task.status }),
@@ -4768,7 +5036,7 @@ window.__ModuleLoader__.load({
               y: minY,
               w: Math.max(196, maxX - minX),
               h: maxY - minY,
-              color: isBlockedFocus ? '#ff453a' : '#ff9f0a',
+              color: isBlockedFocus ? '#ff453a' : '#409cff',
               isBlocked: isBlockedFocus,
               badgeLabel,
               agentCount,
@@ -4936,7 +5204,7 @@ window.__ModuleLoader__.load({
                           h('span', {
                             key: d.id,
                             className: 'dnb-tag',
-                            style: { background: STATUS_BG.doing, color: '#ff9f0a', fontSize: 10.5 },
+                            style: { background: 'rgba(245, 158, 11, 0.16)', color: '#fbbf24', fontSize: 10.5 },
                           }, '⏳ 等待前置：' + clampTitle(d.title || d.id, 14)),
                         ),
                         doneDeps.map(d =>
@@ -4970,7 +5238,7 @@ window.__ModuleLoader__.load({
                               style: {
                                 width: 15,
                                 height: 15,
-                                ...(assum.verified ? { background: '#30d158', borderColor: '#30d158' } : { borderColor: '#ff9f0a' }),
+                                ...(assum.verified ? { background: '#30d158', borderColor: '#30d158' } : { borderColor: '#f59e0b' }),
                               },
                               onClick: e => {
                                 e.stopPropagation()
@@ -5089,7 +5357,7 @@ window.__ModuleLoader__.load({
                   type: 'button',
                   className: 'dnb-pyr-act-btn',
                   title: isFocusedTarget ? '退出聚光灯框选' : '框选高亮负责推进此任务的代理链路',
-                  style: isFocusedTarget ? { borderColor: '#ff9f0a', color: '#ff9f0a', background: 'rgba(255,159,10,0.14)' } : undefined,
+                  style: isFocusedTarget ? { borderColor: '#409cff', color: '#409cff', background: 'rgba(10,132,255,0.14)' } : undefined,
                   onClick: e => {
                     e.stopPropagation()
                     focusObjectiveInPyramid(isFocusedTarget ? '' : task.id)
@@ -5211,16 +5479,17 @@ window.__ModuleLoader__.load({
               h(
                 'div',
                 { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
-                h('span', {
-                  className: isRunning ? 'dnb-live-dot' : undefined,
-                  style: {
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: isRunning ? '#30d158' : (focusTone === 'blocked' ? '#ff453a' : focusTone === 'doing' ? '#ff9f0a' : 'var(--dnb-text-3)'),
-                    flexShrink: 0,
-                  },
-                }),
+                isRunning
+                  ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9px', color: '#409cff' } })
+                  : h('span', {
+                      style: {
+                        width: 8,
+                        height: 8,
+                        borderRadius: '50%',
+                        background: focusTone === 'blocked' ? '#ff453a' : focusTone === 'doing' ? '#409cff' : 'var(--dnb-text-3)',
+                        flexShrink: 0,
+                      },
+                    }),
                 h('span', {
                   style: { fontWeight: 700, fontSize: 13, color: 'var(--dnb-text)', wordBreak: 'break-all' },
                 }, '@' + shortAgentName(agentObj.name, tier > 1)),
@@ -5232,15 +5501,19 @@ window.__ModuleLoader__.load({
                   style: {
                     fontSize: 10.5,
                     fontWeight: 600,
-                    color: isRunning ? '#30d158' : (focusTone ? (focusTone === 'blocked' ? '#ff453a' : '#ff9f0a') : 'var(--dnb-text-2)'),
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 4,
+                    color: isRunning ? '#409cff' : (focusTone ? (focusTone === 'blocked' ? '#ff453a' : '#409cff') : 'var(--dnb-text-2)'),
                   },
                 },
+                isRunning ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#409cff' } }) : null,
                 isRunning ? `${tierLabel} · 运行中` : tierLabel,
               ),
             ),
             desc
               ? h('div', {
-                  style: { fontSize: 11.5, color: isRunning ? '#30d158' : 'var(--dnb-text-2)', marginTop: 4, lineHeight: 1.4, wordBreak: 'break-word' },
+                  style: { fontSize: 11.5, color: isRunning ? '#409cff' : 'var(--dnb-text-2)', marginTop: 4, lineHeight: 1.4, wordBreak: 'break-word' },
                 }, desc)
               : null,
             // Openly laid-out subagent actions right on the agent card
@@ -5555,13 +5828,40 @@ window.__ModuleLoader__.load({
                   },
                 }, '👑 主代理 · 总指挥'),
                 runningKidsCount > 0
-                  ? h('span', {
-                      className: 'dnb-tag',
-                      style: { background: 'rgba(48, 209, 88, 0.16)', color: '#30d158', fontWeight: 600 },
-                    }, `${runningKidsCount} 子代理运行中`)
+                  ? h(
+                      'span',
+                      {
+                        className: 'dnb-tag',
+                        style: {
+                          background: 'rgba(10, 132, 255, 0.15)',
+                          color: '#409cff',
+                          fontWeight: 600,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4.5,
+                        },
+                      },
+                      h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8.5px', color: '#409cff' } }),
+                      `${runningKidsCount} 子代理运行中`,
+                    )
                   : null,
                 doingTotal > 0
-                  ? h('span', { className: 'dnb-tag', style: { background: STATUS_BG.doing, color: '#ff9f0a', fontWeight: 600 } }, `推进 ${doingTotal}`)
+                  ? h(
+                      'span',
+                      {
+                        className: 'dnb-tag',
+                        style: {
+                          background: STATUS_BG.doing,
+                          color: '#409cff',
+                          fontWeight: 600,
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4.5,
+                        },
+                      },
+                      h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8.5px', color: '#409cff' } }),
+                      `推进 ${doingTotal}`,
+                    )
                   : null,
                 blockedTotal > 0
                   ? h('span', { className: 'dnb-tag', style: { background: STATUS_BG.blocked, color: '#ff453a', fontWeight: 600 } }, `受阻 ${blockedTotal}`)
@@ -5698,8 +5998,8 @@ window.__ModuleLoader__.load({
 
             if (isFocusEdge || isLiveEdge) {
               const hiColor = isFocusEdge
-                ? (focusedTask.status === 'blocked' ? '#ff453a' : '#ff9f0a')
-                : (kid.kind === 'task' && kid.task.status === 'blocked' ? '#ff453a' : kid.kind === 'agent' ? '#30d158' : '#ff9f0a')
+                ? (focusedTask.status === 'blocked' ? '#ff453a' : '#0a84ff')
+                : (kid.kind === 'task' && kid.task.status === 'blocked' ? '#ff453a' : '#0a84ff')
               els.push(h('path', {
                 key: `hi-${parent.id}-${kid.id}`,
                 d: `M ${px} ${py} V ${midY} H ${cx} V ${cy}`,
@@ -5717,7 +6017,7 @@ window.__ModuleLoader__.load({
               cy,
               r: isFocusEdge ? 3.2 : 2.3,
               fill: isFocusEdge
-                ? (focusedTask.status === 'blocked' ? '#ff453a' : '#ff9f0a')
+                ? (focusedTask.status === 'blocked' ? '#ff453a' : '#0a84ff')
                 : 'var(--dnb-border-strong, rgba(165,165,178,0.75))',
               opacity: (focusedTask && !isFocusEdge) ? 0.25 : 1,
             }))
@@ -5756,7 +6056,7 @@ window.__ModuleLoader__.load({
               key: `drop-lr-${parent.id}-${kid.id}`,
               d: `M ${midX} ${cy} H ${cx}`,
               fill: 'none',
-              stroke: isFocusEdge ? '#ff9f0a' : 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
+              stroke: isFocusEdge ? '#0a84ff' : 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
               strokeWidth: isFocusEdge ? 2.2 : 1.6,
             }))
           }
@@ -5779,7 +6079,7 @@ window.__ModuleLoader__.load({
           key: 'dep-' + from.id + '-' + to.id,
           d,
           fill: 'none',
-          stroke: satisfied ? '#30d158' : '#ff9f0a',
+          stroke: satisfied ? '#30d158' : '#f59e0b',
           strokeWidth: 1.5,
           strokeDasharray: satisfied ? '3 2.5' : '5 3.5',
           markerEnd: satisfied ? 'url(#dnb-arrow-done)' : 'url(#dnb-arrow-wait)',
@@ -5830,7 +6130,7 @@ window.__ModuleLoader__.load({
               ? h('text', {
                   x: x + w - 12, y: y + 21,
                   textAnchor: 'end',
-                  fill: '#30d158',
+                  fill: '#409cff',
                   fontSize: 10,
                   fontWeight: 600,
                 }, `${runningKids} 运行中`)
@@ -5900,9 +6200,9 @@ window.__ModuleLoader__.load({
           const isFiltered = store.filterAgent === ag.name
           const tierLabel = node.tier === 1 ? '一级代理' : `${node.tier}级代理`
           const accent = isAgentFocused
-            ? (focusedTask && focusedTask.status === 'blocked' ? '#ff453a' : '#ff9f0a')
+            ? (focusedTask && focusedTask.status === 'blocked' ? '#ff453a' : '#0a84ff')
             : isRunning
-              ? '#30d158'
+              ? '#0a84ff'
               : 'var(--dnb-border-strong, rgba(140,140,150,0.4))'
           const desc = ag.taskTitle || ag.description || (isRunning ? '正在执行任务…' : '待命 / 已完成')
 
@@ -5928,22 +6228,31 @@ window.__ModuleLoader__.load({
                   className: 'dnb-pulse-ring',
                   x: x - 2.5, y: y - 2.5, width: w + 5, height: nh + 5, rx: NODE_R + 2,
                   fill: 'none',
-                  stroke: isAgentFocused ? accent : '#30d158',
+                  stroke: isAgentFocused ? accent : '#0a84ff',
                   strokeWidth: 1.8,
                 })
               : null,
             h('rect', {
               x, y, width: w, height: nh, rx: NODE_R,
               fill: isAgentFocused
-                ? (focusedTask && focusedTask.status === 'blocked' ? 'rgba(255,69,58,0.12)' : 'rgba(255,159,10,0.12)')
+                ? (focusedTask && focusedTask.status === 'blocked' ? 'rgba(255,69,58,0.12)' : 'rgba(10,132,255,0.12)')
                 : 'var(--dsw-alias-bg-layer-2, #232328)',
               stroke: isAgentFocused || isRunning || isFiltered ? accent : 'var(--dnb-border)',
               strokeWidth: isAgentFocused ? 2.1 : (isRunning || isFiltered ? 1.6 : 1.1),
             }),
-            h('circle', {
-              cx: x + 13, cy: y + 18, r: 4,
-              fill: isRunning ? '#30d158' : (isAgentFocused ? accent : 'var(--dnb-text-3)'),
-            }),
+            isRunning
+              ? h('circle', {
+                  className: 'dnb-svg-spin',
+                  cx: x + 13, cy: y + 18, r: 4,
+                  fill: 'none',
+                  stroke: '#409cff',
+                  strokeWidth: 1.6,
+                  strokeDasharray: '16 9',
+                })
+              : h('circle', {
+                  cx: x + 13, cy: y + 18, r: 4,
+                  fill: isAgentFocused ? accent : 'var(--dnb-text-3)',
+                }),
             h('text', {
               x: x + 23, y: y + 22,
               fill: 'var(--dnb-text, #f2f2f7)',
@@ -5959,7 +6268,7 @@ window.__ModuleLoader__.load({
             }, tierLabel),
             h('text', {
               x: x + 12, y: y + 40,
-              fill: isRunning ? '#30d158' : 'var(--dnb-text-2, #98989d)',
+              fill: isRunning ? '#409cff' : 'var(--dnb-text-2, #98989d)',
               fontSize: 10.5,
             }, clampTitle(desc, 12)),
             kidCount > 0
@@ -6035,7 +6344,7 @@ window.__ModuleLoader__.load({
             fill: isBlocked
               ? 'rgba(255, 69, 58, 0.11)'
               : isDoing
-                ? 'rgba(255, 159, 10, 0.09)'
+                ? 'rgba(10, 132, 255, 0.09)'
                 : isSelected
                   ? 'var(--dnb-elevated, #2c2c2e)'
                   : 'var(--dsw-alias-bg-layer-2, #222225)',
@@ -6045,11 +6354,21 @@ window.__ModuleLoader__.load({
             strokeWidth: (isSelected || isFocusedTarget) ? 2.2 : ((isDoing || isBlocked) ? 1.6 : 1),
           }),
           h('rect', {
-            x: x + 9, y: y + 8, width: isBlocked ? 52 : 60, height: 16, rx: 8,
+            x: x + 9, y: y + 8, width: isBlocked ? 52 : (isDoing ? 66 : 60), height: 16, rx: 8,
             fill: badgeBg,
           }),
+          isDoing
+            ? h('circle', {
+                className: 'dnb-svg-spin',
+                cx: x + 19, y: y + 16, r: 3.6,
+                fill: 'none',
+                stroke: '#409cff',
+                strokeWidth: 1.4,
+                strokeDasharray: '14 8',
+              })
+            : null,
           h('text', {
-            x: x + (isBlocked ? 35 : 39), y: y + 19.5,
+            x: x + (isBlocked ? 35 : (isDoing ? 47 : 39)), y: y + 19.5,
             textAnchor: 'middle',
             fill: color,
             fontSize: 9.5,
@@ -6059,7 +6378,7 @@ window.__ModuleLoader__.load({
             ? h('text', {
                 x: x + w - 10, y: y + 19.5,
                 textAnchor: 'end',
-                fill: '#ff9f0a',
+                fill: '#f59e0b',
                 fontSize: 9.5,
                 fontWeight: 600,
               }, `等 ${unresolvedDepCount}`)
@@ -6100,14 +6419,14 @@ window.__ModuleLoader__.load({
           h('rect', {
             className: 'dnb-spotlight-halo',
             x: sp.x - 4, y: sp.y - 4, width: sp.w + 8, height: sp.h + 8, rx: 18,
-            fill: sp.isBlocked ? 'rgba(255, 69, 58, 0.08)' : 'rgba(255, 159, 10, 0.08)',
+            fill: sp.isBlocked ? 'rgba(255, 69, 58, 0.08)' : 'rgba(10, 132, 255, 0.08)',
             stroke: sp.color,
             strokeWidth: 1,
             opacity: 0.55,
           }),
           h('rect', {
             x: sp.x, y: sp.y, width: sp.w, height: sp.h, rx: 15,
-            fill: sp.isBlocked ? 'rgba(255, 69, 58, 0.05)' : 'rgba(255, 159, 10, 0.05)',
+            fill: sp.isBlocked ? 'rgba(255, 69, 58, 0.05)' : 'rgba(10, 132, 255, 0.05)',
             stroke: sp.color,
             strokeWidth: 2.3,
           }),
@@ -6148,9 +6467,9 @@ window.__ModuleLoader__.load({
 
       const STATUS_FILTERS = [
         { key: 'all', label: '全部', count: allTasks.length },
-        { key: 'doing', label: '推进中', count: doingTotal, color: '#ff9f0a' },
+        { key: 'doing', label: '推进中', count: doingTotal, color: '#0a84ff' },
         { key: 'blocked', label: '受阻', count: blockedTotal, color: '#ff453a' },
-        { key: 'todo', label: '待推进', count: todoTotal, color: '#0a84ff' },
+        { key: 'todo', label: '待推进', count: todoTotal, color: '#8e8e93' },
         { key: 'done', label: '已完成', count: doneTotal, color: '#30d158' },
       ]
 
@@ -6171,7 +6490,7 @@ window.__ModuleLoader__.load({
                     'div',
                     { className: 'dnb-progress', style: { marginBottom: 8 } },
                     doneTotal ? h('div', { style: { width: (doneTotal / allTasks.length) * 100 + '%', background: '#30d158', transition: 'width 0.3s ease' } }) : null,
-                    doingTotal ? h('div', { style: { width: (doingTotal / allTasks.length) * 100 + '%', background: '#ff9f0a', transition: 'width 0.3s ease' } }) : null,
+                    doingTotal ? h('div', { style: { width: (doingTotal / allTasks.length) * 100 + '%', background: '#0a84ff', transition: 'width 0.3s ease' } }) : null,
                     blockedTotal ? h('div', { style: { width: (blockedTotal / allTasks.length) * 100 + '%', background: '#ff453a', transition: 'width 0.3s ease' } }) : null,
                   )
                 : null,
@@ -6192,9 +6511,11 @@ window.__ModuleLoader__.load({
                           style: { height: 24, padding: '0 8.5px', fontSize: 11 },
                           onClick: () => patch({ taskStatusFilter: f.key }),
                         },
-                        f.color
-                          ? h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: f.color } })
-                          : null,
+                        f.key === 'doing' && doingTotal > 0
+                          ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8.5px', color: '#409cff' } })
+                          : f.color
+                            ? h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: f.color } })
+                            : null,
                         `${f.label} ${f.count}`,
                       ),
                     ),
@@ -6374,7 +6695,7 @@ window.__ModuleLoader__.load({
                         h('marker', {
                           id: 'dnb-arrow-wait', viewBox: '0 0 10 10', refX: '8', refY: '5',
                           markerWidth: '5.5', markerHeight: '5.5', orient: 'auto-start-reverse',
-                        }, h('path', { d: 'M 0 1.5 L 9 5 L 0 8.5 z', fill: '#ff9f0a' })),
+                        }, h('path', { d: 'M 0 1.5 L 9 5 L 0 8.5 z', fill: '#f59e0b' })),
                         h('marker', {
                           id: 'dnb-arrow-done', viewBox: '0 0 10 10', refX: '8', refY: '5',
                           markerWidth: '5.5', markerHeight: '5.5', orient: 'auto-start-reverse',
@@ -6460,7 +6781,7 @@ window.__ModuleLoader__.load({
               contextMenu.task.status === 'doing' && (contextMenu.task.subagent || contextMenu.task.owner)
                 ? h('div', {
                     className: 'dnb-menu-item',
-                    style: { color: '#ff9f0a' },
+                    style: { color: '#f59e0b' },
                     onClick: () => {
                       const t = contextMenu.task
                       setContextMenu(null)
@@ -6590,8 +6911,8 @@ window.__ModuleLoader__.load({
                 fontSize: 10.5,
                 fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
                 fontWeight: 600,
-                background: isGoalMode ? 'rgba(255, 159, 10, 0.16)' : 'rgba(10, 132, 255, 0.12)',
-                color: isGoalMode ? '#ff9f0a' : 'var(--dnb-accent)',
+                background: isGoalMode ? 'rgba(245, 158, 11, 0.16)' : 'rgba(10, 132, 255, 0.12)',
+                color: isGoalMode ? '#fbbf24' : 'var(--dnb-accent)',
               },
             }, '/goal'),
             board && board.objectiveAt && objective === null
@@ -6607,9 +6928,9 @@ window.__ModuleLoader__.load({
                 height: 23,
                 padding: '0 8px',
                 fontSize: 11,
-                borderColor: isGoalMode ? 'rgba(255, 159, 10, 0.45)' : undefined,
-                background: isGoalMode ? 'rgba(255, 159, 10, 0.12)' : undefined,
-                color: isGoalMode ? '#ff9f0a' : 'var(--dnb-text-2)',
+                borderColor: isGoalMode ? 'rgba(245, 158, 11, 0.45)' : undefined,
+                background: isGoalMode ? 'rgba(245, 158, 11, 0.14)' : undefined,
+                color: isGoalMode ? '#fbbf24' : 'var(--dnb-text-2)',
                 fontWeight: isGoalMode ? 600 : 400,
               },
               title: isGoalMode
@@ -6637,8 +6958,8 @@ window.__ModuleLoader__.load({
             className: 'dnb-group',
             style: isGoalMode
               ? {
-                  borderColor: 'rgba(255, 159, 10, 0.38)',
-                  boxShadow: '0 0 0 1px rgba(255, 159, 10, 0.10)',
+                  borderColor: 'rgba(245, 158, 11, 0.38)',
+                  boxShadow: '0 0 0 1px rgba(245, 158, 11, 0.10)',
                 }
               : undefined,
           },
@@ -6667,7 +6988,7 @@ window.__ModuleLoader__.load({
                     padding: '5px 10px 7px',
                     borderTop: '1px solid var(--dnb-border)',
                     fontSize: 11,
-                    color: isGoalMode ? '#ff9f0a' : 'var(--dnb-text-3)',
+                    color: isGoalMode ? '#fbbf24' : 'var(--dnb-text-3)',
                   },
                 },
                 h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
@@ -8825,11 +9146,18 @@ window.__ModuleLoader__.load({
           { className: 'dnb-section-head' },
           h(
             'span',
-            { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } },
+            {
+              style: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 6,
+                color: field === 'allowed' ? '#34d399' : field === 'forbidden' ? '#ff6961' : '#fbbf24',
+              },
+            },
             h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: dot } }),
             label,
             pinnedCountInCol > 0
-              ? h('span', { style: { fontSize: 10.5, color: '#ff9f0a', fontWeight: 600 } }, `📌${pinnedCountInCol}`)
+              ? h('span', { style: { fontSize: 10.5, color: '#fbbf24', fontWeight: 600 } }, `📌${pinnedCountInCol}`)
               : null,
           ),
           h(
@@ -8876,7 +9204,7 @@ window.__ModuleLoader__.load({
                 style: {
                   justifyContent: 'space-between',
                   gap: 8,
-                  background: isPinned ? 'linear-gradient(90deg, rgba(255, 159, 10, 0.08) 0%, transparent 65%)' : undefined,
+                  background: isPinned ? 'linear-gradient(90deg, rgba(245, 158, 11, 0.08) 0%, transparent 65%)' : undefined,
                 },
               },
               // Front Pushpin Stamp (小图钉戳)
@@ -9035,9 +9363,9 @@ window.__ModuleLoader__.load({
                         height: 25,
                         padding: '0 9px',
                         fontSize: 11,
-                        color: '#ff9f0a',
-                        background: 'rgba(255, 159, 10, 0.12)',
-                        borderColor: 'rgba(255, 159, 10, 0.32)',
+                        color: '#fbbf24',
+                        background: 'rgba(245, 158, 11, 0.12)',
+                        borderColor: 'rgba(245, 158, 11, 0.34)',
                       },
                       disabled: view.secBusy,
                       title: '请 DSH 参谋长把当前零散、重复的多条重要边界浓缩合并成一条高密度总则',
@@ -9153,16 +9481,58 @@ window.__ModuleLoader__.load({
 
     function classifyBulletTagTone(tag) {
       const t = String(tag || '')
-      if (/禁止|红线|受阻|风险|告警|错误|撞墙/.test(t)) {
-        return { bg: 'rgba(255, 69, 58, 0.15)', fg: '#ff453a' }
+      if (
+        /禁止|红线|受阻|错误|失败|撞墙|高危|违规|严禁|崩溃|死锁/.test(t)
+        || (/风险|告警|异常/.test(t) && !/保障|兜底|已解|可控|无风险|解除/.test(t))
+      ) {
+        return { bg: 'rgba(255, 69, 58, 0.16)', fg: '#ff6961', border: 'rgba(255, 69, 58, 0.30)', spinning: false }
       }
-      if (/推进|进行|待验|注意|提醒/.test(t)) {
-        return { bg: 'rgba(255, 159, 10, 0.16)', fg: '#ff9f0a' }
+      if (/完成|已完|结论|允许|已解|就绪|已验证|通过|已执行|已处理|兜底|保障|达成/.test(t)) {
+        return { bg: 'rgba(48, 209, 88, 0.15)', fg: '#30d158', border: 'rgba(48, 209, 88, 0.28)', spinning: false }
       }
-      if (/完成|结论|允许|已解|就绪|已执行|已处理/.test(t)) {
-        return { bg: 'rgba(48, 209, 88, 0.15)', fg: '#30d158' }
+      if (/待办|待收尾|待推进|未完|未开始|待定|搁置|排队|空闲|休眠/.test(t)) {
+        return { bg: 'rgba(142, 142, 147, 0.16)', fg: '#a1a1aa', border: 'rgba(142, 142, 147, 0.26)', spinning: false }
       }
-      return { bg: 'rgba(10, 132, 255, 0.14)', fg: '#409cff' }
+      if (/注意|提醒|警告|警惕|纪律|顺序|验收|待验|核对|原因|约束|谨慎|观察|复核|风险/.test(t)) {
+        return { bg: 'rgba(245, 158, 11, 0.16)', fg: '#fbbf24', border: 'rgba(245, 158, 11, 0.30)', spinning: false }
+      }
+      if (/推进|进行中|执行中|运行中|处理中|排查中|构建中|同步中|验证中/.test(t)) {
+        return { bg: 'rgba(10, 132, 255, 0.16)', fg: '#409cff', border: 'rgba(10, 132, 255, 0.32)', spinning: true }
+      }
+      return { bg: 'rgba(10, 132, 255, 0.14)', fg: '#409cff', border: 'rgba(10, 132, 255, 0.26)', spinning: false }
+    }
+
+    function classifySectionHeadingTone(heading) {
+      const s = String(heading || '')
+      const hasWarn = /纪律|边界|注意|提醒|警告|风险|约束|验收|待验/.test(s)
+      const hasRed = /禁止|红线|受阻|阻塞|错误|告警|故障/.test(s)
+      if (hasWarn && hasRed) {
+        return { fg: '#fbbf24', bar: 'linear-gradient(180deg, #f59e0b 0%, #ff453a 100%)' }
+      }
+      if (hasRed) {
+        return { fg: '#ff6961', bar: '#ff453a' }
+      }
+      if (hasWarn) {
+        return { fg: '#fbbf24', bar: '#f59e0b' }
+      }
+      if (/已完成|达成|放行|收口/.test(s)) {
+        return { fg: '#34d399', bar: '#30d158' }
+      }
+      if (/待办|未完成|遗留|后续/.test(s)) {
+        return { fg: '#a1a1aa', bar: '#8e8e93' }
+      }
+      return { fg: '#60a5fa', bar: '#0a84ff' }
+    }
+
+    function renderStructuredHeading(heading, compact) {
+      if (!heading) return null
+      const tone = classifySectionHeadingTone(heading)
+      return h(
+        'div',
+        { className: compact ? 'dnb-struct-head is-compact' : 'dnb-struct-head', style: { color: tone.fg } },
+        h('span', { className: 'dnb-struct-bar', style: { background: tone.bar } }),
+        h('span', null, heading),
+      )
     }
 
     function splitTaggedBullet(rawLine) {
@@ -9241,16 +9611,21 @@ window.__ModuleLoader__.load({
                   style: {
                     display: 'inline-flex',
                     alignItems: 'center',
+                    gap: 4.5,
                     padding: '1px 6.5px',
                     borderRadius: 6,
                     fontSize: 10.5,
                     fontWeight: 700,
                     background: tone.bg,
                     color: tone.fg,
+                    border: '1px solid ' + tone.border,
                     flexShrink: 0,
                     marginTop: 1.5,
                   },
                 },
+                tone.spinning
+                  ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9px', color: tone.fg } })
+                  : null,
                 item.badge,
               )
             : h('span', {
@@ -9281,9 +9656,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { key: bi, style: { marginTop: bi === 0 ? 0 : 6 } },
-            blk.heading
-              ? h('div', { style: { fontSize: 11.5, fontWeight: 700, color: 'var(--dnb-text-2)', marginBottom: 2 } }, blk.heading)
-              : null,
+            blk.heading ? renderStructuredHeading(blk.heading, true) : null,
             blk.items.map((it, ii) => renderStructuredItem(it, `${bi}-${ii}`)),
           ),
         ),
@@ -9412,7 +9785,7 @@ window.__ModuleLoader__.load({
                       h(
                         'div',
                         { key: i, style: { marginTop: i === 0 ? 0 : 12 } },
-                        blk.heading ? h('div', { className: 'dnb-prose-h2', style: { marginTop: 0, marginBottom: 4 } }, blk.heading) : null,
+                        blk.heading ? renderStructuredHeading(blk.heading, false) : null,
                         (blk.items || []).map((it, j) => renderStructuredItem(it, `${i}-${j}`)),
                       ),
                     )
@@ -9458,7 +9831,33 @@ window.__ModuleLoader__.load({
                             ),
                             item.role === 'chief'
                               ? renderStructuredText(item.text)
-                              : h('div', { style: { fontSize: 12, color: 'var(--dnb-text)', lineHeight: 1.5, whiteSpace: 'pre-wrap' } }, item.text),
+                              : h(
+                                  React.Fragment,
+                                  null,
+                                  item.imageCount > 0
+                                    ? h(
+                                        'div',
+                                        {
+                                          style: {
+                                            display: 'inline-flex',
+                                            alignItems: 'center',
+                                            gap: 4,
+                                            padding: '1px 7px',
+                                            marginBottom: item.text ? 4 : 0,
+                                            borderRadius: 999,
+                                            background: 'rgba(10, 132, 255, 0.15)',
+                                            color: '#409cff',
+                                            fontSize: 10.5,
+                                            fontWeight: 600,
+                                          },
+                                        },
+                                        `🖼 附图 ×${item.imageCount}`,
+                                      )
+                                    : null,
+                                  item.text
+                                    ? h('div', { style: { fontSize: 12, color: 'var(--dnb-text)', lineHeight: 1.5, whiteSpace: 'pre-wrap' } }, item.text)
+                                    : null,
+                                ),
                             Array.isArray(item.actions) && item.actions.length
                               ? h(
                                   'div',
@@ -9519,7 +9918,13 @@ window.__ModuleLoader__.load({
                               'div',
                               { style: { display: 'flex', alignItems: 'center', gap: 5 } },
                               fact.pinned ? h(Icon, { name: 'pin', size: 11.5, style: { color: 'var(--dnb-accent)' } }) : null,
-                              h('span', { className: 'dnb-tag' }, FACT_CAT_LABEL[fact.category] || '条目'),
+                              (() => {
+                                const ft = FACT_CAT_TONE[fact.category]
+                                return h('span', {
+                                  className: 'dnb-tag',
+                                  style: ft ? { background: ft.bg, color: ft.fg, border: '1px solid ' + ft.border } : undefined,
+                                }, FACT_CAT_LABEL[fact.category] || '条目')
+                              })(),
                               h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, relativeTimeLabel(fact.updatedAt || fact.addedAt)),
                             ),
                             h(
@@ -9673,16 +10078,17 @@ window.__ModuleLoader__.load({
                     h(
                       'div',
                       { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
-                      h('span', {
-                        style: {
-                          width: 7.5,
-                          height: 7.5,
-                          borderRadius: '50%',
-                          background: isRunning ? '#30d158' : 'var(--dnb-text-3)',
-                          boxShadow: isRunning ? '0 0 0 3px rgba(48, 209, 88, 0.18)' : 'none',
-                          flexShrink: 0,
-                        },
-                      }),
+                      isRunning
+                        ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9px', color: '#409cff' } })
+                        : h('span', {
+                            style: {
+                              width: 7.5,
+                              height: 7.5,
+                              borderRadius: '50%',
+                              background: 'var(--dnb-text-3)',
+                              flexShrink: 0,
+                            },
+                          }),
                       h('span', { style: { fontWeight: 600, fontSize: 12.5 } }, peer.name),
                       h('span', { className: 'dnb-tag', style: { fontSize: 10.5 } }, kindBadge),
                     ),
@@ -9757,14 +10163,16 @@ window.__ModuleLoader__.load({
                     h(
                       'div',
                       { style: { display: 'flex', alignItems: 'center', gap: 6 } },
-                      h('span', {
-                        style: {
-                          width: 6.5,
-                          height: 6.5,
-                          borderRadius: '50%',
-                          background: sess.status === 'running' ? '#30d158' : 'var(--dnb-text-3)',
-                        },
-                      }),
+                      sess.status === 'running'
+                        ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#409cff' } })
+                        : h('span', {
+                            style: {
+                              width: 6.5,
+                              height: 6.5,
+                              borderRadius: '50%',
+                              background: 'var(--dnb-text-3)',
+                            },
+                          }),
                       h('span', { style: { fontWeight: 500, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, sess.name),
                       sess.openTasks ? h('span', { className: 'dnb-tag', style: { fontSize: 10 } }, sess.openTasks + ' 待办') : null,
                     ),
@@ -10060,7 +10468,7 @@ window.__ModuleLoader__.load({
       const BOUND_FIELD_META = {
         forbidden: { label: '禁止红线', color: '#ff453a', bg: 'rgba(255, 69, 58, 0.14)' },
         allowed: { label: '允许范围', color: '#30d158', bg: 'rgba(48, 209, 88, 0.14)' },
-        notes: { label: '注意事项', color: '#ff9f0a', bg: 'rgba(255, 159, 10, 0.14)' },
+        notes: { label: '注意事项', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.14)' },
       }
 
       return h(
@@ -10084,8 +10492,8 @@ window.__ModuleLoader__.load({
                 key: sug.id,
                 className: 'dnb-sug-card',
                 style: {
-                  background: 'rgba(255, 159, 10, 0.08)',
-                  borderColor: 'rgba(255, 159, 10, 0.34)',
+                  background: 'rgba(245, 158, 11, 0.08)',
+                  borderColor: 'rgba(245, 158, 11, 0.34)',
                 },
               },
               h(
@@ -10093,7 +10501,7 @@ window.__ModuleLoader__.load({
                 { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 5 } },
                 h(
                   'div',
-                  { style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: '#ff9f0a', flexWrap: 'wrap' } },
+                  { style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: '#fbbf24', flexWrap: 'wrap' } },
                   isConsolidation ? `🏛 参谋长边界浓缩请示 · ${replacesList.length} 合 1` : '🏛 参谋长边界请示',
                   h(
                     'span',
@@ -10189,7 +10597,7 @@ window.__ModuleLoader__.load({
                 { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
                 h('button', {
                   className: 'dnb-primary-btn',
-                  style: { height: 25, padding: '0 10px', fontSize: 11.5, background: '#ff9f0a', color: '#111', gap: 4 },
+                  style: { height: 25, padding: '0 10px', fontSize: 11.5, background: '#f59e0b', color: '#111', gap: 4 },
                   disabled: view.secBusy,
                   title: '批准并盖上小图钉，作为跨任务全局共享边界生效',
                   onClick: () => {
@@ -10299,7 +10707,10 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function ChiefComposerBar({ view }) {
+    function ChiefComposerBar({ view, barRef }) {
+      const fileInputRef = React.useRef(null)
+      const secImages = Array.isArray(view.secImages) ? view.secImages : []
+      const canSend = (Boolean((view.secInput || '').trim()) || secImages.length > 0) && !view.secBusy
       const peers = (view.secView && Array.isArray(view.secView.peers)) ? view.secView.peers : []
       const fallbackChildren = Array.isArray(view.subagents)
         ? view.subagents.filter(a => a && a.name && a.name !== 'lead').map(a => ({
@@ -10326,15 +10737,39 @@ window.__ModuleLoader__.load({
       const activeTarget = view.secTarget || 'auto'
       const activePeer = targetChips.find(p => p.key === activeTarget) || null
       const modeObj = RELAY_MODES.find(m => m.key === (view.secMode || 'steer')) || RELAY_MODES[0]
-      const placeholder = activeTarget === 'auto'
-        ? '问实时进展、诊卡点、浓缩边界，或吩咐参谋长拆话调度…'
-        : activeTarget === 'all'
-          ? '向全体成员广播（' + modeObj.label + '）…'
-          : ('给 @' + shortAgentName(activePeer ? activePeer.name : activeTarget, true) + ' ' + modeObj.label + '…')
+      const placeholder = secImages.length > 0
+        ? ('已附 ' + secImages.length + ' 张图，回车可直接发送或补充说明…')
+        : (activeTarget === 'auto'
+            ? '问实时进展、诊卡点、浓缩边界，或吩咐参谋长拆话调度…'
+            : activeTarget === 'all'
+              ? '向全体成员广播（' + modeObj.label + '）…'
+              : ('给 @' + shortAgentName(activePeer ? activePeer.name : activeTarget, true) + ' ' + modeObj.label + '…'))
 
       return h(
         'div',
-        { className: 'dnb-sec-bar' },
+        {
+          ref: barRef,
+          className: 'dnb-sec-bar',
+          'data-dragover': view.secDragOver ? '1' : '0',
+          onDragOver: e => {
+            if (e.dataTransfer && Array.from(e.dataTransfer.types || []).includes('Files')) {
+              e.preventDefault()
+              if (!view.secDragOver) patch({ secDragOver: true })
+            }
+          },
+          onDragLeave: e => {
+            if (!e.currentTarget.contains(e.relatedTarget)) {
+              if (view.secDragOver) patch({ secDragOver: false })
+            }
+          },
+          onDrop: e => {
+            e.preventDefault()
+            patch({ secDragOver: false })
+            if (e.dataTransfer && e.dataTransfer.files && e.dataTransfer.files.length) {
+              void ingestSecImageFiles(e.dataTransfer.files)
+            }
+          },
+        },
         // Dismissible Structured Latest Reply Bubble
         view.secLatestReply
           ? h(
@@ -10386,7 +10821,7 @@ window.__ModuleLoader__.load({
               }),
             },
               p.status === 'running'
-                ? h('span', { style: { width: 5.5, height: 5.5, borderRadius: '50%', background: '#30d158' } })
+                ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '7.5px', color: '#409cff' } })
                 : null,
               '@' + clampTitle(p.key === 'lead' ? '主对话' : shortAgentName(p.name, true), 9.5),
             ),
@@ -10412,10 +10847,76 @@ window.__ModuleLoader__.load({
             : null,
         ),
 
-        // DS-Bot Style Rounded Pill Input + Up-Arrow Send Button
+        // Attached Image Preview Strip (only when attached)
+        secImages.length > 0
+          ? h(
+              'div',
+              { className: 'dnb-sec-img-strip' },
+              secImages.map(img =>
+                h(
+                  'div',
+                  { key: img.id, className: 'dnb-sec-img-thumb', title: img.name || '附图' },
+                  h('img', {
+                    src: img.previewUrl || ('data:' + img.mediaType + ';base64,' + img.data),
+                    alt: img.name || '附图',
+                  }),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dnb-sec-img-rm',
+                      title: '移除图片',
+                      onClick: () => {
+                        const next = (store.secImages || []).filter(item => item.id !== img.id)
+                        patch({ secImages: next })
+                      },
+                    },
+                    '×',
+                  ),
+                ),
+              ),
+              h(
+                'span',
+                { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginLeft: 'auto', alignSelf: 'center', flexShrink: 0 } },
+                '附图 ' + secImages.length + '/' + SEC_MAX_IMAGES,
+              ),
+            )
+          : null,
+
+        // DS-Bot Style Rounded Pill Input + Attach Image + Up-Arrow Send Button
         h(
           'div',
           { className: 'dnb-sec-shell' },
+          h('input', {
+            ref: fileInputRef,
+            type: 'file',
+            accept: 'image/png,image/jpeg,image/webp,image/gif',
+            multiple: true,
+            style: { display: 'none' },
+            onChange: e => {
+              const files = e.target && e.target.files
+              if (files && files.length) void ingestSecImageFiles(files)
+              if (e.target) e.target.value = ''
+            },
+          }),
+          h(
+            'button',
+            {
+              type: 'button',
+              className: 'dnb-sec-attach',
+              disabled: Boolean(view.secBusy) || secImages.length >= SEC_MAX_IMAGES,
+              title: secImages.length >= SEC_MAX_IMAGES
+                ? `最多可附 ${SEC_MAX_IMAGES} 张图片`
+                : '上传图片（支持拖拽或 Ctrl+V 粘贴截图）',
+              onClick: () => {
+                if (fileInputRef.current) fileInputRef.current.click()
+              },
+            },
+            h(Icon, { name: 'image', size: 15 }),
+            secImages.length > 0
+              ? h('span', { className: 'dnb-sec-attach-badge' }, String(secImages.length))
+              : null,
+          ),
           h('input', {
             ref: el => { secInputEl = el },
             className: 'dnb-sec-input',
@@ -10423,6 +10924,20 @@ window.__ModuleLoader__.load({
             disabled: view.secBusy,
             value: view.secInput || '',
             onChange: e => patch({ secInput: e.target.value }),
+            onPaste: e => {
+              const items = (e.clipboardData && e.clipboardData.items) ? Array.from(e.clipboardData.items) : []
+              let imgFiles = items
+                .filter(it => it && it.kind === 'file' && String(it.type || '').startsWith('image/'))
+                .map(it => it.getAsFile())
+                .filter(Boolean)
+              if (!imgFiles.length && e.clipboardData && e.clipboardData.files) {
+                imgFiles = Array.from(e.clipboardData.files).filter(f => f && String(f.type || '').startsWith('image/'))
+              }
+              if (imgFiles.length) {
+                e.preventDefault()
+                void ingestSecImageFiles(imgFiles)
+              }
+            },
             onKeyDown: e => {
               if (e.key === 'Enter' && !e.shiftKey) {
                 e.preventDefault()
@@ -10433,7 +10948,7 @@ window.__ModuleLoader__.load({
           h('button', {
             type: 'button',
             className: 'dnb-sec-send',
-            disabled: view.secBusy || !(view.secInput || '').trim(),
+            disabled: !canSend,
             title: '发送给 DSH 参谋长',
             onClick: () => void submitChiefBar(),
           },
@@ -10453,17 +10968,20 @@ window.__ModuleLoader__.load({
       const isDock = !!(props && props.variant === 'dock')
       const selfRef = React.useRef(null)
 
+      const secBarRef = React.useRef(null)
+
       React.useEffect(() => {
         const host = isDock || isPage || view.open ? selfRef.current : null
         if (!host) return undefined
         const measure = () => {
           try {
-            const reserve = reserveCornerSpace(host)
-            const key = reserve.top + '/' + reserve.bottom
+            host.style.removeProperty('--dnb-safe-top')
+            host.style.removeProperty('--dnb-safe-bottom')
+            const reserve = reserveCornerSpace(host, secBarRef.current)
+            const key = String(reserve.right || 0)
             if (key === host.dataset.dnbReserve) return
             host.dataset.dnbReserve = key
-            host.style.setProperty('--dnb-safe-top', reserve.top + 'px')
-            host.style.setProperty('--dnb-safe-bottom', reserve.bottom + 'px')
+            host.style.setProperty('--dnb-safe-right', (reserve.right || 0) + 'px')
           } catch {}
         }
         const timer = setInterval(measure, 3500)
@@ -10630,13 +11148,14 @@ window.__ModuleLoader__.load({
                     style: {
                       padding: '5px 10px',
                       borderRadius: 10,
-                      background: board.cursor.blocked ? STATUS_BG.blocked : 'rgba(255, 159, 10, 0.12)',
-                      color: board.cursor.blocked ? '#ff453a' : '#ff9f0a',
+                      background: board.cursor.blocked ? STATUS_BG.blocked : 'rgba(10, 132, 255, 0.13)',
+                      border: board.cursor.blocked ? '1px solid rgba(255, 69, 58, 0.30)' : '1px solid rgba(10, 132, 255, 0.30)',
+                      color: board.cursor.blocked ? '#ff453a' : '#409cff',
                       fontSize: 11.5,
                       fontWeight: 600,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 6.5,
                       cursor: 'pointer',
                     },
                     title: '点击跳转金字塔视角查看推进/受阻子代理',
@@ -10647,7 +11166,10 @@ window.__ModuleLoader__.load({
                       else patch({ tab: 'tasks', taskViewMode: 'graph' })
                     },
                   },
-                  (board.cursor.blocked ? '⚠ ' : '▶ ') + cursorText,
+                  board.cursor.blocked
+                    ? '⚠ '
+                    : h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '10px', color: '#409cff' } }),
+                  h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 } }, cursorText),
                 ),
               )
             : null,
@@ -10728,7 +11250,7 @@ window.__ModuleLoader__.load({
           ),
 
           // Persistent Bottom Chief Input & Relay Bar
-          h(ChiefComposerBar, { view }),
+          h(ChiefComposerBar, { view, barRef: secBarRef }),
 
           // Floating iOS Toast
           view.notice ? h('div', { className: 'dnb-toast' }, view.notice) : null,

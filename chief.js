@@ -57,6 +57,75 @@ async function loadDshLlm() {
   return dshLlmModulePromise
 }
 
+let dshAttachmentModulePromise = null
+async function loadDshAttachment() {
+  if (!dshAttachmentModulePromise) {
+    dshAttachmentModulePromise = import('@deepseek-ai/dsh-attachment').catch(() => null)
+  }
+  return dshAttachmentModulePromise
+}
+
+const CHIEF_MAX_IMAGES = 4
+const CHIEF_IMAGE_MEDIA_TYPES = new Set(['image/png', 'image/jpeg', 'image/webp', 'image/gif'])
+
+function normalizeUploadedImage(raw, idx = 0) {
+  if (!raw || typeof raw !== 'object') return null
+  let mediaType = String(raw.mediaType || raw.mimeType || raw.type || '').trim().toLowerCase()
+  let data = String(raw.data || raw.base64 || '').trim()
+  const dataUrlMatch = data.match(/^data:([^;]+);base64,(.+)$/is)
+  if (dataUrlMatch) {
+    if (!mediaType) mediaType = dataUrlMatch[1].trim().toLowerCase()
+    data = dataUrlMatch[2].trim()
+  }
+  if (mediaType === 'image/jpg') mediaType = 'image/jpeg'
+  data = data.replace(/\s+/g, '')
+  if (!CHIEF_IMAGE_MEDIA_TYPES.has(mediaType) || !data) return null
+  const ext = mediaType === 'image/jpeg' ? 'jpg' : (mediaType.split('/')[1] || 'png')
+  const name = typeof raw.name === 'string' && raw.name.trim()
+    ? clamp(raw.name.trim(), 80)
+    : `chief-image-${idx + 1}.${ext}`
+  return { name, mediaType, data }
+}
+
+export async function admitChiefImages(deps, rawImages) {
+  const list = Array.isArray(rawImages) ? rawImages.slice(0, CHIEF_MAX_IMAGES) : []
+  if (!list.length) return []
+  const normalized = list.map((item, idx) => normalizeUploadedImage(item, idx)).filter(Boolean)
+  if (!normalized.length) {
+    throw new Error('上传的图片格式不受支持（仅支持 PNG / JPEG / WebP / GIF Base64）')
+  }
+
+  if (deps && typeof deps.admitImagesOverride === 'function') {
+    const refs = await deps.admitImagesOverride(normalized)
+    return (Array.isArray(refs) ? refs : []).filter(Boolean).map(attachment => ({ type: 'image', attachment }))
+  }
+
+  const attachmentsSvc = deps && typeof deps.getAttachments === 'function'
+    ? deps.getAttachments()
+    : (deps && deps.runtime && typeof deps.runtime.get === 'function' ? deps.runtime.get('attachments') : null)
+  if (!attachmentsSvc) {
+    throw new Error('当前 DSH 运行环境未挂载 attachments 图片服务，无法处理图片上传')
+  }
+
+  const attMod = await loadDshAttachment()
+  if (attMod && typeof attMod.admitEncodedImages === 'function') {
+    const refs = await attMod.admitEncodedImages(attachmentsSvc, normalized)
+    return (Array.isArray(refs) ? refs : []).map(attachment => ({ type: 'image', attachment }))
+  }
+
+  if (typeof attachmentsSvc.saveImages === 'function') {
+    const payload = normalized.map(img => ({
+      data: Uint8Array.from(Buffer.from(img.data, 'base64')),
+      mediaType: img.mediaType,
+      name: img.name,
+    }))
+    const refs = await attachmentsSvc.saveImages(payload)
+    return (Array.isArray(refs) ? refs : []).map(attachment => ({ type: 'image', attachment }))
+  }
+
+  throw new Error('attachments 服务缺少 saveImages / admitEncodedImages 接口')
+}
+
 let idSeq = 0
 function nextId(prefix) {
   idSeq = (idSeq + 1) % 1000000
@@ -149,7 +218,8 @@ function normalizeSuggestion(raw) {
 
 function normalizeMail(raw) {
   if (!raw || typeof raw !== 'object') return null
-  const text = cleanMultiline(raw.text, 1500)
+  const imageCount = Math.max(0, Math.round(Number(raw.imageCount) || 0))
+  const text = cleanMultiline(raw.text, 1500) || (imageCount > 0 ? `[附图 ×${imageCount}]` : '')
   if (!text) return null
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : nextId('mail'),
@@ -159,6 +229,7 @@ function normalizeMail(raw) {
     toSession: String(raw.toSession || ''),
     subject: clamp(raw.subject || '', 80),
     text,
+    ...(imageCount > 0 ? { imageCount } : {}),
     mode: ['steer', 'followup', 'silent'].includes(raw.mode) ? raw.mode : 'steer',
     deliveredPhysical: Boolean(raw.deliveredPhysical),
     readBy: Array.isArray(raw.readBy) ? raw.readBy.map(String).slice(0, 32) : [],
@@ -185,14 +256,18 @@ function normalizeWorkspace(raw) {
   base.chat = (Array.isArray(src.chat) ? src.chat : [])
     .filter(item => item && typeof item === 'object' && typeof item.text === 'string')
     .slice(-CHAT_CAP)
-    .map(item => ({
-      id: String(item.id || nextId('chat')),
-      role: item.role === 'user' ? 'user' : 'chief',
-      text: cleanMultiline(item.text, 2000),
-      target: item.target ? String(item.target) : '',
-      actions: Array.isArray(item.actions) ? item.actions.slice(0, 8) : [],
-      at: Number(item.at) || Date.now(),
-    }))
+    .map(item => {
+      const imageCount = Math.max(0, Math.round(Number(item.imageCount) || 0))
+      return {
+        id: String(item.id || nextId('chat')),
+        role: item.role === 'user' ? 'user' : 'chief',
+        text: cleanMultiline(item.text, 2000),
+        target: item.target ? String(item.target) : '',
+        ...(imageCount > 0 ? { imageCount } : {}),
+        actions: Array.isArray(item.actions) ? item.actions.slice(0, 8) : [],
+        at: Number(item.at) || Date.now(),
+      }
+    })
   base.mailbox = (Array.isArray(src.mailbox) ? src.mailbox : []).map(normalizeMail).filter(Boolean).slice(-MAIL_CAP)
   base.seenMailAt = src.seenMailAt && typeof src.seenMailAt === 'object' ? { ...src.seenMailAt } : {}
   base.seenFactsAt = src.seenFactsAt && typeof src.seenFactsAt === 'object' ? { ...src.seenFactsAt } : {}
@@ -741,7 +816,7 @@ function pickRouteFromItems(items, selectedRef, followRef, deps, sessionId, regi
   return queue[0] || null
 }
 
-async function callOneRoute(llm, route, system, userText, maxTokens = SUMMARY_MAX_TOKENS, sessionId = '') {
+async function callOneRoute(llm, route, system, userText, maxTokens = SUMMARY_MAX_TOKENS, sessionId = '', imageBlocks = []) {
   let effort
   let modelDefaultMaxTokens
   try {
@@ -761,15 +836,17 @@ async function callOneRoute(llm, route, system, userText, maxTokens = SUMMARY_MA
   const firstBudget = modelDefaultMaxTokens ? Math.min(modelDefaultMaxTokens, targetBudget) : targetBudget
   const retryBudget = firstBudget < targetBudget ? targetBudget : SUMMARY_RETRY_MAX_TOKENS
   const budgets = retryBudget > firstBudget ? [firstBudget, retryBudget] : [firstBudget]
+  const safeImages = Array.isArray(imageBlocks) ? imageBlocks : []
 
   const runOnce = async (budget) => {
+    const userContent = [...safeImages, { type: 'text', text: userText || '请查看附图并回答。' }]
     const request = {
       provider: route.provider,
       model: route.model,
       ...(sessionId ? { sessionId } : {}),
       ...(effort !== undefined ? { reasoningEffort: effort } : {}),
       system,
-      messages: [{ role: 'user', content: [{ type: 'text', text: userText }] }],
+      messages: [{ role: 'user', content: userContent }],
       maxTokens: budget,
       signal: AbortSignal.timeout(MODEL_TIMEOUT_MS),
     }
@@ -828,9 +905,32 @@ async function callOneRoute(llm, route, system, userText, maxTokens = SUMMARY_MA
   return { text: lastRes.text, modelRef: lastRes.modelRef }
 }
 
-export async function callChiefLlm(deps, { sessionId = '', system, prompt, maxTokens = SUMMARY_MAX_TOKENS }) {
+async function filterVisionRoutes(llm, queue) {
+  const visionRoutes = []
+  const unknownRoutes = []
+  for (const route of queue) {
+    let info = null
+    try {
+      if (typeof llm.resolveModelInfo === 'function') {
+        info = await Promise.resolve(llm.resolveModelInfo(route.provider, route.model))
+      }
+    } catch {}
+    const mods = Array.isArray(info?.inputModalities)
+      ? info.inputModalities
+      : (Array.isArray(route.inputModalities) ? route.inputModalities : null)
+    if (mods) {
+      if (mods.includes('image')) visionRoutes.push(route)
+    } else {
+      unknownRoutes.push(route)
+    }
+  }
+  return [...visionRoutes, ...unknownRoutes]
+}
+
+export async function callChiefLlm(deps, { sessionId = '', system, prompt, maxTokens = SUMMARY_MAX_TOKENS, imageBlocks = [] }) {
+  const safeImages = Array.isArray(imageBlocks) ? imageBlocks : []
   if (deps && typeof deps.callLlmOverride === 'function') {
-    return deps.callLlmOverride({ sessionId, system, prompt, maxTokens })
+    return deps.callLlmOverride({ sessionId, system, prompt, maxTokens, imageBlocks: safeImages })
   }
   const llm = deps.getLlm ? deps.getLlm() : null
   if (!llm || typeof llm.stream !== 'function') {
@@ -840,15 +940,25 @@ export async function callChiefLlm(deps, { sessionId = '', system, prompt, maxTo
   const regSet = typeof llm.listProviders === 'function'
     ? new Set((llm.listProviders() || []).filter(p => p && p.id && !String(p.id).startsWith('local-agent')).map(p => String(p.id)))
     : null
-  const queue = buildRouteQueue(catalog.models, catalog.selectedRef, catalog.followRef || catalog.defaultRef, deps, sessionId, regSet)
+  let queue = buildRouteQueue(catalog.models, catalog.selectedRef, catalog.followRef || catalog.defaultRef, deps, sessionId, regSet)
   if (!queue.length) {
     return { ok: false, error: '未找到可用的参谋长模型，请在 DSH 设置中配置模型供应商' }
+  }
+
+  if (safeImages.length > 0) {
+    queue = await filterVisionRoutes(llm, queue)
+    if (!queue.length) {
+      return {
+        ok: false,
+        error: '当前参谋长及备选模型均不支持图片输入（仅纯文本），请在右上角切换支持视觉的多模态模型（如 Gemini / Claude / GPT-4o / Qwen-VL 等）后再试。',
+      }
+    }
   }
 
   let lastError = '模型返回内容为空'
   for (const route of queue.slice(0, 4)) {
     try {
-      const res = await callOneRoute(llm, route, system, prompt, maxTokens, sessionId)
+      const res = await callOneRoute(llm, route, system, prompt, maxTokens, sessionId, safeImages)
       if (res.text) return { ok: true, text: res.text, modelRef: res.modelRef }
       lastError = `${route.ref} 返回内容为空`
       markRouteFailure(route, new Error(lastError))
@@ -864,9 +974,11 @@ export async function callChiefLlm(deps, { sessionId = '', system, prompt, maxTo
 /* Peer Discovery & Cross-Conversation Delivery ("递话 / 插话")               */
 /* -------------------------------------------------------------------------- */
 
-export async function buildMessageEnvelope(text, sourceKind = CHIEF_RELAY_SOURCE, extraSource = {}) {
+export async function buildMessageEnvelope(text, sourceKind = CHIEF_RELAY_SOURCE, extraSource = {}, imageBlocks = []) {
   const dshLlm = await loadDshLlm()
-  const content = [{ type: 'text', text }]
+  const safeImages = Array.isArray(imageBlocks) ? imageBlocks : []
+  const content = [...safeImages, ...(text ? [{ type: 'text', text }] : [])]
+  if (!content.length) content.push({ type: 'text', text: '' })
   const source = { kind: sourceKind, ...extraSource }
   if (dshLlm && typeof dshLlm.createUserMessage === 'function') {
     try {
@@ -999,10 +1111,27 @@ export async function deliverCrossMessage(deps, {
   text = '',
   subject = '',
   mode = 'steer',
+  images = [],
+  imageBlocks: preAdmittedBlocks = null,
   recordBoardLog = true,
 }) {
   const cleanBody = cleanMultiline(text, 2400)
-  if (!cleanBody) return { ok: false, error: '递话内容不能为空' }
+  const rawImages = Array.isArray(images) ? images : []
+  const hasPreAdmitted = Array.isArray(preAdmittedBlocks) && preAdmittedBlocks.length > 0
+  if (!cleanBody && !rawImages.length && !hasPreAdmitted) {
+    return { ok: false, error: '递话内容不能为空' }
+  }
+
+  let admittedBlocks = hasPreAdmitted ? preAdmittedBlocks : []
+  if (!hasPreAdmitted && rawImages.length > 0) {
+    try {
+      admittedBlocks = await admitChiefImages(deps, rawImages)
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) }
+    }
+  }
+  const effectiveText = cleanBody || (admittedBlocks.length ? '请查看随信附带的图片。' : '')
+  const imgTag = admittedBlocks.length > 0 ? ` [附图 ×${admittedBlocks.length}]` : ''
 
   const rootId = deps.resolveRootSessionId(fromSession) || String(fromSession || '')
   const directory = await listPeerDirectory(deps, rootId || fromSession)
@@ -1016,15 +1145,16 @@ export async function deliverCrossMessage(deps, {
       const res = await deliverSinglePeer(deps, directory, peer, {
         fromSession,
         fromLabel,
-        text: cleanBody,
+        text: effectiveText,
         subject,
         mode,
+        imageBlocks: admittedBlocks,
         recordBoardLog: false,
       })
       deliveries.push({ target: peer.handle, ok: res.ok, mode: res.deliveryMode })
     }
     if (recordBoardLog && rootId) {
-      deps.appendBoardLog(rootId, `📡 ${fromLabel} 向全体成员广播递话（${deliveries.filter(d => d.ok).length} 个目标）：${clamp(cleanBody, 56)}`, fromLabel)
+      deps.appendBoardLog(rootId, `📡 ${fromLabel} 向全体成员广播递话（${deliveries.filter(d => d.ok).length} 个目标）：${clamp(effectiveText, 56)}${imgTag}`, fromLabel)
     }
     return { ok: true, broadcast: true, deliveries }
   }
@@ -1040,17 +1170,21 @@ export async function deliverCrossMessage(deps, {
   return deliverSinglePeer(deps, directory, peer, {
     fromSession,
     fromLabel,
-    text: cleanBody,
+    text: effectiveText,
     subject,
     mode,
+    imageBlocks: admittedBlocks,
     recordBoardLog,
   })
 }
 
-async function deliverSinglePeer(deps, directory, peer, { fromSession, fromLabel, text, subject, mode, recordBoardLog }) {
+async function deliverSinglePeer(deps, directory, peer, { fromSession, fromLabel, text, subject, mode, imageBlocks = [], recordBoardLog }) {
   const runtime = deps.runtime
   const agentsSvc = runtime ? runtime.get('agents') : null
   const subagentsSvc = runtime ? runtime.get('subagents') : null
+  const safeBlocks = Array.isArray(imageBlocks) ? imageBlocks : []
+  const imgCount = safeBlocks.length
+  const imgSuffix = imgCount > 0 ? ` [附图 ×${imgCount}]` : ''
   const headerTag = mode === 'steer'
     ? `[DSH 参谋长插话 · 来自 ${fromLabel}]`
     : `[DSH 参谋长递话 · 来自 ${fromLabel}]`
@@ -1071,7 +1205,7 @@ async function deliverSinglePeer(deps, directory, peer, { fromSession, fromLabel
             targetChildId = await subagentsSvc.resolveName(caller, peer.name, AbortSignal.timeout(5000))
           }
           if (targetChildId) {
-            await subagentsSvc.sendMessage(caller, targetChildId, [{ type: 'text', text: formatted }], {
+            await subagentsSvc.sendMessage(caller, targetChildId, [...safeBlocks, { type: 'text', text: formatted }], {
               signal: AbortSignal.timeout(10_000),
             })
             deliveredPhysical = true
@@ -1100,7 +1234,7 @@ async function deliverSinglePeer(deps, directory, peer, { fromSession, fromLabel
           senderName: fromLabel,
           senderSessionId: fromSession || undefined,
           role: mode === 'steer' ? 'steer' : 'relay',
-        })
+        }, safeBlocks)
         try {
           if (mode === 'steer' && targetAgent.status === 'running' && typeof targetAgent.steer === 'function') {
             const r = targetAgent.steer(envelope)
@@ -1118,7 +1252,7 @@ async function deliverSinglePeer(deps, directory, peer, { fromSession, fromLabel
             deliveredPhysical = true
             deliveryMode = 'agent-inject'
           } else if (typeof targetAgent.steer === 'function') {
-            targetAgent.steer(formatted)
+            targetAgent.steer(safeBlocks.length ? formatted + imgSuffix : formatted)
             deliveredPhysical = true
             deliveryMode = 'agent-steer-text'
           }
@@ -1142,7 +1276,8 @@ async function deliverSinglePeer(deps, directory, peer, { fromSession, fromLabel
     to: peer.handle,
     toSession: peer.id || peer.key,
     subject,
-    text,
+    text: imgCount > 0 ? `${text}${imgSuffix}` : text,
+    imageCount: imgCount,
     mode,
     deliveredPhysical,
     readBy: recipientMarks,
@@ -1159,7 +1294,7 @@ async function deliverSinglePeer(deps, directory, peer, { fromSession, fromLabel
     const badge = mode === 'steer' ? '⚡ 插话' : mode === 'silent' ? '📌 备忘纸条' : '📨 递话'
     deps.appendBoardLog(
       peer.rootId || directory.rootId,
-      `${badge} ${fromLabel} → ${peer.handle}：${clamp(text, 56)}`,
+      `${badge} ${fromLabel} → ${peer.handle}：${clamp(text, 56)}${imgSuffix}`,
       fromLabel,
     )
   }
@@ -1261,8 +1396,8 @@ const NARRATIVE_SYSTEM = [
   '你是「DSH 参谋长」（如同统揽全局的宰相），负责把当前工作区和协同团队的目标、进展、纪律与红线边界，提炼成用户一眼扫完就能掌握全局的「摘要」。',
   '严格遵守以下【简明结构化 · 分点作答】规范：',
   '1. 使用简体中文，语气精炼干脆、直击要害，严禁寒暄套话与冗长铺垫。',
-  '2. 全文分为 2 到 4 个模块，每个模块以一行 `## 模块短标题` 开头（如 `## 核心目标与态势`、`## 关键结论与进展`、`## 协作纪律与边界`）。',
-  '3. **每个模块下方必须全部使用 `- ` 分点列表作答（严禁写成挤在一起的长段落散文！）**。每一点控制在 1 行（最多不超过 2 行），推荐在要点开头用方括号短标签提亮，如 `- 【推进中】…`、`- 【受阻】…`、`- 【结论】…`、`- 【禁止红线】…`、`- 【允许范围】…`。',
+  '2. 全文分为 2 到 4 个模块，每个模块以一行 `## 模块短标题` 开头（如 `## 核心目标与态势`、`## 关键结论与进展`、`## 协作纪律与红线`、`## 协作纪律与边界`）。',
+  '3. **每个模块下方必须全部使用 `- ` 分点列表作答（严禁写成挤在一起的长段落散文！）**。每一点控制在 1 行（最多不超过 2 行），推荐在要点开头用方括号短标签提亮，如 `- 【总目标】…`、`- 【推进中】…`、`- 【已完】…`、`- 【已验证】…`、`- 【结论】…`、`- 【待办】…`、`- 【待收尾】…`、`- 【注意】…`、`- 【归因纪律】…`、`- 【收尾纪律】…`、`- 【并列直接原因】…`、`- 【受阻】…`、`- 【禁止红线】…`、`- 【允许范围】…`。',
   '4. **去噪与聚合铁律**：遇到大量同前缀或已结束的后台巡检子代理（如 `mnemon-review-*`），**严禁逐一报菜名罗列**，必须合并成一句话统计（如 `- 【团队】1 名子代理运行中，其余 12 名历史巡检已结束`）；自动忽略 `[dsh-mnemon:...]` 等系统内部检查点噪音。',
   '5. 具体路径、端口、版本号、命令原样保留，同一事实绝不重复，只陈述真实输入，第一个 `## ` 之前不要输出任何多余字符。',
 ].join('\n')
@@ -1533,7 +1668,7 @@ const ASK_CHIEF_SYSTEM = [
   '',
   '请精准洞悉用户意图（态势汇报、卡点诊断、战术参谋、拆话传话、代维护看板、记忆管理、提炼或浓缩零散边界），并**只输出一个合法 JSON 对象**：',
   '{',
-  '  "reply": "必须【简明、结构化、分点作答】！用换行 `- 【标签】结论` 列出（如【当前进展】【活跃现场】【受阻卡点】【下一步建议】），直给干货，绝不说『记忆里没有这条』，绝不堆砌废话或暴露内部 sessionId",',
+  '  "reply": "必须【简明、结构化、分点作答】！用换行 `- 【标签】结论` 列出（优先使用语义清晰标签：如【总目标】【推进中】【已完】【已验证】【结论】【待办】【待收尾】【注意】【归因纪律】【并列直接原因】【受阻】【禁止红线】【下一步建议】），直给干货，绝不说『记忆里没有这条』，绝不堆砌废话或暴露内部 sessionId",',
   '  "relays": [',
   '    { "target": "成员 key 或名字（如 lead / 子代理名 / session-xxx / all）", "mode": "steer|followup|silent", "subject": "简短事由", "text": "替用户转化好的清晰可执行指令" }',
   '  ],',
@@ -1568,6 +1703,7 @@ const ASK_CHIEF_SYSTEM = [
   '- 【边界奏请与零散浓缩】：',
   '  1) 总结踩坑红线时，生成 `boundProposals` 呈交用户拍板（若用户提到「全局定住/以后所有任务都生效」则设 `"pinGlobal": true`）；只有用户明确下令「直接写进禁止/允许边界」时才用 `boardOps`。',
   '  2) 当用户要求「把重要的零散边界总结成一条 / 合并重复边界」时，仔细阅读现有边界，保留关键命令名/路径/硬红线，浓缩为 1 条精炼总则放入 `boundProposals[0].item`，并把被它吸收替代的旧条文原样放进 `replaces` 数组（若被合并旧规中含 📌 全局定住项，则 `"pinGlobal": true`）。',
+  '- 【看图与带图拆话】：当用户附带上传图片时，请直接结合图片画面诊断 UI 样式、报错截图或架构图；若你在 relays 中向代理拆话派活，系统会自动把用户附带的图片一并转送给目标代理。',
 ].join('\n')
 
 const CONSOLIDATE_BOUNDS_SYSTEM = [
@@ -2352,9 +2488,26 @@ export async function askOrCommandChief(deps, {
   text = '',
   forcedTarget = '',
   forcedMode = 'steer',
+  images = [],
 }) {
-  const input = cleanMultiline(text, 2000)
-  if (!input) return { ok: false, error: '请输入要询问或吩咐参谋长的内容' }
+  const rawInput = cleanMultiline(text, 2000)
+  const rawImages = Array.isArray(images) ? images : []
+  if (!rawInput && !rawImages.length) {
+    return { ok: false, error: '请输入要询问或吩咐参谋长的内容或上传图片' }
+  }
+
+  let imageBlocks = []
+  if (rawImages.length > 0) {
+    try {
+      imageBlocks = await admitChiefImages(deps, rawImages)
+    } catch (err) {
+      return { ok: false, error: String(err && err.message ? err.message : err) }
+    }
+  }
+
+  const input = rawInput || '请结合我上传的图片进行分析处理。'
+  const userDisplayText = rawInput || `[上传图片 ×${imageBlocks.length}]`
+  const imgMeta = imageBlocks.length > 0 ? { imageCount: imageBlocks.length } : {}
 
   const rootId = deps.resolveRootSessionId(sessionId) || String(sessionId || 'global')
   const directory = await listPeerDirectory(deps, rootId)
@@ -2368,17 +2521,18 @@ export async function askOrCommandChief(deps, {
       fromSession: rootId,
       fromLabel: '用户 (经 DSH 参谋长)',
       target: forcedTarget,
-      text: input,
+      text: rawInput || '请查看随信附带的图片。',
       mode: ['steer', 'followup', 'silent'].includes(forcedMode) ? forcedMode : 'steer',
+      imageBlocks,
     })
     const reply = delivery.ok
-      ? `已按你的指定向 ${delivery.target || forcedTarget} ${forcedMode === 'steer' ? '插话' : forcedMode === 'silent' ? '投递备忘纸条' : '递话'}${delivery.note ? '（' + delivery.note + '）' : '。'}`
+      ? `已按你的指定向 ${delivery.target || forcedTarget} ${forcedMode === 'steer' ? '插话' : forcedMode === 'silent' ? '投递备忘纸条' : '递话'}${imageBlocks.length ? `（附带 ${imageBlocks.length} 张图片）` : ''}${delivery.note ? '（' + delivery.note + '）' : '。'}`
       : `投递失败：${delivery.error}`
 
     mutateChiefState((s) => {
       const ws = ensureWorkspace(s, rootId)
       ws.chat.push(
-        { id: nextId('chat'), role: 'user', text: input, target: forcedTarget, actions: [], at: Date.now() },
+        { id: nextId('chat'), role: 'user', text: userDisplayText, target: forcedTarget, ...imgMeta, actions: [], at: Date.now() },
         { id: nextId('chat'), role: 'chief', text: reply, actions: [delivery.ok ? `→ ${delivery.target || forcedTarget}` : '投递失败'], at: Date.now() },
       )
       if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
@@ -2479,8 +2633,8 @@ export async function askOrCommandChief(deps, {
     `- 实时断点游标 (Cursor): 当前步骤="${cursor.step || '无'}" | 下一步="${cursor.next || '无'}" | 阻塞点="${cursor.blocked || '无'}"`,
     `- 计划步骤 (Plan): ${((board.plan || []).slice(0, 8).map(s => `${s.done ? '[✓]' : '[ ]'} ${clamp(s.text, 60)}`).join('；')) || '（无）'}`,
     `- 🔴 受阻任务 (${blockedTasks.length} 项): ${blockedTasks.slice(0, 6).map(t => `#${t.id} ${t.title}${t.owner ? '(@' + shortAgentBriefName(t.owner) + ')' : ''}${t.note ? ' [原因:' + clamp(t.note, 80) + ']' : ''}`).join('；') || '（无）'}`,
-    `- 🟢 推进中任务 (${doingTasks.length} 项): ${doingTasks.slice(0, 6).map(t => `#${t.id} ${t.title}${t.owner ? '(@' + shortAgentBriefName(t.owner) + ')' : ''}${t.note ? ' [' + clamp(t.note, 60) + ']' : ''}`).join('；') || '（无）'}`,
-    `- ⏳ 待办任务 (${todoTasks.length} 项): ${todoTasks.slice(0, 6).map(t => `#${t.id} ${t.title}${t.owner ? '(@' + shortAgentBriefName(t.owner) + ')' : ''}`).join('；') || '（无）'}`,
+    `- 🔵 推进中任务 (${doingTasks.length} 项): ${doingTasks.slice(0, 6).map(t => `#${t.id} ${t.title}${t.owner ? '(@' + shortAgentBriefName(t.owner) + ')' : ''}${t.note ? ' [' + clamp(t.note, 60) + ']' : ''}`).join('；') || '（无）'}`,
+    `- ⚪ 待办任务 (${todoTasks.length} 项): ${todoTasks.slice(0, 6).map(t => `#${t.id} ${t.title}${t.owner ? '(@' + shortAgentBriefName(t.owner) + ')' : ''}`).join('；') || '（无）'}`,
     `- ✅ 最近完成 (${doneTasks.length} 项): ${doneTasks.slice(-5).map(t => `#${t.id} ${t.title}${t.evidence ? ' [证据:' + clamp(t.evidence, 60) + ']' : ''}`).join('；') || '（无）'}`,
     '',
     '## 4. 当前生效边界（📌全局定住 vs 本任务）',
@@ -2503,6 +2657,7 @@ export async function askOrCommandChief(deps, {
     '',
     '## 用户刚刚对你说的话：',
     input,
+    ...(imageBlocks.length > 0 ? [`\n（附带 ${imageBlocks.length} 张用户上传图片，请直接查看图片内容作答）`] : []),
   ]
 
   const llmRes = await callChiefLlm(deps, {
@@ -2510,7 +2665,15 @@ export async function askOrCommandChief(deps, {
     system: ASK_CHIEF_SYSTEM,
     prompt: promptLines.join('\n'),
     maxTokens: SUMMARY_MAX_TOKENS,
+    imageBlocks,
   })
+
+  if (imageBlocks.length > 0 && !llmRes.ok) {
+    return {
+      ok: false,
+      error: llmRes.error || '当前参谋长模型无法识别图片，请在右上角切换支持视觉的多模态模型后重试',
+    }
+  }
 
   let parsed = llmRes.ok ? extractJsonObject(llmRes.text) : null
 
@@ -2527,6 +2690,7 @@ export async function askOrCommandChief(deps, {
         target: targetName,
         text: msgBody,
         mode: 'steer',
+        imageBlocks,
       })
       const fallbackReply = delivery.ok
         ? `- 【已递话】已向 @${delivery.target} 插话传达指令。`
@@ -2534,7 +2698,7 @@ export async function askOrCommandChief(deps, {
       mutateChiefState((s) => {
         const ws = ensureWorkspace(s, rootId)
         ws.chat.push(
-          { id: nextId('chat'), role: 'user', text: input, actions: [], at: Date.now() },
+          { id: nextId('chat'), role: 'user', text: userDisplayText, ...imgMeta, actions: [], at: Date.now() },
           { id: nextId('chat'), role: 'chief', text: fallbackReply, actions: [], at: Date.now() },
         )
         if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
@@ -2550,7 +2714,7 @@ export async function askOrCommandChief(deps, {
     }
 
     // 2) Natural-language request to consolidate scattered boundaries into one
-    if (/边界|红线/.test(input) && /总结成一条|合并成一条|浓缩|合一|整合/.test(input)) {
+    if (!imageBlocks.length && /边界|红线/.test(input) && /总结成一条|合并成一条|浓缩|合一|整合/.test(input)) {
       const targetCol = /允许/.test(input) ? 'allowed' : /注意/.test(input) ? 'notes' : ''
       const consRes = await consolidateBoundsWithChief(deps, {
         sessionId: rootId,
@@ -2561,7 +2725,7 @@ export async function askOrCommandChief(deps, {
         mutateChiefState((s) => {
           const ws = ensureWorkspace(s, rootId)
           ws.chat.push(
-            { id: nextId('chat'), role: 'user', text: input, actions: [], at: Date.now() },
+            { id: nextId('chat'), role: 'user', text: userDisplayText, ...imgMeta, actions: [], at: Date.now() },
             { id: nextId('chat'), role: 'chief', text: consRes.reply, actions: ['呈批浓缩边界'], at: Date.now() },
           )
           if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
@@ -2597,7 +2761,7 @@ export async function askOrCommandChief(deps, {
     mutateChiefState((s) => {
       const ws = ensureWorkspace(s, rootId)
       ws.chat.push(
-        { id: nextId('chat'), role: 'user', text: input, actions: [], at: Date.now() },
+        { id: nextId('chat'), role: 'user', text: userDisplayText, ...imgMeta, actions: [], at: Date.now() },
         { id: nextId('chat'), role: 'chief', text: replyText, actions: [], at: Date.now() },
       )
       if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
@@ -2624,6 +2788,7 @@ export async function askOrCommandChief(deps, {
       subject: r.subject || '',
       text: r.text,
       mode: ['steer', 'followup', 'silent'].includes(r.mode) ? r.mode : 'steer',
+      imageBlocks,
     })
     relayResults.push(deliv)
     if (deliv.ok) actionBadges.push(`${r.mode === 'steer' ? '插话' : '递话'} → ${deliv.target}`)
@@ -2693,7 +2858,7 @@ export async function askOrCommandChief(deps, {
     }
 
     ws.chat.push(
-      { id: nextId('chat'), role: 'user', text: input, actions: [], at: Date.now() },
+      { id: nextId('chat'), role: 'user', text: userDisplayText, ...imgMeta, actions: [], at: Date.now() },
       { id: nextId('chat'), role: 'chief', text: replyText, actions: actionBadges, at: Date.now() },
     )
     if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)

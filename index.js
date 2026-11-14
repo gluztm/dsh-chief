@@ -65,7 +65,7 @@ import {
 const API = '/api/dsh-chief'
 const BOARD_VERSION = 1
 const LOG_CAP = 60
-const BODY_LIMIT = 128 * 1024
+const BODY_LIMIT = 24 * 1024 * 1024
 // How many anchor notes the shared board keeps. Anchors are what a fresh
 // Session reads before it has any context, so this is a budget, not a list.
 /**
@@ -2203,6 +2203,7 @@ function makeChiefDeps(runtime) {
   return {
     runtime: rt,
     getLlm: () => activeLlm || (rt ? rt.get('llm') : null),
+    getAttachments: () => safe(() => (rt ? rt.get('attachments') : null), null),
     resolveRootSessionId,
     resolveAgentIdentity,
     refreshSubagentTree,
@@ -2779,6 +2780,7 @@ function routeTable(runtime) {
             text: typeof body.text === 'string' ? body.text : '',
             forcedTarget: typeof body.target === 'string' ? body.target : '',
             forcedMode: typeof body.mode === 'string' ? body.mode : 'steer',
+            images: Array.isArray(body.images) ? body.images : [],
           })
           const board = out.ok && sessionId ? boardForSession(boardFileFor(sessionId)) : undefined
           sendJson(res, out.ok ? 200 : 400, board ? { ...out, board } : out)
@@ -2801,6 +2803,7 @@ function routeTable(runtime) {
             subject: typeof body.subject === 'string' ? body.subject : '',
             text: typeof body.text === 'string' ? body.text : '',
             mode: typeof body.mode === 'string' ? body.mode : 'steer',
+            images: Array.isArray(body.images) ? body.images : [],
           })
           const view = await getChiefView(makeChiefDeps(runtime), sessionId, { autoSummarize: false })
           sendJson(res, out.ok ? 200 : 400, { ...out, view })
