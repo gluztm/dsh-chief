@@ -34,6 +34,7 @@ import {
 } from './idle-guard.js'
 import {
   loadChiefState,
+  resolveWorkspaceConfig,
   getLinkedCluster,
   setPeerLink,
   invalidateChiefModelCatalog,
@@ -45,6 +46,12 @@ import {
   askOrCommandChief,
   consolidateBoundsWithChief,
   organizeArchivesWithChief,
+  harvestTurnDetailsToArchive,
+  precipitateExperienceWithChief,
+  deployChiefWorkspaceState,
+  updateWorkspaceFlippedIds,
+  maybeRunPreCompaction,
+  runTurnReview,
   proposeBoundToChief,
   scheduleChiefTurnReview,
   handleSuggestionDecision,
@@ -54,12 +61,19 @@ import {
 } from './chief.js'
 import {
   bootstrapArchivesFromSharedBoard,
+  resolveProjectKey,
+  listProjectCabinets,
   getArchiveMeta,
   listArchiveHeaders,
   getArchiveDetail,
   searchArchives,
   mutateArchive,
+  copyArchivesBetweenSessionsOrCabinets,
   getTakenOutArchivesForSession,
+  getFlippedOutPrecipitatedForSession,
+  listPrecipitatedHeaders,
+  getPrecipitatedDetail,
+  mutatePrecipitated,
 } from './archives.js'
 
 const API = '/api/dsh-chief'
@@ -141,6 +155,35 @@ function writePending(value) {
 function clearPending() {
   try {
     fs.unlinkSync(pendingFile())
+  } catch {}
+}
+
+function pendingDeployFile() {
+  return path.join(path.dirname(boardFile()), 'pending-chief-deploy.json')
+}
+
+function readPendingDeploy() {
+  try {
+    const raw = JSON.parse(fs.readFileSync(pendingDeployFile(), 'utf8'))
+    return raw && typeof raw.fromSessionId === 'string' && raw.fromSessionId ? raw : null
+  } catch {
+    return null
+  }
+}
+
+function writePendingDeploy(value) {
+  try {
+    fs.mkdirSync(path.dirname(pendingDeployFile()), { recursive: true })
+    fs.writeFileSync(pendingDeployFile(), JSON.stringify(value, null, 2), 'utf8')
+    return true
+  } catch {
+    return false
+  }
+}
+
+function clearPendingDeploy() {
+  try {
+    fs.unlinkSync(pendingDeployFile())
   } catch {}
 }
 
@@ -354,6 +397,9 @@ function emptyBoard() {
     objective: '',
     objectiveBy: '',
     objectiveAt: 0,
+    objectiveUpdatedAt: 0,
+    activeCabinetId: '',
+    goalApproval: null,
     // 'plan' or 'goal'. A plan is a list of steps being ticked off; a goal is
     // one persistent objective steered toward, where rewriting the step list
     // every turn hides the fact that the objective never moved. The model picks
@@ -635,6 +681,22 @@ function guardCount(value, fallback, min, max) {
   return Math.min(max, Math.max(min, Math.round(number)))
 }
 
+function normalizeGoalApproval(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const status = ['pending', 'approved', 'rejected'].includes(raw.status) ? raw.status : ''
+  if (!status) return null
+  return {
+    id: str(raw.id, newId('ga')),
+    status,
+    objective: str(raw.objective, '').slice(0, 600),
+    summary: str(raw.summary, '').slice(0, 600),
+    evidence: str(raw.evidence, '').slice(0, 800),
+    rejectReason: str(raw.rejectReason, '').slice(0, 300),
+    at: typeof raw.at === 'number' ? raw.at : nowMs(),
+    decidedAt: typeof raw.decidedAt === 'number' ? raw.decidedAt : 0,
+  }
+}
+
 function normalizeBoard(raw) {
   const board = raw && typeof raw === 'object' ? raw : {}
   const plan = Array.isArray(board.plan) ? board.plan : []
@@ -647,6 +709,9 @@ function normalizeBoard(raw) {
     objective: str(board.objective, ''),
     objectiveBy: str(board.objectiveBy, ''),
     objectiveAt: typeof board.objectiveAt === 'number' ? board.objectiveAt : 0,
+    objectiveUpdatedAt: typeof board.objectiveUpdatedAt === 'number' ? board.objectiveUpdatedAt : (typeof board.objectiveAt === 'number' ? board.objectiveAt : 0),
+    activeCabinetId: str(board.activeCabinetId, '').trim(),
+    goalApproval: normalizeGoalApproval(board.goalApproval),
     // Whitelisted, not free-form: an unknown mode would make every consumer
     // (digest, panel) disagree about which shape the board has.
     mode: board.mode === 'goal' ? 'goal' : 'plan',
@@ -911,7 +976,8 @@ function runActionUnlocked(input) {
   if (action === 'archive.search') {
     const q = str(args.query !== undefined ? args.query : (args.question !== undefined ? args.question : args.text), '')
     const folder = str(args.folder, '')
-    const res = searchArchives(q, { folder, limit: 10 }, boardFile())
+    const rootSid = resolveRootSessionId(session) || session
+    const res = searchArchives(q, { folder, limit: 10 }, archiveTarget(activeRuntime, rootSid, str(args.cabinetId, '')))
     return {
       ok: true,
       archiveSearch: res,
@@ -923,7 +989,7 @@ function runActionUnlocked(input) {
     const target = str(args.archiveId !== undefined ? args.archiveId : (args.id !== undefined ? args.id : args.title), '').trim()
     if (!target) return { ok: false, error: 'archive.read requires archiveId, id, or title' }
     const rootSid = resolveRootSessionId(session) || session
-    const res = getArchiveDetail(target, rootSid, boardFile())
+    const res = getArchiveDetail(target, rootSid, archiveTarget(activeRuntime, rootSid, str(args.cabinetId, '')))
     if (!res.ok) return { ok: false, error: res.error }
     return {
       ok: true,
@@ -946,7 +1012,7 @@ function runActionUnlocked(input) {
       points: Array.isArray(args.points) ? args.points : undefined,
       by,
       rootSessionId: rootSid,
-    }, boardFile())
+    }, archiveTarget(activeRuntime, rootSid, str(args.cabinetId, '')))
     if (!res.ok) return { ok: false, error: res.error }
     if (session) {
       withBoardLock(file, () => {
@@ -1234,17 +1300,90 @@ function runActionUnlocked(input) {
     if (mode !== 'plan' && mode !== 'goal') return { ok: false, error: 'mode must be plan or goal' }
     const before = board.mode === 'goal' ? 'goal' : 'plan'
     board.mode = mode
-    // Logged even when unchanged is pointless, but logged when flipped is the
-    // only record of *why* the digest suddenly reads differently.
+    if (mode === 'goal') {
+      if (board.goalApproval && board.goalApproval.status !== 'pending') {
+        board.goalApproval = null
+      }
+    } else if (board.goalApproval && board.goalApproval.status === 'pending') {
+      board.goalApproval = null
+    }
     if (before !== mode) {
       pushLog(
         board,
-        '模式改为：' + mode + (mode === 'goal' ? '（这活按持续目标推进，不用步骤列表代替）' : '（回到步骤推进）'),
+        '模式改为：' + mode + (mode === 'goal' ? '（开启长期目标持续督导）' : '（回到按步规划推进）'),
         by,
         session,
       )
     }
     return { ok: true, mode, board: saveBoard(board, file) }
+  }
+
+  if (action === 'plan.resetForGoal') {
+    const hadSteps = Array.isArray(board.plan) ? board.plan.length : 0
+    board.plan = []
+    board.cursor = {
+      at: nowMs(),
+      step: '',
+      next: '',
+      blocked: '',
+      by,
+      session,
+    }
+    pushLog(board, `已清空陈旧计划步骤（原 ${hadSteps} 步），等待按最新总目标重编`, by, session)
+    return { ok: true, clearedSteps: hadSteps, board: saveBoard(board, file) }
+  }
+
+  if (action === 'goal.proposeApproval') {
+    const obj = str(args.objective, board.objective).trim().slice(0, 600)
+    const summary = str(args.summary, '当前总目标要求已全部完成并已核验，请用户批准结项。').trim().slice(0, 600)
+    const evidence = str(args.evidence, '').trim().slice(0, 800)
+    // Crucial: keep board.mode === 'goal' until the user explicitly approves!
+    board.goalApproval = {
+      id: newId('ga'),
+      status: 'pending',
+      objective: obj,
+      summary,
+      evidence,
+      rejectReason: '',
+      at: nowMs(),
+      decidedAt: 0,
+    }
+    pushLog(board, '🎯 参谋长判定目标已达成，呈请用户批准结项：' + summary.slice(0, 60), by, session)
+    return { ok: true, goalApproval: board.goalApproval, board: saveBoard(board, file) }
+  }
+
+  if (action === 'goal.approve') {
+    const prev = board.goalApproval || { id: newId('ga'), objective: board.objective, summary: '', evidence: '', at: nowMs() }
+    board.goalApproval = {
+      ...prev,
+      status: 'approved',
+      rejectReason: '',
+      decidedAt: nowMs(),
+    }
+    board.mode = 'plan'
+    appendMemory(board, {
+      section: '验证结论',
+      title: '🎯 目标结项批准：' + String(prev.objective || board.objective || '阶段目标').slice(0, 60),
+      text: prev.summary || '用户已批准目标结项并切换回按步规划模式',
+      by,
+      session,
+    })
+    pushLog(board, '✅ 用户已批准目标结项，已退出 Goal 督导模式', by, session)
+    return { ok: true, goalApproval: board.goalApproval, mode: board.mode, board: saveBoard(board, file) }
+  }
+
+  if (action === 'goal.reject') {
+    const reason = str(args.reason, '仍需继续推进完善').trim().slice(0, 300)
+    const prev = board.goalApproval || { id: newId('ga'), objective: board.objective, summary: '', evidence: '', at: nowMs() }
+    board.goalApproval = {
+      ...prev,
+      status: 'rejected',
+      rejectReason: reason,
+      decidedAt: nowMs(),
+    }
+    board.mode = 'goal'
+    pushLog(board, '↩ 用户驳回结项批示（继续 Goal 督导）：' + reason.slice(0, 60), by, session)
+    return { ok: true, goalApproval: board.goalApproval, mode: board.mode, board: saveBoard(board, file) }
   }
 
   if (action === 'settings.set') {
@@ -1271,10 +1410,27 @@ function runActionUnlocked(input) {
     const objective = str(args.objective, '').trim()
     if (!objective) return { ok: false, error: 'objective required' }
     const clips = []
+    const changed = board.objective !== objective
     board.objective = clipInto(clips, 'objective', objective, CAP_OBJECTIVE)
     board.objectiveBy = session
     board.objectiveAt = nowMs()
-    pushLog(board, '目标改为：' + objective.slice(0, 60), by, session)
+    board.objectiveUpdatedAt = board.objectiveAt
+    if (asBool(args.setGoalMode) === true) {
+      board.mode = 'goal'
+    }
+    if (changed && board.goalApproval && board.goalApproval.status !== 'pending') {
+      board.goalApproval = null
+    }
+    if (asBool(args.resetStalePlan) === true) {
+      board.plan = []
+      board.cursor = { at: nowMs(), step: '', next: '', blocked: '', by, session }
+    }
+    pushLog(
+      board,
+      (asBool(args.setGoalMode) === true ? '🎯 设为督导目标：' : '目标改为：') + objective.slice(0, 60),
+      by,
+      session,
+    )
     return clipped({ ok: true, board: saveBoard(board, file) }, clips)
   }
 
@@ -1762,6 +1918,34 @@ function safe(read, fallback) {
   }
 }
 
+/** Probe whether the DSH host provides the post-rc.2 named subagent tree APIs. */
+function probeSubagentSupport(rt) {
+  const subagents = rt ? safe(() => rt.get('subagents'), null) : null
+  if (!subagents) {
+    return {
+      present: false,
+      namedSubagentsSupported: false,
+      missingMethods: [],
+      minDshVersion: '0.2.2-rc.2',
+      warning: '',
+    }
+  }
+  const missingMethods = []
+  if (typeof subagents.resolveName !== 'function') missingMethods.push('resolveName')
+  if (typeof subagents.rootOf !== 'function') missingMethods.push('rootOf')
+  if (typeof subagents.namesOf !== 'function') missingMethods.push('namesOf')
+  const ok = missingMethods.length === 0
+  return {
+    present: true,
+    namedSubagentsSupported: ok,
+    missingMethods,
+    minDshVersion: '0.2.2-rc.2',
+    warning: ok
+      ? ''
+      : '当前 DSH 宿主版本不支持命名子代理树接口（缺少 subagents.resolveName / rootOf / namesOf，常见于 0.2.2-rc.1 及更早版本）。面板其余功能可正常使用；如需使用子代理派发 (task.dispatch) 与插话 (team.steer)，请将 DSH 升级至 >= 0.2.2-rc.2。',
+  }
+}
+
 /** The agent a lookup resolves to: the one named, or the one whose turn this is.
  *  Kept separate from sessionOf because the boundary report has to NAME the
  *  Session it read facts for — the facts were derived from currentInitiator()
@@ -2198,12 +2382,122 @@ function buildTaskDispatchBrief(board, task, extraPrompt) {
   return lines.join('\n')
 }
 
+function getSessionCwd(runtime, sessionId) {
+  const sid = String(sessionId || '').trim()
+  const rootId = sid ? (resolveRootSessionId(sid) || sid) : ''
+  const rt = runtime || activeRuntime
+  if (rt) {
+    try {
+      const agents = rt.get('agents')
+      const agent = (agents && typeof agents.get === 'function') ? (agents.get(sid) || agents.get(rootId)) : null
+      const headerCwd = agent && agent.session && agent.session.header && agent.session.header.cwd
+      if (typeof headerCwd === 'string' && headerCwd.trim()) return headerCwd.trim()
+      const sessionObj = agent && agent.session ? agent.session : safe(() => sessionOf(rt, sid || rootId), null)
+      const wd = rt.get('workingDirectory')
+      if (wd && typeof wd.get === 'function' && sessionObj) {
+        const wDir = wd.get(sessionObj)
+        if (typeof wDir === 'string' && wDir.trim()) return wDir.trim()
+      }
+    } catch {}
+  }
+  for (const probeId of [sid, rootId].filter(Boolean)) {
+    try {
+      const b = loadBoard(boardFileFor(probeId))
+      const row = b && b.sessions && (b.sessions[probeId] || b.sessions[sid])
+      if (row && typeof row.cwd === 'string' && row.cwd.trim()) return row.cwd.trim()
+    } catch {}
+  }
+  return process.cwd()
+}
+
+function archiveTarget(runtime, sessionId, explicitCabinetId = '') {
+  const sid = String(sessionId || '').trim()
+  const rootSid = sid ? (resolveRootSessionId(sid) || sid) : ''
+  let cabinetId = typeof explicitCabinetId === 'string' ? explicitCabinetId.trim() : ''
+  if (!cabinetId && rootSid) {
+    try {
+      cabinetId = loadBoard(boardFileFor(rootSid)).activeCabinetId || ''
+    } catch {}
+  }
+  return {
+    customSharedBoardFile: boardFile(),
+    cwd: getSessionCwd(runtime, rootSid || sid),
+    ...(cabinetId ? { cabinetId } : {}),
+  }
+}
+
+/** Combine working-cabinet mounted items with explicitly flipped precipitated entries (0 disk reads when empty!). */
+function collectTakenOutAndFlipped(runtime, rootId, cabinetId = '') {
+  if (!rootId) return []
+  const targetOpt = archiveTarget(runtime, rootId, cabinetId)
+  const working = getTakenOutArchivesForSession(rootId, targetOpt)
+  const state = loadChiefState()
+  const ws = state && state.workspaces && state.workspaces[rootId]
+  const flippedIds = ws && Array.isArray(ws.flippedPrecipitatedIds) ? ws.flippedPrecipitatedIds : []
+  if (!flippedIds.length) return working
+  const projectKey = resolveProjectKey(targetOpt.cwd)
+  const flippedEntries = getFlippedOutPrecipitatedForSession(projectKey, rootId, true, targetOpt)
+  const mapped = flippedEntries.map(e => ({
+    ...e,
+    folder: e.category || 'contracts',
+    folderLabel: `沉淀冷库/${e.category || '经验'}`,
+    title: `[已翻出沉淀] ${e.title}`,
+  }))
+  return [...working, ...mapped]
+}
+
 function makeChiefDeps(runtime) {
   const rt = runtime || activeRuntime
   return {
     runtime: rt,
     getLlm: () => activeLlm || (rt ? rt.get('llm') : null),
     getAttachments: () => safe(() => (rt ? rt.get('attachments') : null), null),
+    getSessionCwd: (sid) => getSessionCwd(rt, sid),
+    getAgentStatus(sid) {
+      const agents = rt ? rt.get('agents') : null
+      const ag = agents && typeof agents.get === 'function' ? agents.get(sid) : null
+      return (ag && ag.status) || 'idle'
+    },
+    async measureSessionTokens(sid, agentArg) {
+      const agents = rt ? rt.get('agents') : null
+      const ag = agentArg || (agents && typeof agents.get === 'function' ? agents.get(sid) : null)
+      if (!ag || !ag.session) return null
+      try {
+        let totalTokens = 0
+        let seq = 0
+        let contextWindow = 128_000
+        if (typeof ag.session.ownEvents === 'function') {
+          const events = ag.session.ownEvents() || []
+          seq = events.length
+          for (let i = events.length - 1; i >= 0; i -= 1) {
+            const ev = events[i]
+            const usage = ev && (ev.usage || (ev.message && ev.message.usage) || (ev.data && ev.data.usage))
+            if (usage && typeof usage === 'object') {
+              const calc = (Number(usage.inputTokens) || 0)
+                + (Number(usage.cacheReadTokens) || 0)
+                + (Number(usage.outputTokens) || 0)
+              totalTokens = Number(usage.totalTokens) || calc
+              if (Number(usage.contextWindow) > 0) contextWindow = Number(usage.contextWindow)
+              if (totalTokens > 0) break
+            }
+          }
+        }
+        return totalTokens > 0 ? { totalTokens, contextWindow, seq } : null
+      } catch {
+        return null
+      }
+    },
+    async compactSessionNow(sid, cmdId) {
+      const agents = rt ? rt.get('agents') : null
+      const ag = agents && typeof agents.get === 'function' ? agents.get(sid) : null
+      if (!ag) throw new Error('target session agent not found for compaction')
+      if (ag.status === 'running') throw new Error('agent is busy running; refusing compaction')
+      const compSvc = rt ? rt.get('compaction') : null
+      if (!compSvc || typeof compSvc.compactNow !== 'function') {
+        throw new Error('dsh-compaction service unavailable')
+      }
+      return compSvc.compactNow(ag, AbortSignal.timeout(60_000), cmdId || ('chief-compact-' + Date.now().toString(36)))
+    },
     resolveRootSessionId,
     resolveAgentIdentity,
     refreshSubagentTree,
@@ -2304,7 +2598,13 @@ async function executeSubagentAction(runtime, input, callerAgent, signal) {
         dispatchMode = 'session-inject'
       }
     } else if (subagents && liveCaller) {
-      // Case 2: Use DSH native subagent service (continue existing subagent or spawn/fork a new one)
+      // Case 2: Use DSH native subagent service (requires post-rc.2 named subagent API)
+      if (typeof subagents.resolveName !== 'function' || typeof subagents.startActivation !== 'function') {
+        return {
+          ok: false,
+          error: '当前 DSH 宿主不支持命名子代理 API（缺少 subagents.resolveName / startActivation，例如 0.2.2-rc.1 为重构前旧接口），请将 DSH 升级至 >= 0.2.2-rc.2 后再使用子代理派发与插话。',
+        }
+      }
       const providerName = str(args.provider, targetTask.preset === 'fork' ? 'fork' : 'spawn') || 'spawn'
       const preset = str(args.preset, targetTask.preset && targetTask.preset !== 'fork' && targetTask.preset !== 'spawn' ? targetTask.preset : '')
       const candidateName = sanitizeSubagentName(requestedTarget, targetTask.id)
@@ -2410,6 +2710,12 @@ async function executeSubagentAction(runtime, input, callerAgent, signal) {
     if (!targetName) return { ok: false, error: 'team.steer requires agent name or task id with assigned subagent' }
     if (!text) return { ok: false, error: 'team.steer requires message / prompt text' }
     if (!subagents || !liveCaller) return { ok: false, error: 'subagents service or live caller agent unavailable' }
+    if (typeof subagents.resolveName !== 'function') {
+      return {
+        ok: false,
+        error: '当前 DSH 宿主不支持命名子代理 API（缺少 subagents.resolveName，例如 0.2.2-rc.1 为重构前旧接口），请将 DSH 升级至 >= 0.2.2-rc.2 后再使用子代理派发与插话。',
+      }
+    }
 
     let targetId = ''
     try {
@@ -2441,6 +2747,15 @@ async function executeSubagentAction(runtime, input, callerAgent, signal) {
     const targetName = str(args.agent || args.subagent || args.target || (linkedTask && (linkedTask.subagent || linkedTask.owner)), '').trim()
     if (!targetName) return { ok: false, error: 'team.interrupt requires agent name or task id' }
     if (!subagents || !liveCaller) return { ok: false, error: 'subagents service or live caller agent unavailable' }
+    if (typeof subagents.resolveName !== 'function') {
+      return {
+        ok: false,
+        error: '当前 DSH 宿主不支持命名子代理 API（缺少 subagents.resolveName，例如 0.2.2-rc.1 为重构前旧接口），请将 DSH 升级至 >= 0.2.2-rc.2 后再使用子代理派发与插话。',
+      }
+    }
+    if (typeof subagents.interrupt !== 'function') {
+      return { ok: false, error: '当前 DSH 宿主不支持 subagents.interrupt，请升级至 >= 0.2.2-rc.2' }
+    }
 
     let targetId = ''
     try {
@@ -2527,7 +2842,8 @@ function routeTable(runtime) {
               }
             }
           } catch {}
-          let pinnedModelRef = (secState.config && secState.config.modelRef) || ''
+          const effCfg = resolveWorkspaceConfig(secState, rootSid)
+          let pinnedModelRef = effCfg.modelRef || ''
           if (pinnedModelRef) {
             try {
               const llmSvc = runtime && runtime.get('llm')
@@ -2538,6 +2854,9 @@ function routeTable(runtime) {
               }
             } catch {}
           }
+          const rootWs = secState.workspaces && secState.workspaces[rootSid]
+          const tacticalModes = effCfg.tacticalModes || {}
+          const hostCompat = probeSubagentSupport(runtime)
           sendJson(res, 200, {
             ok: true,
             board,
@@ -2545,9 +2864,13 @@ function routeTable(runtime) {
             agentIdentity,
             teamTasks: sessionId ? fetchTeamTasks(runtime, { id: sessionId }) : undefined,
             boundaries: boundaries(runtime, sessionId),
+            hostCompat,
             chiefMeta: {
-              paceMode: (secState.config && secState.config.paceMode) || 'manual',
-              autoPilot: Boolean(secState.config && secState.config.autoPilot),
+              paceMode: effCfg.paceMode || 'manual',
+              autoPilot: Boolean(effCfg.autoPilot),
+              tacticalModes,
+              runtimeGuard: (rootWs && rootWs.runtimeGuard) || {},
+              flippedCount: (rootWs && Array.isArray(rootWs.flippedPrecipitatedIds)) ? rootWs.flippedPrecipitatedIds.length : 0,
               modelRef: pinnedModelRef,
               followModelRef,
               resolvedModelRef: pinnedModelRef || followModelRef || '',
@@ -2555,8 +2878,9 @@ function routeTable(runtime) {
               factsCount,
               mailboxCount,
               linkedPeersCount: Math.max(0, cluster.length - 1),
+              hostCompat,
             },
-            archiveMeta: getArchiveMeta(rootSid, boardFile()),
+            archiveMeta: getArchiveMeta(rootSid, archiveTarget(runtime, rootSid, board.activeCabinetId)),
           })
         } catch (error) {
           sendJson(res, 500, { ok: false, error: String(error && error.message ? error.message : error) })
@@ -2583,7 +2907,7 @@ function routeTable(runtime) {
               subagents,
               agentIdentity,
               teamTasks: sessionId ? fetchTeamTasks(runtime, { id: sessionId }) : undefined,
-              takenOutArchives: rootSid ? getTakenOutArchivesForSession(rootSid, boardFile()) : [],
+              takenOutArchives: rootSid ? collectTakenOutAndFlipped(runtime, rootSid, fullBoard.activeCabinetId) : [],
             }),
             sessions: board.sessions || {},
             updatedAt: board.updatedAt,
@@ -2688,7 +3012,7 @@ function routeTable(runtime) {
           ok: true,
           text: renderHandoff(board, boundaries(runtime, sessionId), 5200, sessionId, {
             teamTasks: fetchTeamTasks(runtime, sessionId ? { id: sessionId } : null),
-            takenOutArchives: rootSid ? getTakenOutArchivesForSession(rootSid, boardFile()) : [],
+            takenOutArchives: rootSid ? collectTakenOutAndFlipped(runtime, rootSid, board.activeCabinetId) : [],
           }),
           handoffAt: board.handoff ? board.handoff.at : 0,
           autoInject: !((board.settings || {}).autoInject === false),
@@ -2833,10 +3157,11 @@ function routeTable(runtime) {
         if (!guard(req, res)) return
         try {
           const body = await readBody(req)
-          const updated = updateChiefConfig(body || {})
-          const sessionId = typeof body.session === 'string' ? body.session : ''
+          const sessionId = typeof body?.session === 'string' ? body.session : ''
+          const rootSid = resolveRootSessionId(sessionId) || sessionId
+          const updated = updateChiefConfig({ ...(body || {}), ...(rootSid ? { sessionId: rootSid } : {}) })
           const view = await getChiefView(makeChiefDeps(runtime), sessionId, { autoSummarize: false })
-          sendJson(res, 200, { ...updated, view })
+          sendJson(res, updated && updated.ok === false ? 400 : 200, { ...updated, view })
         } catch (error) {
           sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
         }
@@ -2945,10 +3270,15 @@ function routeTable(runtime) {
             const query = url.searchParams.get('q') || ''
             const folder = url.searchParams.get('folder') || ''
             const paperclip = url.searchParams.get('paperclip') || ''
-            const out = listArchiveHeaders(rootSid, { query, folder, paperclip }, boardFile())
+            const cabinetId = url.searchParams.get('cabinetId') || ''
+            const targetOpt = archiveTarget(runtime, rootSid || sessionId, cabinetId)
+            const out = listArchiveHeaders(rootSid, { query, folder, paperclip, includePrecipitated: true }, targetOpt)
+            const st = loadChiefState()
+            const ws = rootSid && st.workspaces ? st.workspaces[rootSid] : null
             sendJson(res, 200, {
               ...out,
-              archiveMeta: getArchiveMeta(rootSid, boardFile()),
+              flippedPrecipitatedIds: (ws && Array.isArray(ws.flippedPrecipitatedIds)) ? ws.flippedPrecipitatedIds.slice() : [],
+              archiveMeta: getArchiveMeta(rootSid, targetOpt),
             })
             return
           }
@@ -2957,9 +3287,41 @@ function routeTable(runtime) {
           const sessionId = typeof body.session === 'string' ? body.session : ''
           const rootSid = resolveRootSessionId(sessionId) || sessionId
           const op = typeof body.op === 'string' ? body.op : 'save'
+          const cabinetId = typeof body.cabinetId === 'string' ? body.cabinetId : ''
+          const targetOpt = archiveTarget(runtime, rootSid || sessionId, cabinetId)
+          const projectKey = resolveProjectKey(targetOpt.cwd)
+
+          if (['flipOut', 'sealBack', 'deletePrecipitated', 'updatePrecipitated'].includes(op)) {
+            const pid = typeof body.id === 'string' ? body.id : (typeof body.precipitatedId === 'string' ? body.precipitatedId : '')
+            const pRes = mutatePrecipitated(projectKey, {
+              ...body,
+              id: pid,
+              precipitatedId: pid,
+              op,
+              rootSessionId: rootSid,
+            }, targetOpt)
+            if (!pRes.ok) {
+              sendJson(res, 400, pRes)
+              return
+            }
+            if (rootSid) {
+              if (op === 'flipOut' && pid) updateWorkspaceFlippedIds(rootSid, { flippedId: pid })
+              else if ((op === 'sealBack' || op === 'deletePrecipitated') && pid) updateWorkspaceFlippedIds(rootSid, { sealId: pid })
+            }
+            const stAfter = loadChiefState()
+            const wsAfter = rootSid && stAfter.workspaces ? stAfter.workspaces[rootSid] : null
+            const archives = listArchiveHeaders(rootSid, { includePrecipitated: true }, targetOpt)
+            sendJson(res, 200, {
+              ...pRes,
+              archives,
+              flippedPrecipitatedIds: (wsAfter && Array.isArray(wsAfter.flippedPrecipitatedIds)) ? wsAfter.flippedPrecipitatedIds.slice() : [],
+              archiveMeta: getArchiveMeta(rootSid, targetOpt),
+            })
+            return
+          }
 
           if (op === 'precipitateNotes') {
-            // Sweep active board.notes (session and/or shared) into cold-stored archives.json
+            // Sweep active board.notes (session and/or shared) into active working cabinet
             const noteIds = Array.isArray(body.noteIds) ? new Set(body.noteIds.map(String)) : null
             let sweptCount = 0
             const sweepFromFile = (targetFile) => {
@@ -2982,13 +3344,13 @@ function routeTable(runtime) {
                     paperclip: (note.pinned || (note.tags || []).includes('anchor')) ? 'gold' : undefined,
                     by: note.by || 'user',
                     rootSessionId: rootSid,
-                  }, boardFile())
+                  }, targetOpt)
                   if (saved.ok) sweptCount += 1
                   else keep.push(note)
                 }
                 if (keep.length !== b.notes.length) {
                   b.notes = keep
-                  pushLog(b, `🗄️ 已将 ${sweptCount} 篇便签沉淀封存入「档案」柜`, 'operator', sessionId)
+                  pushLog(b, `🗄️ 已将 ${sweptCount} 篇便签收纳进「档案」工作柜`, 'operator', sessionId)
                   saveBoard(b, targetFile)
                 }
               })
@@ -2996,13 +3358,13 @@ function routeTable(runtime) {
             if (sessionId) sweepFromFile(boardFileFor(sessionId))
             sweepFromFile(boardFile())
             const board = sessionId ? boardForSession(boardFileFor(sessionId)) : emptyBoard()
-            const archives = listArchiveHeaders(rootSid, {}, boardFile())
+            const archives = listArchiveHeaders(rootSid, { includePrecipitated: true }, targetOpt)
             sendJson(res, 200, {
               ok: true,
               sweptCount,
               board,
               archives,
-              archiveMeta: getArchiveMeta(rootSid, boardFile()),
+              archiveMeta: getArchiveMeta(rootSid, targetOpt),
             })
             return
           }
@@ -3011,16 +3373,30 @@ function routeTable(runtime) {
             ...body,
             op,
             rootSessionId: rootSid,
-          }, boardFile())
+          }, targetOpt)
           if (!out.ok) {
             sendJson(res, 400, out)
             return
           }
-          const archives = listArchiveHeaders(rootSid, {}, boardFile())
+          const usedCabId = out.activeCabinetId || out.cabinetId || ''
+          if (rootSid && usedCabId && op !== 'listCabinets') {
+            const bFile = boardFileFor(rootSid)
+            withBoardLock(bFile, () => {
+              const b = loadBoard(bFile)
+              if (op === 'switchCabinet' || op === 'createCabinet' || !b.activeCabinetId) {
+                b.activeCabinetId = usedCabId
+                saveBoard(b, bFile)
+              }
+            })
+          }
+          const finalOpt = archiveTarget(runtime, rootSid || sessionId, out.activeCabinetId || cabinetId || out.cabinetId)
+          const archives = listArchiveHeaders(rootSid, { includePrecipitated: true }, finalOpt)
+          const board = sessionId ? boardForSession(boardFileFor(sessionId)) : undefined
           sendJson(res, 200, {
             ...out,
             archives,
-            archiveMeta: getArchiveMeta(rootSid, boardFile()),
+            ...(board ? { board } : {}),
+            archiveMeta: getArchiveMeta(rootSid, finalOpt),
           })
         } catch (error) {
           sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
@@ -3035,8 +3411,13 @@ function routeTable(runtime) {
           const url = new URL(req.url || '/', 'http://127.0.0.1')
           const id = url.searchParams.get('id') || ''
           const sessionId = url.searchParams.get('session') || ''
+          const cabinetId = url.searchParams.get('cabinetId') || ''
+          const isPrecip = url.searchParams.get('precipitated') === '1' || url.searchParams.get('precipitated') === 'true'
           const rootSid = resolveRootSessionId(sessionId) || sessionId
-          const out = getArchiveDetail(id, rootSid, boardFile())
+          const targetOpt = archiveTarget(runtime, rootSid || sessionId, cabinetId)
+          const out = isPrecip
+            ? getPrecipitatedDetail(resolveProjectKey(targetOpt.cwd), id, rootSid, targetOpt)
+            : getArchiveDetail(id, rootSid, targetOpt)
           sendJson(res, out.ok ? 200 : 404, out)
         } catch (error) {
           sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
@@ -3051,8 +3432,11 @@ function routeTable(runtime) {
           const body = await readBody(req)
           const sessionId = typeof body.session === 'string' ? body.session : ''
           const rootSid = resolveRootSessionId(sessionId) || sessionId
+          const cabinetId = typeof body.cabinetId === 'string' ? body.cabinetId : ''
+          const targetOpt = archiveTarget(runtime, rootSid || sessionId, cabinetId)
           const out = await organizeArchivesWithChief(makeChiefDeps(runtime), {
             sessionId: rootSid,
+            cabinetId,
             ids: Array.isArray(body.ids) ? body.ids : [],
             folder: typeof body.folder === 'string' ? body.folder : '',
             scope: typeof body.scope === 'string' ? body.scope : 'unorganized',
@@ -3060,7 +3444,58 @@ function routeTable(runtime) {
           })
           sendJson(res, out.ok ? 200 : 400, {
             ...out,
-            archiveMeta: getArchiveMeta(rootSid, boardFile()),
+            archiveMeta: getArchiveMeta(rootSid, targetOpt),
+          })
+        } catch (error) {
+          sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
+        }
+      },
+    },
+    {
+      path: API + '/archives/harvest',
+      handler: async (req, res) => {
+        if (!guard(req, res)) return
+        try {
+          const body = await readBody(req)
+          const sessionId = typeof body.session === 'string' ? body.session : ''
+          const rootSid = resolveRootSessionId(sessionId) || sessionId
+          const cabinetId = typeof body.cabinetId === 'string' ? body.cabinetId : ''
+          const targetOpt = archiveTarget(runtime, rootSid || sessionId, cabinetId)
+          const out = await harvestTurnDetailsToArchive(makeChiefDeps(runtime), {
+            sessionId: rootSid,
+            cabinetId,
+            trigger: 'manual',
+            focusHint: typeof body.focusHint === 'string' ? body.focusHint : '',
+          })
+          sendJson(res, out.ok ? 200 : 400, {
+            ...out,
+            archiveMeta: getArchiveMeta(rootSid, targetOpt),
+          })
+        } catch (error) {
+          sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
+        }
+      },
+    },
+    {
+      path: API + '/archives/precipitate',
+      handler: async (req, res) => {
+        if (!guard(req, res)) return
+        try {
+          const body = await readBody(req)
+          const sessionId = typeof body.session === 'string' ? body.session : ''
+          const rootSid = resolveRootSessionId(sessionId) || sessionId
+          const cabinetId = typeof body.cabinetId === 'string' ? body.cabinetId : ''
+          const targetOpt = archiveTarget(runtime, rootSid || sessionId, cabinetId)
+          const out = await precipitateExperienceWithChief(makeChiefDeps(runtime), {
+            sessionId: rootSid,
+            op: typeof body.op === 'string' ? body.op : 'cabinet',
+            cabinetId,
+            folder: typeof body.folder === 'string' ? body.folder : '',
+            clearSource: Boolean(body.clearSource),
+          })
+          sendJson(res, out.ok ? 200 : 400, {
+            ...out,
+            archiveMeta: getArchiveMeta(rootSid, targetOpt),
           })
         } catch (error) {
           sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
@@ -3098,8 +3533,12 @@ function syncObjective(name, args, sessionId) {
     board.objective = objective.slice(0, 2000)
     board.objectiveBy = String(sessionId || '')
     board.objectiveAt = nowMs()
-    if (wantGoalMode) board.mode = 'goal'
-    pushLog(board, '长期目标(/goal)改为：' + objective.slice(0, 60) + (previous && previous !== objective ? '（原：' + previous.slice(0, 40) + '）' : ''), 'agent', sessionId)
+    if (wantGoalMode) {
+      board.mode = 'goal'
+      if (board.goalApproval && board.goalApproval.status !== 'pending') board.goalApproval = null
+    }
+    board.objectiveUpdatedAt = board.objectiveAt
+    pushLog(board, '长期目标改为：' + objective.slice(0, 60) + (previous && previous !== objective ? '（原：' + previous.slice(0, 40) + '）' : ''), 'agent', sessionId)
     saveBoard(board, file)
   })
 }
@@ -3970,18 +4409,156 @@ async function injectInto(agent, text) {
   return { ok: false, error: 'inject 不接受完整消息形状（纯文本会写坏会话日志，不试）' }
 }
 
+/**
+ * System-level handover & state deployment to a target Chief workspace (`一键部署参谋`).
+ * Copies active objective, mode, plan steps, unfinished tasks (scrubbing stale `doing` / child handles),
+ * cursor, bounds, and Chief facts/narrative/chat — while optionally copying working cabinet archives
+ * per `archiveTransferPolicy` ('none' | 'mounted' | 'drawer' | 'all') and strictly NEVER leaking precipitated cold vault.
+ */
+export function deployStateToTargetChief(runtime, {
+  fromSessionId = '',
+  toSessionId = '',
+  archiveTransferPolicy = 'none',
+  archiveDrawer = '',
+  toCabinetId = '',
+  customNote = '',
+} = {}) {
+  const fromRoot = resolveRootSessionId(fromSessionId) || String(fromSessionId || '').trim()
+  const toRoot = resolveRootSessionId(toSessionId) || String(toSessionId || '').trim()
+  if (!fromRoot || !toRoot || fromRoot === toRoot) {
+    return { ok: false, error: '跨会话移交需要两个不同的会话 ID' }
+  }
+
+  const srcBoard = boardForSession(boardFileFor(fromRoot))
+  const destFile = boardFileFor(toRoot)
+  let copiedTaskCount = 0
+  let copiedStepCount = 0
+
+  withBoardLock(destFile, () => {
+    const dest = loadBoard(destFile)
+    if (srcBoard.objective) {
+      dest.objective = srcBoard.objective
+      dest.objectiveBy = srcBoard.objectiveBy || fromRoot
+      dest.objectiveAt = srcBoard.objectiveAt || nowMs()
+      dest.objectiveUpdatedAt = nowMs()
+    }
+    dest.mode = srcBoard.mode === 'goal' ? 'goal' : 'plan'
+    dest.goalApproval = null
+
+    if (Array.isArray(srcBoard.plan) && srcBoard.plan.length > 0) {
+      dest.plan = srcBoard.plan.map(step => ({
+        id: step.id || newId('s'),
+        text: step.text,
+        done: Boolean(step.done),
+      }))
+      copiedStepCount = dest.plan.length
+    }
+
+    const srcTasks = Array.isArray(srcBoard.tasks) ? srcBoard.tasks : []
+    const unfinished = srcTasks.filter(t => t && t.status !== 'done')
+    const unfinishedIds = new Set(unfinished.map(t => t.id))
+    const existingIds = new Set((dest.tasks || []).map(t => t.id))
+    for (const rawTask of unfinished) {
+      if (existingIds.has(rawTask.id)) continue
+      const remainingBlockers = (rawTask.blockedBy || []).filter(bid => unfinishedIds.has(bid))
+      const droppedDoneCount = (rawTask.blockedBy || []).length - remainingBlockers.length
+      dest.tasks.push(normalizeTask({
+        ...rawTask,
+        status: rawTask.status === 'doing' ? 'todo' : rawTask.status,
+        session: '',
+        subagent: '',
+        blockedBy: remainingBlockers,
+        note: droppedDoneCount > 0
+          ? [rawTask.note, `[接力已自动解除 ${droppedDoneCount} 项已完成前置依赖]`].filter(Boolean).join(' ')
+          : rawTask.note,
+        updatedAt: nowMs(),
+      }))
+      copiedTaskCount += 1
+    }
+
+    if (srcBoard.cursor && (srcBoard.cursor.step || srcBoard.cursor.next || srcBoard.cursor.blocked)) {
+      dest.cursor = {
+        ...srcBoard.cursor,
+        at: nowMs(),
+        by: 'deploy',
+        session: fromRoot,
+      }
+    }
+
+    // Merge local non-pinned bounds from source session board into destination session board
+    const srcLocal = srcBoard.localBounds || { allowed: [], forbidden: [], notes: [] }
+    const destBounds = normalizeBounds(dest.bounds)
+    for (const col of BOUND_FIELDS) {
+      const merged = new Set(destBounds[col] || [])
+      for (const item of (srcLocal[col] || [])) merged.add(item)
+      destBounds[col] = [...merged].slice(0, BOUND_CAP)
+    }
+    dest.bounds = destBounds
+
+    // Carry non-anchor handoff context notes selectively if target has room
+    dest.handoff = { at: nowMs(), by: 'deploy', session: fromRoot }
+    pushLog(
+      dest,
+      `🚀 已系统级移交部署自会话 ${fromRoot.slice(0, 12)}：计划 ${copiedStepCount} 步、未完任务 ${copiedTaskCount} 项`,
+      'deploy',
+      toRoot,
+    )
+    saveBoard(dest, destFile)
+  })
+
+  const chiefRes = deployChiefWorkspaceState(makeChiefDeps(runtime), {
+    fromRootId: fromRoot,
+    toRootId: toRoot,
+    fromTitle: sessionName(runtime, fromRoot) || fromRoot,
+    customText: customNote,
+    objective: srcBoard.objective || '',
+  })
+
+  let archiveCopyRes = { ok: true, policy: 'none', copiedCount: 0 }
+  const policy = ['none', 'mounted', 'drawer', 'all'].includes(archiveTransferPolicy)
+    ? archiveTransferPolicy
+    : 'none'
+  if (policy !== 'none') {
+    archiveCopyRes = copyArchivesBetweenSessionsOrCabinets({
+      fromRootSessionId: fromRoot,
+      toRootSessionId: toRoot,
+      fromCwd: getSessionCwd(runtime, fromRoot),
+      toCwd: getSessionCwd(runtime, toRoot),
+      fromCabinetId: srcBoard.activeCabinetId || '',
+      toCabinetId: toCabinetId || loadBoard(boardFileFor(toRoot)).activeCabinetId || '',
+      policy,
+      drawer: archiveDrawer,
+      customSharedBoardFile: boardFile(),
+    })
+  }
+
+  return {
+    ok: true,
+    fromSessionId: fromRoot,
+    toSessionId: toRoot,
+    copiedTaskCount,
+    copiedStepCount,
+    chiefDeployed: chiefRes,
+    archiveTransfer: archiveCopyRes,
+  }
+}
+
 export async function transferChief(runtime, args, sessionId) {
   const passed = args && typeof args === 'object' ? args : {}
   const target = typeof passed.target === 'string' ? passed.target.trim() : 'new'
-  // The packet is rendered from the sender's own board — the receiving board
-  // stays untouched (per-session isolation; the transfer text is what moves).
-  // Read through boardForSession so the packet still carries the operator's
-  // bounds and the machine objective when this session never wrote its own.
+  const deployChief = asBool(passed.deployChief) !== false
+  const archiveTransferPolicy = ['none', 'mounted', 'drawer', 'all'].includes(str(passed.archiveTransferPolicy, 'none'))
+    ? str(passed.archiveTransferPolicy, 'none')
+    : 'none'
+  const archiveDrawer = str(passed.archiveDrawer, '')
+  const toCabinetId = str(passed.toCabinetId, '')
+  const customNote = str(passed.customNote, '')
+
   const board = boardForSession(boardFileFor(sessionId))
   const rootSid = resolveRootSessionId(sessionId) || sessionId
   const packet = renderHandoff(board, boundaries(runtime, sessionId), 5200, sessionId, {
     teamTasks: fetchTeamTasks(runtime, sessionId ? { id: sessionId } : null),
-    takenOutArchives: rootSid ? getTakenOutArchivesForSession(rootSid, boardFile()) : [],
+    takenOutArchives: rootSid ? collectTakenOutAndFlipped(runtime, rootSid, board.activeCabinetId) : [],
   })
   const by = typeof passed.by === 'string' && passed.by ? passed.by : 'user'
 
@@ -3989,25 +4566,41 @@ export async function transferChief(runtime, args, sessionId) {
     if (!writePending({ at: nowMs(), by, session: sessionId, text: packet })) {
       return { ok: false, error: '待领取文件写入失败' }
     }
+    if (deployChief && rootSid) {
+      writePendingDeploy({
+        at: nowMs(),
+        by,
+        fromSessionId: rootSid,
+        archiveTransferPolicy,
+        archiveDrawer,
+        toCabinetId,
+        customNote,
+      })
+    }
     const owner = boardFileFor(sessionId)
     withBoardLock(owner, () => {
       const next = loadBoard(owner)
-      pushLog(next, '交接单已投放：等下一个新会话领取', by, sessionId)
+      pushLog(next, '交接单与参谋接力包已投放：等下一个新会话自动部署领取', by, sessionId)
       saveBoard(next, owner)
     })
-    return { ok: true, mode: 'pending', text: packet }
+    return { ok: true, mode: 'pending', deployQueued: deployChief, text: packet }
   }
 
-  // One-click handover: open the successor conversation here instead of
-  // asking the operator to create one by hand and then find it in a picker.
-  // The packet is parked BEFORE the create call: if creation dies half way the
-  // next conversation still picks it up, and if it succeeds the
-  // agent/created listener races us for the file — whoever clears it wins,
-  // so the packet is never injected twice.
   if (target === 'create') {
     const controller = runtime.get('sessionController')
     const parked = writePending({ at: nowMs(), by, session: sessionId, text: packet })
     if (!parked) return { ok: false, error: '待领取文件写入失败' }
+    if (deployChief && rootSid) {
+      writePendingDeploy({
+        at: nowMs(),
+        by,
+        fromSessionId: rootSid,
+        archiveTransferPolicy,
+        archiveDrawer,
+        toCabinetId,
+        customNote,
+      })
+    }
     if (!controller || typeof controller.create !== 'function') {
       return { ok: false, error: '这个部署没有 sessionController，交接单已放进待领取', mode: 'pending', text: packet }
     }
@@ -4024,16 +4617,28 @@ export async function transferChief(runtime, args, sessionId) {
     }
     const createdId = str(created && created.sessionId, '')
     if (!createdId) return { ok: false, error: '新会话没有返回 id', mode: 'pending', text: packet }
+
+    let deployResult = null
+    if (deployChief && rootSid && readPendingDeploy()) {
+      clearPendingDeploy()
+      deployResult = deployStateToTargetChief(runtime, {
+        fromSessionId: rootSid,
+        toSessionId: createdId,
+        archiveTransferPolicy,
+        archiveDrawer,
+        toCabinetId,
+        customNote,
+      })
+    }
+
     const owner = boardFileFor(sessionId)
-    // The listener got there first: the packet is gone and that conversation
-    // already carries it.
     if (!readPending()) {
       withBoardLock(owner, () => {
         const next = loadBoard(owner)
-        pushLog(next, '交接单已由新会话 ' + createdId.replace(/^session-/, '').slice(0, 8) + ' 领取', by, sessionId)
+        pushLog(next, '交接单与参谋已由新会话 ' + createdId.replace(/^session-/, '').slice(0, 8) + ' 领取部署', by, sessionId)
         saveBoard(next, owner)
       })
-      return { ok: true, mode: 'created', sessionId: createdId, delivered: true, text: packet }
+      return { ok: true, mode: 'created', sessionId: createdId, delivered: true, deployResult, text: packet }
     }
     const agents = runtime.get('agents')
     const fresh = agents && typeof agents.get === 'function' ? agents.get(createdId) : undefined
@@ -4043,20 +4648,38 @@ export async function transferChief(runtime, args, sessionId) {
       const next = loadBoard(owner)
       pushLog(
         next,
-        (delivered.ok ? '交接单已交给新会话 ' : '新会话已建（交接单仍待领取）：') + createdId.replace(/^session-/, '').slice(0, 8),
+        (delivered.ok ? '交接单与参谋已部署至新会话 ' : '新会话已建（交接单仍待领取）：') + createdId.replace(/^session-/, '').slice(0, 8),
         by,
         sessionId,
       )
       saveBoard(next, owner)
     })
-    return { ok: delivered.ok, mode: delivered.ok ? 'created' : 'pending', sessionId: createdId, text: packet }
+    return { ok: delivered.ok, mode: delivered.ok ? 'created' : 'pending', sessionId: createdId, deployResult, text: packet }
+  }
+
+  let deployResult = null
+  if (deployChief && rootSid && target !== rootSid) {
+    deployResult = deployStateToTargetChief(runtime, {
+      fromSessionId: rootSid,
+      toSessionId: target,
+      archiveTransferPolicy,
+      archiveDrawer,
+      toCabinetId,
+      customNote,
+    })
   }
 
   const agents = runtime.get('agents')
   const agent = agents && typeof agents.get === 'function' ? agents.get(target) : undefined
   if (!agent) {
     writePending({ at: nowMs(), by, session: sessionId, text: packet, failedTarget: target })
-    return { ok: false, error: '目标会话没有活的 agent：已改成待领取，下次新会话可取', mode: 'pending', text: packet }
+    return {
+      ok: Boolean(deployResult && deployResult.ok),
+      error: deployResult && deployResult.ok ? '' : '目标会话没有活的 agent：已改成待领取，下次新会话可取',
+      mode: 'pending',
+      deployResult,
+      text: packet,
+    }
   }
   const delivered = await injectInto(agent, packet)
   const owner = boardFileFor(sessionId)
@@ -4064,7 +4687,7 @@ export async function transferChief(runtime, args, sessionId) {
     const next = loadBoard(owner)
     pushLog(
       next,
-      (delivered.ok ? '交接单已投放到会话 ' : '投放失败（' + delivered.error + '）：') + String(target).replace(/^session-/, '').slice(0, 8),
+      (delivered.ok ? '交接单与参谋已投放到会话 ' : '投放失败（' + delivered.error + '）：') + String(target).replace(/^session-/, '').slice(0, 8),
       by,
       sessionId,
     )
@@ -4072,9 +4695,9 @@ export async function transferChief(runtime, args, sessionId) {
   })
   if (!delivered.ok) {
     writePending({ at: nowMs(), by, session: sessionId, text: packet, failedTarget: target })
-    return { ok: false, error: delivered.error, mode: 'pending', text: packet }
+    return { ok: false, error: delivered.error, mode: 'pending', deployResult, text: packet }
   }
-  return { ok: true, mode: 'injected', target, text: packet }
+  return { ok: true, mode: 'injected', target, deployResult, text: packet }
 }
 
 /* ------------------------------------------------------------------------ apply */
@@ -4216,7 +4839,7 @@ export function apply(ctx) {
         const subagents = getSubagentRoster(runtime, rootId, board)
         const secState = loadChiefState()
         const linkedPeersCount = Math.max(0, getLinkedCluster(secState, rootId || 'global').length - 1)
-        const takenOutArchives = rootId ? getTakenOutArchivesForSession(rootId, boardFile()) : []
+        const takenOutArchives = rootId ? collectTakenOutAndFlipped(runtime, rootId, board.activeCabinetId) : []
         if (rootId) refreshSubagentTree(runtime, rootId, board).catch(() => {})
         return renderDigest(board, { teamTasks, agentIdentity, subagents, linkedPeersCount, takenOutArchives })
       },
@@ -4238,19 +4861,32 @@ export function apply(ctx) {
     } catch {}
   }), 'dsh-chief: plan & subagent mirror')
 
-  // 2b) A transferred packet waits for exactly one new Session.
+  // 2b) A transferred packet + staged Chief deployment waits for one new Session.
   ctx.effect(() => ctx.on('agent/created', async payload => {
     try {
       const agent = payload && payload.agent
       if (!agent || !agent.id) return
+      const id = String(agent.id)
+
+      const pendingDeploy = readPendingDeploy()
+      if (pendingDeploy && pendingDeploy.fromSessionId && pendingDeploy.fromSessionId !== id) {
+        clearPendingDeploy()
+        try {
+          deployStateToTargetChief(runtime, {
+            fromSessionId: pendingDeploy.fromSessionId,
+            toSessionId: id,
+            archiveTransferPolicy: pendingDeploy.archiveTransferPolicy || 'none',
+            archiveDrawer: pendingDeploy.archiveDrawer || '',
+            toCabinetId: pendingDeploy.toCabinetId || '',
+            customNote: pendingDeploy.customNote || '',
+          })
+        } catch {}
+      }
+
       const pending = readPending()
       if (!pending) return
       const delivered = await injectInto(agent, pending.text)
       if (delivered.ok) clearPending()
-      // The claim is logged on the NEW session's own board, not the sender's.
-      // A brand-new Session's turn-stopping write can land while this runs, so
-      // the claim re-reads under the lock and keeps whatever else got there.
-      const id = String(agent.id)
       const file = boardFileFor(id)
       const short = id.replace(/^session-/, '').slice(0, 8)
       withBoardLock(file, () => {
@@ -4324,6 +4960,8 @@ export function apply(ctx) {
           const entry = board.sessions[id] || { lastSeen: 0, cwd: '', turns: 0 }
           entry.lastSeen = nowMs()
           entry.turns = (entry.turns || 0) + 1
+          const resolvedCwd = getSessionCwd(runtime, id)
+          if (resolvedCwd) entry.cwd = resolvedCwd
           board.sessions[id] = entry
           const ids = Object.keys(board.sessions)
           if (ids.length > 40) {
@@ -4451,6 +5089,16 @@ export function apply(ctx) {
   ctx.inject(['tools'], toolCtx => {
     for (const tool of [boardTool(runtime), boundariesTool(runtime), handoffTool(runtime), memoryTool(runtime)]) {
       toolCtx.effect(() => toolCtx.tools.register(tool), 'dsh-chief: tool ' + tool.name)
+    }
+  })
+
+  // Runtime capability probe for DSH >= 0.2.2-rc.2 named subagent APIs
+  ctx.inject(['subagents'], () => {
+    const compat = probeSubagentSupport(runtime)
+    if (compat.present && !compat.namedSubagentsSupported) {
+      try {
+        console.warn('[dsh-chief] ' + compat.warning)
+      } catch {}
     }
   })
 }

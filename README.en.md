@@ -7,14 +7,14 @@
 # ✦ DSH Chief (`dsh-chief` · DSH 参谋长)
 ### Multi-Agent Command Cockpit · SuperAgent Cross-Session Synergy · 4-Tier Cold Archive Vault for DeepSeek Harness
 
-[![DSH Compatibility](https://img.shields.io/badge/DSH-%3E%3D%200.2.0-38bdf8?style=flat-square)](https://dsh.deepseek.com)
+[![DSH Compatibility](https://img.shields.io/badge/DSH-%3E%3D%200.2.2--rc.2-38bdf8?style=flat-square)](https://dsh.deepseek.com)
 [![SuperAgent Ready](https://img.shields.io/badge/SuperAgent-Router--Worker%20Synergy-a855f7?style=flat-square)](https://github.com/deepseek-ai/dsh-superagent-prototype)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D%2022.13-30d158?style=flat-square)](https://nodejs.org)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![Cold Vault](https://img.shields.io/badge/Cold%20Archive-0%20Token%20Idle-34d399?style=flat-square)](#03--4-tier-cold-engineering-archive-cabinet-档案-tab)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-> **Turn scattered chat tabs into a unified Chief of Staff command center**: inspired by DeepSeek's official **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** *Router + Isolated Workers* architecture to eliminate the human attention bottleneck and context pollution—natively integrated with **DeepSeek Harness (DSH)** split-pane subagent streams, `/goal` supervision, live `steer` injection, and workspace session switching.
+> **Turn scattered chat tabs into a unified Chief of Staff command center**: inspired by DeepSeek's official **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** *Router + Isolated Workers* architecture to eliminate the human attention bottleneck and context pollution—natively integrated with **DeepSeek Harness (DSH)** split-pane subagent streams, panel-native **Goal Supervision + Human Approval Gate**, live `steer` injection, pre-compaction detail harvesting, multi-cabinet precipitated cold vaults, and one-click cross-session Chief deployment.
 
 [简体中文 (`README.md`)](README.md) · **English** · [Changelog (`CHANGELOG.md`)](CHANGELOG.md)
 
@@ -30,9 +30,9 @@ DeepSeek's official **[`dsh-superagent-prototype`](https://github.com/deepseek-a
 
 1. **Visual Router–Worker Orchestration**: Supervise your Root Coordinator, spawned Subagents, and linked independent DSH Worker windows from one **Full-Spread Pyramid DAG** and unified **Collaboration Directory**.
 2. **Native DSH Split-Pane Subagent Stream (`subagentchat`)**: Click `分屏对话` on any pyramid node or directory row to invoke DSH's native `sidebarRight.openResource('dsh-resource://subagentchat/...')` split-pane live viewer.
-3. **Native DSH `/goal` Long-Horizon Supervision**: Dedicated dual-tier `/goal` objective + step board paired with `idle-guard` to prevent premature agent stops before tasks are verified.
-4. **Native DSH `steer` / `followup` Injection & Exact Provider Alignment**: Dispatches live `steer`, `followup`, or `silent` mailbox messages straight through DSH's `agents` runtime while matching the exact `provider/model` channel of your active session.
-5. **Native Workspace Navigation & Zero-Leak Context Preservation**: Spawns clean worker/handoff sessions and switches the active viewport via `uiWorkspace.openSession`, while keeping long-term engineering postmortems sealed at **0 prompt bytes** inside the 4-Tier Cold Archive Cabinet until explicitly taken out.
+3. **Panel-Native Goal Supervision & Human Approval Gate**: Click **`🎯 设为目标`** right inside the `规划` (Plan) tab to enable long-horizon goal supervision without slash-command friction. When objectives change, stale checklists are flagged for clean reset; once the Chief determines the goal is achieved, it remains in `goal` supervision mode until you explicitly click **Approve & Close (`✅ 批准结项`)** or **Reject & Continue (`↩ 驳回继续`)**.
+4. **Composer `+` Tactical Cockpit & Anti-Loop Circuit Breaker**: Open the **`+`** button inside the Chief composer bar to configure **Active Strong Intervention** (requires pre-flight goal/redline & risk modal acknowledgment, provides a red **`⏹ 急停`** emergency stop button, and auto-trips on turn cap or 3 stagnant turns), **Pre-Compaction Detail Harvest + Auto-Compact %**, **Strict Verification**, **Redline Sentinel**, and **Concise Brief Mode**.
+5. **1-Click Cross-Session Chief Deployment & Workspace Image Persistence**: Spawn clean handoff windows from `规划` Zone 3 with 4 configurable working-archive transfer policies (project precipitated cold vaults never leak across handoffs), automatically carrying over your Chief model, disciplines, and tactical preferences with `intervention` safely defaulted off. Attached images are persisted directly to `<cwd>/.dsh-chief/uploads/` and gracefully fall back for text-only Chief models.
 
 ---
 
@@ -40,20 +40,20 @@ DeepSeek's official **[`dsh-superagent-prototype`](https://github.com/deepseek-a
 
 Ordinary Todo lists and always-injected memory plugins break down on complex, multi-subagent engineering sessions:
 1. **Silent Background Token Drain & Wrong Provider Routing**: Auto-summarizing after every turn burns quota in the background and often matches bare model names onto expensive metered channels instead of your active subscription provider.
-2. **Context Bloat from Long Notes**: Dumping dozens of debugging notes straight into the system prompt wastes thousands of tokens per turn and degrades model focus.
+2. **Context Bloat & Sudden Compaction Amnesia**: Stuffing debugging notes into system prompts wastes thousands of tokens; meanwhile, automatic context compaction wipes out recently discovered paths, commands, and decisions.
 3. **Cramped Drag-Scroll Canvas**: Subagent graphs trapped inside tiny scroll boxes force constant panning just to see what is blocked.
-4. **Forgotten Guardrails & Context Loss Across Windows**: Safety rules buried in chat vanish after compaction, and independent DSH windows cannot coordinate.
+4. **Forgotten Guardrails & Lost Chief State Across Windows**: Safety rules vanish when switching chats, forcing manual copy-paste and reconfiguration.
 
 **`dsh-chief` («DSH 参谋长») replaces ad-hoc scratchpads with a full right-docked Chief of Staff cockpit:**
 
 | Capability | Typical Todo / Always-On Memory Plugins | ✦ DSH Chief (`dsh-chief`) |
 | :--- | :--- | :--- |
-| **Briefing Pace & Channel Alignment** | Blind per-turn background LLM calls; bare-name provider mismatches | **3-Gear Human-Paced Control** (`⏸ On-Demand` **0 background calls by default**, `⚡ Smart`, `🤖 Auto`) + exact `provider/model` channel matching |
+| **Pace & `+` Tactical Cockpit** | Blind per-turn background calls; no tactical safety brakes | **3-Gear Human Pace** (`⏸ On-Demand` **0 background calls**, `👁 Smart`, `🤖 Auto`) + composer **`+` Tactical Cockpit** (`Intervention + Emergency Stop + Circuit Breaker`, `Auto-Compact Harvest`, `Strict Verify`, `Redline Sentinel`) |
 | **Subagent Task Topology** | Flat lists or cramped drag-scroll viewports | **Full-Spread Pyramid DAG**: Root Coordinator at the apex, subagent lanes laid out cleanly with inline status, explain, dispatch & split-stream buttons |
-| **Long-Term Engineering Memory** | Stuffed into every system prompt or flat unindexed notes | **4-Tier Cold Archive Cabinet**: `Drawers → Gold/Silver/Dark-Copper Paperclipped Dossiers → Memory Points → Unfoldable Sub-points` (**0 prompt tokens while sealed**) |
-| **Plan Readability & Step Q&A** | Static technical checklists | **Dual-Tier `/goal` + Interactive Step Board**: click any step to ask *"What does this step mean / why is it needed?"* or get an instant Chief explanation without interrupting the main agent |
-| **Cross-Session & Subagent Relay** | Isolated to a single window | **Cross-Window Peer Linking + 3-Mode Relay Bus** (`steer`, `followup`, `silent`) across root coordinators and subagents |
-| **Redline Governance & Handoff** | Verbal rules lost on compaction; manual copy-paste handoffs | **`📌` Global Thumbtack Redlines** (global vs. task-scoped) + human approval banner + **1-click self-contained Session Handoff** + `idle-guard` |
+| **Multi-Cabinet & Cold Vault** | Stuffed into system prompts or lost on compaction | **Per-Project Multi-Cabinets + 4-Tier Dossiers + 0-Token Precipitated Cold Vault**: one-click **Harvest (`📥 抢救细节`)** before compaction and **Precipitate (`⏬ 沉淀`)** into cross-session cold storage (**0 file reads / 0 prompt tokens** unless explicitly **Flipped Out (`📂 翻出`)**) |
+| **Goal Supervision & Step Q&A** | Static checklists; models self-declare completion | **Core Objective + Human Approval Gate + Interactive Step Board**: click any step to ask *"Why is this needed?"*; goal completion requires explicit human sign-off |
+| **Cross-Session Relay & Images** | Isolated single window; image uploads fail on text-only Chiefs | **Cross-Window Peer Linking + 1-Click Chief Deployment (4 archive policies)** + **Workspace `.dsh-chief/uploads/` persistence** with text-only fallback |
+| **Redline Governance & Idle Guard** | Verbal rules lost; no handoff verification | **`📌` Global Thumbtack Redlines** + boundary proposals + **self-contained handoff** + `idle-guard` |
 
 ---
 
@@ -75,29 +75,29 @@ No cramped mini-viewports: the Root Coordinator sits at the top while subagent s
 
 ---
 
-### 03 · 4-Tier Cold Engineering Archive Cabinet (`档案` Tab)
-Store hundreds of long-term engineering postmortems and coordinates with **zero idle prompt overhead**:
-- **4-Tier Hierarchy**: **Filing Drawers** → **Color-Coded Paperclipped Dossiers** (high-contrast **Luminous Gold `#ffe033`**, **Brushed Silver `#cbd5e1`**, and **Dark Antique Copper `#7c4329`**) → **Structured Memory Points** → **Click-to-Unfold Sub-point Details**.
-- **3-Stage Lazy Loading**: `Stage-0` (`/snapshot`) carries `< 80B` of counts; sealed dossiers inject **0 bytes** into system prompts until explicitly taken out (`取出备查`) or queried via `archive.search`.
+### 03 · Multi-Cabinet Archives, Detail Harvest & 0-Token Precipitated Cold Vault (`档案` Tab)
+Scoped cleanly per workspace directory (`resolveProjectKey`), allowing multiple working cabinets per project plus lossless detail preservation:
+- **4-Tier Hierarchy**: **Multi-Cabinet Switcher → Filing Drawers** → **Color-Coded Paperclipped Dossiers** (**Luminous Gold `#ffe033`**, **Brushed Silver `#cbd5e1`**, **Dark Antique Copper `#7c4329`**) → **Structured Memory Points** → **Unfoldable Sub-point Details**.
+- **Pre-Compaction Harvest (`📥 抢救细节`) & Precipitated Cold Vault (`⏬ 沉淀`)**: Extracts exact file paths, shell commands, and decisions either manually or automatically when hitting the configured context threshold before compacting. Generalizable lessons precipitated into the Cold Vault stay **physically unread (0 disk reads, 0 prompt tokens)** across all sessions until explicitly **Flipped Out (`📂 翻出`)** and return to 0 immediately when **Sealed Back (`🔒 封回`)**.
 - **Lossless Chief Curation**: One-click curation refines points and summaries while preserving 100% of raw markdown text.
 
 <div align="center">
-  <img src="assets/screenshots/03-cold-archive-cabinet.png" alt="03 - 4-Tier Cold Engineering Archive Cabinet" width="68%" />
+  <img src="assets/screenshots/03-cold-archive-cabinet.png" alt="03 - Multi-Cabinet Archives and 0-Token Precipitated Cold Vault" width="68%" />
 </div>
 
 ---
 
-### 04 · Dual-Tier `/goal` Supervisor & Click-to-Ask Step Board (`规划` Tab)
-Pairs a dedicated `/goal` long-running objective box with an interactive step checklist. Click any step to open the glass popover menu and ask what a step means or request an immediate inline explanation from DSH Chief without interrupting the lead agent.
+### 04 · Panel-Native Goal Supervision, Human Approval Gate & 1-Click Chief Deployment (`规划` Tab)
+Combines a core objective box with a **`🎯 设为目标`** supervision toggle, stale-checklist reset warnings on goal edits, and a strict **Human Approval Gate** (completion proposals stay in `goal` mode until you click `✅ 批准结项` or `↩ 驳回继续`). Zone 3 integrates **Cross-Session Handoff & 1-Click Chief Deployment** with 4 archive migration policies (`none`, `mounted`, `drawer`, `all`)—keeping precipitated cold vaults strictly isolated.
 
 <div align="center">
-  <img src="assets/screenshots/04-dual-tier-goal-and-step-qa.png" alt="04 - Dual-Tier Goal and Step Q&A" width="68%" />
+  <img src="assets/screenshots/04-dual-tier-goal-and-step-qa.png" alt="04 - Goal Supervision, Approval Gate and 1-Click Chief Deployment" width="68%" />
 </div>
 
 ---
 
-### 05 · Cross-Window Session Linking & Relay Network (`协同` Tab)
-Link multiple independent DSH root sessions (e.g., UI workspace + benchmark workspace) with one toggle to share a live agent directory and cross-session collaboration mailbox.
+### 05 · Cross-Window Linking, Composer `+` Tactical Cockpit & Image Persistence (`协同` & Input Bar)
+Link multiple independent DSH root sessions into one shared bus, upload or paste screenshots persisted directly into `<cwd>/.dsh-chief/uploads/` (with automatic text-only Chief fallback carrying verified raw file paths to your multimodal lead agent), and control **Active Strong Intervention**, **Auto-Compact Thresholds**, **Strict Verification**, **Redline Sentinel**, and the red **`⏹ 急停`** emergency stop inside the **`+`** Tactical Cockpit.
 
 <div align="center">
   <img src="assets/screenshots/05-cross-session-collab-bus.png" alt="05 - Cross-Session Collaboration Bus" width="68%" />
@@ -105,8 +105,8 @@ Link multiple independent DSH root sessions (e.g., UI workspace + benchmark work
 
 ---
 
-### 06 · `📌` Global Thumbtack Redlines & Rule Consolidation (`边界` Tab)
-Pin critical safety rules with `📌` so they enforce globally across all sessions, keep task-specific rules scoped locally, approve or refine subagent boundary proposals in one click, and consolidate scattered rules via DSH Chief.
+### 06 · `📌` Global Thumbtack Redlines & Guard Preferences (`边界` Tab)
+Pin critical safety rules with `📌` globally or keep them task-scoped, review subagent boundary proposals in one click, consolidate scattered rules via DSH Chief, and tune per-turn injection and `idle-guard` preferences under **守护偏好**.
 
 <div align="center">
   <img src="assets/screenshots/06-pinned-bounds-and-handoff.png" alt="06 - Pinned Global Redlines and Governance" width="68%" />
@@ -114,12 +114,24 @@ Pin critical safety rules with `📌` so they enforce globally across all sessio
 
 ---
 
-### 07 · One-Click Self-Contained Session Handoff & Idle Guard (`边界` → `会话交接 & 守护`)
-Generate a self-contained Markdown handoff packet (goal, hierarchical task tree, active cursor, blockers, and pinned boundaries), spawn a fresh session, and switch the frontend view automatically—backed by `idle-guard` to prevent premature turn termination.
+### 07 · Pre-Compaction Safety & Self-Contained Handoff Previews
+When context usage reaches your configured threshold while idle, `dsh-chief` harvests recent technical details to disk, verifies readability on disk, and only then triggers compaction—or lets you generate and inspect a full self-contained Markdown handoff packet before spawning a fresh session.
 
 <div align="center">
-  <img src="assets/screenshots/07-session-handoff-and-guard.png" alt="07 - Self-Contained Session Handoff and Idle Guard" width="68%" />
+  <img src="assets/screenshots/07-session-handoff-and-guard.png" alt="07 - Self-Contained Session Handoff and Guard" width="68%" />
 </div>
+
+---
+
+## ⚠️ Usage Notes & Disclaimers
+
+> [!IMPORTANT]
+> Before enabling **`+` Tactical Cockpit** features such as **Active Strong Intervention (`⚡ 主动强介入`)**, **Pre-Compaction Auto-Harvest**, or **Redline Sentinel**, please review the following two disclaimers:
+>
+> 1. **Underlying Model Capability Dependency**: All Chief auto-review, active strong intervention steering, pre-compaction detail harvesting, and redline interception capabilities depend heavily on the reasoning strength and context quality of the underlying LLM configured for DSH Chief; models differ objectively in planning rigor and instruction adherence.
+> 2. **Host System Prompt & Rules Conflict Risk**: Mounting excessive System Prompts, global Rules, or rigid custom instructions in the main session or current project may conflict with this plugin's autonomous intervention logic—potentially causing abnormal intervention loops, premature circuit-breaker trips, or unexpected deviations.
+>
+> Always specify a clear Core Objective and at least one Forbidden Redline before confirming Active Strong Intervention, and use the red **`⏹ 急停`** button above the composer anytime you want immediate manual takeover.
 
 ---
 
@@ -127,13 +139,20 @@ Generate a self-contained Markdown handoff packet (goal, hierarchical task tree,
 
 ```bash
 # Fast install from prebuilt GitHub Release tarball (~240 KB, zero build scripts)
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.0.0/dsh-chief-1.0.0.tgz
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.1.0/dsh-chief-1.1.0.tgz
 
 # Or install directly via GitHub shorthand (replace `desktop` with `web` if using web profile)
 dsh plugin --profile desktop add github:gluztm/dsh-chief
 ```
 
 Refresh the DSH Web UI and click the **✦ `DSH 参谋长`** icon in the right-hand sidebar header.
+
+### Host Compatibility Matrix
+
+| DeepSeek Harness (DSH) Version | Sidebar Panel / Board / Vaults / Bounds | Named Subagent Tree (`task.dispatch` / `team.steer` / `team.interrupt`) | Notes |
+| :--- | :---: | :---: | :--- |
+| **`>= 0.2.2-rc.2` (`rc.3+` recommended)** | ✅ Full support | ✅ Full support | Provides `subagents.resolveName` / `rootOf` / `namesOf` and flat `startActivation` |
+| `0.2.0 ~ 0.2.2-rc.1` | ✅ Panel works normally | ⚠️ Unavailable (guided prompt) | Pre-refactor `subagents` API; panel displays a non-blocking warning and guards `team.*` cleanly |
 
 ---
 

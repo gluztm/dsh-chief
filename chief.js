@@ -19,12 +19,18 @@ import os from 'node:os'
 import crypto from 'node:crypto'
 import {
   DEFAULT_ARCHIVE_FOLDERS,
+  resolveProjectKey,
   loadArchiveStore,
   listArchiveHeaders,
   getArchiveDetail,
   searchArchives,
   smartParseNoteToDossier,
+  mutateArchive,
   applyChiefArchiveCurations,
+  getFlippedOutPrecipitatedForSession,
+  listPrecipitatedHeaders,
+  savePrecipitatedEntry,
+  mutatePrecipitated,
 } from './archives.js'
 
 const STATE_VERSION = 1
@@ -85,6 +91,75 @@ function normalizeUploadedImage(raw, idx = 0) {
     ? clamp(raw.name.trim(), 80)
     : `chief-image-${idx + 1}.${ext}`
   return { name, mediaType, data }
+}
+
+function resolveSessionWorkspaceCwd(deps, sessionId) {
+  const rootId = (deps && typeof deps.resolveRootSessionId === 'function' ? deps.resolveRootSessionId(sessionId) : '') || sessionId
+  try {
+    if (deps && typeof deps.getSessionCwd === 'function') {
+      const c = deps.getSessionCwd(rootId) || deps.getSessionCwd(sessionId)
+      if (c && fs.existsSync(c)) return c
+    }
+    if (deps && typeof deps.boardForSession === 'function' && typeof deps.boardFileFor === 'function') {
+      const b = deps.boardForSession(deps.boardFileFor(rootId))
+      const sess = b && b.sessions && (b.sessions[rootId] || b.sessions[sessionId])
+      if (sess && sess.cwd && fs.existsSync(sess.cwd)) return sess.cwd
+    }
+  } catch {}
+  return process.cwd()
+}
+
+function archiveTargetForRoot(deps, rootId, cabinetId = '') {
+  const sharedFile = deps && (typeof deps.sharedBoardFile === 'function' ? deps.sharedBoardFile() : deps.sharedBoardFile)
+  const cwd = resolveSessionWorkspaceCwd(deps, rootId)
+  return {
+    customSharedBoardFile: sharedFile || '',
+    cwd,
+    ...(cabinetId ? { cabinetId: String(cabinetId).trim() } : {}),
+  }
+}
+
+/** Persist raw uploaded images onto local workspace `.dsh-chief/uploads/` so any agent can inspect raw files even when LLM vision is unavailable. */
+export function persistChiefImagesToWorkspace(deps, sessionId, rawImages) {
+  const list = Array.isArray(rawImages) ? rawImages.slice(0, CHIEF_MAX_IMAGES) : []
+  if (!list.length) return []
+  const normalized = list.map((item, idx) => normalizeUploadedImage(item, idx)).filter(Boolean)
+  if (!normalized.length) return []
+
+  const cwd = resolveSessionWorkspaceCwd(deps, sessionId)
+  const uploadDir = path.join(cwd, '.dsh-chief', 'uploads')
+  fs.mkdirSync(uploadDir, { recursive: true })
+
+  const d = new Date()
+  const stamp = [
+    d.getFullYear(),
+    String(d.getMonth() + 1).padStart(2, '0'),
+    String(d.getDate()).padStart(2, '0'),
+  ].join('') + '-' + [
+    String(d.getHours()).padStart(2, '0'),
+    String(d.getMinutes()).padStart(2, '0'),
+    String(d.getSeconds()).padStart(2, '0'),
+  ].join('')
+
+  const saved = []
+  for (let idx = 0; idx < normalized.length; idx += 1) {
+    const img = normalized[idx]
+    const ext = img.mediaType === 'image/jpeg' ? 'jpg' : (img.mediaType.split('/')[1] || 'png')
+    const baseRaw = path.basename(String(img.name || `image-${idx + 1}`), path.extname(String(img.name || '')))
+    const safeName = baseRaw.replace(/[^a-zA-Z0-9._-]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 48) || `image-${idx + 1}`
+    const fileName = `${stamp}-${idx + 1}-${safeName}.${ext}`
+    const absPath = path.join(uploadDir, fileName)
+    const buf = Buffer.from(img.data, 'base64')
+    fs.writeFileSync(absPath, buf)
+    saved.push({
+      index: idx + 1,
+      path: absPath,
+      name: img.name || fileName,
+      mediaType: img.mediaType,
+      bytes: buf.length,
+    })
+  }
+  return saved
 }
 
 export async function admitChiefImages(deps, rawImages) {
@@ -159,6 +234,7 @@ function stateFilePath() {
 
 function emptyWorkspace() {
   return {
+    config: null,
     facts: [],
     narrative: { hash: '', text: '', at: 0, byModel: '' },
     suggestions: [],
@@ -167,6 +243,17 @@ function emptyWorkspace() {
     seenMailAt: {},
     seenFactsAt: {},
     reviewCursors: {},
+    runtimeGuard: {
+      lastCompactedSeq: 0,
+      lastCompactedAt: 0,
+      interventionTurns: 0,
+      lastDigestHash: '',
+      unchangedCount: 0,
+      cooldownUntil: 0,
+      circuitBroken: false,
+      circuitReason: '',
+    },
+    flippedPrecipitatedIds: [],
   }
 }
 
@@ -192,7 +279,7 @@ function normalizeSuggestion(raw) {
   if (!raw || typeof raw !== 'object') return null
   const title = clamp(raw.title, 90)
   if (!title) return null
-  const kind = raw.kind === 'bound' ? 'bound' : raw.kind === 'board' ? 'board' : 'relay'
+  const kind = ['bound', 'board', 'goal_approval', 'relay'].includes(raw.kind) ? raw.kind : 'relay'
   const boundField = ['forbidden', 'allowed', 'notes'].includes(raw.boundField) ? raw.boundField : 'forbidden'
   const replaces = Array.isArray(raw.replaces)
     ? raw.replaces.map(x => String(x || '').trim()).filter(Boolean).slice(0, 20)
@@ -206,10 +293,12 @@ function normalizeSuggestion(raw) {
     fromAgent: clamp(raw.fromAgent || '', 48),
     title,
     reason: clamp(raw.reason || '', 220),
-    target: clamp(raw.target || (kind === 'bound' ? 'bounds' : 'lead'), 64),
-    targetLabel: clamp(raw.targetLabel || raw.target || (kind === 'bound' ? '工作边界' : '主对话'), 40),
+    target: clamp(raw.target || (kind === 'bound' ? 'bounds' : kind === 'goal_approval' ? 'board' : 'lead'), 64),
+    targetLabel: clamp(raw.targetLabel || raw.target || (kind === 'bound' ? '工作边界' : kind === 'goal_approval' ? '目标结项批示' : '主对话'), 40),
     mode: ['steer', 'followup', 'silent'].includes(raw.mode) ? raw.mode : 'steer',
     draftText: cleanMultiline(raw.draftText || '', 600),
+    evidence: cleanMultiline(raw.evidence || '', 600),
+    missing: clamp(raw.missing || '', 300),
     boardOp: raw.boardOp && typeof raw.boardOp === 'object' ? raw.boardOp : null,
     status: ['pending', 'applied', 'dismissed'].includes(raw.status) ? raw.status : 'pending',
     createdAt: Number(raw.createdAt) || Date.now(),
@@ -272,7 +361,84 @@ function normalizeWorkspace(raw) {
   base.seenMailAt = src.seenMailAt && typeof src.seenMailAt === 'object' ? { ...src.seenMailAt } : {}
   base.seenFactsAt = src.seenFactsAt && typeof src.seenFactsAt === 'object' ? { ...src.seenFactsAt } : {}
   base.reviewCursors = src.reviewCursors && typeof src.reviewCursors === 'object' ? { ...src.reviewCursors } : {}
+  const rg = src.runtimeGuard && typeof src.runtimeGuard === 'object' ? src.runtimeGuard : {}
+  base.runtimeGuard = {
+    lastCompactedSeq: Math.max(0, Math.round(Number(rg.lastCompactedSeq) || 0)),
+    lastCompactedAt: Math.max(0, Number(rg.lastCompactedAt) || 0),
+    interventionTurns: Math.max(0, Math.round(Number(rg.interventionTurns) || 0)),
+    lastDigestHash: String(rg.lastDigestHash || ''),
+    unchangedCount: Math.max(0, Math.round(Number(rg.unchangedCount) || 0)),
+    cooldownUntil: Math.max(0, Number(rg.cooldownUntil) || 0),
+    circuitBroken: Boolean(rg.circuitBroken),
+    circuitReason: String(rg.circuitReason || ''),
+  }
+  if (src.config && typeof src.config === 'object') {
+    const validPaces = ['manual', 'smart', 'auto']
+    const pm = validPaces.includes(src.config.paceMode) ? src.config.paceMode : undefined
+    base.config = {
+      ...(typeof src.config.modelRef === 'string' ? { modelRef: src.config.modelRef.trim() } : {}),
+      ...(pm ? { paceMode: pm, autoPilot: pm === 'auto', autoReview: pm !== 'manual' } : {}),
+      ...(src.config.tacticalModes && typeof src.config.tacticalModes === 'object'
+        ? { tacticalModes: normalizeTacticalModes(src.config.tacticalModes) }
+        : {}),
+    }
+  }
+  base.flippedPrecipitatedIds = Array.isArray(src.flippedPrecipitatedIds)
+    ? [...new Set(src.flippedPrecipitatedIds.map(x => String(x || '').trim()).filter(Boolean))].slice(0, 20)
+    : []
   return base
+}
+
+/** Resolve effective Chief config for a specific root session (isolates `intervention` per session). */
+export function resolveWorkspaceConfig(state, sessionId = '') {
+  const safeState = state && typeof state === 'object' ? state : {}
+  const base = safeState.config && typeof safeState.config === 'object' ? safeState.config : {}
+  const baseTactical = normalizeTacticalModes(base.tacticalModes)
+  const sid = String(sessionId || '').trim()
+  const ws = sid && safeState.workspaces && safeState.workspaces[sid] ? safeState.workspaces[sid] : null
+  const wsCfg = ws && ws.config && typeof ws.config === 'object' ? ws.config : null
+  const validPaces = ['manual', 'smart', 'auto']
+  const paceMode = wsCfg && validPaces.includes(wsCfg.paceMode)
+    ? wsCfg.paceMode
+    : (validPaces.includes(base.paceMode) ? base.paceMode : 'manual')
+  const modelRef = wsCfg && typeof wsCfg.modelRef === 'string'
+    ? wsCfg.modelRef.trim()
+    : (typeof base.modelRef === 'string' ? base.modelRef.trim() : '')
+  const mergedTactical = wsCfg && wsCfg.tacticalModes
+    ? normalizeTacticalModes({ ...baseTactical, ...wsCfg.tacticalModes })
+    : { ...baseTactical, ...(sid ? { intervention: false } : {}) }
+  return {
+    modelRef,
+    paceMode,
+    autoPilot: paceMode === 'auto',
+    autoReview: paceMode !== 'manual',
+    tacticalModes: mergedTactical,
+  }
+}
+
+const DEFAULT_TACTICAL_MODES = {
+  intervention: false,
+  autoCompact: false,
+  compactThresholdPct: 80,
+  strictVerify: false,
+  redlineSentinel: false,
+  conciseBrief: false,
+  maxInterventionTurns: 10,
+}
+
+function normalizeTacticalModes(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {}
+  const pct = Math.round(Number(src.compactThresholdPct) || DEFAULT_TACTICAL_MODES.compactThresholdPct)
+  const maxTurns = Math.round(Number(src.maxInterventionTurns) || DEFAULT_TACTICAL_MODES.maxInterventionTurns)
+  return {
+    intervention: Boolean(src.intervention),
+    autoCompact: Boolean(src.autoCompact),
+    compactThresholdPct: Math.min(95, Math.max(50, pct)),
+    strictVerify: Boolean(src.strictVerify),
+    redlineSentinel: Boolean(src.redlineSentinel),
+    conciseBrief: Boolean(src.conciseBrief),
+    maxInterventionTurns: Math.min(30, Math.max(1, maxTurns)),
+  }
 }
 
 function normalizeState(raw) {
@@ -303,6 +469,7 @@ function normalizeState(raw) {
       paceMode,
       autoPilot: paceMode === 'auto',
       autoReview: paceMode !== 'manual',
+      tacticalModes: normalizeTacticalModes(cfg.tacticalModes),
     },
     links,
     workspaces,
@@ -605,7 +772,9 @@ export async function listChiefModels(deps, fresh = false, sessionId = '') {
   const llm = deps.getLlm ? deps.getLlm() : null
   const runtime = deps.runtime
   const state = loadChiefState()
-  let selectedRef = state.config.modelRef || ''
+  const rootSid = (deps && deps.resolveRootSessionId ? deps.resolveRootSessionId(sessionId) : '') || String(sessionId || '').trim()
+  const effCfg = resolveWorkspaceConfig(state, rootSid)
+  let selectedRef = effCfg.modelRef || ''
 
   const leadRef = sessionModelRef(deps, sessionId)
   const profileDefaultRef = profileDefaultModelRef(runtime)
@@ -927,10 +1096,17 @@ async function filterVisionRoutes(llm, queue) {
   return [...visionRoutes, ...unknownRoutes]
 }
 
-export async function callChiefLlm(deps, { sessionId = '', system, prompt, maxTokens = SUMMARY_MAX_TOKENS, imageBlocks = [] }) {
+export async function callChiefLlm(deps, {
+  sessionId = '',
+  system,
+  prompt,
+  maxTokens = SUMMARY_MAX_TOKENS,
+  imageBlocks = [],
+  allowTextFallbackOnVisionMiss = false,
+}) {
   const safeImages = Array.isArray(imageBlocks) ? imageBlocks : []
   if (deps && typeof deps.callLlmOverride === 'function') {
-    return deps.callLlmOverride({ sessionId, system, prompt, maxTokens, imageBlocks: safeImages })
+    return deps.callLlmOverride({ sessionId, system, prompt, maxTokens, imageBlocks: safeImages, allowTextFallbackOnVisionMiss })
   }
   const llm = deps.getLlm ? deps.getLlm() : null
   if (!llm || typeof llm.stream !== 'function') {
@@ -940,14 +1116,23 @@ export async function callChiefLlm(deps, { sessionId = '', system, prompt, maxTo
   const regSet = typeof llm.listProviders === 'function'
     ? new Set((llm.listProviders() || []).filter(p => p && p.id && !String(p.id).startsWith('local-agent')).map(p => String(p.id)))
     : null
-  let queue = buildRouteQueue(catalog.models, catalog.selectedRef, catalog.followRef || catalog.defaultRef, deps, sessionId, regSet)
-  if (!queue.length) {
+  const baseQueue = buildRouteQueue(catalog.models, catalog.selectedRef, catalog.followRef || catalog.defaultRef, deps, sessionId, regSet)
+  if (!baseQueue.length) {
     return { ok: false, error: '未找到可用的参谋长模型，请在 DSH 设置中配置模型供应商' }
   }
 
+  let queue = baseQueue
+  let sendImages = safeImages
+  let degradedToTextOnly = false
   if (safeImages.length > 0) {
-    queue = await filterVisionRoutes(llm, queue)
-    if (!queue.length) {
+    const visionQueue = await filterVisionRoutes(llm, baseQueue)
+    if (visionQueue.length > 0) {
+      queue = visionQueue
+    } else if (allowTextFallbackOnVisionMiss) {
+      queue = baseQueue
+      sendImages = []
+      degradedToTextOnly = true
+    } else {
       return {
         ok: false,
         error: '当前参谋长及备选模型均不支持图片输入（仅纯文本），请在右上角切换支持视觉的多模态模型（如 Gemini / Claude / GPT-4o / Qwen-VL 等）后再试。',
@@ -958,16 +1143,22 @@ export async function callChiefLlm(deps, { sessionId = '', system, prompt, maxTo
   let lastError = '模型返回内容为空'
   for (const route of queue.slice(0, 4)) {
     try {
-      const res = await callOneRoute(llm, route, system, prompt, maxTokens, sessionId, safeImages)
-      if (res.text) return { ok: true, text: res.text, modelRef: res.modelRef }
+      const res = await callOneRoute(llm, route, system, prompt, maxTokens, sessionId, sendImages)
+      if (res.text) return { ok: true, text: res.text, modelRef: res.modelRef, degradedToTextOnly }
       lastError = `${route.ref} 返回内容为空`
       markRouteFailure(route, new Error(lastError))
     } catch (err) {
       lastError = String(err && err.message ? err.message : err)
+      if (sendImages.length > 0 && allowTextFallbackOnVisionMiss) {
+        try {
+          const textRes = await callOneRoute(llm, route, system, prompt, maxTokens, sessionId, [])
+          if (textRes.text) return { ok: true, text: textRes.text, modelRef: textRes.modelRef, degradedToTextOnly: true }
+        } catch {}
+      }
       markRouteFailure(route, err)
     }
   }
-  return { ok: false, error: lastError }
+  return { ok: false, error: lastError, degradedToTextOnly }
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1104,6 +1295,17 @@ function matchTargetPeer(targets, rawTarget) {
  * - 'followup': queue for next turn / wake idle session without cutting running step.
  * - 'silent': record in chief mailbox so the recipient sees it cleanly at its next pre-step without waking an idle session.
  */
+function buildSavedImageNotice(savedImagePaths) {
+  const list = Array.isArray(savedImagePaths) ? savedImagePaths.filter(item => item && item.path) : []
+  if (!list.length) return ''
+  return [
+    '',
+    '🖼️ [用户原图已落盘至工作区路径]：',
+    ...list.map(item => `- ${item.path}${item.name ? ` (${item.name})` : ''}`),
+    '⚠️ 请直接查阅附带图片或使用读图/文件工具读取上述原始路径后再动手，严禁只凭参谋长转述文本猜测或编造未确认的图内信息！',
+  ].join('\n')
+}
+
 export async function deliverCrossMessage(deps, {
   fromSession = '',
   fromLabel = 'DSH 参谋长',
@@ -1113,12 +1315,20 @@ export async function deliverCrossMessage(deps, {
   mode = 'steer',
   images = [],
   imageBlocks: preAdmittedBlocks = null,
+  savedImagePaths: preSavedPaths = null,
   recordBoardLog = true,
 }) {
   const cleanBody = cleanMultiline(text, 2400)
   const rawImages = Array.isArray(images) ? images : []
   const hasPreAdmitted = Array.isArray(preAdmittedBlocks) && preAdmittedBlocks.length > 0
-  if (!cleanBody && !rawImages.length && !hasPreAdmitted) {
+  let savedPaths = Array.isArray(preSavedPaths) ? preSavedPaths : []
+  if (!savedPaths.length && rawImages.length > 0) {
+    try {
+      savedPaths = persistChiefImagesToWorkspace(deps, fromSession, rawImages)
+    } catch {}
+  }
+
+  if (!cleanBody && !rawImages.length && !hasPreAdmitted && !savedPaths.length) {
     return { ok: false, error: '递话内容不能为空' }
   }
 
@@ -1127,11 +1337,16 @@ export async function deliverCrossMessage(deps, {
     try {
       admittedBlocks = await admitChiefImages(deps, rawImages)
     } catch (err) {
-      return { ok: false, error: String(err && err.message ? err.message : err) }
+      if (!savedPaths.length) {
+        return { ok: false, error: String(err && err.message ? err.message : err) }
+      }
+      // Degrade cleanly to path-based image delivery if host attachments service is unavailable
+      admittedBlocks = []
     }
   }
-  const effectiveText = cleanBody || (admittedBlocks.length ? '请查看随信附带的图片。' : '')
-  const imgTag = admittedBlocks.length > 0 ? ` [附图 ×${admittedBlocks.length}]` : ''
+  const effectiveText = cleanBody || (admittedBlocks.length || savedPaths.length ? '请查看随信附带的图片与落盘路径。' : '')
+  const totalImgCount = Math.max(admittedBlocks.length, savedPaths.length)
+  const imgTag = totalImgCount > 0 ? ` [附图 ×${totalImgCount}]` : ''
 
   const rootId = deps.resolveRootSessionId(fromSession) || String(fromSession || '')
   const directory = await listPeerDirectory(deps, rootId || fromSession)
@@ -1149,6 +1364,7 @@ export async function deliverCrossMessage(deps, {
         subject,
         mode,
         imageBlocks: admittedBlocks,
+        savedImagePaths: savedPaths,
         recordBoardLog: false,
       })
       deliveries.push({ target: peer.handle, ok: res.ok, mode: res.deliveryMode })
@@ -1156,7 +1372,7 @@ export async function deliverCrossMessage(deps, {
     if (recordBoardLog && rootId) {
       deps.appendBoardLog(rootId, `📡 ${fromLabel} 向全体成员广播递话（${deliveries.filter(d => d.ok).length} 个目标）：${clamp(effectiveText, 56)}${imgTag}`, fromLabel)
     }
-    return { ok: true, broadcast: true, deliveries }
+    return { ok: true, broadcast: true, deliveries, savedImagePaths: savedPaths }
   }
 
   const peer = matchTargetPeer(directory.targets, rawTarget)
@@ -1174,21 +1390,34 @@ export async function deliverCrossMessage(deps, {
     subject,
     mode,
     imageBlocks: admittedBlocks,
+    savedImagePaths: savedPaths,
     recordBoardLog,
   })
 }
 
-async function deliverSinglePeer(deps, directory, peer, { fromSession, fromLabel, text, subject, mode, imageBlocks = [], recordBoardLog }) {
+async function deliverSinglePeer(deps, directory, peer, {
+  fromSession,
+  fromLabel,
+  text,
+  subject,
+  mode,
+  imageBlocks = [],
+  savedImagePaths = [],
+  recordBoardLog,
+}) {
   const runtime = deps.runtime
   const agentsSvc = runtime ? runtime.get('agents') : null
   const subagentsSvc = runtime ? runtime.get('subagents') : null
   const safeBlocks = Array.isArray(imageBlocks) ? imageBlocks : []
-  const imgCount = safeBlocks.length
+  const safePaths = Array.isArray(savedImagePaths) ? savedImagePaths : []
+  const imgCount = Math.max(safeBlocks.length, safePaths.length)
   const imgSuffix = imgCount > 0 ? ` [附图 ×${imgCount}]` : ''
+  const imgNoticeBlock = buildSavedImageNotice(safePaths)
+  const textWithImagePaths = imgNoticeBlock ? `${text}\n${imgNoticeBlock}` : text
   const headerTag = mode === 'steer'
     ? `[DSH 参谋长插话 · 来自 ${fromLabel}]`
     : `[DSH 参谋长递话 · 来自 ${fromLabel}]`
-  const formatted = `${headerTag}${subject ? ' ' + subject : ''}\n${text}\n\n（如需回信或同步进展，可调用参谋看板 chief_board({ action: "mail.send", target: "${fromLabel === 'DSH 参谋长' ? 'lead' : fromLabel}", text: "…" })）`
+  const formatted = `${headerTag}${subject ? ' ' + subject : ''}\n${textWithImagePaths}\n\n（如需回信或同步进展，可调用参谋看板 chief_board({ action: "mail.send", target: "${fromLabel === 'DSH 参谋长' ? 'lead' : fromLabel}", text: "…" })）`
 
   let deliveredPhysical = false
   let deliveryMode = 'mailbox-queued'
@@ -1276,7 +1505,7 @@ async function deliverSinglePeer(deps, directory, peer, { fromSession, fromLabel
     to: peer.handle,
     toSession: peer.id || peer.key,
     subject,
-    text: imgCount > 0 ? `${text}${imgSuffix}` : text,
+    text: imgCount > 0 ? `${textWithImagePaths}${imgSuffix}` : textWithImagePaths,
     imageCount: imgCount,
     mode,
     deliveredPhysical,
@@ -1306,6 +1535,7 @@ async function deliverSinglePeer(deps, directory, peer, { fromSession, fromLabel
     targetId: peer.id,
     deliveredPhysical,
     deliveryMode,
+    savedImagePaths: safePaths,
     ...(errorNote && !deliveredPhysical ? { note: '目标暂未在线运行，已存入参谋部协同信箱，将在其下一步自动送达（' + errorNote + '）' } : {}),
   }
 }
@@ -1575,7 +1805,8 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
   const state = loadChiefState()
   const view = clusterView(state, rootId)
   const modelsInfo = await listChiefModels(deps, false, rootId)
-  const paceMode = (state.config && state.config.paceMode) || 'manual'
+  const effCfgBefore = resolveWorkspaceConfig(state, rootId)
+  const paceMode = effCfgBefore.paceMode || 'manual'
 
   const rawInput = buildNarrativeInput({
     board,
@@ -1631,10 +1862,12 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
     ? latestView.narrative.text
     : buildFallbackNarrative({ board, facts: latestView.facts, targets: directory.targets })
 
+  const ownWs = ensureWorkspace(latestState, rootId)
+  const effectiveConfig = resolveWorkspaceConfig(latestState, rootId)
   return {
     ok: true,
     rootId,
-    config: latestState.config,
+    config: effectiveConfig,
     models: modelsInfo,
     narrative: {
       text: narrativeText,
@@ -1652,7 +1885,134 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
     peers: directory.targets,
     otherSessions: directory.otherSessions,
     cluster: directory.cluster,
+    flippedPrecipitatedIds: (ownWs.flippedPrecipitatedIds || []).slice(),
+    runtimeGuard: { ...ownWs.runtimeGuard },
   }
+}
+
+/** Manage which cold precipitated-vault entries are explicitly unsealed/flipped into a single root session. */
+export function updateWorkspaceFlippedIds(sessionId, { flippedId = '', sealId = '', clearAll = false } = {}) {
+  const key = String(sessionId || 'global').trim() || 'global'
+  return mutateChiefState((state) => {
+    const ws = ensureWorkspace(state, key)
+    const set = new Set(ws.flippedPrecipitatedIds || [])
+    if (clearAll) {
+      set.clear()
+    } else {
+      if (flippedId) set.add(String(flippedId).trim())
+      if (sealId) set.delete(String(sealId).trim())
+    }
+    ws.flippedPrecipitatedIds = [...set].slice(-20)
+    return { ok: true, flippedPrecipitatedIds: ws.flippedPrecipitatedIds.slice() }
+  })
+}
+
+/** One-click system deployment of Chief state (`facts`, `narrative`, `chat`/`mailbox` bridge) to a target Chief workspace (strictly keeping `flippedPrecipitatedIds = []`). */
+export function deployChiefWorkspaceState(deps, {
+  fromRootId = '',
+  toRootId = '',
+  fromTitle = '',
+  customText = '',
+  objective = '',
+} = {}) {
+  const fromKey = String(fromRootId || 'global').trim() || 'global'
+  const toKey = String(toRootId || '').trim()
+  if (!toKey) return { ok: false, error: '目标会话 ID 不能为空' }
+
+  return mutateChiefState((state) => {
+    const fromWs = ensureWorkspace(state, fromKey)
+    const toWs = ensureWorkspace(state, toKey)
+
+    const existingTexts = new Set(toWs.facts.map(f => f.text.trim()))
+    let copiedFacts = 0
+    for (const f of fromWs.facts) {
+      if (!f || !f.text) continue
+      const norm = f.text.trim()
+      if (existingTexts.has(norm)) continue
+      existingTexts.add(norm)
+      toWs.facts.push({
+        ...f,
+        id: nextId('fact'),
+        source: f.source || `移交自 ${fromTitle || fromKey}`,
+        updatedAt: Date.now(),
+      })
+      copiedFacts += 1
+    }
+    if (toWs.facts.length > FACTS_CAP) {
+      const pinned = toWs.facts.filter(f => f.pinned)
+      const rest = toWs.facts.filter(f => !f.pinned).slice(-(FACTS_CAP - pinned.length))
+      toWs.facts = [...pinned, ...rest].slice(-FACTS_CAP)
+    }
+
+    if (fromWs.narrative && fromWs.narrative.text && !toWs.narrative.text) {
+      toWs.narrative = {
+        ...fromWs.narrative,
+        hash: fromWs.narrative.hash || '',
+        at: Date.now(),
+      }
+    }
+
+    const briefLines = [
+      `- 【跨会话接力部署】本会话参谋状态已自 **${fromTitle || fromKey}** 系统级一键移交部署完成。`,
+      objective ? `- 【继承总目标】${clamp(objective, 180)}` : '',
+      copiedFacts > 0 ? `- 【继承纪律与事实】共继承 **${copiedFacts} 条**核心记忆与纪律。` : '',
+      customText ? `- 【附带交接叮嘱】${clamp(customText, 240)}` : '',
+    ].filter(Boolean).join('\n')
+
+    const mailItem = normalizeMail({
+      id: nextId('mail'),
+      from: 'DSH 参谋长 (接力部署)',
+      fromSession: fromKey,
+      to: 'lead',
+      toSession: toKey,
+      subject: `跨会话参谋部署：自 ${fromTitle || fromKey}`,
+      text: briefLines,
+      mode: 'silent',
+      deliveredPhysical: false,
+      at: Date.now(),
+    })
+    if (mailItem) {
+      toWs.mailbox.push(mailItem)
+      if (toWs.mailbox.length > MAIL_CAP) toWs.mailbox = toWs.mailbox.slice(-MAIL_CAP)
+    }
+
+    toWs.chat.push({
+      id: nextId('chat'),
+      role: 'chief',
+      text: briefLines,
+      actions: ['系统接力部署', ...(copiedFacts > 0 ? [`继承记忆 ×${copiedFacts}`] : [])],
+      at: Date.now(),
+    })
+    if (toWs.chat.length > CHAT_CAP) toWs.chat = toWs.chat.slice(-CHAT_CAP)
+
+    // Clone safe workspace chief config (model, pace, tactical preferences), ALWAYS forcing intervention=false!
+    const fromCfg = resolveWorkspaceConfig(state, fromKey)
+    toWs.config = {
+      modelRef: fromCfg.modelRef || '',
+      paceMode: fromCfg.paceMode || 'manual',
+      autoPilot: Boolean(fromCfg.autoPilot),
+      autoReview: Boolean(fromCfg.autoReview),
+      tacticalModes: {
+        ...normalizeTacticalModes(fromCfg.tacticalModes),
+        intervention: false,
+      },
+    }
+    toWs.runtimeGuard.interventionTurns = 0
+    toWs.runtimeGuard.unchangedCount = 0
+    toWs.runtimeGuard.circuitBroken = false
+    toWs.runtimeGuard.circuitReason = ''
+
+    // Strictly keep precipitated cold vault isolated at 0-token default in destination session!
+    toWs.flippedPrecipitatedIds = []
+
+    return {
+      ok: true,
+      copiedFacts,
+      narrativeCopied: Boolean(fromWs.narrative && fromWs.narrative.text),
+      flippedPrecipitatedIds: [],
+      config: { ...toWs.config, tacticalModes: { ...toWs.config.tacticalModes } },
+    }
+  })
 }
 
 /* -------------------------------------------------------------------------- */
@@ -1943,6 +2303,25 @@ function applyBoardOps(deps, rootId, boardOps) {
         by: 'chief',
       })
       if (res && res.ok) executed.push('更新推进断点')
+    } else if (op === 'plan.resetForGoal') {
+      const res = deps.runAction({ action: 'plan.resetForGoal', session: rootId, by: 'chief' })
+      if (res && res.ok) executed.push('清空陈旧计划以便按新目标重编')
+    } else if (op === 'plan.set' && Array.isArray(opItem.steps)) {
+      const steps = opItem.steps.map(s => (typeof s === 'string' ? { text: s, done: false } : s)).filter(Boolean)
+      if (steps.length > 0) {
+        const res = deps.runAction({ action: 'plan.set', steps, session: rootId, by: 'chief' })
+        if (res && res.ok) executed.push(`更新计划共 ${steps.length} 步`)
+      }
+    } else if (op === 'goal.proposeApproval') {
+      const res = deps.runAction({
+        action: 'goal.proposeApproval',
+        objective: String(opItem.objective || ''),
+        summary: String(opItem.summary || ''),
+        evidence: String(opItem.evidence || ''),
+        session: rootId,
+        by: 'chief',
+      })
+      if (res && res.ok) executed.push('呈批目标结项')
     } else if ((op === 'bounds.forbid' || op === 'bounds.allow') && opItem.item) {
       const field = op === 'bounds.forbid' ? 'forbidden' : 'allowed'
       const val = clamp(opItem.item, 220)
@@ -2325,14 +2704,15 @@ const ORGANIZE_ARCHIVES_SYSTEM = [
  */
 export async function organizeArchivesWithChief(deps, {
   sessionId = '',
+  cabinetId = '',
   ids = [],
   folder = '',
   scope = 'unorganized',
   instruction = '',
 } = {}) {
   const rootId = (deps.resolveRootSessionId && deps.resolveRootSessionId(sessionId)) || String(sessionId || 'global')
-  const sharedFile = typeof deps.sharedBoardFile === 'function' ? deps.sharedBoardFile() : deps.sharedBoardFile
-  const store = loadArchiveStore(sharedFile)
+  const targetOpt = archiveTargetForRoot(deps, rootId, cabinetId)
+  const store = loadArchiveStore(targetOpt)
 
   if (!store.items.length) {
     return {
@@ -2434,8 +2814,8 @@ export async function organizeArchivesWithChief(deps, {
     }
   }
 
-  const applied = applyChiefArchiveCurations(allCurations, allNewFolders, sharedFile)
-  const refreshedList = listArchiveHeaders(rootId, {}, sharedFile)
+  const applied = applyChiefArchiveCurations(allCurations, allNewFolders, targetOpt)
+  const refreshedList = listArchiveHeaders(rootId, { includePrecipitated: false }, targetOpt)
   const folderNameMap = new Map(refreshedList.folders.map(f => [f.id, f.label]))
 
   const folderStats = new Map()
@@ -2483,6 +2863,331 @@ export async function organizeArchivesWithChief(deps, {
   }
 }
 
+const HARVEST_ARCHIVE_SYSTEM = [
+  '你是「DSH 参谋长」的高精度上下文抢救员。当前即将执行上下文压缩或用户主动抢救本轮现场细节，请从原始对话与看板轨迹中无损抢救工程硬细节并归档！',
+  '要求：',
+  '1. 重点抓取：**具体文件路径、行号、真实命令/脚本参数、刚确认的报错根因与结论、尚未完成的断点、未解决的阻塞细节**，严禁泛泛而谈或丢弃关键参数。',
+  '2. 绝对不要编造原文未出现的文件名或命令。',
+  '3. 只输出一个合法 JSON 对象：',
+  '{',
+  '  "folder": "coords|incidents|contracts|ops|plans",',
+  '  "paperclip": "gold|silver|copper",',
+  '  "title": "精炼明确归档标题（≤38字）",',
+  '  "summary": "一句话总结核心工程事实（≤56字）",',
+  '  "tags": ["标签1", "标签2"],',
+  '  "points": [',
+  '    { "title": "记忆点短标题", "cue": "速览钩子", "detail": "含原文件路径/命令/结论的高保真明细" }',
+  '  ]',
+  '}',
+].join('\n')
+
+function collectRawSessionEvidence(deps, { sessionId = '', rootId = '', agent = null }) {
+  const board = deps && deps.boardForSession && deps.boardFileFor
+    ? deps.boardForSession(deps.boardFileFor(rootId))
+    : null
+  const lines = []
+  if (board && board.objective) lines.push(`【当前总目标】${board.objective}`)
+  if (board && board.cursor && (board.cursor.step || board.cursor.next || board.cursor.blocked)) {
+    lines.push(`【断点游标】当前=${board.cursor.step || '无'} | 下一步=${board.cursor.next || '无'} | 阻塞=${board.cursor.blocked || '无'}`)
+  }
+  const tasks = Array.isArray(board && board.tasks) ? board.tasks : []
+  const openTasks = tasks.filter(t => t.status !== 'done').slice(0, 6)
+  if (openTasks.length > 0) {
+    lines.push('【进行中/未完任务】')
+    for (const t of openTasks) {
+      lines.push(`- [${t.status}] #${t.id} ${t.title}${t.note ? `（${clamp(t.note, 100)}）` : ''}`)
+    }
+  }
+
+  let targetAgent = agent
+  if (!targetAgent && deps && deps.runtime) {
+    try {
+      const agentsSvc = deps.runtime.get('agents')
+      if (agentsSvc && typeof agentsSvc.get === 'function') {
+        targetAgent = agentsSvc.get(sessionId) || agentsSvc.get(rootId)
+      }
+    } catch {}
+  }
+
+  const pathsFound = new Set()
+  const cmdsFound = new Set()
+  const rawTurns = []
+  try {
+    if (targetAgent && targetAgent.session && typeof targetAgent.session.deriveMessages === 'function') {
+      const msgs = targetAgent.session.deriveMessages() || []
+      for (const m of msgs.slice(-14)) {
+        if (!m || !m.role) continue
+        if (m.source && m.source.kind && m.source.kind !== 'user' && m.role === 'user') continue
+        const blocks = Array.isArray(m.content)
+          ? m.content
+          : (typeof m.content === 'string' ? [{ type: 'text', text: m.content }] : [])
+        for (const b of blocks) {
+          if (!b || typeof b !== 'object') continue
+          if (b.type === 'text' && typeof b.text === 'string') {
+            const clean = stripCheckpointNoise(b.text)
+            if (!clean || isInternalCheckpointNoise(clean) || secretLike(clean)) continue
+            rawTurns.push(`${m.role === 'user' ? 'User' : 'Assistant'}: ${clamp(clean, 500)}`)
+            const pathMatches = clean.match(/(?:[A-Za-z]:)?(?:[\\/][^\s'"`<>|]{2,70})+/g) || []
+            for (const p of pathMatches.slice(0, 8)) pathsFound.add(p)
+          } else if ((b.type === 'tool_use' || b.type === 'tool-call' || b.type === 'toolCall') && (b.name || b.toolName)) {
+            const name = String(b.name || b.toolName)
+            const rawArgs = b.input || b.arguments || b.args
+            let obj = null
+            try { obj = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : rawArgs } catch {}
+            const cmd = obj && (obj.command || obj.cmd || obj.CommandLine)
+            const fpath = obj && (obj.path || obj.file_path || obj.Path)
+            if (fpath && !secretLike(String(fpath))) pathsFound.add(String(fpath))
+            if (cmd && !secretLike(String(cmd))) cmdsFound.add(clamp(String(cmd), 140))
+            rawTurns.push(`Tool[${name}]: ${clamp(JSON.stringify(obj || {}), 220)}`)
+          }
+        }
+      }
+    }
+  } catch {}
+
+  if (pathsFound.size > 0) lines.push('', '【涉及路径与符号】\n' + [...pathsFound].slice(0, 12).map(p => `- ${p}`).join('\n'))
+  if (cmdsFound.size > 0) lines.push('', '【近期执行命令】\n' + [...cmdsFound].slice(0, 8).map(c => `- \`${c}\``).join('\n'))
+  if (rawTurns.length > 0) lines.push('', '【近期对话与工具流水】\n' + rawTurns.slice(-10).join('\n'))
+  return {
+    board,
+    text: lines.join('\n').trim(),
+    hasTranscript: rawTurns.length > 0,
+    pathCount: pathsFound.size,
+    cmdCount: cmdsFound.size,
+  }
+}
+
+/** High-precision harvest of recent session details into active project's working archive cabinet (`pre-compaction` or `manual`). */
+export async function harvestTurnDetailsToArchive(deps, {
+  sessionId = '',
+  agent = null,
+  trigger = 'manual',
+  focusHint = '',
+  cabinetId = '',
+} = {}) {
+  const rootId = (deps && deps.resolveRootSessionId && deps.resolveRootSessionId(sessionId, agent)) || String(sessionId || 'global')
+  const targetOpt = archiveTargetForRoot(deps, rootId, cabinetId)
+  const evidence = collectRawSessionEvidence(deps, { sessionId: sessionId || rootId, rootId, agent })
+  const bodySource = [
+    focusHint ? `【抢救焦点提示】${cleanMultiline(focusHint, 240)}` : '',
+    evidence.text || `【抢救快照】时间 ${new Date().toLocaleString('zh-CN')} | 触发原因：${trigger}`,
+  ].filter(Boolean).join('\n\n')
+
+  let parsed = null
+  let usedLlm = false
+  try {
+    const llmRes = await callChiefLlm(deps, {
+      sessionId: rootId,
+      system: HARVEST_ARCHIVE_SYSTEM,
+      prompt: `触发模式：${trigger === 'pre-compaction' ? '上下文压缩前自动高保真抢救' : '用户手动抢救当前工作细节入柜'}\n\n${cleanMultiline(bodySource, 5200)}`,
+      maxTokens: SUMMARY_MAX_TOKENS,
+    })
+    if (llmRes && llmRes.ok && llmRes.text) {
+      parsed = extractJsonObject(llmRes.text)
+      if (parsed && (parsed.title || (Array.isArray(parsed.points) && parsed.points.length > 0))) {
+        usedLlm = true
+      }
+    }
+  } catch {}
+
+  const fallback = smartParseNoteToDossier({
+    title: `${trigger === 'pre-compaction' ? '【压缩前抢救】' : '【细节抢救】'}${clamp(focusHint || (evidence.board && evidence.board.objective) || '本轮工作现场细节', 28)}`,
+    body: bodySource,
+  })
+  const d = new Date()
+  const timeStamp = `${String(d.getHours()).padStart(2, '0')}:${String(d.getMinutes()).padStart(2, '0')}`
+  const title = clamp((parsed && parsed.title) || `${fallback.title || '工作细节抢救'} (${timeStamp})`, 70)
+  const folder = String((parsed && parsed.folder) || fallback.folder || 'incidents').trim()
+  const paperclip = ['gold', 'silver', 'copper'].includes(parsed && parsed.paperclip)
+    ? parsed.paperclip
+    : (trigger === 'pre-compaction' ? 'gold' : fallback.paperclip)
+  const summary = clamp((parsed && parsed.summary) || fallback.summary || clamp(bodySource, 110), 180)
+  const tags = Array.isArray(parsed && parsed.tags) && parsed.tags.length > 0
+    ? parsed.tags.slice(0, 6)
+    : [trigger === 'pre-compaction' ? '压缩抢救' : '细节抢救', ...(evidence.cmdCount > 0 ? ['命令流水'] : [])]
+  const points = Array.isArray(parsed && parsed.points) && parsed.points.length > 0
+    ? parsed.points
+    : fallback.points
+
+  const saveRes = mutateArchive({
+    op: 'save',
+    session: rootId,
+    folder,
+    paperclip,
+    title,
+    summary,
+    tags,
+    points,
+    body: bodySource,
+  }, targetOpt)
+
+  if (!saveRes || !saveRes.ok || !saveRes.item || !saveRes.item.id) {
+    return { ok: false, error: (saveRes && saveRes.error) || '工作档案写入失败，未执行后续操作' }
+  }
+
+  // Strictly verify persistence on disk before returning ok!
+  const verify = getArchiveDetail(saveRes.item.id, rootId, targetOpt)
+  if (!verify || !verify.ok || !verify.item || verify.item.id !== saveRes.item.id) {
+    return { ok: false, error: '档案硬盘落盘复核失败' }
+  }
+
+  if (deps && typeof deps.appendBoardLog === 'function' && rootId !== 'global') {
+    deps.appendBoardLog(rootId, `📥 已将本轮工程细节抢救入柜：《${title}》（trigger=${trigger}）`, 'chief')
+  }
+
+  return {
+    ok: true,
+    trigger,
+    usedLlm,
+    savedId: saveRes.item.id,
+    item: verify.item,
+    cabinetId: targetOpt.cabinetId || verify.cabinetId || '',
+    archives: listArchiveHeaders(rootId, { includePrecipitated: trigger === 'manual' }, targetOpt),
+  }
+}
+
+const PRECIPITATE_EXPERIENCE_SYSTEM = [
+  '你是「DSH 参谋长」的知识沉淀总编。请把当前工作档案柜（或指定抽屉）的多份工作卷宗脱水提炼为 1~3 条**跨会话长期可复用**的高密度经验胶囊，准备封存入 0-Token 冷库！',
+  '原则：',
+  '1. **去水保干**：彻底剔除单轮聊天客套话、过时中间试错步骤与一次性状态；只保留长期有价值的【工程架构契约 / 踩坑根因与解法 / 核心文件路径与校验命令】。',
+  '2. 保留真实文件名、函数名、配置键、关键命令，绝不编造不存在的细节。',
+  '3. 只输出一个合法 JSON 对象：',
+  '{',
+  '  "entries": [',
+  '    {',
+  '      "title": "沉淀经验短标题（≤36字）",',
+  '      "category": "coords|incidents|contracts|ops",',
+  '      "summary": "一句话价值摘要（≤60字）",',
+  '      "tags": ["标签1", "标签2"],',
+  '      "points": [',
+  '        { "title": "要点标题", "cue": "一句话钩子", "detail": "完整可复用步骤/路径/契约" }',
+  '      ],',
+  '      "body": "完整精炼正文"',
+  '    }',
+  '  ]',
+  '}',
+].join('\n')
+
+/** Purify working archive items into reusable long-term entries saved to `precipitated/<projectKey>.json`. */
+export async function precipitateExperienceWithChief(deps, {
+  sessionId = '',
+  op = 'cabinet',
+  cabinetId = '',
+  folder = '',
+  clearSource = false,
+} = {}) {
+  const rootId = (deps && deps.resolveRootSessionId && deps.resolveRootSessionId(sessionId)) || String(sessionId || 'global')
+  const targetOpt = archiveTargetForRoot(deps, rootId, cabinetId)
+  const store = loadArchiveStore(targetOpt)
+  const projectKey = resolveProjectKey(targetOpt.cwd)
+
+  const selectedItems = (op === 'drawer' && folder)
+    ? store.items.filter(it => it.folder === folder)
+    : store.items.slice()
+
+  if (!selectedItems.length) {
+    return { ok: false, error: '当前选定范围暂无工作档案可沉淀' }
+  }
+
+  const promptBody = selectedItems.slice(0, 12).map((it, idx) => [
+    `--- 工作档案 #${idx + 1}: 《${it.title}》 (drawer=${it.folder}, clip=${it.paperclip}) ---`,
+    `提要: ${it.summary || '无'}`,
+    Array.isArray(it.points) && it.points.length > 0
+      ? '记忆点:\n' + it.points.map(p => `- ${p.title}: ${p.detail || p.cue}`).join('\n')
+      : `正文:\n${cleanMultiline(it.body, 1500)}`,
+  ].join('\n')).join('\n\n')
+
+  let entriesRaw = null
+  let usedLlm = false
+  try {
+    const llmRes = await callChiefLlm(deps, {
+      sessionId: rootId,
+      system: PRECIPITATE_EXPERIENCE_SYSTEM,
+      prompt: `待沉淀工程档案范围：${op === 'drawer' && folder ? `抽屉 ${folder}` : '整柜'}（共 ${selectedItems.length} 卷）\n\n${cleanMultiline(promptBody, 6400)}`,
+      maxTokens: SUMMARY_MAX_TOKENS,
+    })
+    if (llmRes && llmRes.ok && llmRes.text) {
+      const parsed = extractJsonObject(llmRes.text)
+      if (parsed && Array.isArray(parsed.entries) && parsed.entries.length > 0) {
+        entriesRaw = parsed.entries.slice(0, 4)
+        usedLlm = true
+      }
+    }
+  } catch {}
+
+  if (!entriesRaw) {
+    // Deterministic distillation fallback preserving high-signal points & paths
+    const leadTitle = op === 'drawer' && folder
+      ? `【${folder} 沉淀】${selectedItems[0].title}`
+      : `【工程沉淀】${selectedItems[0].title}${selectedItems.length > 1 ? ` 等 ${selectedItems.length} 卷精华` : ''}`
+    const mergedPoints = []
+    const mergedTags = new Set(['已沉淀'])
+    const bodyBlocks = []
+    for (const it of selectedItems.slice(0, 8)) {
+      for (const tg of (it.tags || [])) mergedTags.add(tg)
+      bodyBlocks.push(`### ${it.title}\n${cleanMultiline(it.summary || it.body, 500)}`)
+      if (Array.isArray(it.points) && it.points.length > 0) {
+        for (const pt of it.points.slice(0, 3)) {
+          mergedPoints.push(pt)
+        }
+      } else {
+        mergedPoints.push({
+          title: clamp(it.title, 32),
+          cue: clamp(it.summary || it.body, 56),
+          detail: cleanMultiline(it.body || it.summary, 420),
+        })
+      }
+    }
+    entriesRaw = [{
+      title: clamp(leadTitle, 64),
+      category: folder || selectedItems[0].folder || 'contracts',
+      summary: clamp(selectedItems.map(x => x.summary || x.title).filter(Boolean).slice(0, 2).join('；'), 140),
+      tags: [...mergedTags].slice(0, 6),
+      points: mergedPoints.slice(0, 10),
+      body: bodyBlocks.join('\n\n'),
+    }]
+  }
+
+  const savedEntries = []
+  for (const raw of entriesRaw) {
+    const res = savePrecipitatedEntry(projectKey, {
+      ...raw,
+      sourceCabinet: store.cabinetName || store.cabinetId,
+      sourceCount: selectedItems.length,
+    }, targetOpt)
+    if (res && res.ok && res.entry) savedEntries.push(res.entry)
+  }
+
+  if (!savedEntries.length) {
+    return { ok: false, error: '沉淀写入冷库失败，已保留原有工作档案' }
+  }
+
+  let clearedSource = false
+  if (clearSource) {
+    if (op === 'drawer' && folder) {
+      mutateArchive({ op: 'clearFolder', folder }, targetOpt)
+      clearedSource = true
+    } else {
+      mutateArchive({ op: 'clearByIds', ids: selectedItems.map(x => x.id) }, targetOpt)
+      clearedSource = true
+    }
+  }
+
+  if (deps && typeof deps.appendBoardLog === 'function' && rootId !== 'global') {
+    deps.appendBoardLog(rootId, `⏬ 已从${selectedItems.length} 卷工作档案提炼 ${savedEntries.length} 条可复用经验封存入 0-Token 冷库`, 'chief')
+  }
+
+  return {
+    ok: true,
+    projectKey,
+    usedLlm,
+    createdCount: savedEntries.length,
+    entries: savedEntries,
+    clearedSource,
+    archives: listArchiveHeaders(rootId, { includePrecipitated: true }, targetOpt),
+  }
+}
+
 export async function askOrCommandChief(deps, {
   sessionId = '',
   text = '',
@@ -2496,24 +3201,31 @@ export async function askOrCommandChief(deps, {
     return { ok: false, error: '请输入要询问或吩咐参谋长的内容或上传图片' }
   }
 
+  const rootId = deps.resolveRootSessionId(sessionId) || String(sessionId || 'global')
+  const savedImagePaths = rawImages.length > 0 ? persistChiefImagesToWorkspace(deps, rootId, rawImages) : []
   let imageBlocks = []
   if (rawImages.length > 0) {
     try {
       imageBlocks = await admitChiefImages(deps, rawImages)
     } catch (err) {
-      return { ok: false, error: String(err && err.message ? err.message : err) }
+      if (!savedImagePaths.length) {
+        return { ok: false, error: String(err && err.message ? err.message : err) }
+      }
+      imageBlocks = []
     }
   }
 
+  const effectiveImgCount = Math.max(imageBlocks.length, savedImagePaths.length)
   const input = rawInput || '请结合我上传的图片进行分析处理。'
-  const userDisplayText = rawInput || `[上传图片 ×${imageBlocks.length}]`
-  const imgMeta = imageBlocks.length > 0 ? { imageCount: imageBlocks.length } : {}
+  const userDisplayText = rawInput || `[上传图片 ×${effectiveImgCount}]`
+  const imgMeta = effectiveImgCount > 0 ? { imageCount: effectiveImgCount } : {}
 
-  const rootId = deps.resolveRootSessionId(sessionId) || String(sessionId || 'global')
   const directory = await listPeerDirectory(deps, rootId)
   const board = deps.boardForSession(deps.boardFileFor(rootId))
   const state = loadChiefState()
   const view = clusterView(state, rootId)
+  const ownWs = ensureWorkspace(state, rootId)
+  const targetOpt = archiveTargetForRoot(deps, rootId)
 
   // Fast path: if user explicitly picked a concrete target pill AND used direct relay mode without asking chief to decompose
   if (forcedTarget && forcedTarget !== 'auto') {
@@ -2521,12 +3233,13 @@ export async function askOrCommandChief(deps, {
       fromSession: rootId,
       fromLabel: '用户 (经 DSH 参谋长)',
       target: forcedTarget,
-      text: rawInput || '请查看随信附带的图片。',
+      text: rawInput || '请查看随信附带的图片与落盘路径。',
       mode: ['steer', 'followup', 'silent'].includes(forcedMode) ? forcedMode : 'steer',
       imageBlocks,
+      savedImagePaths,
     })
     const reply = delivery.ok
-      ? `已按你的指定向 ${delivery.target || forcedTarget} ${forcedMode === 'steer' ? '插话' : forcedMode === 'silent' ? '投递备忘纸条' : '递话'}${imageBlocks.length ? `（附带 ${imageBlocks.length} 张图片）` : ''}${delivery.note ? '（' + delivery.note + '）' : '。'}`
+      ? `已按你的指定向 ${delivery.target || forcedTarget} ${forcedMode === 'steer' ? '插话' : forcedMode === 'silent' ? '投递备忘纸条' : '递话'}${effectiveImgCount ? `（附带 ${effectiveImgCount} 张图片，原图已落盘）` : ''}${delivery.note ? '（' + delivery.note + '）' : '。'}`
       : `投递失败：${delivery.error}`
 
     mutateChiefState((s) => {
@@ -2542,6 +3255,7 @@ export async function askOrCommandChief(deps, {
       ok: delivery.ok,
       reply,
       relays: [delivery],
+      savedImagePaths,
       memoryChanges: [],
       boardOps: [],
       view: await getChiefView(deps, rootId, { autoSummarize: false }),
@@ -2570,19 +3284,39 @@ export async function askOrCommandChief(deps, {
     }
   }
 
-  // On-demand lazy archive lookup ONLY when the user explicitly asks about archives / historical engineering records
+  // 0-Token Precipitated Vault Contract: ONLY read precipitated vault if this session EXPLICITLY flipped entries out!
+  const flippedIds = Array.isArray(ownWs.flippedPrecipitatedIds) ? ownWs.flippedPrecipitatedIds : []
+  const flippedVaultLines = []
+  if (flippedIds.length > 0) {
+    const projectKey = resolveProjectKey(targetOpt.cwd)
+    const flippedItems = getFlippedOutPrecipitatedForSession(projectKey, rootId, true, targetOpt)
+    if (flippedItems.length > 0) {
+      flippedVaultLines.push('', '## 8. 本会话已显式翻出的跨会话沉淀经验（仅包含用户显式翻出授权的条目）')
+      for (const entry of flippedItems) {
+        flippedVaultLines.push(`- 🏛️ [沉淀/${entry.category}] 《${entry.title}》：${entry.summary}`)
+        if (Array.isArray(entry.points) && entry.points.length > 0) {
+          for (const pt of entry.points.slice(0, 4)) {
+            flippedVaultLines.push(`    * ${pt.title}：${clamp(pt.detail || pt.cue, 200)}`)
+          }
+        } else if (entry.body) {
+          flippedVaultLines.push(`    * 正文：${clamp(entry.body, 280)}`)
+        }
+      }
+    }
+  }
+
+  // On-demand lazy archive lookup ONLY when the user explicitly asks about working archives (never reads precipitated vault!)
   const asksArchiveExplicitly = /(?:档案|卷宗|归档|以前|历史记录|工程坐标|老笔记|查一下.*(?:怎么|路径|命令|配置))/.test(input)
   const onDemandArchiveLines = []
   if (asksArchiveExplicitly) {
-    const sharedFile = typeof deps.sharedBoardFile === 'function' ? deps.sharedBoardFile() : deps.sharedBoardFile
-    const found = searchArchives(input, { limit: 4 }, sharedFile)
+    const found = searchArchives(input, { limit: 4 }, targetOpt)
     if (found.ok && found.hits.length > 0) {
-      onDemandArchiveLines.push('', '## 7. 按需调取的沉淀工程档案（仅因用户本次提问涉及历史档案而临时检索）')
+      onDemandArchiveLines.push('', '## 7. 按需调取的工作档案柜卷宗（仅因用户本次提问涉及历史档案而临时检索）')
       for (let i = 0; i < found.hits.length; i += 1) {
         const hit = found.hits[i]
         onDemandArchiveLines.push(`- 📎 [${hit.folderLabel}] 《${hit.title}》：${hit.summary}`)
         if (i < 2) {
-          const det = getArchiveDetail(hit.id, rootId, sharedFile)
+          const det = getArchiveDetail(hit.id, rootId, targetOpt)
           if (det.ok && det.item && Array.isArray(det.item.points)) {
             for (const pt of det.item.points.slice(0, 4)) {
               onDemandArchiveLines.push(`    * ${pt.title}：${clamp(pt.detail || pt.cue, 180)}`)
@@ -2654,10 +3388,18 @@ export async function askOrCommandChief(deps, {
       .map(m => `- [回合/${m.section}] ${clamp(stripCheckpointNoise(m.title || m.text), 150)}`)),
     ...(view.mailbox.slice(-4).map(m => `- [信箱 ${m.from} → @${m.to}] ${clamp(m.text, 120)}`)),
     ...onDemandArchiveLines,
+    ...flippedVaultLines,
     '',
     '## 用户刚刚对你说的话：',
     input,
-    ...(imageBlocks.length > 0 ? [`\n（附带 ${imageBlocks.length} 张用户上传图片，请直接查看图片内容作答）`] : []),
+    ...(savedImagePaths.length > 0
+      ? [
+          '',
+          `🖼️ 用户随信上传了 ${savedImagePaths.length} 张原图（已真实落盘到工作区）：`,
+          ...savedImagePaths.map(p => `- ${p.path}`),
+          '（重要提示：若当前参谋长模型不支持视觉看图，请把任务与上述绝对路径直接调度/递话给支持看图或读文件工具的主对话 @lead / 子代理处理，严禁臆造图内细节！）',
+        ]
+      : []),
   ]
 
   const llmRes = await callChiefLlm(deps, {
@@ -2666,9 +3408,10 @@ export async function askOrCommandChief(deps, {
     prompt: promptLines.join('\n'),
     maxTokens: SUMMARY_MAX_TOKENS,
     imageBlocks,
+    allowTextFallbackOnVisionMiss: savedImagePaths.length > 0,
   })
 
-  if (imageBlocks.length > 0 && !llmRes.ok) {
+  if (imageBlocks.length > 0 && !llmRes.ok && !savedImagePaths.length) {
     return {
       ok: false,
       error: llmRes.error || '当前参谋长模型无法识别图片，请在右上角切换支持视觉的多模态模型后重试',
@@ -2691,9 +3434,10 @@ export async function askOrCommandChief(deps, {
         text: msgBody,
         mode: 'steer',
         imageBlocks,
+        savedImagePaths,
       })
       const fallbackReply = delivery.ok
-        ? `- 【已递话】已向 @${delivery.target} 插话传达指令。`
+        ? `- 【已递话】已向 @${delivery.target} 插话传达指令${savedImagePaths.length ? `（附原图路径 ×${savedImagePaths.length}）` : ''}。`
         : `- 【投递失败】未找到目标 ${targetName}（${delivery.error}）`
       mutateChiefState((s) => {
         const ws = ensureWorkspace(s, rootId)
@@ -2707,6 +3451,7 @@ export async function askOrCommandChief(deps, {
         ok: delivery.ok,
         reply: fallbackReply,
         relays: [delivery],
+        savedImagePaths,
         memoryChanges: [],
         boardOps: [],
         view: await getChiefView(deps, rootId, { autoSummarize: false }),
@@ -2789,6 +3534,7 @@ export async function askOrCommandChief(deps, {
       text: r.text,
       mode: ['steer', 'followup', 'silent'].includes(r.mode) ? r.mode : 'steer',
       imageBlocks,
+      savedImagePaths,
     })
     relayResults.push(deliv)
     if (deliv.ok) actionBadges.push(`${r.mode === 'steer' ? '插话' : '递话'} → ${deliv.target}`)
@@ -2977,34 +3723,174 @@ export function proposeBoundToChief(deps, { sessionId, callerAgent, by, field, i
 /* -------------------------------------------------------------------------- */
 
 const TURN_REVIEW_SYSTEM = [
-  '你是「DSH 参谋长」（宰相级协同中枢）的后台复盘与参谋模块。某个对话刚结束一轮输出。',
-  '请阅读最新对话片段、团队状态、当前边界与持久记忆，完成两件事并**只输出一个 JSON 对象**：',
-  '1. `memoryChanges`：仅当出现跨轮次持久有效的规矩、分工、关键架构结论或踩坑教训时才新增/修订/删除（精炼一句话）；普通干活过程返回 `[]`。严禁保存密码或密钥。',
-  '2. `suggestions`（最多 1 条，宁缺毋滥，没有高价值事项必须返回 `[]`）：',
-  '   - **类型 A · 宰相边界请示 (`"kind": "bound"`)**：若主代理或子代理在本轮**明显撞墙**（如权限拒绝、沙箱越界、目录不可写、某工具/命令严禁调用、环境硬限制），或用户明确提出了某条应长期遵守的工作红线/允许范围，且尚不在「已有全局边界」中 → 生成一条 `bound` 请示，由用户一键批准后正式注入全局边界！',
-  '   - **类型 B · 跨对话递话建议 (`"kind": "relay"`)**：若发现明确的跨对话信息差（如子代理刚查清下游急需的关键结论、或某代理偏离目标需纠偏） → 生成一条简明分点的 `relay` 递话建议。',
+  '你是「DSH 参谋长」（宰相级协同与督导中枢）的后台复盘与督导模块。某个对话刚结束一轮输出。',
+  '请阅读最新对话片段、工作区目标、计划步骤、团队状态、生效边界（尤其红线）、持久记忆与当前开启的战术开关，只输出一个 JSON 对象：',
   '',
-  '输出格式：',
+  '1. `memoryChanges`：仅当出现跨轮次持久有效的规矩、分工、关键架构结论或踩坑教训时才新增/修订/删除；普通干活过程返回 `[]`。严禁保存密码或密钥。',
+  '2. `boardOps`：若发现当前 `计划步骤 (Plan)` 明显仍对应旧需求/与最新 `总目标 (Objective)` 严重脱节（stale plan），务必输出 `{ "op": "plan.resetForGoal" }` 或 `{ "op": "plan.set", "steps": [...] }` 自动修正计划；也可更新 `task.update` / `cursor.set`。',
+  '3. `planAssessment`：`{ "stale": true|false, "reason": "…" }`，指明当前计划步骤是否与总目标失配陈旧。',
+  '4. `goalStatus`：仅当处于 Goal 督导模式时重点评估，取值 `"in_progress" | "achieved" | "blocked"`；若 `achieved`，填写简明 `goalSummary` 与实测 `goalEvidence`；若未完成填写 `goalMissing`。',
+  '5. `shouldIntervene` & `interventionText`：当开启「接管督导模式」且主代理停下但总目标仍未完成（或存在计划失配 / 未提供验证证据却自称完成 / 触及红线风险）时，设 `shouldIntervene: true` 并写出清晰简明、可直接投递给 `@lead` 推进下一回合的执行指令；若处于 `strictVerify` 模式但回复无实测输出证据，务必驳回自称完成并要求补跑验证；若开启 `conciseBrief`，督导指令严格限定在 3 条以内要点。若已达成 `achieved` 等待人类结项批示、或正常等待子代理回信/人工决策，设 `shouldIntervene: false`。',
+  '6. `suggestions`（最多 1 条，宁缺毋滥）：',
+  '   - `"kind": "bound"`：明显撞墙或发现长期红线时请示注入全局边界；',
+  '   - `"kind": "relay"`：发现明确跨对话信息差时的递话建议。',
+  '',
+  '输出格式（严格 JSON）：',
   '{',
-  '  "memoryChanges": [',
-  '    { "op": "add", "category": "discipline|architecture|progress|preference|team", "text": "…" }',
-  '  ],',
-  '  "suggestions": [',
-  '    {',
-  '      "kind": "bound 或 relay",',
-  '      "boundField": "当 kind=bound 时必填: forbidden|allowed|notes",',
-  '      "title": "一句话简明标题（≤26字）",',
-  '      "reason": "简要说明撞墙背景或递话原因（≤65字）",',
-  '      "target": "当 kind=relay 时填目标 key（如 lead 或子代理名）；kind=bound 时填 bounds",',
-  '      "targetLabel": "目标显示名（如 主对话 / 禁止红线）",',
-  '      "mode": "steer|followup|silent",',
-  '      "draftText": "kind=bound 时填精炼的一句话边界条文；kind=relay 时填简明分点的递话内容"',
-  '    }',
-  '  ]',
+  '  "memoryChanges": [{ "op": "add", "category": "discipline|architecture|progress|preference|team", "text": "…" }],',
+  '  "boardOps": [],',
+  '  "planAssessment": { "stale": false, "reason": "" },',
+  '  "goalStatus": "in_progress",',
+  '  "goalSummary": "",',
+  '  "goalEvidence": "",',
+  '  "goalMissing": "",',
+  '  "shouldIntervene": false,',
+  '  "interventionText": "",',
+  '  "suggestions": []',
   '}',
 ].join('\n')
 
 const reviewTimers = new Map()
+const COMPACT_POLL_MS = 180
+const COMPACT_IDLE_WAIT_MS = 15_000
+
+async function waitUntilAgentIdle(getStatusFn, timeoutMs = COMPACT_IDLE_WAIT_MS, pollMs = COMPACT_POLL_MS) {
+  const deadline = Date.now() + Math.max(200, timeoutMs)
+  while (Date.now() < deadline) {
+    let status = 'idle'
+    try { status = getStatusFn() || 'idle' } catch {}
+    if (status !== 'running') return true
+    await new Promise(resolve => setTimeout(resolve, pollMs))
+  }
+  try {
+    return (getStatusFn() || 'idle') !== 'running'
+  } catch {
+    return false
+  }
+}
+
+function measureAgentSessionTokensFallback(agent) {
+  if (!agent || !agent.session) return null
+  try {
+    let totalTokens = 0
+    let seq = 0
+    let contextWindow = 128_000
+    if (typeof agent.session.ownEvents === 'function') {
+      const events = agent.session.ownEvents() || []
+      seq = events.length
+      for (let i = events.length - 1; i >= 0; i -= 1) {
+        const ev = events[i]
+        const usage = ev && (ev.usage || (ev.message && ev.message.usage) || (ev.data && ev.data.usage))
+        if (usage && typeof usage === 'object') {
+          const calc = (Number(usage.inputTokens) || 0)
+            + (Number(usage.cacheReadTokens) || 0)
+            + (Number(usage.outputTokens) || 0)
+          totalTokens = Number(usage.totalTokens) || calc
+          if (Number(usage.contextWindow) > 0) contextWindow = Number(usage.contextWindow)
+          if (totalTokens > 0) break
+        }
+      }
+    }
+    return totalTokens > 0 ? { totalTokens, contextWindow, seq } : null
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Post-Turn Auto-Compaction Pipeline (strict safety contract):
+ * 1. NEVER run inside synchronous `turn-stopping` or while agent.status === 'running'. Wait for idle first.
+ * 2. Check token threshold against contextWindow and guard with `lastCompactedSeq`.
+ * 3. Execute `harvestTurnDetailsToArchive` and verify dossier persisted on disk.
+ * 4. ONLY then call `compactSessionNow`!
+ */
+export async function maybeRunPreCompaction(deps, {
+  agent = null,
+  sessionId = '',
+  rootId: explicitRootId = '',
+  bypassIdleWait = false,
+} = {}) {
+  const sid = String(sessionId || (agent && agent.id) || '').trim()
+  if (!sid) return { ok: false, skipped: 'no-session' }
+  const rootId = explicitRootId || (deps && deps.resolveRootSessionId ? deps.resolveRootSessionId(sid, agent) : '') || sid
+
+  const state = loadChiefState()
+  const effCfg = resolveWorkspaceConfig(state, rootId)
+  const tactical = normalizeTacticalModes(effCfg.tacticalModes)
+  if (!tactical.autoCompact) return { ok: false, skipped: 'disabled' }
+  if (!deps || typeof deps.compactSessionNow !== 'function') return { ok: false, skipped: 'no-compaction-service' }
+
+  const getStatus = () => {
+    if (typeof deps.getAgentStatus === 'function') return deps.getAgentStatus(sid)
+    return (agent && agent.status) || 'idle'
+  }
+  if (getStatus() === 'running') {
+    if (bypassIdleWait) return { ok: false, skipped: 'running' }
+    const becameIdle = await waitUntilAgentIdle(getStatus)
+    if (!becameIdle) return { ok: false, skipped: 'busy-running' }
+  }
+
+  let usage = null
+  try {
+    usage = typeof deps.measureSessionTokens === 'function'
+      ? await deps.measureSessionTokens(sid, agent)
+      : measureAgentSessionTokensFallback(agent)
+  } catch {}
+  if (!usage || !Number(usage.totalTokens)) {
+    return { ok: false, skipped: 'no-token-usage' }
+  }
+  const contextWindow = Math.max(1000, Number(usage.contextWindow) || 128_000)
+  const totalTokens = Number(usage.totalTokens) || 0
+  const seq = Math.max(0, Math.round(Number(usage.seq) || 0))
+  const ratioPct = (totalTokens / contextWindow) * 100
+  const wsSnapshot = ensureWorkspace(loadChiefState(), rootId)
+  const lastSeq = (wsSnapshot.runtimeGuard && wsSnapshot.runtimeGuard.lastCompactedSeq) || 0
+
+  if (ratioPct < tactical.compactThresholdPct) {
+    return { ok: false, skipped: 'below-threshold', ratioPct: Math.round(ratioPct), thresholdPct: tactical.compactThresholdPct }
+  }
+  if (seq > 0 && seq <= lastSeq) {
+    return { ok: false, skipped: 'already-compacted-seq', seq, lastSeq }
+  }
+
+  // Step 1: High-precision harvest to working archive cabinet BEFORE compaction!
+  const harvest = await harvestTurnDetailsToArchive(deps, {
+    sessionId: rootId,
+    agent,
+    trigger: 'pre-compaction',
+    focusHint: `上下文占用已达 ${Math.round(ratioPct)}%（${totalTokens}/${contextWindow} tokens），压缩前抢救现场细节。`,
+  })
+  if (!harvest || !harvest.ok || !harvest.savedId) {
+    return { ok: false, error: 'harvest-failed-abort-compact', detail: harvest && harvest.error }
+  }
+
+  // Step 2: Double-verify written dossier exists cleanly on disk
+  const targetOpt = archiveTargetForRoot(deps, rootId)
+  const verified = getArchiveDetail(harvest.savedId, rootId, targetOpt)
+  if (!verified || !verified.ok || !verified.item) {
+    return { ok: false, error: 'harvest-verify-failed-abort-compact' }
+  }
+
+  // Step 3: Record compacted seq before triggering host compaction
+  mutateChiefState((s) => {
+    const ws = ensureWorkspace(s, rootId)
+    ws.runtimeGuard.lastCompactedSeq = seq > 0 ? seq : (ws.runtimeGuard.lastCompactedSeq + 1)
+    ws.runtimeGuard.lastCompactedAt = Date.now()
+  })
+
+  // Step 4: Execute compaction safely while agent is idle
+  const cmdId = `dsh-chief-autocompact-${Date.now().toString(36)}`
+  const compactRes = await deps.compactSessionNow(sid, cmdId)
+  if (typeof deps.appendBoardLog === 'function' && rootId !== 'global') {
+    deps.appendBoardLog(rootId, `🗜️ 已先抢救入柜（#${harvest.savedId}）并自动完成上下文压缩（占 ${Math.round(ratioPct)}%）`, 'chief')
+  }
+  return {
+    ok: true,
+    harvestId: harvest.savedId,
+    ratioPct: Math.round(ratioPct),
+    compactRes,
+  }
+}
 
 function extractLatestTurnDigest(agent, turn) {
   if (!agent || !agent.session) return null
@@ -3047,73 +3933,125 @@ export function scheduleChiefTurnReview(deps, { agent, sessionId, turn }) {
     return
   }
   const state = loadChiefState()
-  const paceMode = (state.config && state.config.paceMode) || 'manual'
-  // Default 'manual' mode: ZERO automatic background LLM calls! Human controls the rhythm.
-  if (paceMode === 'manual' || state.config.autoReview === false) return
-
   const rootKey = (deps && deps.resolveRootSessionId ? deps.resolveRootSessionId(sid, agent) : '') || sid
+  const effCfg = resolveWorkspaceConfig(state, rootKey)
+  const paceMode = effCfg.paceMode || 'manual'
+  const tactical = normalizeTacticalModes(effCfg.tacticalModes)
+  const board = deps && deps.boardForSession && deps.boardFileFor
+    ? deps.boardForSession(deps.boardFileFor(rootKey))
+    : null
+  const isGoalMode = Boolean(board && board.mode === 'goal')
+  const hasHighPriorityChannel = isGoalMode || tactical.autoCompact || tactical.intervention || tactical.redlineSentinel || tactical.strictVerify
+
+  // Default 'manual' mode without tactical/goal active: ZERO background LLM calls!
+  if (!hasHighPriorityChannel && (paceMode === 'manual' || effCfg.autoReview === false)) return
+
   clearTimeout(reviewTimers.get(rootKey))
+  const delayMs = hasHighPriorityChannel ? 1_200 : REVIEW_DELAY_MS
   const timer = setTimeout(() => {
     reviewTimers.delete(rootKey)
     runTurnReview(deps, { agent, sessionId: sid, turn }).catch(() => {})
-  }, REVIEW_DELAY_MS)
+  }, delayMs)
   timer.unref?.()
   reviewTimers.set(rootKey, timer)
 }
 
-async function runTurnReview(deps, { agent, sessionId, turn }) {
-  const rootId = deps.resolveRootSessionId(sessionId, agent) || sessionId
+export async function runTurnReview(deps, { agent, sessionId, turn, force = false }) {
+  const sid = String(sessionId || (agent && agent.id) || '').trim()
+  if (!sid) return { ok: false, skipped: 'no-session' }
+  const rootId = (deps.resolveRootSessionId && deps.resolveRootSessionId(sid, agent)) || sid
+
   const stateBefore = loadChiefState()
-  const paceMode = (stateBefore.config && stateBefore.config.paceMode) || 'manual'
-  if (paceMode === 'manual') return
+  const effCfgBefore = resolveWorkspaceConfig(stateBefore, rootId)
+  const tactical = normalizeTacticalModes(effCfgBefore.tacticalModes)
+  const paceMode = effCfgBefore.paceMode || 'manual'
+  const board = deps.boardForSession && deps.boardFileFor
+    ? deps.boardForSession(deps.boardFileFor(rootId))
+    : null
+  const isGoalMode = Boolean(board && board.mode === 'goal')
+  const hasHighPriority = isGoalMode || tactical.intervention || tactical.redlineSentinel || tactical.strictVerify || tactical.autoCompact
+
+  if (!force && !hasHighPriority && paceMode === 'manual') {
+    return { ok: false, skipped: 'manual' }
+  }
+
+  // Always check pre-compaction pipeline first when autoCompact is active
+  if (tactical.autoCompact) {
+    await maybeRunPreCompaction(deps, { agent, sessionId: sid, rootId, bypassIdleWait: Boolean(force) }).catch(() => {})
+  }
+
+  // If ONLY autoCompact was on and neither paceMode != 'manual' nor supervisor toggles are on, exit cleanly here
+  const needsSupervisorLlm = isGoalMode || tactical.intervention || tactical.redlineSentinel || tactical.strictVerify || paceMode !== 'manual'
+  if (!force && !needsSupervisorLlm) return { ok: true, onlyCompactionChecked: true }
 
   const digest = extractLatestTurnDigest(agent, turn)
-  if (!digest || !digest.text) return
+  if (!digest || !digest.text) return { ok: false, skipped: 'no-digest' }
 
   const wsBefore = ensureWorkspace(stateBefore, rootId)
-  const cursorKey = `${sessionId}`
-  if (wsBefore.reviewCursors[cursorKey] === digest.stamp) return
+  const cursorKey = `${sid}`
+  if (!force && wsBefore.reviewCursors[cursorKey] === digest.stamp) {
+    return { ok: false, skipped: 'same-stamp' }
+  }
 
-  const identity = deps.resolveAgentIdentity(deps.runtime, sessionId, agent)
-  if (identity && /^mnemon-(?:review|run)/i.test(String(identity.self || ''))) return
+  const identity = deps.resolveAgentIdentity ? deps.resolveAgentIdentity(deps.runtime, sid, agent) : null
+  if (identity && /^mnemon-(?:review|run)/i.test(String(identity.self || ''))) return { ok: false, skipped: 'mnemon' }
 
   const hasWallCue = /(?:permission denied|eacces|eperm|forbidden|blocked|not allowed|sandbox|read-only|撞墙|受阻|权限拒绝|越界)/i.test(digest.text)
   const now = Date.now()
   const lastAt = Number(lastReviewAtByRoot.get(rootId) || 0)
-  const cooldownMs = paceMode === 'smart'
-    ? (hasWallCue ? 45_000 : SMART_REVIEW_COOLDOWN_MS)
-    : AUTO_REVIEW_COOLDOWN_MS
-  if (now - lastAt < cooldownMs) return
+  const cooldownMs = hasHighPriority
+    ? 4_000
+    : (paceMode === 'smart' ? (hasWallCue ? 45_000 : SMART_REVIEW_COOLDOWN_MS) : AUTO_REVIEW_COOLDOWN_MS)
+  if (!force && now - lastAt < cooldownMs) return { ok: false, skipped: 'cooldown' }
+
+  // Wait if supervisor intervention/goal is running for an active agent so turn-stopping settles to idle
+  if ((tactical.intervention || isGoalMode) && typeof deps.getAgentStatus === 'function' && !force) {
+    await waitUntilAgentIdle(() => deps.getAgentStatus(sid), 5_000, 150)
+  }
 
   const directory = await listPeerDirectory(deps, rootId)
   const realPeers = directory.targets.filter(t => !/^mnemon-(?:review|run)/i.test(String(t.name || t.handle || '')))
 
-  // In 'smart' mode, ONLY review when a hard wall/error cue occurred OR multi-agent milestone with human turn
-  if (paceMode === 'smart' && !hasWallCue && !(digest.hasUser && realPeers.length > 1)) {
-    return
+  // In 'smart' background mode (without supervisor/goal), gate LLM call on wall cue or multi-agent human turn
+  if (!force && !isGoalMode && !tactical.intervention && !tactical.redlineSentinel && !tactical.strictVerify) {
+    if (paceMode === 'smart' && !hasWallCue && !(digest.hasUser && realPeers.length > 1)) {
+      return { ok: false, skipped: 'smart-quiet' }
+    }
+    if (!digest.hasUser && realPeers.length <= 1 && !hasWallCue) return { ok: false, skipped: 'single-quiet' }
   }
-  if (!digest.hasUser && realPeers.length <= 1 && !hasWallCue) return
 
-  const modelsInfo = await listChiefModels(deps, false, rootId)
-  if (!modelsInfo.available) return
+  if (!deps.callLlmOverride) {
+    const modelsInfo = await listChiefModels(deps, false, rootId)
+    if (!modelsInfo.available) return { ok: false, skipped: 'no-models' }
+  }
 
   lastReviewAtByRoot.set(rootId, now)
   const speaker = identity && identity.isChild ? `子代理 @${identity.self}` : '主对话 (@lead)'
   const view = clusterView(stateBefore, rootId)
   const numberedFacts = view.facts.slice()
-  const board = deps.boardForSession && deps.boardFileFor
-    ? deps.boardForSession(deps.boardFileFor(rootId))
-    : null
   const bounds = (board && board.bounds) || { allowed: [], forbidden: [], notes: [] }
+  const planSteps = Array.isArray(board && board.plan) ? board.plan : []
+  const tasks = Array.isArray(board && board.tasks) ? board.tasks : []
 
   const activeTargets = realPeers.filter(t => t.key === 'lead' || t.status === 'running').slice(0, 10)
   const idleCount = Math.max(0, realPeers.length - activeTargets.length)
+  const activeFlags = [
+    isGoalMode ? 'GOAL_MODE' : '',
+    tactical.intervention ? 'INTERVENTION_SUPERVISOR' : '',
+    tactical.strictVerify ? 'STRICT_VERIFY' : '',
+    tactical.redlineSentinel ? 'REDLINE_SENTINEL' : '',
+    tactical.conciseBrief ? 'CONCISE_BRIEF_3_BULLETS' : '',
+  ].filter(Boolean)
 
   const prompt = [
-    `刚刚结束回合的对话身份：${speaker}（sessionId=${sessionId}）`,
+    `当前激活监督模式：${activeFlags.join(' | ') || paceMode}`,
+    `工作区总目标 (Objective)：${(board && board.objective) || '（暂未设定明确总目标）'}`,
+    `当前计划步骤 (Plan)：${planSteps.length ? planSteps.map((s, i) => `${i + 1}.${s.done ? '[✓]' : '[ ]'} ${clamp(s.text, 60)}`).join('；') : '（空）'}`,
+    `当前任务列表 (Tasks)：${tasks.length ? tasks.slice(0, 10).map(t => `[${t.status}] #${t.id} ${clamp(t.title, 48)}`).join('；') : '（空）'}`,
+    `刚刚结束回合的对话身份：${speaker}（sessionId=${sid}）`,
     `活跃团队成员：${activeTargets.map(t => `${t.handle}[key=${t.key}, ${t.status}${t.taskTitle ? ', 任务:' + t.taskTitle : ''}]`).join('；')}${idleCount > 0 ? `（另有 ${idleCount} 名空闲子代理已折叠）` : ''}`,
     '',
-    '已有全局边界（请勿重复提议已有项）：',
+    '已有工作边界（红线严防越界，请勿重复提议已有项）：',
     `- 禁止：${(bounds.forbidden || []).join('；') || '（暂无）'}`,
     `- 允许：${(bounds.allowed || []).join('；') || '（暂无）'}`,
     `- 注意：${(bounds.notes || []).join('；') || '（暂无）'}`,
@@ -3131,32 +4069,83 @@ async function runTurnReview(deps, { agent, sessionId, turn }) {
     prompt,
     maxTokens: SUMMARY_MAX_TOKENS,
   })
-  if (!res.ok) return
+  if (!res.ok) return { ok: false, error: res.error }
 
   const parsed = extractJsonObject(res.text)
-  if (!parsed) return
+  if (!parsed) return { ok: false, error: 'non-json-review' }
 
-  const autoPilot = Boolean(loadChiefState().config.autoPilot)
+  const autoPilot = Boolean(resolveWorkspaceConfig(loadChiefState(), rootId).autoPilot)
   const rawSuggestions = (Array.isArray(parsed.suggestions) ? parsed.suggestions : [])
     .map(raw => normalizeSuggestion({ ...raw, fromAgent: raw?.fromAgent || speaker }))
     .filter(Boolean)
     .slice(0, 1)
 
-  let factsChanged = false
+  // Stale plan check & auto-reconcile
+  const isStalePlan = Boolean(parsed.planAssessment && parsed.planAssessment.stale)
+  const parsedBoardOps = Array.isArray(parsed.boardOps) ? parsed.boardOps.slice() : []
+  if (isStalePlan && !parsedBoardOps.some(op => op && (op.op === 'plan.resetForGoal' || op.op === 'plan.set'))) {
+    parsedBoardOps.unshift({ op: 'plan.resetForGoal' })
+  }
+  const executedOps = parsedBoardOps.length > 0 && deps.runAction
+    ? applyBoardOps(deps, rootId, parsedBoardOps)
+    : []
+
+  const isGoalAchieved = isGoalMode && String(parsed.goalStatus || '') === 'achieved'
+  let goalProposalCreated = false
+  if (isGoalAchieved && deps.runAction) {
+    const existingApproval = board && board.goalApproval
+    const alreadyPendingSame = existingApproval
+      && existingApproval.status === 'pending'
+      && existingApproval.objective === board.objective
+    if (!alreadyPendingSame) {
+      const propRes = deps.runAction({
+        action: 'goal.proposeApproval',
+        objective: board.objective || '',
+        summary: cleanMultiline(parsed.goalSummary || '总目标各项核心要求及验证均已完成，建议结项。', 320),
+        evidence: cleanMultiline(parsed.goalEvidence || '', 420),
+        session: rootId,
+        by: 'DSH 参谋长',
+      })
+      goalProposalCreated = Boolean(propRes && propRes.ok)
+    }
+  }
+
+  let circuitTripped = false
+  let circuitReason = ''
+  let interventionMessage = ''
   const autoRelays = []
 
   mutateChiefState((s) => {
     const ws = ensureWorkspace(s, rootId)
     ws.reviewCursors[cursorKey] = digest.stamp
-    const applied = applyFactChanges(ws, numberedFacts, parsed.memoryChanges, speaker)
-    if (applied.length > 0) factsChanged = true
+    applyFactChanges(ws, numberedFacts, parsed.memoryChanges, speaker)
+
+    // Goal achieved: create user approval suggestion pill (NEVER exit goal mode automatically!)
+    if (isGoalAchieved) {
+      const hasPendingGoalSug = ws.suggestions.some(
+        sug => sug.status === 'pending' && sug.kind === 'goal_approval',
+      )
+      if (!hasPendingGoalSug) {
+        const goalSug = normalizeSuggestion({
+          kind: 'goal_approval',
+          fromAgent: '🎯 目标督导参谋',
+          title: '🎯 目标已达成，请示批准结项',
+          reason: cleanMultiline(parsed.goalSummary || '主对话已完成当前设定总目标，请批示是否结束督导。', 220),
+          evidence: cleanMultiline(parsed.goalEvidence || '', 480),
+          target: 'board',
+          targetLabel: '目标结项',
+          mode: 'silent',
+          draftText: cleanMultiline(parsed.goalSummary || '批准结项并退出 Goal 督导模式', 400),
+        })
+        if (goalSug) ws.suggestions.push(goalSug)
+      }
+    }
 
     for (const sug of rawSuggestions) {
       if (sug.kind === 'bound') {
         const colList = Array.isArray(bounds[sug.boundField]) ? bounds[sug.boundField] : []
         if (colList.some(x => String(x).trim() === sug.draftText)) continue
       }
-      // Prime Minister Rule: Boundary changes NEVER auto-execute without explicit user approval!
       if (autoPilot && sug.kind === 'relay' && sug.draftText) {
         sug.status = 'applied'
         autoRelays.push(sug)
@@ -3169,14 +4158,90 @@ async function runTurnReview(deps, { agent, sessionId, turn }) {
         if (!dup) {
           const pending = ws.suggestions.filter(item => item.status === 'pending')
           if (pending.length >= 5) {
-            const victim = pending.find(item => item.kind !== 'bound') || pending[0]
+            const victim = pending.find(item => item.kind !== 'bound' && item.kind !== 'goal_approval') || pending[0]
             victim.status = 'dismissed'
           }
           ws.suggestions.push(sug)
         }
       }
     }
+
+    // Intervention Supervisor follow-up + Circuit Breaker
+    const candidateIntervention = parsed.interventionText
+      || (parsed.nextActionForLead && (parsed.shouldIntervene || parsed.goalStatus === 'in_progress') ? parsed.nextActionForLead : '')
+    if (!isGoalAchieved && tactical.intervention && (parsed.shouldIntervene || parsed.goalStatus === 'in_progress') && candidateIntervention) {
+      const assistantTail = (digest.text.split('Assistant:').pop() || digest.text)
+      const sig = crypto
+        .createHash('sha1')
+        .update(JSON.stringify({
+          objective: (board && board.objective) || '',
+          goalStatus: parsed.goalStatus || '',
+          donePlanCount: planSteps.filter(p => p.done).length,
+          doneTaskCount: tasks.filter(t => t.status === 'done').length,
+          blockedTaskCount: tasks.filter(t => t.status === 'blocked').length,
+          assistantTail: clamp(assistantTail, 140),
+        }))
+        .digest('hex')
+        .slice(0, 12)
+
+      const nextUnchanged = ws.runtimeGuard.lastDigestHash === sig
+        ? (ws.runtimeGuard.unchangedCount + 1)
+        : 1
+      const nextTurns = ws.runtimeGuard.interventionTurns + 1
+      const maxTurns = tactical.maxInterventionTurns || 10
+
+      if (nextTurns > maxTurns || nextUnchanged >= 3) {
+        circuitTripped = true
+        circuitReason = nextTurns > maxTurns
+          ? `接管督导连续介入已达上限 (${maxTurns} 轮)，触发安全熔断，已自动退回人工监督。`
+          : '连续 3 轮检测进展无实质变化，触发死循环熔断，已自动关闭接管督导并交还用户控制。'
+        if (!ws.config || typeof ws.config !== 'object') ws.config = resolveWorkspaceConfig(s, rootId)
+        ws.config.tacticalModes = {
+          ...normalizeTacticalModes(ws.config.tacticalModes),
+          intervention: false,
+        }
+        s.config.tacticalModes = {
+          ...normalizeTacticalModes(s.config.tacticalModes),
+          intervention: false,
+        }
+        ws.runtimeGuard.circuitBroken = true
+        ws.runtimeGuard.circuitReason = circuitReason
+        ws.runtimeGuard.interventionTurns = 0
+        ws.runtimeGuard.unchangedCount = 0
+        ws.chat.push({
+          id: nextId('chat'),
+          role: 'chief',
+          text: `- 【⚠️ 安全熔断】${circuitReason}`,
+          actions: ['熔断停机'],
+          at: Date.now(),
+        })
+        if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+      } else {
+        ws.runtimeGuard.lastDigestHash = sig
+        ws.runtimeGuard.unchangedCount = nextUnchanged
+        ws.runtimeGuard.interventionTurns = nextTurns
+        ws.runtimeGuard.circuitBroken = false
+        ws.runtimeGuard.circuitReason = ''
+        interventionMessage = cleanMultiline(candidateIntervention, tactical.conciseBrief ? 420 : 1200)
+      }
+    }
   })
+
+  if (interventionMessage) {
+    const tags = [
+      tactical.strictVerify ? '严格校验实测' : '',
+      tactical.redlineSentinel ? '红线哨兵巡检' : '',
+      tactical.conciseBrief ? '精炼要点' : '',
+    ].filter(Boolean).join(' · ')
+    await deliverCrossMessage(deps, {
+      fromSession: rootId,
+      fromLabel: `DSH 参谋长 (接管督导${tags ? '·' + tags : ''})`,
+      target: 'lead',
+      subject: '参谋长自动督导推进',
+      text: interventionMessage,
+      mode: 'followup',
+    })
+  }
 
   for (const sug of autoRelays) {
     await deliverCrossMessage(deps, {
@@ -3188,7 +4253,17 @@ async function runTurnReview(deps, { agent, sessionId, turn }) {
       mode: sug.mode || 'silent',
     })
   }
-  // Never chain an automatic LLM summary right after turn review — human controls summary rhythm!
+
+  return {
+    ok: true,
+    executedOps,
+    isStalePlan,
+    goalAchieved: isGoalAchieved,
+    goalProposalCreated,
+    intervened: Boolean(interventionMessage),
+    circuitTripped,
+    circuitReason,
+  }
 }
 
 export async function handleSuggestionDecision(deps, { sessionId, suggestionId, decision, editedText, boundField, pinGlobal }) {
@@ -3266,6 +4341,33 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
     }
   }
 
+  if (decision === 'approve' && found.kind === 'goal_approval') {
+    const res = deps.runAction
+      ? deps.runAction({ action: 'goal.approve', session: rootId, by: 'user' })
+      : { ok: false, error: 'runAction unavailable' }
+    return {
+      ok: Boolean(res && res.ok),
+      goalApproved: true,
+      view: await getChiefView(deps, rootId, { autoSummarize: false }),
+    }
+  }
+
+  if (decision !== 'approve' && found.kind === 'goal_approval') {
+    const res = deps.runAction
+      ? deps.runAction({
+          action: 'goal.reject',
+          reason: editedText || '暂不结项，继续推进完善',
+          session: rootId,
+          by: 'user',
+        })
+      : { ok: false }
+    return {
+      ok: Boolean(res && res.ok),
+      goalRejected: true,
+      view: await getChiefView(deps, rootId, { autoSummarize: false }),
+    }
+  }
+
   if (decision === 'approve' && found.kind === 'relay') {
     const body = editedText ? cleanMultiline(editedText, 1200) : found.draftText
     const delivery = await deliverCrossMessage(deps, {
@@ -3290,22 +4392,89 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
 }
 
 export function updateChiefConfig(patch) {
+  const safePatch = patch && typeof patch === 'object' ? patch : {}
+  const sid = String(safePatch.sessionId || safePatch.session || '').trim()
   return mutateChiefState((state) => {
-    if (typeof patch.modelRef === 'string') state.config.modelRef = patch.modelRef.trim()
-    if (typeof patch.paceMode === 'string' && ['manual', 'smart', 'auto'].includes(patch.paceMode)) {
-      state.config.paceMode = patch.paceMode
-      state.config.autoPilot = patch.paceMode === 'auto'
-      state.config.autoReview = patch.paceMode !== 'manual'
-    } else if (typeof patch.autoPilot === 'boolean') {
-      state.config.paceMode = patch.autoPilot ? 'auto' : 'manual'
-      state.config.autoPilot = patch.autoPilot
-      state.config.autoReview = patch.autoPilot
+    const ws = sid ? ensureWorkspace(state, sid) : null
+    const effBefore = resolveWorkspaceConfig(state, sid)
+    const prevTactical = normalizeTacticalModes(effBefore.tacticalModes)
+    if (safePatch.emergencyStopIntervention === true) {
+      if (ws) {
+        if (!ws.config || typeof ws.config !== 'object') ws.config = { ...effBefore }
+        ws.config.tacticalModes = { ...normalizeTacticalModes(ws.config.tacticalModes), intervention: false }
+        ws.runtimeGuard.interventionTurns = 0
+        ws.runtimeGuard.unchangedCount = 0
+        ws.runtimeGuard.circuitBroken = false
+        ws.runtimeGuard.circuitReason = ''
+      }
+      state.config.tacticalModes = { ...normalizeTacticalModes(state.config.tacticalModes), intervention: false }
+      const stoppedCfg = resolveWorkspaceConfig(state, sid)
+      return {
+        ok: true,
+        emergencyStopped: true,
+        config: { ...stoppedCfg, tacticalModes: { ...stoppedCfg.tacticalModes } },
+      }
     }
-    if (typeof patch.autoReview === 'boolean' && typeof patch.paceMode !== 'string') {
-      state.config.autoReview = patch.autoReview
-      if (!patch.autoReview) state.config.paceMode = 'manual'
+
+    const incomingTactical = safePatch.tacticalModes && typeof safePatch.tacticalModes === 'object'
+      ? safePatch.tacticalModes
+      : null
+    if (incomingTactical && incomingTactical.intervention === true && !prevTactical.intervention) {
+      if (safePatch.confirmedInterventionRisk !== true) {
+        return {
+          ok: false,
+          error: '开启「接管督导模式」需先确认双项风险免责声明（confirmedInterventionRisk: true）',
+        }
+      }
+      if (ws) {
+        ws.runtimeGuard.interventionTurns = 0
+        ws.runtimeGuard.unchangedCount = 0
+        ws.runtimeGuard.circuitBroken = false
+        ws.runtimeGuard.circuitReason = ''
+      }
     }
-    return { ok: true, config: { ...state.config } }
+
+    const applyPatchTo = (targetCfg, allowIntervention) => {
+      if (typeof safePatch.modelRef === 'string') targetCfg.modelRef = safePatch.modelRef.trim()
+      if (typeof safePatch.paceMode === 'string' && ['manual', 'smart', 'auto'].includes(safePatch.paceMode)) {
+        targetCfg.paceMode = safePatch.paceMode
+        targetCfg.autoPilot = safePatch.paceMode === 'auto'
+        targetCfg.autoReview = safePatch.paceMode !== 'manual'
+      } else if (typeof safePatch.autoPilot === 'boolean') {
+        targetCfg.paceMode = safePatch.autoPilot ? 'auto' : 'manual'
+        targetCfg.autoPilot = safePatch.autoPilot
+        targetCfg.autoReview = safePatch.autoPilot
+      }
+      if (typeof safePatch.autoReview === 'boolean' && typeof safePatch.paceMode !== 'string') {
+        targetCfg.autoReview = safePatch.autoReview
+        if (!safePatch.autoReview) targetCfg.paceMode = 'manual'
+      }
+      if (incomingTactical) {
+        const merged = normalizeTacticalModes({
+          ...normalizeTacticalModes(targetCfg.tacticalModes),
+          ...incomingTactical,
+        })
+        if (!allowIntervention) merged.intervention = false
+        targetCfg.tacticalModes = merged
+      } else if (!allowIntervention && targetCfg.tacticalModes) {
+        targetCfg.tacticalModes = { ...normalizeTacticalModes(targetCfg.tacticalModes), intervention: false }
+      }
+    }
+
+    if (ws) {
+      if (!ws.config || typeof ws.config !== 'object') ws.config = { ...effBefore }
+      applyPatchTo(ws.config, true)
+      // Keep global non-dangerous defaults aligned while NEVER leaking intervention globally!
+      applyPatchTo(state.config, false)
+    } else {
+      applyPatchTo(state.config, true)
+    }
+
+    const finalCfg = resolveWorkspaceConfig(state, sid)
+    return {
+      ok: true,
+      config: { ...finalCfg, tacticalModes: { ...finalCfg.tacticalModes } },
+    }
   })
 }
 

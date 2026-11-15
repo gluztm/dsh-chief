@@ -1,6 +1,6 @@
 {
   "name": "dsh-chief",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "icon": "icon.svg",
   "type": "module",
   "description": "DSH 参谋长 (Chief of Staff for DeepSeek Harness) — SuperAgent-inspired multi-agent command cockpit, full-spread subagent pyramid DAG, cross-session relay, /goal step Q&A, 4-tier cold archive vault, and pinned boundary governance.",
@@ -34,7 +34,7 @@
   ],
   "engines": {
     "node": ">=22.13.0",
-    "dsh": ">=0.2.0"
+    "dsh": ">=0.2.2-rc.2"
   },
   "main": "./index.js",
   "exports": {

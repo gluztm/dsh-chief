@@ -169,6 +169,24 @@ window.__ModuleLoader__.load({
       chiefMeta: {
         paceMode: 'manual',
         autoPilot: false,
+        tacticalModes: {
+          intervention: false,
+          maxInterventionTurns: 5,
+          strictVerify: true,
+          autoCompact: false,
+          compactThresholdPct: 80,
+          redlineSentinel: false,
+          conciseBrief: true,
+        },
+        runtimeGuard: {
+          consecutiveInterventionTurns: 0,
+          lastInterventionSignature: '',
+          circuitBroken: false,
+          circuitReason: '',
+          lastCompactedSeq: 0,
+          lastCompactedAt: 0,
+        },
+        flippedCount: 0,
         modelRef: '',
         followModelRef: '',
         resolvedModelRef: '',
@@ -177,6 +195,8 @@ window.__ModuleLoader__.load({
         mailboxCount: 0,
         linkedPeersCount: 0,
       },
+      hostCompat: null,
+      hostCompatDismissed: false,
       secView: null,
       secBusy: false,
       secRegenerating: false,
@@ -189,16 +209,28 @@ window.__ModuleLoader__.load({
       secLatestReply: null,
       secModelMenuOpen: false,
       secPaceMenuOpen: false,
+      tacticalMenuOpen: false,
+      interventionModalOpen: false,
+      interventionAgreed: false,
+      precipitateModal: null,
+      deployArchivePolicy: 'none',
+      deployDrawer: '',
+      planResetPrompt: null,
       secModelsCatalog: null,
       secNewFactText: '',
       secNewFactCat: 'discipline',
       secShowRawTurns: false,
       // Engineering Memory Filing Cabinet (档案柜 · Cold Lazy-Loaded Vault)
       archiveMeta: {
+        projectKey: '',
+        activeCabinetId: 'cab-main',
+        cabinetCount: 1,
         totalCount: 0,
         folderCount: 0,
         takenOutCount: 0,
         unorganizedCount: 0,
+        precipitatedCount: 0,
+        flippedCount: 0,
       },
       archiveLoaded: false,
       archiveLoading: false,
@@ -206,8 +238,17 @@ window.__ModuleLoader__.load({
       archiveOrganizeOpen: false,
       archiveOrganizeScope: 'unorganized',
       archiveOrganizePrompt: '',
+      archiveHarvesting: false,
+      archivePrecipitating: false,
+      archiveProjectKey: '',
+      archiveCabinetId: 'cab-main',
+      archiveCabinets: [],
       archiveFolders: [],
       archiveItems: [],
+      archivePrecipitated: [],
+      flippedPrecipitatedIds: [],
+      archiveNewCabinetOpen: false,
+      archiveNewCabinetName: '',
       archiveDetails: {},
       archiveDetailLoading: {},
       archiveOpenFolders: {},
@@ -641,7 +682,7 @@ window.__ModuleLoader__.load({
       const query = new URLSearchParams({ parent, mode })
       const url = 'dsh-resource://subagentchat/session/' + encodeURIComponent(agent.id) + '?' + query.toString()
       try {
-        face.openResource(url, { revealIfOpened: true, preferSeparatePane: true })
+        face.openResource(url, { revealIfOpened: true, preferNewPane: true })
         return true
       } catch {
         try {
@@ -792,12 +833,24 @@ window.__ModuleLoader__.load({
         || (store.chiefMeta && store.chiefMeta.followModelRef)
         || ''
       const resolvedRef = (modelsObj && modelsObj.resolvedRef) || pinnedRef || followRef || ''
+      const prevMeta = store.chiefMeta || {}
+      const cfg = (viewData && viewData.config && typeof viewData.config === 'object') ? viewData.config : {}
       patch({
         secView: viewData,
         ...(viewData.models ? { secModelsCatalog: viewData.models } : {}),
         chiefMeta: {
-          paceMode: (viewData.config && viewData.config.paceMode) || 'manual',
-          autoPilot: Boolean(viewData.config && viewData.config.autoPilot),
+          ...prevMeta,
+          paceMode: cfg.paceMode || 'manual',
+          autoPilot: Boolean(cfg.autoPilot),
+          tacticalModes: cfg.tacticalModes && typeof cfg.tacticalModes === 'object'
+            ? { ...(prevMeta.tacticalModes || {}), ...cfg.tacticalModes }
+            : (prevMeta.tacticalModes || {}),
+          runtimeGuard: viewData.runtimeGuard && typeof viewData.runtimeGuard === 'object'
+            ? viewData.runtimeGuard
+            : (prevMeta.runtimeGuard || {}),
+          flippedCount: Array.isArray(viewData.flippedPrecipitatedIds)
+            ? viewData.flippedPrecipitatedIds.length
+            : (prevMeta.flippedCount || 0),
           modelRef: pinnedRef,
           followModelRef: followRef,
           resolvedModelRef: resolvedRef,
@@ -828,6 +881,9 @@ window.__ModuleLoader__.load({
       if (value && value.agentIdentity) patch({ agentIdentity: value.agentIdentity })
       if (value && value.boundaries) patch({ boundaries: value.boundaries })
       if (value && value.chiefMeta) patch({ chiefMeta: { ...store.chiefMeta, ...value.chiefMeta } })
+      if (value && (value.hostCompat || (value.chiefMeta && value.chiefMeta.hostCompat))) {
+        patch({ hostCompat: value.hostCompat || value.chiefMeta.hostCompat })
+      }
       if (value && value.archiveMeta) patch({ archiveMeta: { ...store.archiveMeta, ...value.archiveMeta } })
       if (value && value.archives && Array.isArray(value.archives.items)) applyArchiveHeaders(value.archives)
       if (value && value.view) applySecView(value.view)
@@ -885,7 +941,15 @@ window.__ModuleLoader__.load({
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ ...nextCfg, session: store.sessionId }),
         })
-        if (typeof nextCfg.paceMode === 'string') {
+        if (nextCfg.emergencyStopIntervention) {
+          patch({ notice: '⏹ 已紧急关停「主动强介入」，自动驱动与巡检续跑已停机' })
+        } else if (nextCfg.tacticalModes && typeof nextCfg.tacticalModes === 'object') {
+          if (typeof nextCfg.tacticalModes.intervention === 'boolean' && Object.keys(nextCfg.tacticalModes).length === 1) {
+            patch({ notice: nextCfg.tacticalModes.intervention ? '⚡ 已开启「主动强介入」模式' : '已关闭「主动强介入」模式' })
+          } else {
+            patch({ notice: '✦ 已更新参谋长战术驾驶舱开关' })
+          }
+        } else if (typeof nextCfg.paceMode === 'string') {
           const paceNotice = nextCfg.paceMode === 'auto'
             ? '已切为「全自动托管」：节流巡检、跨窗递话与阶段摘要（5分钟冷却）'
             : nextCfg.paceMode === 'smart'
@@ -1193,6 +1257,13 @@ window.__ModuleLoader__.load({
       if (!payload || typeof payload !== 'object') return
       const folders = Array.isArray(payload.folders) ? payload.folders : store.archiveFolders
       const items = Array.isArray(payload.items) ? payload.items : store.archiveItems
+      const cabinets = Array.isArray(payload.cabinets) ? payload.cabinets : store.archiveCabinets
+      const activeCabinetId = payload.activeCabinetId || store.archiveCabinetId || 'cab-main'
+      const projectKey = payload.projectKey || store.archiveProjectKey || ''
+      const precipitated = Array.isArray(payload.precipitated) ? payload.precipitated : store.archivePrecipitated
+      const flippedPrecipitatedIds = Array.isArray(payload.flippedPrecipitatedIds)
+        ? payload.flippedPrecipitatedIds
+        : store.flippedPrecipitatedIds
       const openFolders = { ...(store.archiveOpenFolders || {}) }
       // On very first open of the Filing Cabinet, gently open the first non-empty drawer so the user sees how paperclipped files sit inside
       if (!store.archiveLoaded && Object.keys(openFolders).length === 0) {
@@ -1232,21 +1303,28 @@ window.__ModuleLoader__.load({
       }
       patch({
         archiveLoaded: true,
+        archiveProjectKey: projectKey,
+        archiveCabinetId: activeCabinetId,
+        archiveCabinets: cabinets,
         archiveFolders: folders,
         archiveItems: items,
+        archivePrecipitated: precipitated,
+        flippedPrecipitatedIds,
         archiveOpenFolders: openFolders,
         archiveDetails: nextDetails,
       })
     }
 
     /** Tier-1 Lazy Load: called ONLY when the user opens or refreshes the `档案` tab */
-    async function loadArchives(force = false) {
+    async function loadArchives(force = false, cabinetIdOverride = '') {
       if (store.archiveLoading) return null
-      if (store.archiveLoaded && !force) return null
+      if (store.archiveLoaded && !force && !cabinetIdOverride) return null
       patch({ archiveLoading: true, error: '' })
       try {
         const qs = new URLSearchParams()
         if (store.sessionId) qs.set('session', store.sessionId)
+        const cid = cabinetIdOverride || store.archiveCabinetId || ''
+        if (cid) qs.set('cabinetId', cid)
         const value = await call('archives' + (qs.toString() ? '?' + qs.toString() : ''))
         if (value && value.ok) {
           applyArchiveHeaders(value)
@@ -1266,7 +1344,7 @@ window.__ModuleLoader__.load({
     }
 
     /** Tier-2 Lazy Load: called ONLY when the user clicks a paperclipped dossier card to unfold its points */
-    async function loadArchiveDetail(archiveId, force = false) {
+    async function loadArchiveDetail(archiveId, force = false, opts = {}) {
       const id = String(archiveId || '').trim()
       if (!id) return null
       if (!force && store.archiveDetails && store.archiveDetails[id]) {
@@ -1277,6 +1355,8 @@ window.__ModuleLoader__.load({
       try {
         const qs = new URLSearchParams({ id })
         if (store.sessionId) qs.set('session', store.sessionId)
+        if (store.archiveCabinetId) qs.set('cabinetId', store.archiveCabinetId)
+        if (opts && opts.precipitated) qs.set('precipitated', '1')
         const value = await call('archives/detail?' + qs.toString())
         if (value && value.ok && value.item) {
           patch({
@@ -1300,12 +1380,16 @@ window.__ModuleLoader__.load({
 
     async function mutateArchiveApi(payload, toastLabel = '') {
       try {
+        const cabinetId = (payload && payload.cabinetId) || store.archiveCabinetId || 'cab-main'
         const value = await call('archives', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ session: store.sessionId, ...payload }),
+          body: JSON.stringify({ session: store.sessionId, cabinetId, ...payload }),
         })
         if (value && value.ok) {
+          if (payload.op === 'switchCabinet' || payload.op === 'createCabinet' || payload.op === 'deleteCabinet') {
+            patch({ archiveDetails: {}, archiveOpenFolders: {}, archiveOpenFiles: {} })
+          }
           if (value.item && value.item.id) {
             patch({
               archiveDetails: {
@@ -1340,6 +1424,7 @@ window.__ModuleLoader__.load({
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
             session: store.sessionId,
+            cabinetId: opts.cabinetId || store.archiveCabinetId || 'cab-main',
             ids: Array.isArray(opts.ids) ? opts.ids : [],
             folder: opts.folder || '',
             scope: opts.scope || store.archiveOrganizeScope || 'unorganized',
@@ -1370,6 +1455,86 @@ window.__ModuleLoader__.load({
       } finally {
         patch({ archiveOrganizing: false })
       }
+    }
+
+    async function harvestArchivesApi(focusHint = '') {
+      if (store.archiveHarvesting) return null
+      patch({ archiveHarvesting: true, error: '' })
+      try {
+        const value = await call('archives/harvest', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId,
+            cabinetId: store.archiveCabinetId || 'cab-main',
+            focusHint,
+          }),
+        })
+        if (value && value.ok) {
+          patch({
+            notice: value.count > 0
+              ? `📥 已抢救 ${value.count} 份本轮对话工程细节入柜（防压缩失忆）`
+              : '📥 当前对话暂无新增重要工程细节',
+          })
+          void loadArchives(true)
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ archiveHarvesting: false })
+      }
+    }
+
+    async function precipitateArchivesApi(opts = {}) {
+      if (store.archivePrecipitating) return null
+      patch({ archivePrecipitating: true, error: '' })
+      try {
+        const value = await call('archives/precipitate', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId,
+            op: opts.op || 'cabinet',
+            cabinetId: opts.cabinetId || store.archiveCabinetId || 'cab-main',
+            folder: opts.folder || '',
+            clearSource: Boolean(opts.clearSource),
+          }),
+        })
+        if (value && value.ok) {
+          patch({
+            precipitateModal: null,
+            notice: value.count > 0
+              ? `⏬ 已提炼 ${value.count} 条可复用经验封入冷库（默认 0 Token 隔离）`
+              : '⏬ 当前卷宗暂无更多可沉淀经验',
+          })
+          void loadArchives(true)
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ archivePrecipitating: false })
+      }
+    }
+
+    async function approveGoalApi() {
+      const value = await act({ action: 'goal.approve' })
+      if (value && value.ok) patch({ notice: '✅ 已批准目标结项并切换回标准计划模式' })
+      return value
+    }
+
+    async function rejectGoalApi(reason) {
+      const text = String(reason || '').trim()
+      if (!text) {
+        patch({ error: '请简短说明驳回原因与补充要求' })
+        return null
+      }
+      const value = await act({ action: 'goal.reject', reason: text })
+      if (value && value.ok) patch({ notice: '↩ 已驳回结项，目标督导将继续推进' })
+      return value
     }
 
     async function deliverArchiveToChat(headerOrDetail, point = null) {
@@ -1514,21 +1679,30 @@ window.__ModuleLoader__.load({
       }
     }
 
-    async function transfer(target) {
+    async function transfer(target, opts = {}) {
       patch({ transferNote: '投递中…', error: '' })
       try {
         const value = await call('transfer', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ target, session: store.sessionId, by: 'user' }),
+          body: JSON.stringify({
+            target,
+            session: store.sessionId,
+            by: 'user',
+            deployChief: opts.deployChief !== false,
+            archiveTransferPolicy: opts.archiveTransferPolicy || store.deployArchivePolicy || 'none',
+            ...(opts.archiveDrawer || store.deployDrawer ? { archiveDrawer: opts.archiveDrawer || store.deployDrawer } : {}),
+            ...(opts.toCabinetId ? { toCabinetId: opts.toCabinetId } : {}),
+            ...(opts.customNote ? { customNote: opts.customNote } : {}),
+          }),
         })
         const created = value && value.mode === 'created' && value.sessionId ? String(value.sessionId) : ''
-        let note = '已放入待领取队列'
-        if (value && value.mode === 'injected') note = '已投递至目标会话'
+        let note = '已放入待领取队列（含参谋预部署）'
+        if (value && value.mode === 'injected') note = '已投递至目标会话并部署参谋'
         if (created) {
           patch({ transferred: true })
           setTimeout(() => patch({ transferred: false }), 2000)
-          note = '已创建新会话 ' + shortSession(created)
+          note = '已创建新会话 ' + shortSession(created) + ' 并部署参谋'
           if (navigation && typeof navigation.openSession === 'function') {
             try {
               navigation.openSession(created)
@@ -1541,8 +1715,10 @@ window.__ModuleLoader__.load({
           handoffText: value && value.text ? value.text : store.handoffText,
         })
         void loadTargets()
+        return value
       } catch (error) {
         patch({ transferNote: '失败：' + String((error && error.message) || error) })
+        return null
       }
     }
 
@@ -3550,6 +3726,213 @@ window.__ModuleLoader__.load({
         border-color: rgba(10, 132, 255, 0.42);
         background: rgba(10, 132, 255, 0.11);
         color: var(--dnb-accent);
+      }
+
+      /* vNext Micro-Flat Components: Tactical Cockpit, Scoped Modals, Goal Approval & Cold Vault */
+      .dnb-sec-bar {
+        position: relative;
+      }
+      .dnb-modal-backdrop {
+        position: absolute;
+        inset: 0;
+        z-index: 80;
+        background: rgba(0, 0, 0, 0.46);
+        backdrop-filter: blur(4px);
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        padding: 12px;
+      }
+      .dnb-modal-card {
+        width: 100%;
+        max-height: 92%;
+        overflow-y: auto;
+        border-radius: 12px;
+        background: var(--dnb-elevated);
+        border: 1px solid var(--dnb-border-strong);
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.28);
+        padding: 14px;
+        display: flex;
+        flex-direction: column;
+        gap: 10px;
+      }
+      .dnb-plus-btn {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: 1px solid var(--dnb-border-strong);
+        background: var(--dnb-card);
+        color: var(--dnb-text-2);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        cursor: pointer;
+        font-size: 15px;
+        font-weight: 600;
+        line-height: 1;
+        transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
+      }
+      .dnb-plus-btn:hover {
+        border-color: var(--dnb-accent);
+        color: var(--dnb-text);
+      }
+      .dnb-plus-btn[data-active="1"] {
+        border-color: rgba(10, 132, 255, 0.48);
+        background: rgba(10, 132, 255, 0.14);
+        color: var(--dnb-accent);
+      }
+      .dnb-plus-btn[data-danger="1"] {
+        border-color: rgba(245, 158, 11, 0.55);
+        background: rgba(245, 158, 11, 0.16);
+        color: #f59e0b;
+      }
+      .dnb-tactical-pop {
+        position: absolute;
+        left: 12px;
+        right: calc(12px + var(--dnb-safe-right, 0px));
+        bottom: calc(100% + 6px);
+        z-index: 65;
+        border-radius: 12px;
+        background: var(--dnb-popover);
+        border: 1px solid var(--dnb-border-strong);
+        box-shadow: 0 10px 28px rgba(0, 0, 0, 0.22);
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        max-height: 360px;
+        overflow-y: auto;
+      }
+      .dnb-tactical-row {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 5px 0;
+        border-bottom: 1px solid var(--dnb-border);
+      }
+      .dnb-tactical-row:last-of-type {
+        border-bottom: none;
+      }
+      .dnb-tactical-strip {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex-wrap: wrap;
+        padding-bottom: 6px;
+      }
+      .dnb-tac-chip {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 22px;
+        padding: 0 8px;
+        border-radius: 99px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-card);
+        color: var(--dnb-text-2);
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .dnb-tac-chip[data-tone="amber"] {
+        border-color: rgba(245, 158, 11, 0.45);
+        background: rgba(245, 158, 11, 0.12);
+        color: #f59e0b;
+      }
+      .dnb-tac-chip[data-tone="accent"] {
+        border-color: rgba(10, 132, 255, 0.42);
+        background: rgba(10, 132, 255, 0.11);
+        color: var(--dnb-accent);
+      }
+      .dnb-stop-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 22px;
+        padding: 0 9px;
+        border-radius: 99px;
+        border: 1px solid rgba(255, 69, 58, 0.55);
+        background: rgba(255, 69, 58, 0.16);
+        color: #ff453a;
+        font-size: 11px;
+        font-weight: 600;
+        cursor: pointer;
+        margin-left: auto;
+      }
+      .dnb-stop-btn:hover {
+        background: rgba(255, 69, 58, 0.24);
+      }
+      .dnb-stepper {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        border: 1px solid var(--dnb-border);
+        border-radius: 7px;
+        background: var(--dnb-card);
+        padding: 1px 3px;
+      }
+      .dnb-stepper button {
+        width: 18px;
+        height: 18px;
+        border: none;
+        background: transparent;
+        color: var(--dnb-text-2);
+        cursor: pointer;
+        font-size: 12px;
+        border-radius: 4px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+      }
+      .dnb-stepper button:hover {
+        background: var(--dnb-fill);
+        color: var(--dnb-text);
+      }
+      .dnb-stepper span {
+        min-width: 26px;
+        text-align: center;
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--dnb-text);
+      }
+      .dnb-disclaimer-box {
+        border-radius: 8px;
+        border: 1px solid rgba(245, 158, 11, 0.36);
+        background: rgba(245, 158, 11, 0.08);
+        padding: 8px 10px;
+        font-size: 11px;
+        line-height: 1.5;
+        color: var(--dnb-text-2);
+      }
+      .dnb-disclaimer-box strong {
+        color: #f59e0b;
+      }
+      .dnb-goal-approval-card {
+        border-radius: 10px;
+        border: 1px solid rgba(48, 209, 88, 0.45);
+        background: rgba(48, 209, 88, 0.08);
+        padding: 10px 12px;
+        margin-bottom: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+      }
+      .dnb-cab-bar {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+        margin-bottom: 8px;
+      }
+      .dnb-precip-box {
+        margin-top: 12px;
+        border-radius: 10px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-card);
+        overflow: hidden;
       }
     `
 
@@ -5906,7 +6289,7 @@ window.__ModuleLoader__.load({
                 ? board.objective
                 : (allTasks.length
                     ? `共 ${allTasks.length} 项任务节点（推进中 ${doingTotal} · 受阻 ${blockedTotal} · 待推进 ${todoTotal} · 已完成 ${doneTotal}）`
-                    : '尚未设定长期目标（可在「规划」页签设定 /goal，或点右上「拆解任务图」）'),
+                    : '尚未设定长期目标（可在「规划」页签设定目标，或点右上「拆解任务图」）'),
             ),
           ),
 
@@ -6808,6 +7191,7 @@ window.__ModuleLoader__.load({
     /* ------------------------------------------------------------- Plan Tab */
 
     function PlanTab({ board }) {
+      const view = store
       const [objective, setObjective] = React.useState(null)
       const [contextMenu, setContextMenu] = React.useState(null)
       const [consultIdx, setConsultIdx] = React.useState(-1)
@@ -6815,42 +7199,78 @@ window.__ModuleLoader__.load({
       const [secAnswers, setSecAnswers] = React.useState({})
       const [secAskingIdx, setSecAskingIdx] = React.useState(-1)
       const [newStepText, setNewStepText] = React.useState('')
+      const [rejectingGoal, setRejectingGoal] = React.useState(false)
+      const [rejectReason, setRejectReason] = React.useState('')
+      const [showHandoffPreview, setShowHandoffPreview] = React.useState(false)
+
+      React.useEffect(() => {
+        void loadTargets()
+      }, [view.sessionId])
 
       const current = objective === null ? ((board && board.objective) || '') : objective
+      const savedObj = String((board && board.objective) || '').trim()
       const steps = (board && Array.isArray(board.plan)) ? board.plan : []
       const doneCount = steps.filter(s => s && s.done).length
       const isGoalMode = (board && board.mode) === 'goal'
+      const goalApproval = (board && board.goalApproval) || null
+
+      const commitObjective = async (setGoal = false, resetStalePlan = false) => {
+        const nextVal = String(current || '').trim()
+        setObjective(null)
+        patch({ planResetPrompt: null })
+        const res = await act({
+          action: 'objective.set',
+          objective: nextVal,
+          ...(setGoal ? { setGoalMode: true } : {}),
+          ...(resetStalePlan ? { resetStalePlan: true } : {}),
+        })
+        if (res && res.ok) {
+          patch({ notice: setGoal ? '🎯 已设为长期目标并开启督导' : '核心目标已保存' })
+        }
+      }
 
       const saveObjective = () => {
         if (objective === null) return
-        const nextVal = objective
-        setObjective(null)
-        void act({ action: 'plan.set', objective: nextVal })
-        patch({ notice: '长期目标已保存' })
+        const nextVal = String(objective || '').trim()
+        if (nextVal !== savedObj && steps.length > 0) {
+          patch({ planResetPrompt: { text: nextVal, setGoal: false } })
+          setObjective(null)
+          return
+        }
+        void commitObjective(false, false)
       }
 
       const toggleGoalMode = () => {
-        const nextMode = isGoalMode ? 'plan' : 'goal'
-        void act({ action: 'mode.set', mode: nextMode })
-        patch({
-          notice: nextMode === 'goal'
-            ? '已开启 /goal 持续督导：每轮核验长期目标是否实质推进'
-            : '已切回常规推进模式：按小任务板逐步勾选推进',
-        })
+        const cleanCurrent = String(current || '').trim()
+        if (!isGoalMode) {
+          if (!cleanCurrent) {
+            patch({ error: '请先输入本阶段核心目标，再开启目标督导' })
+            return
+          }
+          if (cleanCurrent !== savedObj && steps.length > 0) {
+            patch({ planResetPrompt: { text: cleanCurrent, setGoal: true } })
+            setObjective(null)
+            return
+          }
+          void commitObjective(true, false)
+          return
+        }
+        void act({ action: 'mode.set', mode: 'plan' })
+        patch({ notice: '已退出目标督导，切回标准计划推进模式' })
       }
 
       const keepIds = list => list.map(s => ({ id: s.id, text: s.text, done: s.done }))
       const pushSteps = next => void act({ action: 'plan.set', steps: next })
 
       const buildExplainPrompt = (stepText, idx) => {
-        const goalCtx = (current || '').trim() ? `（当前长期目标：${String(current).trim().slice(0, 90)}）` : ''
+        const goalCtx = (current || '').trim() ? `（当前核心目标：${String(current).trim().slice(0, 90)}）` : ''
         return `请用通俗易懂的大白话给我解释一下小任务板第 ${idx + 1} 步「${String(stepText || '').slice(0, 80)}」${goalCtx}：\n1. 这条具体是什么意思？\n2. 为什么需要有这个步骤（它解决什么问题、不做会怎样）？`
       }
 
       const askStepViaChief = async (idx, stepText, customQuestion = '') => {
         setSecAskingIdx(idx)
         try {
-          const goalCtx = (current || '').trim() ? `当前长期目标：「${String(current).trim().slice(0, 100)}」。` : ''
+          const goalCtx = (current || '').trim() ? `当前核心目标：「${String(current).trim().slice(0, 100)}」。` : ''
           const q = customQuestion
             ? `${goalCtx}针对小任务板第 ${idx + 1} 步「${String(stepText || '').slice(0, 90)}」，用户咨询：${customQuestion}。请结合当前会话上下文，用通俗简明的分点大白话直接解答（不要派活或改状态）。`
             : `${goalCtx}请结合当前会话上下文，用通俗易懂的分点大白话向用户解释小任务板第 ${idx + 1} 步「${String(stepText || '').slice(0, 90)}」：1) 这句话是什么意思；2) 为什么要有这一步；3) 目前这一步做到了什么程度或结论。`
@@ -6893,7 +7313,7 @@ window.__ModuleLoader__.load({
         { className: 'dnb-view' },
         h(ObjectiveRadarStrip, { board, compact: true }),
 
-        // ==================== Zone 1: Long-Term /goal Objective Box ====================
+        // ==================== Zone 1: Long-Term Objective & Goal Supervision Box ====================
         h(
           'div',
           {
@@ -6903,18 +7323,19 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
-            h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, '长期目标'),
-            h('span', {
-              style: {
-                padding: '1px 6px',
-                borderRadius: 6,
-                fontSize: 10.5,
-                fontFamily: 'ui-monospace, SFMono-Regular, Consolas, monospace',
-                fontWeight: 600,
-                background: isGoalMode ? 'rgba(245, 158, 11, 0.16)' : 'rgba(10, 132, 255, 0.12)',
-                color: isGoalMode ? '#fbbf24' : 'var(--dnb-accent)',
-              },
-            }, '/goal'),
+            h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, '核心目标'),
+            isGoalMode
+              ? h('span', {
+                  style: {
+                    padding: '1px 7px',
+                    borderRadius: 99,
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    background: 'rgba(245, 158, 11, 0.16)',
+                    color: '#fbbf24',
+                  },
+                }, '🎯 目标督导中')
+              : null,
             board && board.objectiveAt && objective === null
               ? h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, timeLabel(board.objectiveAt))
               : null,
@@ -6928,16 +7349,16 @@ window.__ModuleLoader__.load({
                 height: 23,
                 padding: '0 8px',
                 fontSize: 11,
-                borderColor: isGoalMode ? 'rgba(245, 158, 11, 0.45)' : undefined,
-                background: isGoalMode ? 'rgba(245, 158, 11, 0.14)' : undefined,
-                color: isGoalMode ? '#fbbf24' : 'var(--dnb-text-2)',
-                fontWeight: isGoalMode ? 600 : 400,
+                borderColor: isGoalMode ? 'rgba(245, 158, 11, 0.45)' : 'rgba(10, 132, 255, 0.35)',
+                background: isGoalMode ? 'rgba(245, 158, 11, 0.14)' : 'rgba(10, 132, 255, 0.09)',
+                color: isGoalMode ? '#fbbf24' : 'var(--dnb-accent)',
+                fontWeight: 600,
               },
               title: isGoalMode
-                ? '已开启 /goal 持续目标督导：防空转守卫每轮核验长期目标是否实质推进（点击切回常规模式）'
-                : '点击开启 /goal 持续目标督导：盯紧上方长期总目标，防止模型只改步骤原地空转',
+                ? '退出目标督导并切回标准计划模式'
+                : '设为长期目标并开启督导：达成后需您拍板结项才结束',
               onClick: toggleGoalMode,
-            }, isGoalMode ? '🎯 持续督导中' : '持续督导'),
+            }, isGoalMode ? '退出目标' : '🎯 设为目标'),
             h('button', {
               className: 'dnb-pill dnb-pill-accent',
               style: { height: 23, padding: '0 9px', fontSize: 11 },
@@ -6965,7 +7386,7 @@ window.__ModuleLoader__.load({
           },
           h('textarea', {
             className: 'dnb-bare-area',
-            placeholder: '输入或由 /goal 自动同步长期总目标…',
+            placeholder: '输入当前阶段核心目标，点击右上「🎯 设为目标」即可开启持续督导…',
             value: current,
             onChange: e => setObjective(e.target.value),
             onBlur: saveObjective,
@@ -6993,8 +7414,8 @@ window.__ModuleLoader__.load({
                 },
                 h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
                   isGoalMode
-                    ? '🎯 正在按 /goal 长期目标持续推进督导'
-                    : '与对话 /goal 长期目标实时双向同步'),
+                    ? '🎯 目标督导生效中：达成后将向您请示结项，未获批准不自动退回'
+                    : '标准计划推进模式（点击右上「🎯 设为目标」开启持续督导）'),
                 h(
                   'div',
                   { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
@@ -7012,8 +7433,8 @@ window.__ModuleLoader__.load({
                         title: '让模型用大白话解释这个长期目标的核心问题与解决思路',
                         onClick: () => {
                           void askLeadModel(
-                            `请用通俗易懂的大白话给我解释一下当前长期目标「${String(current).trim().slice(0, 120)}」：核心卡点是什么、整体打算怎么解决？`,
-                            '咨询长期目标',
+                            `请用通俗易懂的大白话给我解释一下当前核心目标「${String(current).trim().slice(0, 120)}」：核心卡点是什么、整体打算怎么解决？`,
+                            '咨询核心目标',
                           )
                         },
                       }, '咨询目标')
@@ -7022,6 +7443,129 @@ window.__ModuleLoader__.load({
               )
             : null,
         ),
+
+        // Inline Stale Plan Reset Prompt when Objective changed and old steps exist
+        view.planResetPrompt
+          ? h(
+              'div',
+              {
+                className: 'dnb-group',
+                style: {
+                  marginTop: 8,
+                  padding: '8px 10px',
+                  borderColor: 'rgba(245, 158, 11, 0.42)',
+                  background: 'rgba(245, 158, 11, 0.07)',
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: 6,
+                },
+              },
+              h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text)', fontWeight: 600 } },
+                `检测到您修改了核心目标，下方小任务板还有 ${steps.length} 条旧步骤：`),
+              h(
+                'div',
+                { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  'data-tone': 'amber',
+                  onClick: () => void commitObjective(Boolean(view.planResetPrompt.setGoal), true),
+                }, '清空旧步骤并重来'),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  'data-tone': 'accent',
+                  onClick: () => void commitObjective(Boolean(view.planResetPrompt.setGoal), false),
+                }, '保留旧步骤并保存'),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  onClick: () => patch({ planResetPrompt: null }),
+                }, '取消'),
+              ),
+            )
+          : null,
+
+        // Pending Goal Completion Human Approval Card
+        (goalApproval && goalApproval.status === 'pending')
+          ? h(
+              'div',
+              { className: 'dnb-goal-approval-card', style: { marginTop: 10 } },
+              h('div', { style: { fontSize: 12, fontWeight: 700, color: '#30d158' } }, '🎯 参谋长判定目标已达标 · 等待您拍板结项'),
+              goalApproval.summary
+                ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text)', lineHeight: 1.5 } }, goalApproval.summary)
+                : null,
+              goalApproval.evidence
+                ? h('div', {
+                    style: {
+                      padding: '6px 8px',
+                      borderRadius: 7,
+                      background: 'var(--dnb-card)',
+                      border: '1px solid var(--dnb-border)',
+                      fontSize: 11,
+                      color: 'var(--dnb-text-2)',
+                      whiteSpace: 'pre-wrap',
+                    },
+                  }, '验证依据：' + goalApproval.evidence)
+                : null,
+              rejectingGoal
+                ? h(
+                    'div',
+                    { style: { display: 'flex', gap: 5, marginTop: 2 } },
+                    h('input', {
+                      className: 'dnb-input',
+                      style: { height: 26, fontSize: 11.5, flex: 1 },
+                      placeholder: '填写驳回原因或补充要求…',
+                      value: rejectReason,
+                      onChange: e => setRejectReason(e.target.value),
+                      onKeyDown: e => {
+                        if (e.key === 'Enter' && rejectReason.trim()) {
+                          void rejectGoalApi(rejectReason).then(() => {
+                            setRejectingGoal(false)
+                            setRejectReason('')
+                          })
+                        }
+                      },
+                    }),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-primary-btn',
+                      style: { height: 26, padding: '0 9px', fontSize: 11 },
+                      disabled: view.busy || !rejectReason.trim(),
+                      onClick: () => void rejectGoalApi(rejectReason).then(() => {
+                        setRejectingGoal(false)
+                        setRejectReason('')
+                      }),
+                    }, '提交驳回'),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-pill',
+                      style: { height: 26, padding: '0 8px', fontSize: 11 },
+                      onClick: () => setRejectingGoal(false),
+                    }, '取消'),
+                  )
+                : h(
+                    'div',
+                    { style: { display: 'flex', gap: 6, marginTop: 2 } },
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-primary-btn',
+                      style: { height: 26, padding: '0 11px', fontSize: 11.5, background: '#30d158', color: '#09180e', fontWeight: 700 },
+                      disabled: view.busy,
+                      onClick: () => void approveGoalApi(),
+                    }, '✅ 批准结项'),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-pill',
+                      style: { height: 26, padding: '0 9px', fontSize: 11.5 },
+                      onClick: () => {
+                        setRejectingGoal(true)
+                        setRejectReason('')
+                      },
+                    }, '↩ 驳回继续'),
+                  ),
+            )
+          : null,
 
         // ==================== Zone 2: Small Task Board (Steps + Consultation) ====================
         h(
@@ -7318,6 +7862,135 @@ window.__ModuleLoader__.load({
                 }),
               ),
             ),
+
+        // ==================== Zone 3: Cross-Session Handoff & One-Click Chief Deployment ====================
+        (() => {
+          const targets = Array.isArray(view.targets) ? view.targets : []
+          const options = [{ id: 'new', label: '新建独立会话并部署参谋' }].concat(
+            targets
+              .filter(item => item && item.id !== view.sessionId)
+              .map(item => ({
+                id: item.id,
+                label: [item.name || shortSession(item.id), timeLabel(item.lastSeen)].filter(Boolean).join(' · '),
+              })),
+          )
+          const target = options.some(i => i.id === view.target) ? view.target : 'new'
+          const policy = view.deployArchivePolicy || 'none'
+          const drawers = Array.isArray(view.archiveFolders) ? view.archiveFolders : []
+          return h(
+            React.Fragment,
+            null,
+            h('div', { className: 'dnb-section-head', style: { marginTop: 14 } },
+              h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, '🚀 跨会话接力 & 一键部署参谋'),
+              h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } }, '冷库保持 0 Token 隔离'),
+            ),
+            h(
+              'div',
+              { className: 'dnb-group', style: { padding: 10, display: 'flex', flexDirection: 'column', gap: 8 } },
+              h(
+                'div',
+                { style: { fontSize: 11, color: 'var(--dnb-text-2)' } },
+                '工作档案跟随策略（同步模型/纪律/战术开关，强介入默认安全置关）：',
+              ),
+              h(
+                'div',
+                { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
+                [
+                  { key: 'none', label: '不带工作档案' },
+                  { key: 'mounted', label: '仅挂桌面备查' },
+                  { key: 'drawer', label: '带整个抽屉' },
+                  { key: 'all', label: '全柜工作档案' },
+                ].map(p =>
+                  h('button', {
+                    key: p.key,
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    'data-tone': policy === p.key ? 'accent' : undefined,
+                    onClick: () => {
+                      patch({ deployArchivePolicy: p.key })
+                      if (p.key === 'drawer' && !view.archiveLoaded) void loadArchives(false)
+                    },
+                  }, p.label),
+                ),
+              ),
+              policy === 'drawer'
+                ? h('select', {
+                    className: 'dnb-input',
+                    style: { height: 28, padding: '0 9px', borderRadius: 9, fontSize: 11.5 },
+                    value: view.deployDrawer || ((drawers[0] && drawers[0].id) || 'inbox'),
+                    onChange: e => patch({ deployDrawer: e.target.value }),
+                  }, drawers.length
+                    ? drawers.map(d => h('option', { key: d.id, value: d.id }, `${d.label} (${d.count || 0} 卷)`))
+                    : [h('option', { key: 'inbox', value: 'inbox' }, '未归类收件箱 (加载抽屉中…)')])
+                : null,
+              h(
+                'div',
+                { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-primary-btn',
+                  style: { flex: 1, height: 30, fontSize: 11.5 },
+                  disabled: Boolean(view.handoffBusy),
+                  onClick: () => void transfer('create', {
+                    deployChief: true,
+                    archiveTransferPolicy: policy,
+                    archiveDrawer: policy === 'drawer' ? (view.deployDrawer || (drawers[0] && drawers[0].id) || 'inbox') : '',
+                  }),
+                }, '🚀 新建窗口并部署参谋长'),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pill',
+                  style: { height: 30, padding: '0 10px', fontSize: 11.5 },
+                  disabled: Boolean(view.handoffBusy),
+                  onClick: async () => {
+                    const text = store.handoffText || (await loadHandoff())
+                    if (text) copyText(text, '自包含交接单已复制')
+                  },
+                }, h(Icon, { name: 'copy', size: 12 }), '复制交接单'),
+              ),
+              h(
+                'div',
+                { style: { display: 'flex', gap: 6 } },
+                h('select', {
+                  className: 'dnb-input',
+                  style: { flex: 1, height: 28, padding: '0 10px', borderRadius: 99, fontSize: 11.5 },
+                  value: target,
+                  onChange: e => patch({ target: e.target.value }),
+                }, options.map(i => h('option', { key: i.id, value: i.id }, i.label))),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pill dnb-pill-accent',
+                  style: { height: 28, padding: '0 10px', fontSize: 11.5 },
+                  disabled: Boolean(view.handoffBusy),
+                  onClick: () => void transfer(target === 'new' ? 'create' : target, {
+                    deployChief: true,
+                    archiveTransferPolicy: policy,
+                    archiveDrawer: policy === 'drawer' ? (view.deployDrawer || (drawers[0] && drawers[0].id) || 'inbox') : '',
+                  }),
+                }, '投递并部署'),
+              ),
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  onClick: () => {
+                    const nextShow = !showHandoffPreview
+                    setShowHandoffPreview(nextShow)
+                    if (nextShow && !view.handoffText) void loadHandoff()
+                  },
+                }, showHandoffPreview ? '收起交接单预览' : '预览自包含交接单'),
+                view.transferNote
+                  ? h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, view.transferNote)
+                  : null,
+              ),
+              showHandoffPreview
+                ? h('pre', { className: 'dnb-pre', style: { maxHeight: 160, marginTop: 2 } }, view.handoffText || '加载中…')
+                : null,
+            ),
+          )
+        })(),
 
         // Upgraded Step Consultation & Action Context Menu
         contextMenu && contextMenu.stepIndex !== undefined
@@ -8402,6 +9075,65 @@ window.__ModuleLoader__.load({
         'div',
         { className: 'dnb-view' },
 
+        // 0. Project Multi-Cabinet Switcher Bar
+        (() => {
+          const cabinets = Array.isArray(view.archiveCabinets) && view.archiveCabinets.length
+            ? view.archiveCabinets
+            : [{ id: view.archiveCabinetId || 'cab-main', name: '默认工程档案柜', count: items.length }]
+          const activeCabId = view.archiveCabinetId || 'cab-main'
+          return h(
+            'div',
+            { className: 'dnb-cab-bar' },
+            h('span', { style: { fontSize: 11.5, fontWeight: 600, color: 'var(--dnb-text-2)' } }, '档案柜：'),
+            h('select', {
+              className: 'dnb-input',
+              style: { flex: 1, minWidth: 120, height: 26, padding: '0 8px', borderRadius: 8, fontSize: 11.5 },
+              value: activeCabId,
+              onChange: e => {
+                const nextCid = e.target.value
+                patch({ archiveCabinetId: nextCid })
+                void mutateArchiveApi({ op: 'switchCabinet', cabinetId: nextCid }, '已切换工程档案柜')
+              },
+            }, cabinets.map(c => h('option', { key: c.id, value: c.id }, `${c.name} (${c.count ?? 0})`))),
+            h('button', {
+              type: 'button',
+              className: 'dnb-mini-btn',
+              onClick: () => patch({ archiveNewCabinetOpen: !view.archiveNewCabinetOpen }),
+            }, '+ 新柜'),
+            view.archiveNewCabinetOpen
+              ? h(
+                  'div',
+                  { style: { display: 'flex', gap: 5, width: '100%', marginTop: 2 } },
+                  h('input', {
+                    className: 'dnb-input',
+                    style: { height: 26, fontSize: 11.5, borderRadius: 8, flex: 1 },
+                    placeholder: '输入新档案柜名称（如：压测专项档案柜）…',
+                    value: view.archiveNewCabinetName || '',
+                    onChange: e => patch({ archiveNewCabinetName: e.target.value }),
+                    onKeyDown: async e => {
+                      if (e.key === 'Enter' && (view.archiveNewCabinetName || '').trim()) {
+                        const nm = view.archiveNewCabinetName.trim()
+                        patch({ archiveNewCabinetName: '', archiveNewCabinetOpen: false })
+                        await mutateArchiveApi({ op: 'createCabinet', name: nm }, `已新建并切入「${nm}」`)
+                      }
+                    },
+                  }),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-primary-btn',
+                    style: { height: 26, padding: '0 10px', fontSize: 11 },
+                    onClick: async () => {
+                      const nm = String(view.archiveNewCabinetName || '').trim()
+                      if (!nm) return
+                      patch({ archiveNewCabinetName: '', archiveNewCabinetOpen: false })
+                      await mutateArchiveApi({ op: 'createCabinet', name: nm }, `已新建并切入「${nm}」`)
+                    },
+                  }, '创建'),
+                )
+              : null,
+          )
+        })(),
+
         // 1. Top Vault Status & Chief Curation Bar
         h(
           'div',
@@ -8413,7 +9145,7 @@ window.__ModuleLoader__.load({
               'div',
               { style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } },
               h(Icon, { name: 'archive', size: 13.5, style: { color: '#f59e0b' } }),
-              `工程档案柜 · ${totalCount} 卷`,
+              `工作卷宗 · ${totalCount} 卷`,
             ),
             h(
               'div',
@@ -8428,6 +9160,14 @@ window.__ModuleLoader__.load({
             { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' } },
             h('button', {
               type: 'button',
+              className: 'dnb-pill',
+              style: { height: 26, padding: '0 9px', fontSize: 11, borderColor: 'rgba(16, 185, 129, 0.4)', color: '#10b981' },
+              disabled: Boolean(view.archiveHarvesting),
+              title: '从最近对话中抢救命令、文件路径、接口决策与踩坑细节并归档（防上下文压缩遗忘）',
+              onClick: () => void harvestArchivesApi(),
+            }, view.archiveHarvesting ? '抢救中…' : '📥 抢救细节'),
+            h('button', {
+              type: 'button',
               className: 'dnb-pill dnb-pill-accent',
               style: { height: 26, padding: '0 9px', fontSize: 11 },
               disabled: view.archiveOrganizing,
@@ -8437,8 +9177,23 @@ window.__ModuleLoader__.load({
               view.archiveOrganizing
                 ? h(Icon, { name: 'refresh', size: 11.5, style: { animation: 'dnb-spin 0.9s linear infinite' } })
                 : h(Icon, { name: 'sparkles', size: 11.5 }),
-              view.archiveOrganizing ? '参谋长收纳中…' : '请参谋长整理收纳',
+              view.archiveOrganizing ? '参谋长收纳中…' : '✦ 参谋一键整理',
             ),
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 26, padding: '0 9px', fontSize: 11 },
+              disabled: Boolean(view.archivePrecipitating),
+              title: '从当前档案柜提炼通用经验进入跨会话 0-Token 沉淀冷库',
+              onClick: () => patch({
+                precipitateModal: {
+                  op: 'cabinet',
+                  cabinetId: view.archiveCabinetId || 'cab-main',
+                  label: '当前工程档案柜',
+                  clearSource: false,
+                },
+              }),
+            }, '⏬ 沉淀可复用经验'),
             h('button', {
               type: 'button',
               className: 'dnb-pill',
@@ -8835,6 +9590,23 @@ window.__ModuleLoader__.load({
                                     onClick: () => void requestOrganizeArchives({ folder: folder.id, scope: 'folder' }),
                                   }, h(Icon, { name: 'sparkles', size: 10 }), '整理本抽屉')
                                 : null,
+                              fItems.length > 0
+                                ? h('button', {
+                                    type: 'button',
+                                    className: 'dnb-mini-btn',
+                                    disabled: view.archivePrecipitating,
+                                    title: '从本抽屉提炼高价值可复用经验到项目沉淀冷库（默认 0 Token 隔离）',
+                                    onClick: () => patch({
+                                      precipitateModal: {
+                                        op: 'drawer',
+                                        cabinetId: view.archiveCabinetId || 'cab-main',
+                                        folder: folder.id,
+                                        label: folder.label + '抽屉',
+                                        clearSource: false,
+                                      },
+                                    }),
+                                  }, '⏬ 沉淀')
+                                : null,
                               h('button', {
                                 type: 'button',
                                 className: 'dnb-mini-btn',
@@ -8866,6 +9638,121 @@ window.__ModuleLoader__.load({
                   ),
                 )
               }),
+
+        // 8. Project-wide Precipitated Cold Vault (0-Token isolated unless explicitly flipped out)
+        (() => {
+          const precipList = Array.isArray(view.archivePrecipitated) ? view.archivePrecipitated : []
+          const flippedSet = new Set(Array.isArray(view.flippedPrecipitatedIds) ? view.flippedPrecipitatedIds : [])
+          return h(
+            'div',
+            { className: 'dnb-precip-box' },
+            h(
+              'div',
+              {
+                className: 'dnb-cell dnb-cell-hover',
+                style: { cursor: 'pointer', justifyContent: 'space-between', padding: '9px 11px' },
+                onClick: () => patch({ archiveOpenFolders: { ...(view.archiveOpenFolders || {}), __precip: !(view.archiveOpenFolders && view.archiveOpenFolders.__precip) } }),
+              },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
+                h('span', { style: { fontSize: 12, fontWeight: 700, color: 'var(--dnb-text)' } }, '🏛️ 跨会话沉淀冷库'),
+                h('span', { className: 'dnb-tag', style: { fontSize: 10 } }, `${precipList.length} 条 · 默认 0 Token 隔离`),
+                flippedSet.size > 0
+                  ? h('span', { className: 'dnb-tag', style: { fontSize: 10, background: 'rgba(10,132,255,0.14)', color: 'var(--dnb-accent)' } }, `本会话已翻出 ${flippedSet.size}`)
+                  : null,
+              ),
+              h(Icon, {
+                name: 'chevron',
+                size: 13,
+                style: {
+                  color: 'var(--dnb-text-3)',
+                  transform: (view.archiveOpenFolders && view.archiveOpenFolders.__precip) ? 'rotate(90deg)' : 'none',
+                  transition: 'transform 0.16s ease',
+                },
+              }),
+            ),
+            (view.archiveOpenFolders && view.archiveOpenFolders.__precip)
+              ? h(
+                  'div',
+                  { style: { padding: '8px 11px 10px', borderTop: '1px solid var(--dnb-border)', display: 'flex', flexDirection: 'column', gap: 7 } },
+                  precipList.length === 0
+                    ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)', lineHeight: 1.5 } },
+                        '冷库尚空。可点击上方「⏬ 沉淀可复用经验」或抽屉右上「⏬ 沉淀」，将通用踩坑、架构约定与验收经验提炼封存于此。')
+                    : precipList.map(p => {
+                        const isFlipped = flippedSet.has(p.id)
+                        const isOpen = Boolean(view.archiveOpenFiles && view.archiveOpenFiles['prec_' + p.id])
+                        const detail = (view.archiveDetails && view.archiveDetails[p.id]) || null
+                        return h(
+                          'div',
+                          {
+                            key: p.id,
+                            style: {
+                              borderRadius: 9,
+                              border: isFlipped ? '1px solid rgba(10, 132, 255, 0.45)' : '1px solid var(--dnb-border)',
+                              background: isFlipped ? 'rgba(10, 132, 255, 0.06)' : 'var(--dnb-elevated)',
+                              padding: '8px 10px',
+                              display: 'flex',
+                              flexDirection: 'column',
+                              gap: 5,
+                            },
+                          },
+                          h(
+                            'div',
+                            {
+                              style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, cursor: 'pointer' },
+                              onClick: () => {
+                                const key = 'prec_' + p.id
+                                const nextOpen = !isOpen
+                                patch({ archiveOpenFiles: { ...(view.archiveOpenFiles || {}), [key]: nextOpen } })
+                                if (nextOpen && !detail) void loadArchiveDetail(p.id, false, { precipitated: true })
+                              },
+                            },
+                            h(
+                              'div',
+                              { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 } },
+                              h('span', { className: 'dnb-tag', style: { fontSize: 10, flexShrink: 0 } }, p.category || '经验'),
+                              h('span', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, p.title),
+                            ),
+                            h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', flexShrink: 0 } }, isOpen ? '收起' : `${p.pointsCount || 0} 要点`),
+                          ),
+                          p.summary
+                            ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.45 } }, p.summary)
+                            : null,
+                          isOpen && detail
+                            ? h(
+                                'div',
+                                { style: { padding: '6px 8px', borderRadius: 7, background: 'var(--dnb-card)', fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.5, display: 'flex', flexDirection: 'column', gap: 4 } },
+                                Array.isArray(detail.points) && detail.points.length
+                                  ? detail.points.map((pt, pidx) => h('div', { key: pidx }, h('strong', { style: { color: 'var(--dnb-text)' } }, `• ${pt.title}：`), pt.detail || pt.cue || ''))
+                                  : h('div', { style: { whiteSpace: 'pre-wrap' } }, detail.body || detail.summary || ''),
+                              )
+                            : null,
+                          h(
+                            'div',
+                            { style: { display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 } },
+                            h('button', {
+                              type: 'button',
+                              className: 'dnb-mini-btn',
+                              'data-tone': isFlipped ? 'accent' : undefined,
+                              onClick: () => void mutateArchiveApi(
+                                { op: isFlipped ? 'sealBack' : 'flipOut', id: p.id },
+                                isFlipped ? '🔒 已封回冷库（本会话恢复 0 Token 隔离）' : '📂 已翻出并注入当前会话参谋参考',
+                              ),
+                            }, isFlipped ? '🔒 封回冷库' : '📂 翻出注入本会话'),
+                            h('button', {
+                              type: 'button',
+                              className: 'dnb-mini-btn',
+                              style: { marginLeft: 'auto', color: '#ff453a' },
+                              onClick: () => void mutateArchiveApi({ op: 'deletePrecipitated', id: p.id }, '已删除沉淀条目'),
+                            }, '删除'),
+                          ),
+                        )
+                      }),
+                )
+              : null,
+          )
+        })(),
       )
     }
 
@@ -8873,119 +9760,17 @@ window.__ModuleLoader__.load({
 
     function HandoffTab({ view }) {
       React.useEffect(() => {
-        if (!store.handoffText) void loadHandoff()
         void loadTargets()
       }, [view.sessionId])
-
-      const targets = Array.isArray(view.targets) ? view.targets : []
-      const options = [{ id: 'new', label: '新建会话并交接' }].concat(
-        targets
-          .filter(item => item && item.id !== view.sessionId)
-          .map(item => ({
-            id: item.id,
-            label: [item.name || shortSession(item.id), timeLabel(item.lastSeen)].filter(Boolean).join(' · '),
-          })),
-      )
-      const target = options.some(i => i.id === view.target) ? view.target : 'new'
-
-      const copyPacket = async () => {
-        const text = store.handoffText || (await loadHandoff())
-        if (text) copyText(text, '交接单已复制')
-      }
-
-      const exportMd = () => {
-        const text = store.handoffText || ''
-        if (!text) return
-        const blob = new Blob([text], { type: 'text/markdown' })
-        const url = URL.createObjectURL(blob)
-        const a = document.createElement('a')
-        a.href = url
-        a.download = 'handoff-' + new Date().toISOString().replace(/[:.]/g, '-').slice(0, 19) + '.md'
-        a.click()
-        URL.revokeObjectURL(url)
-        patch({ notice: '已导出 Markdown' })
-      }
 
       return h(
         'div',
         { className: 'dnb-view' },
-        // Card 1: Quick Actions
-        h('div', { className: 'dnb-section-head' }, h('span', null, '会话交接')),
-        h(
-          'div',
-          { className: 'dnb-group', style: { padding: 10 } },
-          h(
-            'div',
-            { style: { display: 'flex', gap: 8, marginBottom: 8 } },
-            h('button', {
-              className: 'dnb-primary-btn',
-              style: { flex: 1 },
-              disabled: view.handoffBusy,
-              onClick: () => void copyPacket(),
-            }, h(Icon, { name: 'copy', size: 13 }), view.handoffBusy ? '生成中…' : '复制交接单'),
-            h('button', {
-              className: 'dnb-pill dnb-pill-accent',
-              style: { flex: 1, height: 30 },
-              disabled: view.handoffBusy,
-              onClick: () => void transfer('create'),
-            }, '新会话接力'),
-          ),
-          h(
-            'div',
-            { style: { display: 'flex', gap: 6 } },
-            h('select', {
-              className: 'dnb-input',
-              style: { flex: 1, height: 30, padding: '0 10px', borderRadius: 99, fontSize: 12 },
-              value: target,
-              onChange: e => patch({ target: e.target.value }),
-            }, options.map(i => h('option', { key: i.id, value: i.id }, i.label))),
-            h('button', {
-              className: 'dnb-pill',
-              style: { height: 30 },
-              disabled: view.handoffBusy,
-              onClick: () => void transfer(target === 'new' ? 'create' : target),
-            }, '投递'),
-          ),
+        // Guard Preferences (Cross-session handoff now lives in `规划` Zone 3)
+        h('div', { className: 'dnb-section-head' },
+          h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, '自动化守护偏好'),
+          h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } }, '跨会话接力已收口至「规划」页底部'),
         ),
-
-        // Card 2: Packet Preview
-        h(
-          'div',
-          { className: 'dnb-section-head', style: { marginTop: 12 } },
-          h('span', null, '交接单预览'),
-          h(
-            'div',
-            { style: { display: 'flex', gap: 4 } },
-            h('button', { className: 'dnb-pill', style: { height: 22, fontSize: 11 }, onClick: () => void loadHandoff() }, '刷新'),
-            h('button', {
-              className: 'dnb-pill',
-              style: { height: 22, fontSize: 11 },
-              onClick: () => {
-                if (view.handoffEdit === null || view.handoffEdit === undefined) {
-                  patch({ handoffEdit: view.handoffText || '' })
-                } else {
-                  patch({ handoffText: view.handoffEdit, handoffEdit: null, notice: '已更新预览' })
-                }
-              },
-            }, view.handoffEdit === null || view.handoffEdit === undefined ? '编辑' : '完成'),
-            h('button', { className: 'dnb-pill', style: { height: 22, fontSize: 11 }, onClick: exportMd }, '导出'),
-          ),
-        ),
-        h(
-          'div',
-          { className: 'dnb-group' },
-          view.handoffEdit === null || view.handoffEdit === undefined
-            ? h('pre', { className: 'dnb-pre', style: { maxHeight: 220 } }, view.handoffText || '暂无内容')
-            : h('textarea', {
-                className: 'dnb-bare-area',
-                style: { minHeight: 180, fontFamily: 'monospace', fontSize: 11.5 },
-                value: view.handoffEdit,
-                onChange: e => patch({ handoffEdit: e.target.value }),
-              }),
-        ),
-
-        // Card 3: iOS Settings Switches
-        h('div', { className: 'dnb-section-head', style: { marginTop: 12 } }, h('span', null, '自动化偏好')),
         h(
           'div',
           { className: 'dnb-group' },
@@ -9350,7 +10135,7 @@ window.__ModuleLoader__.load({
               className: 'dnb-pill',
               'data-active': subTab === 'handoff' ? '1' : '0',
               onClick: () => patch({ boundSubTab: 'handoff' }),
-            }, '会话交接 & 守护'),
+            }, '守护偏好'),
           ),
           subTab === 'rules'
             ? h(
@@ -10453,15 +11238,15 @@ window.__ModuleLoader__.load({
       const rawSuggestions = (view.secView && Array.isArray(view.secView.suggestions))
         ? view.secView.suggestions.filter(s => s && s.status === 'pending')
         : []
-      // Prioritize Prime Minister boundary proposals first so wall-hits never get buried
-      const suggestions = [
-        ...rawSuggestions.filter(s => s.kind === 'bound'),
-        ...rawSuggestions.filter(s => s.kind !== 'bound'),
-      ]
+      // Prioritize goal approval & boundary proposals first so critical gates never get buried
+      const rankSug = s => (s.kind === 'goal_approval' ? 0 : s.kind === 'bound' ? 1 : 2)
+      const suggestions = [...rawSuggestions].sort((a, b) => rankSug(a) - rankSug(b))
       const [expandedId, setExpandedId] = React.useState('')
       const [editingId, setEditingId] = React.useState('')
       const [editDraft, setEditDraft] = React.useState('')
       const [editBoundCol, setEditBoundCol] = React.useState('forbidden')
+      const [rejectingGoalId, setRejectingGoalId] = React.useState('')
+      const [rejectGoalDraft, setRejectGoalDraft] = React.useState('')
 
       if (!suggestions.length) return null
 
@@ -10475,6 +11260,106 @@ window.__ModuleLoader__.load({
         React.Fragment,
         null,
         suggestions.slice(0, 2).map(sug => {
+          if (sug.kind === 'goal_approval') {
+            const isRejecting = rejectingGoalId === sug.id
+            return h(
+              'div',
+              {
+                key: sug.id,
+                className: 'dnb-sug-card',
+                style: {
+                  background: 'rgba(48, 209, 88, 0.08)',
+                  borderColor: 'rgba(48, 209, 88, 0.40)',
+                },
+              },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 4 } },
+                h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 700, color: '#30d158' } },
+                  '🎯 参谋长目标达标请示（待您拍板结项）',
+                ),
+                h('button', {
+                  className: 'dnb-icon-btn',
+                  style: { width: 20, height: 20 },
+                  title: '暂缓忽略通知',
+                  onClick: () => void decideSuggestion(sug, 'dismiss'),
+                }, h(Icon, { name: 'x', size: 12 })),
+              ),
+              h('div', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)', marginBottom: 3 } }, sug.title || '主对话目标已满足验收条件'),
+              sug.reason
+                ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.45, marginBottom: 6 } }, sug.reason)
+                : null,
+              sug.draftText
+                ? h('div', {
+                    style: {
+                      padding: '6px 9px',
+                      marginBottom: 7,
+                      borderRadius: 8,
+                      background: 'var(--dnb-card)',
+                      border: '1px solid var(--dnb-border)',
+                      fontSize: 11.5,
+                      color: 'var(--dnb-text-2)',
+                      whiteSpace: 'pre-wrap',
+                    },
+                  }, sug.draftText)
+                : null,
+              isRejecting
+                ? h(
+                    'div',
+                    { style: { display: 'flex', gap: 5, marginBottom: 6 } },
+                    h('input', {
+                      className: 'dnb-input',
+                      style: { height: 26, fontSize: 11.5, flex: 1 },
+                      placeholder: '输入驳回原因或补充要求，督导将继续推动…',
+                      value: rejectGoalDraft,
+                      onChange: e => setRejectGoalDraft(e.target.value),
+                      onKeyDown: e => {
+                        if (e.key === 'Enter' && rejectGoalDraft.trim()) {
+                          void rejectGoalApi(rejectGoalDraft).then(() => {
+                            setRejectingGoalId('')
+                            setRejectGoalDraft('')
+                          })
+                        }
+                      },
+                    }),
+                    h('button', {
+                      className: 'dnb-primary-btn',
+                      style: { height: 26, padding: '0 9px', fontSize: 11 },
+                      disabled: view.busy || !rejectGoalDraft.trim(),
+                      onClick: () => void rejectGoalApi(rejectGoalDraft).then(() => {
+                        setRejectingGoalId('')
+                        setRejectGoalDraft('')
+                      }),
+                    }, '提交'),
+                    h('button', {
+                      className: 'dnb-pill',
+                      style: { height: 26, padding: '0 8px', fontSize: 11 },
+                      onClick: () => setRejectingGoalId(''),
+                    }, '取消'),
+                  )
+                : h(
+                    'div',
+                    { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+                    h('button', {
+                      className: 'dnb-primary-btn',
+                      style: { height: 25, padding: '0 10px', fontSize: 11.5, background: '#30d158', color: '#09180e', fontWeight: 700 },
+                      disabled: view.busy || view.secBusy,
+                      onClick: () => void approveGoalApi(),
+                    }, '✅ 批准结项'),
+                    h('button', {
+                      className: 'dnb-pill',
+                      style: { height: 25, padding: '0 9px', fontSize: 11.5 },
+                      onClick: () => {
+                        setRejectingGoalId(sug.id)
+                        setRejectGoalDraft('')
+                      },
+                    }, '↩ 驳回继续'),
+                  ),
+            )
+          }
+
           const isBound = sug.kind === 'bound'
           const openDraft = expandedId === sug.id
           const isEditing = editingId === sug.id
@@ -10737,6 +11622,22 @@ window.__ModuleLoader__.load({
       const activeTarget = view.secTarget || 'auto'
       const activePeer = targetChips.find(p => p.key === activeTarget) || null
       const modeObj = RELAY_MODES.find(m => m.key === (view.secMode || 'steer')) || RELAY_MODES[0]
+      const meta = view.chiefMeta || {}
+      const tm = meta.tacticalModes || {}
+      const guard = meta.runtimeGuard || {}
+      const maxTurns = Number(tm.maxInterventionTurns) || 5
+      const pct = Number(tm.compactThresholdPct) || 80
+      const activeChipsCount = (tm.intervention ? 1 : 0)
+        + (tm.autoCompact ? 1 : 0)
+        + (tm.redlineSentinel ? 1 : 0)
+        + (tm.strictVerify === false ? 0 : 0)
+      const toggleTacticalField = (key, val) => {
+        if (key === 'intervention' && val === true) {
+          patch({ tacticalMenuOpen: false, interventionModalOpen: true, interventionAgreed: false })
+          return
+        }
+        void updateSecConfig({ tacticalModes: { ...tm, [key]: val } })
+      }
       const placeholder = secImages.length > 0
         ? ('已附 ' + secImages.length + ' 张图，回车可直接发送或补充说明…')
         : (activeTarget === 'auto'
@@ -10770,6 +11671,115 @@ window.__ModuleLoader__.load({
             }
           },
         },
+        // Tactical Cockpit Popover (Anchored above `+` button)
+        view.tacticalMenuOpen
+          ? h(
+              'div',
+              { className: 'dnb-tactical-pop' },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
+                h('span', { style: { fontSize: 12, fontWeight: 700, color: 'var(--dnb-text)' } }, '🎛 参谋长战术驾驶舱'),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-icon-btn',
+                  style: { width: 20, height: 20 },
+                  onClick: () => patch({ tacticalMenuOpen: false }),
+                }, h(Icon, { name: 'x', size: 12 })),
+              ),
+              // Row 1: Intervention + Max Turns Stepper
+              h(
+                'div',
+                { className: 'dnb-tactical-row' },
+                h(
+                  'div',
+                  { style: { flex: 1, minWidth: 0 } },
+                  h('div', { style: { fontSize: 12, fontWeight: 600, color: tm.intervention ? '#f59e0b' : 'var(--dnb-text)' } }, '⚡ 主动强介入（需风险确认）'),
+                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '每轮停止时自动核验、自驱纠偏与续跑，含防死循环熔断'),
+                ),
+                h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
+                  h(
+                    'div',
+                    { className: 'dnb-stepper', title: '连续主动介入轮数上限' },
+                    h('button', { type: 'button', onClick: () => toggleTacticalField('maxInterventionTurns', Math.max(1, maxTurns - 1)) }, '-'),
+                    h('span', null, `${maxTurns}轮`),
+                    h('button', { type: 'button', onClick: () => toggleTacticalField('maxInterventionTurns', Math.min(15, maxTurns + 1)) }, '+'),
+                  ),
+                  h(Switch, { checked: Boolean(tm.intervention), onChange: v => toggleTacticalField('intervention', v) }),
+                ),
+              ),
+              // Row 2: Auto-Compact + Threshold% Stepper
+              h(
+                'div',
+                { className: 'dnb-tactical-row' },
+                h(
+                  'div',
+                  { style: { flex: 1, minWidth: 0 } },
+                  h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '🗜 压缩前抢救 + 自动压缩'),
+                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '达阈值时先写实档并核验落盘，再静默压缩上下文'),
+                ),
+                h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
+                  h(
+                    'div',
+                    { className: 'dnb-stepper', title: '触发抢救与压缩的上下文占用阈值' },
+                    h('button', { type: 'button', onClick: () => toggleTacticalField('compactThresholdPct', Math.max(50, pct - 5)) }, '-'),
+                    h('span', null, `${pct}%`),
+                    h('button', { type: 'button', onClick: () => toggleTacticalField('compactThresholdPct', Math.min(95, pct + 5)) }, '+'),
+                  ),
+                  h(Switch, { checked: Boolean(tm.autoCompact), onChange: v => toggleTacticalField('autoCompact', v) }),
+                ),
+              ),
+              // Row 3: Strict Verify
+              h(
+                'div',
+                { className: 'dnb-tactical-row' },
+                h(
+                  'div',
+                  { style: { flex: 1, minWidth: 0 } },
+                  h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '✓ 严格实证核验'),
+                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '要求结论附文件/命令证据，未核实不放行结项'),
+                ),
+                h(Switch, { checked: tm.strictVerify !== false, onChange: v => toggleTacticalField('strictVerify', v) }),
+              ),
+              // Row 4: Redline Sentinel
+              h(
+                'div',
+                { className: 'dnb-tactical-row' },
+                h(
+                  'div',
+                  { style: { flex: 1, minWidth: 0 } },
+                  h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '🛡 红线越界哨兵'),
+                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '触碰禁止红线时立即发高优纠偏或拦截'),
+                ),
+                h(Switch, { checked: Boolean(tm.redlineSentinel), onChange: v => toggleTacticalField('redlineSentinel', v) }),
+              ),
+              // Row 5: Concise Brief
+              h(
+                'div',
+                { className: 'dnb-tactical-row' },
+                h(
+                  'div',
+                  { style: { flex: 1, minWidth: 0 } },
+                  h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '📝 极简战报模式'),
+                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '汇报直击卡点、决定与可验证证据，压缩废话'),
+                ),
+                h(Switch, { checked: tm.conciseBrief !== false, onChange: v => toggleTacticalField('conciseBrief', v) }),
+              ),
+              // Dual Mandatory Disclaimer Footer
+              h(
+                'div',
+                { className: 'dnb-disclaimer-box' },
+                h('strong', null, '⚠️ 能力与提示词免责提示：'),
+                '1. 参谋长的一切自动审查、强介入驱动、压缩前抢救与红线拦截能力均高度依赖您为参谋长配置的底层大模型能力与上下文质量，不同模型在规划严谨度与遵循指令上的表现存在客观差异。',
+                ' 2. 若主会话或当前项目中挂载了过多的系统提示词（System Prompt）、Rules 或硬性规则，可能与本插件的自主干预逻辑产生指令冲突，进而导致介入循环异常、提前熔断或执行偏离预期。',
+              ),
+            )
+          : null,
+
         // Dismissible Structured Latest Reply Bubble
         view.secLatestReply
           ? h(
@@ -10797,6 +11807,52 @@ window.__ModuleLoader__.load({
                   onClick: () => patch({ secLatestReply: null }),
                 }, h(Icon, { name: 'x', size: 12 })),
               ),
+            )
+          : null,
+
+        // Active Tactical Mode Strip (only shown when non-default modes or intervention/circuitBreaker active)
+        (tm.intervention || tm.autoCompact || tm.redlineSentinel || guard.circuitBroken)
+          ? h(
+              'div',
+              { className: 'dnb-tactical-strip' },
+              tm.intervention
+                ? h('button', {
+                    type: 'button',
+                    className: 'dnb-tac-chip',
+                    'data-tone': 'amber',
+                    onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen }),
+                  }, `⚡ 强介入 ${Number(guard.interventionTurns ?? guard.consecutiveInterventionTurns ?? 0)}/${maxTurns}`)
+                : null,
+              tm.autoCompact
+                ? h('button', {
+                    type: 'button',
+                    className: 'dnb-tac-chip',
+                    'data-tone': 'accent',
+                    onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen }),
+                  }, `🗜 自动压缩 ${pct}%`)
+                : null,
+              tm.redlineSentinel
+                ? h('button', {
+                    type: 'button',
+                    className: 'dnb-tac-chip',
+                    onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen }),
+                  }, '🛡 红线哨兵')
+                : null,
+              guard.circuitBroken
+                ? h('span', {
+                    className: 'dnb-tac-chip',
+                    style: { borderColor: 'rgba(255,69,58,0.45)', color: '#ff453a', background: 'rgba(255,69,58,0.1)' },
+                    title: guard.circuitReason || '已触发自动防死循环熔断',
+                  }, '⛔ 已熔断')
+                : null,
+              tm.intervention
+                ? h('button', {
+                    type: 'button',
+                    className: 'dnb-stop-btn',
+                    title: '立即急停主动强介入与后台自驱，保留当前计划',
+                    onClick: () => void updateSecConfig({ emergencyStopIntervention: true }),
+                  }, '⏹ 急停')
+                : null,
             )
           : null,
 
@@ -10883,10 +11939,18 @@ window.__ModuleLoader__.load({
             )
           : null,
 
-        // DS-Bot Style Rounded Pill Input + Attach Image + Up-Arrow Send Button
+        // DS-Bot Style Rounded Pill Input + `+` Tactical Button + Attach Image + Up-Arrow Send Button
         h(
           'div',
           { className: 'dnb-sec-shell' },
+          h('button', {
+            type: 'button',
+            className: 'dnb-plus-btn',
+            'data-active': (view.tacticalMenuOpen || activeChipsCount > 0) ? '1' : '0',
+            'data-danger': tm.intervention ? '1' : '0',
+            title: '打开参谋长战术驾驶舱（强介入 / 压缩抢救 / 红线哨兵 / 核验开关）',
+            onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen, secModelMenuOpen: false, secPaceMenuOpen: false }),
+          }, view.tacticalMenuOpen ? '×' : '+'),
           h('input', {
             ref: fileInputRef,
             type: 'file',
@@ -10961,6 +12025,212 @@ window.__ModuleLoader__.load({
     }
 
     /* ----------------------------------------------------------- Main Panel */
+
+    function InterventionConfirmModal({ view, board }) {
+      if (!view.interventionModalOpen) return null
+      const meta = view.chiefMeta || {}
+      const tm = meta.tacticalModes || {}
+      const bnd = view.boundaries || { forbidden: [], allowed: [], notes: [] }
+      const obj = (board && board.objective) ? String(board.objective).trim() : ''
+      const forbiddenList = Array.isArray(bnd.forbidden) ? bnd.forbidden.filter(Boolean) : []
+      const missingPrerequisite = !obj || forbiddenList.length === 0
+
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget) patch({ interventionModalOpen: false })
+          },
+        },
+        h(
+          'div',
+          { className: 'dnb-modal-card' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚡ 启用「主动强介入」前置风险与边界核对'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 22, height: 22 },
+              onClick: () => patch({ interventionModalOpen: false }),
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          // Live Objective & Redline Readback
+          h(
+            'div',
+            {
+              style: {
+                borderRadius: 9,
+                padding: '8px 10px',
+                border: missingPrerequisite ? '1px solid rgba(255, 69, 58, 0.45)' : '1px solid var(--dnb-border)',
+                background: missingPrerequisite ? 'rgba(255, 69, 58, 0.08)' : 'var(--dnb-card)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 5,
+                fontSize: 11.5,
+              },
+            },
+            h('div', null, h('strong', null, '当前主目标：'), obj ? obj : h('span', { style: { color: '#ff453a', fontWeight: 600 } }, '未设定（建议先设定清晰长期目标）')),
+            h('div', null, h('strong', null, '已设禁止红线：'), forbiddenList.length
+              ? forbiddenList.slice(0, 3).map(f => '「' + f.text + '」').join('、') + (forbiddenList.length > 3 ? ` 等 ${forbiddenList.length} 条` : '')
+              : h('span', { style: { color: '#ff453a', fontWeight: 600 } }, '未设定（缺少禁止红线时强介入风险较高）')),
+            missingPrerequisite
+              ? h(
+                  'div',
+                  { style: { display: 'flex', gap: 6, marginTop: 3 } },
+                  !obj
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        'data-tone': 'amber',
+                        onClick: () => patch({ interventionModalOpen: false, tab: 'plan' }),
+                      }, '前往设定目标')
+                    : null,
+                  !forbiddenList.length
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        'data-tone': 'amber',
+                        onClick: () => patch({ interventionModalOpen: false, tab: 'boundaries', boundarySubTab: 'rules' }),
+                      }, '前往设定红线')
+                    : null,
+                )
+              : null,
+          ),
+          // 3 Concrete Operational Risks
+          h(
+            'div',
+            { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.55 } },
+            h('div', { style: { fontWeight: 600, color: 'var(--dnb-text)', marginBottom: 3 } }, '开启后的行为与实操风险：'),
+            h('div', null, '• Token 额外消耗：主对话每轮停顿都将唤醒参谋长核验并可能继续发指令。'),
+            h('div', null, '• 对话节奏接管：参谋长会主动插话纠偏与派发下步，点击红色「⏹ 急停」可随时中断。'),
+            h('div', null, `• 防死循环熔断：达到 ${Number(tm.maxInterventionTurns) || 5} 轮上限或连续 3 轮无实际进展将自动熔断退回待命。`),
+          ),
+          // Dual Mandatory Disclaimers
+          h(
+            'div',
+            { className: 'dnb-disclaimer-box' },
+            h('div', { style: { marginBottom: 4 } },
+              h('strong', null, '免责声明 1（模型依赖）：'),
+              '参谋长的一切自动审查、强介入驱动、压缩前抢救与红线拦截能力均高度依赖您为参谋长配置的底层大模型能力与上下文质量，不同模型在规划严谨度与遵循指令上的表现存在客观差异。',
+            ),
+            h('div', null,
+              h('strong', null, '免责声明 2（规则冲突）：'),
+              '若主会话或当前项目中挂载了过多的系统提示词（System Prompt）、Rules 或硬性规则，可能与本插件的自主干预逻辑产生指令冲突，进而导致介入循环异常、提前熔断或执行偏离预期。',
+            ),
+          ),
+          // Explicit Checkbox Agreement
+          h(
+            'label',
+            { style: { display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 11.5, color: 'var(--dnb-text)', cursor: 'pointer', lineHeight: 1.45 } },
+            h('input', {
+              type: 'checkbox',
+              checked: Boolean(view.interventionAgreed),
+              style: { marginTop: 2 },
+              onChange: e => patch({ interventionAgreed: Boolean(e.target.checked) }),
+            }),
+            '我已核对当前目标与红线，理解底层模型与宿主提示词规则冲突可能带来偏离，并确认启用主动强介入。',
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: 7, marginTop: 2 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 28, padding: '0 12px', fontSize: 12 },
+              onClick: () => patch({ interventionModalOpen: false, interventionAgreed: false }),
+            }, '取消'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: { height: 28, padding: '0 14px', fontSize: 12, background: '#f59e0b', color: '#111', fontWeight: 700, opacity: view.interventionAgreed ? 1 : 0.45 },
+              disabled: !view.interventionAgreed,
+              onClick: async () => {
+                const ok = await updateSecConfig({
+                  tacticalModes: { ...tm, intervention: true },
+                  confirmedInterventionRisk: true,
+                })
+                if (ok) patch({ interventionModalOpen: false, interventionAgreed: false })
+              },
+            }, '确认启用主动强介入'),
+          ),
+        ),
+      )
+    }
+
+    function PrecipitateConfirmModal({ view }) {
+      const m = view.precipitateModal
+      if (!m) return null
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget && !view.archivePrecipitating) patch({ precipitateModal: null })
+          },
+        },
+        h(
+          'div',
+          { className: 'dnb-modal-card' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '⏬ 沉淀可复用工程经验至冷库'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 22, height: 22 },
+              disabled: Boolean(view.archivePrecipitating),
+              onClick: () => patch({ precipitateModal: null }),
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          h(
+            'div',
+            { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5 } },
+            `将从「${m.label || '当前档案'}」中提炼高价值的通用踩坑、架构约定与验收模式，封入同项目全局冷库。冷库条目默认全会话 `,
+            h('strong', { style: { color: 'var(--dnb-text)' } }, '0 Token 隔离'),
+            '，仅在您需要时点击「翻出」才会临时注入当前对话。',
+          ),
+          h(
+            'label',
+            { style: { display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 11.5, color: 'var(--dnb-text)', cursor: 'pointer', lineHeight: 1.45 } },
+            h('input', {
+              type: 'checkbox',
+              checked: Boolean(m.clearSource),
+              disabled: Boolean(view.archivePrecipitating),
+              style: { marginTop: 2 },
+              onChange: e => patch({ precipitateModal: { ...m, clearSource: Boolean(e.target.checked) } }),
+            }),
+            '沉淀成功后同步清空已沉淀的原工作档案条目（保留冷库精炼经验）',
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: 7 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 28, padding: '0 12px', fontSize: 12 },
+              disabled: Boolean(view.archivePrecipitating),
+              onClick: () => patch({ precipitateModal: null }),
+            }, '取消'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: { height: 28, padding: '0 14px', fontSize: 12, fontWeight: 600 },
+              disabled: Boolean(view.archivePrecipitating),
+              onClick: () => void precipitateArchivesApi({
+                op: m.op || 'cabinet',
+                cabinetId: m.cabinetId || view.archiveCabinetId || 'cab-main',
+                folder: m.folder || '',
+                clearSource: Boolean(m.clearSource),
+              }),
+            }, view.archivePrecipitating ? '正在提炼沉淀…' : '开始提炼沉淀'),
+          ),
+        ),
+      )
+    }
 
     function PanelInner(props) {
       const view = useStore()
@@ -11220,6 +12490,31 @@ window.__ModuleLoader__.load({
             ),
           ),
 
+          // Host Compatibility Banner (when DSH host is pre-rc.2 without named subagent tree APIs)
+          view.hostCompat && view.hostCompat.present && view.hostCompat.namedSubagentsSupported === false && !view.hostCompatDismissed
+            ? h(
+                'div',
+                {
+                  style: {
+                    margin: '0 12px 8px',
+                    padding: '6px 10px',
+                    borderRadius: 10,
+                    border: '1px solid rgba(245, 158, 11, 0.42)',
+                    background: 'rgba(245, 158, 11, 0.12)',
+                    color: '#f59e0b',
+                    fontSize: 11.5,
+                    lineHeight: 1.45,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 8,
+                  },
+                },
+                h('span', null, '⚠ ' + (view.hostCompat.warning || '当前 DSH 宿主版本不支持命名子代理 API，请升级至 >= 0.2.2-rc.2。')),
+                h('span', { style: { cursor: 'pointer', paddingLeft: 6, flexShrink: 0 }, onClick: () => patch({ hostCompatDismissed: true }) }, '×'),
+              )
+            : null,
+
           // Error Banner (only on API failure)
           view.error
             ? h(
@@ -11251,6 +12546,10 @@ window.__ModuleLoader__.load({
 
           // Persistent Bottom Chief Input & Relay Bar
           h(ChiefComposerBar, { view, barRef: secBarRef }),
+
+          // Scoped Modal Overlays (Strictly bounded inside .dnb-panel)
+          h(InterventionConfirmModal, { view, board }),
+          h(PrecipitateConfirmModal, { view }),
 
           // Floating iOS Toast
           view.notice ? h('div', { className: 'dnb-toast' }, view.notice) : null,
@@ -11306,6 +12605,14 @@ window.__ModuleLoader__.load({
               memReply: '',
               memHits: null,
               memOpen: '',
+              tacticalMenuOpen: false,
+              interventionModalOpen: false,
+              interventionAgreed: false,
+              precipitateModal: null,
+              archiveLoaded: false,
+              archiveDetails: {},
+              archiveOpenFolders: {},
+              archiveOpenFiles: {},
             }
           : {}),
       })
