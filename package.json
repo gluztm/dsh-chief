@@ -49,6 +49,8 @@
     "index.js",
     "client.js",
     "chief.js",
+    "chief-executor.js",
+    "auto-continue.js",
     "archives.js",
     "idle-guard.js",
     "memory.js",

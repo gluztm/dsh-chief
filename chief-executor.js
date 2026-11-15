@@ -30,28 +30,29 @@ export const CHIEF_TOOLS_PROMPT_GUIDE = [
   '3) 工具返回结果回传给你后，若已完成查验与执行，请输出最终 JSON（去掉 `"toolCalls"`），并在 `reply` 中以实测事实作答；任何权限或红线拦截时如实汇报，绝不伪造输出。',
 ].join('\n')
 
-const DSML_OPEN_RE = /<(?:\s*\|\s*\|\s*DSML\s*\|\s*\|\s*|[｜|]DSML[｜|])(?:calls|invoke)\b/i
+const DSML_PREFIX = '(?:[\\s|｜¦│┃]*DSML[\\s|｜¦│┃]*)'
+const DSML_OPEN_RE = new RegExp(`<${DSML_PREFIX}(?:calls|invoke)\\b`, 'i')
 
 /**
- * Strip DeepSeek DSML / XML tool-call markup (`<｜DSML｜calls>`, `< | | DSML | | ...>`,
- * `<function_calls>`, `<invoke>`, `<tool_call>`, or unclosed trailing DSML tails) so raw
- * internal tool syntax NEVER leaks into Chief UI or user replies.
+ * Strip DeepSeek DSML / XML tool-call markup (`<｜DSML｜calls>`, `<｜｜DSML｜｜ calls>`,
+ * `< | | DSML | | ...>`, `<function_calls>`, `<invoke>`, `<tool_call>`, or unclosed tails)
+ * so raw internal tool syntax NEVER leaks into Chief UI or user replies.
  */
 export function stripToolCallMarkup(rawText) {
   let s = String(rawText || '')
   if (!s) return ''
-  // 1) Closed DSML blocks (with optional whitespace around vertical bars or fullwidth ｜)
-  s = s.replace(/<(?:\s*\|\s*\|\s*DSML\s*\|\s*\|\s*|[｜|]DSML[｜|])calls\b[^>]*>[\s\S]*?<\/(?:\s*\|\s*\|\s*DSML\s*\|\s*\|\s*|[｜|]DSML[｜|])calls\s*>/gi, '\n')
-  s = s.replace(/<(?:\s*\|\s*\|\s*DSML\s*\|\s*\|\s*|[｜|]DSML[｜|])invoke\b[^>]*>[\s\S]*?<\/(?:\s*\|\s*\|\s*DSML\s*\|\s*\|\s*|[｜|]DSML[｜|])invoke\s*>/gi, '\n')
+  // 1) Closed DSML blocks (ASCII |, fullwidth ｜, repeated bars, optional whitespace)
+  s = s.replace(new RegExp(`<${DSML_PREFIX}calls\\b[^>]*>[\\s\\S]*?</${DSML_PREFIX}calls\\s*>`, 'gi'), '\n')
+  s = s.replace(new RegExp(`<${DSML_PREFIX}invoke\\b[^>]*>[\\s\\S]*?</${DSML_PREFIX}invoke\\s*>`, 'gi'), '\n')
   // 2) Generic XML tool-call envelopes
   s = s.replace(/<function_calls\b[^>]*>[\s\S]*?<\/function_calls\s*>/gi, '\n')
   s = s.replace(/<tool_call\b[^>]*>[\s\S]*?<\/tool_call\s*>/gi, '\n')
   s = s.replace(/<invoke\b[^>]*>[\s\S]*?<\/invoke\s*>/gi, '\n')
   // 3) Unclosed / truncated DSML or XML tool-call tails
-  s = s.replace(/<(?:\s*\|\s*\|\s*DSML\s*\|\s*\|\s*|[｜|]DSML[｜|])(?:calls|invoke|parameter)\b[\s\S]*$/gi, '')
+  s = s.replace(new RegExp(`<${DSML_PREFIX}(?:calls|invoke|parameter)\\b[\\s\\S]*$`, 'gi'), '')
   s = s.replace(/<(?:function_calls|tool_call|invoke)\b[\s\S]*$/gi, '')
   // 4) Leftover single DSML tags
-  s = s.replace(/<\/?(?:\s*\|\s*\|\s*DSML\s*\|\s*\|\s*|[｜|]DSML[｜|])[a-z_-]*\b[^>]*>/gi, '')
+  s = s.replace(new RegExp(`</?${DSML_PREFIX}[a-z_-]*\\b[^>]*>`, 'gi'), '')
   // 5) Stray standalone "toolCalls" JSON object envelope if the entire text is just raw tool scheduling
   const trimmed = s.trim()
   if (/^\s*\{[\s\S]*"toolCalls"\s*:\s*\[[\s\S]*\}\s*$/i.test(trimmed)) {
@@ -77,19 +78,25 @@ export function parseDsmlToolCalls(rawText) {
   const s = String(rawText || '')
   if (!s || !DSML_OPEN_RE.test(s)) return []
   const calls = []
-  const invokeRe = /<(?:\s*\|\s*\|\s*DSML\s*\|\s*\|\s*|[｜|]DSML[｜|])invoke\s+name="([^"]+)"[^>]*>([\s\S]*?)<\/(?:\s*\|\s*\|\s*DSML\s*\|\s*\|\s*|[｜|]DSML[｜|])invoke\s*>/gi
+  const invokeRe = new RegExp(
+    `<${DSML_PREFIX}invoke\\s+name=["']([^"']+)["'][^>]*>([\\s\\S]*?)(?:</${DSML_PREFIX}invoke\\s*>|(?=<${DSML_PREFIX}invoke\\b|</${DSML_PREFIX}calls\\s*>|$))`,
+    'gi',
+  )
   let m
   while ((m = invokeRe.exec(s)) !== null && calls.length < 4) {
     let toolName = String(m[1] || '').trim()
     const body = String(m[2] || '')
-    const paramRe = /<(?:\s*\|\s*\|\s*DSML\s*\|\s*\|\s*|[｜|]DSML[｜|])parameter\s+name="([^"]+)"([^>]*)>([\s\S]*?)<\/(?:\s*\|\s*\|\s*DSML\s*\|\s*\|\s*|[｜|]DSML[｜|])parameter\s*>/gi
+    const paramRe = new RegExp(
+      `<${DSML_PREFIX}parameter\\s+name=["']([^"']+)["']([^>]*)>([\\s\\S]*?)(?:</${DSML_PREFIX}parameter\\s*>|(?=<${DSML_PREFIX}parameter\\b|</${DSML_PREFIX}(?:invoke|calls)\\s*>|$))`,
+      'gi',
+    )
     const rawParams = {}
     let pm
     while ((pm = paramRe.exec(body)) !== null) {
       const pName = String(pm[1] || '').trim()
       const attrs = String(pm[2] || '')
       let pVal = String(pm[3] || '').trim()
-      const isStr = /string="true"/i.test(attrs)
+      const isStr = /string\s*=\s*["']true["']/i.test(attrs)
       if (!isStr && (pVal.startsWith('{') || pVal.startsWith('[') || pVal === 'true' || pVal === 'false' || /^-?\d+(?:\.\d+)?$/.test(pVal))) {
         try {
           pVal = JSON.parse(pVal)
@@ -669,12 +676,30 @@ export async function executeChiefToolCall(deps, call, execCtx = {}) {
       if (typeof execCtx.compactNowFn !== 'function') {
         return { tool, ok: false, error: '压缩服务未就绪', badge: '⚠️ 无压缩引擎' }
       }
-      const cRes = await execCtx.compactNowFn(String(args.reason || '参谋长主动执行抢救与上下文压缩'))
-      return {
-        tool,
-        ok: Boolean(cRes && cRes.ok),
-        ...(cRes || {}),
-        badge: cRes && cRes.ok ? '🗜 完成抢救压缩' : '⚠️ 压缩跳过',
+      try {
+        const cRes = await execCtx.compactNowFn(String(args.reason || '参谋长主动执行抢救与上下文压缩'))
+        if (cRes && cRes.ok) {
+          return {
+            tool,
+            ok: true,
+            ...cRes,
+            badge: cRes.noop ? '🗄️ 已归档(免压)' : '🗜 完成抢救压缩',
+          }
+        }
+        return {
+          tool,
+          ok: false,
+          ...(cRes && typeof cRes === 'object' ? cRes : { error: String(cRes || '压缩未完成') }),
+          error: (cRes && cRes.error) || '压缩未完成',
+          badge: '⚠️ 压缩未完成',
+        }
+      } catch (e) {
+        return {
+          tool,
+          ok: false,
+          error: (e && e.message) || String(e || '压缩执行异常'),
+          badge: '⚠️ 压缩异常',
+        }
       }
     }
 

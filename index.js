@@ -92,7 +92,7 @@ import {
 } from './chief-executor.js'
 
 const API = '/api/dsh-chief'
-const BACKEND_BUILD = '1.2.0-r6'
+const BACKEND_BUILD = '1.2.0-r7'
 const BOARD_VERSION = 1
 const LOG_CAP = 60
 const BODY_LIMIT = 24 * 1024 * 1024
@@ -2599,7 +2599,11 @@ function buildTaskDispatchBrief(board, task, extraPrompt) {
   return lines.join('\n')
 }
 
-function getSessionCwd(runtime, sessionId) {
+function isInternalProfileCwd(dirPath) {
+  return /[\\/]\.dsh[\\/]+profiles(?:$|[\\/])/i.test(String(dirPath || '').trim())
+}
+
+export function getSessionCwd(runtime, sessionId) {
   const sid = String(sessionId || '').trim()
   const rootId = sid ? (resolveRootSessionId(sid) || sid) : ''
   const rt = runtime || activeRuntime
@@ -2621,9 +2625,53 @@ function getSessionCwd(runtime, sessionId) {
     try {
       const b = loadBoard(boardFileFor(probeId))
       const row = b && b.sessions && (b.sessions[probeId] || b.sessions[sid])
-      if (row && typeof row.cwd === 'string' && row.cwd.trim()) return row.cwd.trim()
+      if (row && typeof row.cwd === 'string' && row.cwd.trim() && !isInternalProfileCwd(row.cwd)) {
+        return row.cwd.trim()
+      }
     } catch {}
   }
+  if (rt) {
+    try {
+      const reg = rt.get('workspaceRegistry')
+      const rawList = reg && typeof reg.list === 'function' ? reg.list() : []
+      const rows = Array.isArray(rawList)
+        ? rawList
+        : (Array.isArray(rawList && rawList.workspaces) ? rawList.workspaces : (Array.isArray(rawList && rawList.items) ? rawList.items : []))
+      const matched = rows.find((w) => {
+        if (!w || typeof w.path !== 'string' || !w.path.trim()) return false
+        const sids = Array.isArray(w.sessionIds) ? w.sessionIds : []
+        return (sid && sids.includes(sid)) || (rootId && sids.includes(rootId))
+      })
+      if (matched) return matched.path.trim()
+      const sorted = rows
+        .filter(w => w && typeof w.path === 'string' && w.path.trim() && !isInternalProfileCwd(w.path))
+        .slice()
+        .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
+      if (sorted[0]) return sorted[0].path.trim()
+    } catch {}
+  }
+  try {
+    const boardsDir = path.join(path.dirname(boardFile()), 'boards')
+    if (fs.existsSync(boardsDir)) {
+      const recentFiles = fs.readdirSync(boardsDir)
+        .filter(name => name.endsWith('.json'))
+        .map((name) => {
+          const full = path.join(boardsDir, name)
+          return { full, mtimeMs: safe(() => fs.statSync(full).mtimeMs, 0) }
+        })
+        .sort((a, b) => b.mtimeMs - a.mtimeMs)
+        .slice(0, 15)
+      for (const f of recentFiles) {
+        const b = safe(() => loadBoard(f.full), null)
+        const sessMap = b && b.sessions && typeof b.sessions === 'object' ? Object.values(b.sessions) : []
+        for (const row of sessMap) {
+          if (row && typeof row.cwd === 'string' && row.cwd.trim() && !isInternalProfileCwd(row.cwd)) {
+            return row.cwd.trim()
+          }
+        }
+      }
+    }
+  } catch {}
   return process.cwd()
 }
 
@@ -2977,11 +3025,74 @@ function collectDigestArchiveContext(runtime, rootId, cabinetId = '') {
     try {
       const cfg = resolveWorkspaceConfig(loadChiefState(), rootId)
       const tm = (cfg && cfg.tacticalModes) || {}
-      smartCompactActive = Boolean(tm.autoCompact && tm.smartCompact)
+      smartCompactActive = Boolean(tm.smartCompact)
       chiefPermissionMode = normalizePermissionMode(cfg && cfg.permissionMode)
     } catch {}
   }
   return { takenOutArchives, sessionArchiveBriefs, smartCompactActive, chiefPermissionMode }
+}
+
+/**
+ * Execute host session compaction across Cordis service isolation:
+ * 1. Resolve live or archived session agent (`agents.get` -> `sessionController.resolveAgent`).
+ * 2. Refuse compaction while the agent is actively running.
+ * 3. Prefer unisolated/direct `compaction.compactNow` if present; otherwise invoke
+ *    `commands.execute(ag, '/compact', [], signal)` which crosses into `@deepseek-ai/dsh-command-compact`.
+ */
+export async function executeHostSessionCompaction(rt, sid, cmdId) {
+  const targetSid = String(sid || '').trim()
+  if (!targetSid) throw new Error('missing target session id for compaction')
+  const agents = rt && typeof rt.get === 'function' ? rt.get('agents') : null
+  let ag = agents && typeof agents.get === 'function' ? agents.get(targetSid) : null
+  if (!ag) {
+    const ctrl = rt && typeof rt.get === 'function' ? rt.get('sessionController') : null
+    if (ctrl && typeof ctrl.resolveAgent === 'function') {
+      try {
+        const resolved = await ctrl.resolveAgent(targetSid)
+        if (resolved && resolved.agent) ag = resolved.agent
+      } catch {}
+    }
+  }
+  if (!ag) throw new Error('target session agent not found for compaction')
+  if (ag.status === 'running') throw new Error('agent is busy running; refusing compaction')
+
+  const signal = AbortSignal.timeout(60_000)
+  const effectiveCmdId = cmdId || ('chief-compact-' + Date.now().toString(36))
+
+  const compSvc = rt && typeof rt.get === 'function' ? rt.get('compaction') : null
+  if (compSvc && typeof compSvc.compactNow === 'function') {
+    const directRes = await compSvc.compactNow(ag, signal, effectiveCmdId)
+    if (directRes === null) {
+      return { ok: true, noop: true, via: 'compaction.compactNow', commandId: effectiveCmdId, text: 'No compactable history yet.' }
+    }
+    return directRes && typeof directRes === 'object'
+      ? { ok: true, noop: false, via: 'compaction.compactNow', ...directRes }
+      : { ok: true, noop: false, via: 'compaction.compactNow', result: directRes }
+  }
+
+  const cmdSvc = rt && typeof rt.get === 'function' ? rt.get('commands') : null
+  if (cmdSvc && typeof cmdSvc.execute === 'function') {
+    const execOut = await cmdSvc.execute(ag, '/compact', [], signal)
+    const cmdRes = execOut && execOut.result ? execOut.result : execOut
+    if (!cmdRes) {
+      throw new Error('dsh-command /compact unavailable in runtime')
+    }
+    if (cmdRes.kind === 'error') {
+      throw new Error(String(cmdRes.text || 'host /compact command failed'))
+    }
+    const text = String(cmdRes.text || '')
+    const noop = /no compactable history/i.test(text)
+    return {
+      ok: true,
+      noop,
+      via: 'commands:/compact',
+      commandId: (execOut && execOut.commandId) || effectiveCmdId,
+      text,
+      sourceEventSeq: cmdRes.sourceEventSeq,
+    }
+  }
+
+  throw new Error('dsh-compaction and /compact command services unavailable')
 }
 
 function makeChiefDeps(runtime) {
@@ -3003,15 +3114,18 @@ function makeChiefDeps(runtime) {
       return composeHandoffFromNarrative(opts)
     },
     async compactSessionNow(sid, cmdId) {
-      const agents = rt ? rt.get('agents') : null
-      const ag = agents && typeof agents.get === 'function' ? agents.get(sid) : null
-      if (!ag) throw new Error('target session agent not found for compaction')
-      if (ag.status === 'running') throw new Error('agent is busy running; refusing compaction')
-      const compSvc = rt ? rt.get('compaction') : null
-      if (!compSvc || typeof compSvc.compactNow !== 'function') {
-        throw new Error('dsh-compaction service unavailable')
-      }
-      return compSvc.compactNow(ag, AbortSignal.timeout(60_000), cmdId || ('chief-compact-' + Date.now().toString(36)))
+      return executeHostSessionCompaction(rt, sid, cmdId)
+    },
+    stagePendingTransfer(text, fromSid, extra = {}) {
+      const cleanText = String(text || '').trim()
+      if (!cleanText) return false
+      return writePending({
+        at: nowMs(),
+        by: (extra && extra.by) || 'chief',
+        session: fromSid || 'global',
+        text: cleanText,
+        ...(extra && typeof extra === 'object' ? extra : {}),
+      })
     },
     resolveRootSessionId,
     resolveAgentIdentity,

@@ -19,7 +19,7 @@ window.__ModuleLoader__.load({
     const API = 'api/dsh-chief'
     const SIDE_ID = 'dsh-chief'
     const BRAND_NAME = 'DSH 参谋长'
-    const EXPECTED_BACKEND_BUILD = '1.2.0-r6'
+    const EXPECTED_BACKEND_BUILD = '1.2.0-r7'
 
     function normalizeMaxTurnsVal(raw) {
       if (raw === 0 || raw === '0') return 0
@@ -1438,18 +1438,27 @@ window.__ModuleLoader__.load({
         })
         if (value) {
           const actions = []
-          for (const r of (value.relays || [])) {
-            if (r && r.ok) actions.push('→ ' + (r.target || target))
+          const seenActions = new Set()
+          const pushAction = (label) => {
+            const clean = typeof label === 'string' ? label.trim() : ''
+            if (!clean || seenActions.has(clean)) return
+            seenActions.add(clean)
+            actions.push(clean)
           }
-          for (const b of (value.boardOps || [])) actions.push(b)
-          for (const a of (value.archiveOps || [])) actions.push(a)
-          for (const n of (value.networkOps || [])) actions.push(n)
+          for (const b of (value.actionBadges || [])) pushAction(b)
+          for (const r of (value.relays || [])) {
+            if (r && r.ok) pushAction('→ ' + (r.target || target))
+          }
+          for (const b of (value.boardOps || [])) pushAction(b)
+          for (const a of (value.archiveOps || [])) pushAction(a)
+          for (const n of (value.networkOps || [])) pushAction(n)
           for (const m of (value.memoryChanges || [])) {
-            if (m && m.text) actions.push((m.op === 'remove' ? '移除：' : '记入：') + clampTitle(m.text, 14))
+            if (m && m.text) pushAction((m.op === 'remove' ? '移除：' : '记入：') + clampTitle(m.text, 14))
           }
           for (const bp of (value.boundProposals || [])) {
-            if (bp && bp.draftText) actions.push('呈批边界：' + clampTitle(bp.draftText, 12))
+            if (bp && bp.draftText) pushAction('呈批边界：' + clampTitle(bp.draftText, 12))
           }
+          if (value.view) applySecView(value.view)
           patch({
             secLatestReply: {
               text: value.reply || '- 【已处理】已按吩咐执行完毕。',
@@ -15924,7 +15933,7 @@ window.__ModuleLoader__.load({
                     gap: 8,
                   },
                 },
-                h('span', null, '⚠ 检测到宿主进程仍在运行旧版内存模块（非 1.2.0-r6），状态问答防泄漏、强介入核心目标锁定、高危急停弹窗与必做事项督导核验需重启 DeepSeek Harness 客户端后完全生效。'),
+                h('span', null, '⚠ 检测到宿主进程仍在运行旧版内存模块（非 1.2.0-r7），跨隔离上下文压缩与空白新对话防 DSML 泄漏修复需重启 DeepSeek Harness 客户端或重载插件后完全生效。'),
                 h('span', { style: { cursor: 'pointer', paddingLeft: 6, flexShrink: 0 }, onClick: () => patch({ staleBackendDismissed: true }) }, '×'),
               )
             : null,

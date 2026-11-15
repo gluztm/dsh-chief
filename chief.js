@@ -2621,7 +2621,13 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
     ...(handoffSyncResult ? { handoffSyncResult } : {}),
     facts: finalView.facts.slice().reverse(),
     suggestions: finalView.suggestions.slice().reverse(),
-    chat: finalView.chat.slice(-40),
+    chat: finalView.chat.slice(-40).map((c) => {
+      if (!c || typeof c !== 'object') return c
+      const cleaned = stripToolCallMarkup(c.text || '')
+      return cleaned !== c.text
+        ? { ...c, text: cleaned || '（该条历史响应仅包含内部工具调用标记，已自动净化）' }
+        : c
+    }),
     mailbox: finalView.mailbox.slice(-30).reverse(),
     peers: directory.targets,
     otherSessions: directory.otherSessions,
@@ -3430,6 +3436,21 @@ function isPureStatusInquiry(rawText) {
     return false
   }
   return /(?:现在在做什么|在做什么|在干嘛|在干什么|处于什么步骤|什么步骤|第几步|到哪一步|到哪了|做到哪|进度|进展|情况如何|怎么样了|当前状态|实时状态|团队在|主对话在|主代理在|子代理在)/.test(q)
+}
+
+/** Detect explicit user requests asking Chief to immediately compress/compact context. */
+export function isExplicitCompactCommand(rawText) {
+  const q = String(rawText || '').trim()
+  if (!q || q.length > 80) return false
+  if (/不要压缩|别压缩|不用压缩|停止压缩|关闭压缩|取消压缩|为什么|为啥|没触发|未触发|不能|无法|报错|失败|是什么|原理|区别|开关|怎么(?:设置|用|开|关)/.test(q)) {
+    return false
+  }
+  if (/^\/compact(?:\s|$)/i.test(q)) return true
+  if (!/压缩/.test(q)) return false
+  if (/文件|图片|视频|音频|zip|tar|gzip|rar|7z|打包/i.test(q) && !/上下文|对话|会话|历史|记忆|session|context/i.test(q)) {
+    return false
+  }
+  return /^(?:请|麻烦|帮我|给我|你|可以|先|赶紧|立即|立刻|马上|现在|把[\u4e00-\u9fa5]{0,12})*(?:执行|触发|做一下|跑一下|开始|进行|归档并|抢救并)?(?:一键|手动|静默)?(?:当前|一下|下)?(?:上下文|对话|会话|历史|内容|内存)?压缩(?:当前|一下|下)?(?:上下文|对话|会话|历史|内存)?(?:吧|一下|下|呀|啊|哦|嘛|呢|好了|好吗|可以吗|！|!|。|\.)*$/i.test(q)
 }
 
 /**
@@ -4767,11 +4788,23 @@ export async function askOrCommandChief(deps, {
       : []),
   ]
 
-  const statusOnlyInquiry = !imageBlocks.length && isPureStatusInquiry(input)
+  const isBlankContext = liveDigest.summaryLines.length === 0 && !board.objective && !(board.plan || []).length
+  const resolvedCwd = deps && typeof deps.getSessionCwd === 'function' ? deps.getSessionCwd(rootId) : ''
+  const explicitCompactReq = !imageBlocks.length && isExplicitCompactCommand(input)
+  const statusOnlyInquiry = !imageBlocks.length && !explicitCompactReq && isPureStatusInquiry(input)
 
   const effectiveSystem = [
     ASK_CHIEF_SYSTEM,
     ...(isConciseBrief ? [CONCISE_BRIEF_ASK_EXTRA] : []),
+    ...(isBlankContext
+      ? [
+          '',
+          '🌱 【当前处于空白新上下文（主对话尚未开聊）】：',
+          resolvedCwd ? `- 当前已解析工作区根目录：${resolvedCwd}` : '',
+          '- 若用户让你查找/分析/修改当前工作区项目文件，请依据当前 permissionMode 直接调用你的真实 JSON `toolCalls` 工具（如 `list_dir` / `search_files` / `read_file` / `edit_file` / `run_command`）处理并如实汇报；绝对禁止直接向用户输出 `<｜DSML｜calls>` 等原始工具调用标签！',
+          '- 若尚无主对话历史，除非用户明确命令且会话已存在，不要无故调用 `session_compact`；若用户明确想把任务留给主对话开场接手，可放进 `relays`（`target: "lead"`）由系统自动暂存待领交接包。',
+        ].filter(Boolean)
+      : []),
     ...(statusOnlyInquiry
       ? [
           '',
@@ -4801,8 +4834,11 @@ export async function askOrCommandChief(deps, {
   }
 
   const compactNowFn = async (reason) => {
+    if (!rootId || rootId === 'global') {
+      return { ok: false, noop: true, skipped: 'blank-context', error: '当前为空白新对话（未绑定活跃主会话），暂无可压缩的历史上下文' }
+    }
     if (!deps || typeof deps.compactSessionNow !== 'function') {
-      return { ok: false, skipped: 'no-compaction-service' }
+      return { ok: false, skipped: 'no-compaction-service', error: '宿主压缩服务未挂载' }
     }
     let usage = null
     try {
@@ -4853,7 +4889,21 @@ export async function askOrCommandChief(deps, {
   }
 
   let parsed = (loopRes && loopRes.parsed) || (llmRes.ok ? extractJsonObject(llmRes.text) : null)
-  const loopBadges = Array.isArray(loopRes && loopRes.toolBadges) ? loopRes.toolBadges : []
+  const loopBadges = Array.isArray(loopRes && loopRes.toolBadges) ? [...loopRes.toolBadges] : []
+  const loopToolRecords = Array.isArray(loopRes && loopRes.toolRecords) ? loopRes.toolRecords : []
+  const compactToolRec = loopToolRecords.find(r => r && r.tool === 'session_compact') || null
+  let forcedCompactOut = null
+  if (explicitCompactReq && !compactToolRec) {
+    forcedCompactOut = await compactNowFn(`用户指令触发：${input}`).catch(err => ({
+      ok: false,
+      error: (err && err.message) || String(err || '压缩执行失败'),
+    }))
+    if (forcedCompactOut && forcedCompactOut.ok) {
+      loopBadges.push(forcedCompactOut.noop ? '🗄️ 已归档(免压)' : '🗜 完成抢救压缩')
+    } else {
+      loopBadges.push('⚠️ 压缩未完成')
+    }
+  }
 
   // Graceful intelligent fallback if LLM is offline / unconfigured / returned non-JSON
   if (!parsed) {
@@ -5012,6 +5062,33 @@ export async function askOrCommandChief(deps, {
       }
     }
 
+    // 2.5) Deterministic reply when user explicitly requested compaction and LLM failed to emit JSON
+    if (forcedCompactOut) {
+      const compactMsg = forcedCompactOut.ok
+        ? (forcedCompactOut.noop
+            ? `- 【已归档(免压)】已抢救当前现场记录入本会话档案柜${forcedCompactOut.harvestId ? `（#${forcedCompactOut.harvestId}）` : ''}；当前主对话历史暂无需压缩。`
+            : `- 【已完成抢救与上下文压缩】已将关键细节抢救入本会话档案柜${forcedCompactOut.harvestId ? `（#${forcedCompactOut.harvestId}）` : ''}，并完成主对话上下文静默压缩。`)
+        : `- 【压缩未完成】${forcedCompactOut.error || '当前暂无可压缩历史或宿主压缩服务暂未就绪。'}`
+      mutateChiefState((s) => {
+        const ws = ensureWorkspace(s, rootId)
+        ws.chat.push(
+          { id: nextId('chat'), role: 'user', text: userDisplayText, ...imgMeta, actions: [], at: Date.now() },
+          { id: nextId('chat'), role: 'chief', text: compactMsg, actions: loopBadges, at: Date.now() },
+        )
+        if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+      })
+      return {
+        ok: true,
+        reply: compactMsg,
+        relays: [],
+        memoryChanges: [],
+        boardOps: [],
+        actionBadges: loopBadges,
+        toolRecords: loopToolRecords,
+        view: await getChiefView(deps, rootId, { autoSummarize: false }),
+      }
+    }
+
     // 3) If LLM actually returned readable prose (just not wrapped in JSON), strip tool markup first; if empty or JSON fragment, synthesize smart live briefing
     const strippedPlain = llmRes.ok && llmRes.text ? stripToolCallMarkup(llmRes.text).trim() : ''
     const usablePlainLlm = strippedPlain && !strippedPlain.startsWith('{') && strippedPlain.length >= 6
@@ -5045,26 +5122,41 @@ export async function askOrCommandChief(deps, {
       relays: [],
       memoryChanges: [],
       boardOps: [],
-      toolRecords: (loopRes && loopRes.toolRecords) || [],
+      actionBadges: loopBadges,
+      toolRecords: loopToolRecords,
       view: await getChiefView(deps, rootId, { autoSummarize: false }),
     }
   }
 
-  // Execute decomposed relays
+  // Execute decomposed relays (with blank-context staging into pending-transfer when Lead is not yet alive)
   const relayResults = []
   const actionBadges = [...loopBadges]
   for (const r of (Array.isArray(parsed.relays) ? parsed.relays : []).slice(0, 8)) {
     if (!r || !r.text) continue
+    const targetName = r.target || 'lead'
     const deliv = await deliverCrossMessage(deps, {
       fromSession: rootId,
       fromLabel: 'DSH 参谋长 (代用户传达)',
-      target: r.target || 'lead',
+      target: targetName,
       subject: r.subject || '',
       text: r.text,
       mode: ['steer', 'followup', 'silent'].includes(r.mode) ? r.mode : 'steer',
       imageBlocks,
       savedImagePaths,
     })
+    const isLeadTarget = /^(?:lead|main|主对话)$/i.test(String(targetName).trim())
+    if (isLeadTarget && (!deliv.ok || (isBlankContext && !deliv.deliveredPhysical)) && typeof deps.stagePendingTransfer === 'function') {
+      const staged = deps.stagePendingTransfer(
+        `[DSH 参谋长预派发指令${r.subject ? ' · ' + r.subject : ''}]\n${r.text}`,
+        rootId,
+        { by: 'chief', subject: r.subject || '' },
+      )
+      if (staged) {
+        relayResults.push({ ...deliv, ok: true, target: '主对话(待领)', mode: 'pending-transfer', stagedPending: true })
+        actionBadges.push('暂存待领 → 主对话')
+        continue
+      }
+    }
     relayResults.push(deliv)
     if (deliv.ok) actionBadges.push(`${r.mode === 'steer' ? '插话' : '递话'} → ${deliv.target}`)
   }
@@ -5086,10 +5178,22 @@ export async function askOrCommandChief(deps, {
   const existingBounds = (board && board.bounds) || { allowed: [], forbidden: [], notes: [] }
   const rawBoundProposals = Array.isArray(parsed.boundProposals) ? parsed.boundProposals.slice(0, 4) : []
   const cleanedParsedReply = stripToolCallMarkup(parsed.reply || '').trim()
-  const rawReplyText = cleanMultiline(
-    cleanedParsedReply || buildSmartFallbackReply({ input, board, liveDigest, directory, facts: numberedFacts, mailbox: view.mailbox, conciseBrief: isConciseBrief }) || '- 【已执行】已按你的吩咐安排妥当。',
-    1000,
-  )
+  const compactOutcomeNote = forcedCompactOut
+    ? (forcedCompactOut.ok
+        ? (forcedCompactOut.noop
+            ? `【已归档(免压)】已将本轮现场记录存入本会话档案柜${forcedCompactOut.harvestId ? `（#${forcedCompactOut.harvestId}）` : ''}，宿主历史暂无需进一步压缩。`
+            : `【已完成抢救与上下文压缩】已将关键细节存入本会话档案柜${forcedCompactOut.harvestId ? `（#${forcedCompactOut.harvestId}）` : ''}，并完成主对话静默压缩。`)
+        : `【压缩未完成】${forcedCompactOut.error || '宿主压缩服务未就绪'}`)
+    : (compactToolRec && compactToolRec.ok === false
+        ? `（⚠️ 实测压缩提示：${compactToolRec.error || '压缩未完成'}）`
+        : '')
+  const baseParsedReply = cleanedParsedReply || buildSmartFallbackReply({ input, board, liveDigest, directory, facts: numberedFacts, mailbox: view.mailbox, conciseBrief: isConciseBrief }) || '- 【已执行】已按你的吩咐安排妥当。'
+  const combinedParsedReply = compactOutcomeNote
+    ? (forcedCompactOut && !forcedCompactOut.ok
+        ? `${compactOutcomeNote}\n${baseParsedReply}`
+        : (baseParsedReply.includes('压缩') && baseParsedReply.includes('档案') ? baseParsedReply : `${compactOutcomeNote}\n${baseParsedReply}`))
+    : baseParsedReply
+  const rawReplyText = cleanMultiline(combinedParsedReply, 1000)
   const replyText = isConciseBrief ? sanitizeConciseBriefText(rawReplyText) : rawReplyText
 
   const BOUND_COL_LABEL = { forbidden: '禁止红线', allowed: '必做事项', notes: '注意事项' }
@@ -5180,12 +5284,13 @@ export async function askOrCommandChief(deps, {
     ok: true,
     reply: replyText,
     relays: relayResults,
+    actionBadges,
     memoryChanges: appliedFacts,
     boardOps: executedBoardOps,
     archiveOps: executedArchiveOps,
     networkOps: executedNetworkOps,
     boundProposals: proposedBounds,
-    toolRecords: (loopRes && loopRes.toolRecords) || [],
+    toolRecords: loopToolRecords,
     permissionMode,
     ...(freshBoard ? { board: freshBoard } : {}),
     ...(freshArchives ? { archives: freshArchives } : {}),
@@ -5553,6 +5658,26 @@ function measureAgentSessionTokensFallback(agent) {
   }
 }
 
+/** Record a visible confirmation card in Chief's right-panel chat when autonomous smart compaction finishes. */
+function recordSmartCompactionChatReceipt(rootId, { cRes, ratioPct = 0, totalTokens = 0, contextWindow = 0, via = '✦ 智选压缩' } = {}) {
+  if (!rootId || rootId === 'global' || !cRes || !cRes.ok || cRes.noop) return
+  const usageNote = totalTokens > 0 && contextWindow > 0
+    ? `（压前占用 ${formatCompactTokenShort(totalTokens)}/${formatCompactTokenShort(contextWindow)} · ${Math.round(ratioPct)}%）`
+    : (ratioPct > 0 ? `（压前占用 ${Math.round(ratioPct)}%）` : '')
+  const receiptText = `- 【${via}】已先将本轮关键细节抢救入本会话档案柜（#${cRes.harvestId}），并完成主对话静默压缩${usageNote}。`
+  mutateChiefState((s) => {
+    const ws = ensureWorkspace(s, rootId)
+    ws.chat.push({
+      id: nextId('chat'),
+      role: 'chief',
+      text: receiptText,
+      actions: ['✦ 智选压缩'],
+      at: Date.now(),
+    })
+    if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+  })
+}
+
 /** Shared harvest -> disk verification -> host silent compaction sequence (always harvests into Session Cabinet). */
 async function executeHarvestAndCompact(deps, {
   sid,
@@ -5565,6 +5690,9 @@ async function executeHarvestAndCompact(deps, {
   contextWindow = 0,
   logLabel = '自动压缩',
 } = {}) {
+  if (!sid || !rootId || rootId === 'global') {
+    return { ok: false, noop: true, error: '当前为空白新对话（未绑定活跃主会话），暂无可压缩的历史上下文' }
+  }
   const focusHint = reason
     || (ratioPct > 0
       ? `上下文占用 ${Math.round(ratioPct)}%（${totalTokens}/${contextWindow} tokens），压缩前抢救现场细节。`
@@ -5586,6 +5714,49 @@ async function executeHarvestAndCompact(deps, {
     return { ok: false, error: 'harvest-verify-failed-abort-compact' }
   }
 
+  const cmdId = `dsh-chief-compact-${Date.now().toString(36)}`
+  let compactRes
+  try {
+    compactRes = await deps.compactSessionNow(sid, cmdId)
+  } catch (err) {
+    const errMsg = (err && err.message) || String(err || 'compaction-failed')
+    if (!/busy running/i.test(errMsg)) {
+      mutateChiefState((s) => {
+        const ws = ensureWorkspace(s, rootId)
+        ws.runtimeGuard.pendingSmartCompact = null
+      })
+    }
+    if (typeof deps.appendBoardLog === 'function' && rootId !== 'global') {
+      deps.appendBoardLog(
+        rootId,
+        `⚠️ ${logLabel}未执行（已抢救档案 #${harvest.savedId}，计数未变动）：${errMsg}`,
+        'chief',
+      )
+    }
+    return { ok: false, error: errMsg, harvestId: harvest.savedId }
+  }
+
+  if (compactRes && compactRes.noop) {
+    mutateChiefState((s) => {
+      const ws = ensureWorkspace(s, rootId)
+      ws.runtimeGuard.pendingSmartCompact = null
+    })
+    if (typeof deps.appendBoardLog === 'function' && rootId !== 'global') {
+      deps.appendBoardLog(
+        rootId,
+        `🗄️ ${logLabel}：已先抢救细节入本会话档案柜（#${harvest.savedId}），宿主历史暂无需压缩`,
+        'chief',
+      )
+    }
+    return {
+      ok: true,
+      noop: true,
+      harvestId: harvest.savedId,
+      ratioPct: Math.round(ratioPct),
+      compactRes,
+    }
+  }
+
   mutateChiefState((s) => {
     const ws = ensureWorkspace(s, rootId)
     ws.runtimeGuard.lastCompactedSeq = seq > 0 ? seq : ((ws.runtimeGuard.lastCompactedSeq || 0) + 1)
@@ -5594,8 +5765,6 @@ async function executeHarvestAndCompact(deps, {
     ws.runtimeGuard.pendingSmartCompact = null
   })
 
-  const cmdId = `dsh-chief-compact-${Date.now().toString(36)}`
-  const compactRes = await deps.compactSessionNow(sid, cmdId)
   if (typeof deps.appendBoardLog === 'function' && rootId !== 'global') {
     deps.appendBoardLog(
       rootId,
@@ -5605,6 +5774,7 @@ async function executeHarvestAndCompact(deps, {
   }
   return {
     ok: true,
+    noop: false,
     harvestId: harvest.savedId,
     ratioPct: Math.round(ratioPct),
     compactRes,
@@ -5746,7 +5916,17 @@ export async function maybeRunPreCompaction(deps, {
       contextWindow,
       logLabel: '✦ 智选压缩',
     })
-    return { ...out, smartCompacted: Boolean(out && out.ok) }
+    const actuallyCompacted = Boolean(out && out.ok && !out.noop)
+    if (actuallyCompacted) {
+      recordSmartCompactionChatReceipt(rootId, {
+        cRes: out,
+        ratioPct,
+        totalTokens,
+        contextWindow,
+        via: '✦ 智选压缩',
+      })
+    }
+    return { ...out, smartCompacted: actuallyCompacted }
   }
 
   if (!usage || !Number(usage.totalTokens)) {
@@ -5911,7 +6091,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     : null
   const isGoalMode = Boolean(board && board.mode === 'goal')
   const pendingSmart = Boolean(wsBefore.runtimeGuard && wsBefore.runtimeGuard.pendingSmartCompact)
-  const smartCoManaged = Boolean(tactical.autoCompact && tactical.smartCompact)
+  const smartCoManaged = Boolean(tactical.smartCompact)
   const hasHighPriority = isGoalMode || tactical.intervention || tactical.redlineSentinel || tactical.strictVerify || tactical.autoCompact || tactical.smartCompact || pendingSmart
 
   if (!force && !hasHighPriority && paceMode === 'manual') {
@@ -5920,7 +6100,14 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
 
   // Always check pre-compaction pipeline first when autoCompact/smartCompact/pendingSmartCompact is active
   if (tactical.autoCompact || tactical.smartCompact || pendingSmart) {
-    const preRes = await maybeRunPreCompaction(deps, { agent, sessionId: sid, rootId, bypassIdleWait: Boolean(force) }).catch(() => null)
+    const preRes = await maybeRunPreCompaction(deps, { agent, sessionId: sid, rootId, bypassIdleWait: Boolean(force) })
+      .catch((err) => {
+        const msg = (err && err.message) || String(err || 'pre-compact-error')
+        if (typeof deps.appendBoardLog === 'function' && rootId !== 'global') {
+          deps.appendBoardLog(rootId, `⚠️ 自动压缩检测异常：${msg}`, 'chief')
+        }
+        return { ok: false, error: msg }
+      })
     if (preRes && preRes.ok && preRes.smartCompacted) {
       return { ok: true, smartCompacted: true, harvestId: preRes.harvestId }
     }
@@ -5949,8 +6136,8 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     : (paceMode === 'smart' ? (hasWallCue ? 45_000 : SMART_REVIEW_COOLDOWN_MS) : AUTO_REVIEW_COOLDOWN_MS)
   if (!force && now - lastAt < cooldownMs) return { ok: false, skipped: 'cooldown' }
 
-  // Wait if supervisor intervention/goal is running for an active agent so turn-stopping settles to idle
-  if ((tactical.intervention || isGoalMode) && typeof deps.getAgentStatus === 'function' && !force) {
+  // Wait if supervisor/goal/smart-compact is active so turn-stopping settles to idle before evaluating usage
+  if ((tactical.intervention || isGoalMode || smartCoManaged) && typeof deps.getAgentStatus === 'function' && !force) {
     await waitUntilAgentIdle(() => deps.getAgentStatus(sid), 5_000, 150)
   }
 
@@ -6332,6 +6519,10 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
       const compactReason = clamp(parsed.compactReason || '参谋长评估当前阶段已收口，执行智选归档压缩', 220)
       let st = 'idle'
       try { if (typeof deps.getAgentStatus === 'function') st = deps.getAgentStatus(sid) || 'idle' } catch {}
+      if (st === 'running' && !force && typeof deps.getAgentStatus === 'function') {
+        await waitUntilAgentIdle(() => deps.getAgentStatus(sid), 8_000, 200)
+        try { st = deps.getAgentStatus(sid) || 'idle' } catch {}
+      }
       if (st === 'running' && !force) {
         mutateChiefState((s) => {
           const ws = ensureWorkspace(s, rootId)
@@ -6352,8 +6543,23 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
           totalTokens,
           contextWindow,
           logLabel: '✦ 智选压缩(参谋长判断)',
-        }).catch(() => null)
-        smartCompacted = Boolean(cRes && cRes.ok)
+        }).catch((err) => {
+          const msg = (err && err.message) || String(err || 'smart-compact-error')
+          if (typeof deps.appendBoardLog === 'function' && rootId !== 'global') {
+            deps.appendBoardLog(rootId, `⚠️ ✦ 智选压缩失败：${msg}`, 'chief')
+          }
+          return { ok: false, error: msg }
+        })
+        if (cRes && cRes.ok && !cRes.noop) {
+          smartCompacted = true
+          recordSmartCompactionChatReceipt(rootId, {
+            cRes,
+            ratioPct,
+            totalTokens,
+            contextWindow,
+            via: '✦ 智选压缩',
+          })
+        }
       }
     }
   }
