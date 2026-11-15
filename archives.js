@@ -148,6 +148,18 @@ function chiefRootDir(targetOpt) {
   return path.join(home, 'chief')
 }
 
+function normalizeVaultScope(raw) {
+  const s = str(raw, '').trim().toLowerCase()
+  if (s === 'global') return 'global'
+  if (s === 'precipitated' || s === 'cold' || s === 'vault') return 'precipitated'
+  return 'session'
+}
+
+function cleanRootSessionId(raw = '') {
+  const s = str(raw, '').trim()
+  return (!s || s === 'global') ? '' : s
+}
+
 function resolveTargetOpts(targetOpt) {
   if (!targetOpt || typeof targetOpt === 'string') {
     return {
@@ -155,6 +167,8 @@ function resolveTargetOpts(targetOpt) {
       cwd: '',
       projectKey: '',
       cabinetId: '',
+      rootSessionId: '',
+      vaultScope: 'session',
     }
   }
   return {
@@ -162,7 +176,39 @@ function resolveTargetOpts(targetOpt) {
     cwd: str(targetOpt.cwd, ''),
     projectKey: str(targetOpt.projectKey, ''),
     cabinetId: str(targetOpt.cabinetId, ''),
+    rootSessionId: cleanRootSessionId(targetOpt.rootSessionId || targetOpt.sessionId || targetOpt.session),
+    vaultScope: normalizeVaultScope(targetOpt.vaultScope || targetOpt.scope),
   }
+}
+
+function normalizeSessionScopeKey(rootSessionId = '') {
+  const sid = cleanRootSessionId(rootSessionId)
+  if (!sid) return ''
+  return 'sess:' + sid.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 72)
+}
+
+function sessionCabinetId(rootSessionId = '') {
+  const hash10 = crypto.createHash('sha1').update(String(rootSessionId || 'session')).digest('hex').slice(0, 10)
+  return `cab-s-${hash10}`
+}
+
+function withRootScope(targetOpt, rootSessionId = '') {
+  const sid = cleanRootSessionId(rootSessionId)
+  if (!targetOpt || typeof targetOpt === 'string') {
+    const base = { customSharedBoardFile: str(targetOpt, ''), vaultScope: 'session' }
+    return sid ? { ...base, rootSessionId: sid } : base
+  }
+  const vaultScope = normalizeVaultScope(targetOpt.vaultScope || targetOpt.scope)
+  if (vaultScope === 'global') {
+    return { ...targetOpt, vaultScope: 'global' }
+  }
+  if (!sid) {
+    return { ...targetOpt, vaultScope }
+  }
+  if (cleanRootSessionId(targetOpt.rootSessionId || targetOpt.sessionId || targetOpt.session)) {
+    return { ...targetOpt, vaultScope }
+  }
+  return { ...targetOpt, rootSessionId: sid, vaultScope }
 }
 
 export function legacyArchiveFilePath(targetOpt) {
@@ -182,14 +228,32 @@ export function cabinetFilePath(cabinetId = 'cab-main', targetOpt) {
   return path.join(cabinetsDirPath(targetOpt), `${safe}.json`)
 }
 
-export function precipitatedFilePath(projectKey = 'proj-default', targetOpt) {
-  const safe = resolveProjectKey(projectKey || 'proj-default').replace(/[^a-zA-Z0-9\u4e00-\u9fa5._-]+/g, '-').slice(0, 72) || 'proj-default'
-  return path.join(chiefRootDir(targetOpt), 'precipitated', `${safe}.json`)
+export function globalChiefVaultFilePath(targetOpt) {
+  return path.join(chiefRootDir(targetOpt), 'global-vault', 'vault-chief-global.json')
+}
+
+export function globalPrecipitatedFilePath(targetOpt) {
+  return path.join(chiefRootDir(targetOpt), 'precipitated', 'vault-global.json')
+}
+
+export function precipitatedFilePath(_projectKey = 'proj-default', targetOpt) {
+  return globalPrecipitatedFilePath(targetOpt)
 }
 
 export function archiveFilePath(targetOpt) {
   const resolved = ensureProjectCabinet(targetOpt)
-  return resolved.cabinetFile
+  return resolved.cabinetFile || ''
+}
+
+function normalizeArchiveTitleKey(title) {
+  return String(title || '').trim().replace(/\s+/g, ' ').toLowerCase()
+}
+
+function computeEntryContentHash(raw) {
+  const title = String((raw && raw.title) || '').trim()
+  const summary = String((raw && raw.summary) || '').trim()
+  const body = cleanMultiline((raw && (raw.body !== undefined ? raw.body : raw.rawBody)) || '', 30000)
+  return crypto.createHash('sha1').update(`${title}\n${summary}\n${body}`).digest('hex').slice(0, 12)
 }
 
 /* ----------------------------------------------------------- Lock & Storage */
@@ -297,12 +361,69 @@ function normalizeRegistry(raw) {
       }
     }
   }
+  const sessions = {}
+  if (src.sessions && typeof src.sessions === 'object') {
+    for (const [rawKey, sess] of Object.entries(src.sessions)) {
+      if (!sess || typeof sess !== 'object') continue
+      const rSid = str(sess.rootSessionId || rawKey.replace(/^sess:/, ''), '').trim()
+      const sKey = normalizeSessionScopeKey(rSid)
+      if (!sKey) continue
+      const pKey = resolveProjectKey(sess.projectKey || sess.cwd || 'proj-default')
+      const cabinets = (Array.isArray(sess.cabinets) ? sess.cabinets : [])
+        .filter(c => c && typeof c === 'object' && str(c.id, '').trim())
+        .map(c => ({
+          id: str(c.id, '').trim().slice(0, 72),
+          name: clamp(c.name || '本对话工作档案柜', 40),
+          projectKey: pKey,
+          rootSessionId: rSid,
+          cwd: str(c.cwd, '').slice(0, 260),
+          createdAt: Number(c.createdAt) || Date.now(),
+          updatedAt: Number(c.updatedAt) || Number(c.createdAt) || Date.now(),
+        }))
+      if (!cabinets.length) continue
+      const activeCabinetId = cabinets.some(c => c.id === sess.activeCabinetId)
+        ? sess.activeCabinetId
+        : cabinets[0].id
+      sessions[sKey] = {
+        sessionKey: sKey,
+        rootSessionId: rSid,
+        projectKey: pKey,
+        cwd: str(sess.cwd, '').slice(0, 260),
+        activeCabinetId,
+        cabinets,
+      }
+    }
+  }
+  let globalEntry = null
+  if (src.global && typeof src.global === 'object') {
+    const gCabs = (Array.isArray(src.global.cabinets) ? src.global.cabinets : [])
+      .filter(c => c && typeof c === 'object' && str(c.id, '').trim())
+      .map(c => ({
+        id: str(c.id, '').trim().slice(0, 72),
+        name: clamp(c.name || '🌐 全局工作档案柜', 40),
+        projectKey: 'global',
+        cwd: '',
+        createdAt: Number(c.createdAt) || Date.now(),
+        updatedAt: Number(c.updatedAt) || Number(c.createdAt) || Date.now(),
+      }))
+    if (gCabs.length) {
+      globalEntry = {
+        projectKey: 'global',
+        cwd: '',
+        activeCabinetId: gCabs.some(c => c.id === src.global.activeCabinetId) ? src.global.activeCabinetId : gCabs[0].id,
+        cabinets: gCabs,
+      }
+    }
+  }
   return {
     version: ARCHIVE_VERSION,
     migratedLegacy: Boolean(src.migratedLegacy),
+    migratedGlobalAt: Number(src.migratedGlobalAt) || 0,
     migratedAt: Number(src.migratedAt) || 0,
     legacyOwnerProjectKey: str(src.legacyOwnerProjectKey, ''),
     projects,
+    sessions,
+    global: globalEntry,
   }
 }
 
@@ -310,11 +431,38 @@ function writeRegistryRaw(regFile, registry) {
   atomicWriteJson(regFile, normalizeRegistry(registry))
 }
 
+function claimSessionOwnLegacyItems(reg, projectKey, rootSessionId, opts) {
+  const claimed = []
+  const seenTitles = new Set()
+  const candidateCabIds = new Set(['cab-main'])
+  const projEntry = reg.projects && reg.projects[projectKey]
+  if (projEntry && Array.isArray(projEntry.cabinets)) {
+    for (const c of projEntry.cabinets) {
+      if (c && c.id) candidateCabIds.add(c.id)
+    }
+  }
+  for (const cabId of candidateCabIds) {
+    const file = cabinetFilePath(cabId, opts.customSharedBoardFile)
+    const parsed = readJsonSafe(file, null)
+    const items = Array.isArray(parsed && parsed.items) ? parsed.items : []
+    for (const rawItem of items) {
+      if (!rawItem || str(rawItem.sourceSession, '').trim() !== rootSessionId) continue
+      const norm = normalizeArchiveItem(rawItem)
+      if (!norm || seenTitles.has(norm.title)) continue
+      seenTitles.add(norm.title)
+      claimed.push(norm)
+    }
+  }
+  return claimed
+}
+
 function ensureProjectCabinet(targetOpt) {
   const opts = resolveTargetOpts(targetOpt)
   const regFile = cabinetRegistryPath(opts.customSharedBoardFile)
   const legacyFile = legacyArchiveFilePath(opts.customSharedBoardFile)
   const projectKey = opts.projectKey ? resolveProjectKey(opts.projectKey) : resolveProjectKey(opts.cwd)
+  const sessKey = normalizeSessionScopeKey(opts.rootSessionId)
+  const vaultScope = opts.vaultScope === 'global' ? 'global' : 'session'
 
   const release = acquireFileLock(regFile)
   try {
@@ -358,80 +506,135 @@ function ensureProjectCabinet(targetOpt) {
       dirty = true
     }
 
-    // 2. Ensure requested projectKey exists in registry
-    if (!reg.projects[projectKey]) {
-      const now = Date.now()
-      const hasMainAlready = Object.values(reg.projects).some(p => p.cabinets.some(c => c.id === 'cab-main'))
-      const defaultCabId = hasMainAlready ? `cab-${projectKey.slice(-8)}-main` : 'cab-main'
-      const labelPrefix = opts.cwd ? (path.basename(normalizeCwd(opts.cwd)) || '当前工程') : '默认'
-      const cabFile = cabinetFilePath(defaultCabId, opts.customSharedBoardFile)
-      if (!fs.existsSync(cabFile)) {
-        atomicWriteJson(cabFile, normalizeArchiveStore({
-          cabinetId: defaultCabId,
-          cabinetName: `${labelPrefix} · 主档案柜`,
+    // 2. SYSTEM GLOBAL COLD VAULT (`vaultScope === 'global'`):
+    // Mirrors Precipitated Vault's system-level cold storage: NEVER auto-populated from cab-main or project cabinets,
+    // NEVER follows conversation context automatically (0 Token until Chief-search hit or explicit mount/import).
+    if (vaultScope === 'global') {
+      const globalFile = globalChiefVaultFilePath(opts.customSharedBoardFile)
+      if (dirty) {
+        writeRegistryRaw(regFile, reg)
+      }
+      return {
+        scope: 'global',
+        vaultScope: 'global',
+        isSystemGlobalVault: true,
+        unboundSession: false,
+        sessionKey: '',
+        rootSessionId: opts.rootSessionId || '',
+        projectKey: 'global',
+        cabinetId: '',
+        cabinetName: '🌐 系统全局档案柜（0 Token 冷封存 · 仅参谋与您可见）',
+        cabinetFile: globalFile,
+        registry: reg,
+        projectEntry: {
+          projectKey: 'global',
+          activeCabinetId: '',
+          cabinets: [],
+        },
+      }
+    }
+
+    // 3B. STRICT SESSION-ISOLATED WORKING CABINET (`sess:<rootSessionId>`):
+    // Working cabinets are strictly 1-to-1 with ONE root conversation (never shared across sessions!).
+    if (sessKey) {
+      if (!reg.sessions[sessKey]) {
+        const now = Date.now()
+        const defaultCabId = sessionCabinetId(opts.rootSessionId)
+        const cabFile = cabinetFilePath(defaultCabId, opts.customSharedBoardFile)
+        if (!fs.existsSync(cabFile)) {
+          const ownItems = claimSessionOwnLegacyItems(reg, projectKey, opts.rootSessionId, opts)
+          atomicWriteJson(cabFile, normalizeArchiveStore({
+            cabinetId: defaultCabId,
+            cabinetName: '本对话工作档案柜',
+            projectKey,
+            items: ownItems,
+          }))
+        }
+        reg.sessions[sessKey] = {
+          sessionKey: sessKey,
+          rootSessionId: opts.rootSessionId,
+          projectKey,
+          cwd: opts.cwd,
+          activeCabinetId: defaultCabId,
+          cabinets: [
+            {
+              id: defaultCabId,
+              name: '本对话工作档案柜',
+              projectKey,
+              rootSessionId: opts.rootSessionId,
+              cwd: opts.cwd,
+              createdAt: now,
+              updatedAt: now,
+            },
+          ],
+        }
+        dirty = true
+      } else {
+        if (opts.cwd && !reg.sessions[sessKey].cwd) {
+          reg.sessions[sessKey].cwd = opts.cwd
+          dirty = true
+        }
+        if (projectKey && reg.sessions[sessKey].projectKey !== projectKey && opts.cwd) {
+          reg.sessions[sessKey].projectKey = projectKey
+          dirty = true
+        }
+      }
+
+      const sessEntry = reg.sessions[sessKey]
+      let selectedCabinet = null
+      // Strictly match ONLY within THIS session's own cabinets (never cross-mount cab-main/cab-global!)
+      if (opts.cabinetId) {
+        selectedCabinet = sessEntry.cabinets.find(c => c.id === opts.cabinetId) || null
+      }
+      if (!selectedCabinet) {
+        selectedCabinet = sessEntry.cabinets.find(c => c.id === sessEntry.activeCabinetId) || sessEntry.cabinets[0]
+      }
+      const selectedFile = cabinetFilePath(selectedCabinet.id, opts.customSharedBoardFile)
+      if (!fs.existsSync(selectedFile)) {
+        atomicWriteJson(selectedFile, normalizeArchiveStore({
+          cabinetId: selectedCabinet.id,
+          cabinetName: selectedCabinet.name,
           projectKey,
         }))
       }
-      reg.projects[projectKey] = {
-        projectKey,
-        cwd: opts.cwd,
-        activeCabinetId: defaultCabId,
-        cabinets: [
-          {
-            id: defaultCabId,
-            name: `${labelPrefix} · 主档案柜`,
-            projectKey,
-            cwd: opts.cwd,
-            createdAt: now,
-            updatedAt: now,
-          },
-        ],
+      if (dirty || !fs.existsSync(regFile)) {
+        writeRegistryRaw(regFile, reg)
       }
-      dirty = true
-    } else if (opts.cwd && !reg.projects[projectKey].cwd) {
-      reg.projects[projectKey].cwd = opts.cwd
-      dirty = true
-    }
-
-    const projEntry = reg.projects[projectKey]
-    let selectedCabinet = null
-    if (opts.cabinetId) {
-      selectedCabinet = projEntry.cabinets.find(c => c.id === opts.cabinetId) || null
-      if (!selectedCabinet) {
-        // Also check across projects if an explicit cabinetId was passed
-        for (const p of Object.values(reg.projects)) {
-          const hit = p.cabinets.find(c => c.id === opts.cabinetId)
-          if (hit) {
-            selectedCabinet = hit
-            break
-          }
-        }
-      }
-    }
-    if (!selectedCabinet) {
-      selectedCabinet = projEntry.cabinets.find(c => c.id === projEntry.activeCabinetId) || projEntry.cabinets[0]
-    }
-
-    const selectedFile = cabinetFilePath(selectedCabinet.id, opts.customSharedBoardFile)
-    if (!fs.existsSync(selectedFile)) {
-      atomicWriteJson(selectedFile, normalizeArchiveStore({
+      return {
+        scope: 'session',
+        vaultScope: 'session',
+        unboundSession: false,
+        sessionKey: sessKey,
+        rootSessionId: opts.rootSessionId,
+        projectKey: sessEntry.projectKey || projectKey,
         cabinetId: selectedCabinet.id,
         cabinetName: selectedCabinet.name,
-        projectKey: selectedCabinet.projectKey,
-      }))
+        cabinetFile: selectedFile,
+        registry: reg,
+        projectEntry: sessEntry,
+      }
     }
 
+    // 3C. Unbound / blank new conversation: MUST NOT fall back to cab-main or cab-global!
     if (dirty || !fs.existsSync(regFile)) {
       writeRegistryRaw(regFile, reg)
     }
-
     return {
+      scope: 'session',
+      vaultScope: 'session',
+      unboundSession: true,
+      sessionKey: '',
+      rootSessionId: '',
       projectKey,
-      cabinetId: selectedCabinet.id,
-      cabinetName: selectedCabinet.name,
-      cabinetFile: selectedFile,
+      cabinetId: '',
+      cabinetName: '本会话尚未开始（空白新对话）',
+      cabinetFile: '',
       registry: reg,
-      projectEntry: projEntry,
+      projectEntry: {
+        projectKey,
+        activeCabinetId: '',
+        cabinets: [],
+      },
     }
   } finally {
     release()
@@ -440,11 +643,19 @@ function ensureProjectCabinet(targetOpt) {
 
 export function listProjectCabinets(targetOpt) {
   const resolved = ensureProjectCabinet(targetOpt)
+  const isGlobal = Boolean(resolved.isSystemGlobalVault || resolved.vaultScope === 'global')
   return {
     ok: true,
+    scope: isGlobal ? 'global' : (resolved.scope || 'session'),
+    vaultScope: isGlobal ? 'global' : (resolved.vaultScope || resolved.scope || 'session'),
+    isSystemGlobalVault: isGlobal,
+    unboundSession: isGlobal ? false : Boolean(resolved.unboundSession),
+    rootSessionId: resolved.rootSessionId || '',
     projectKey: resolved.projectKey,
-    activeCabinetId: resolved.projectEntry.activeCabinetId,
-    cabinets: resolved.projectEntry.cabinets.map(c => ({ ...c })),
+    activeCabinetId: isGlobal ? '' : (resolved.projectEntry ? resolved.projectEntry.activeCabinetId : ''),
+    cabinets: isGlobal
+      ? []
+      : (resolved.projectEntry && Array.isArray(resolved.projectEntry.cabinets) ? resolved.projectEntry.cabinets : []).map(c => ({ ...c })),
   }
 }
 
@@ -526,10 +737,16 @@ function normalizeArchiveItem(raw) {
   const takenOutSessions = Array.isArray(raw.takenOutSessions)
     ? [...new Set(raw.takenOutSessions.map(s => String(s || '').trim()).filter(Boolean))].slice(0, 32)
     : []
+  const chiefMountedSessions = Array.isArray(raw.chiefMountedSessions)
+    ? [...new Set(raw.chiefMountedSessions.map(s => String(s || '').trim()).filter(Boolean))].slice(0, 32)
+    : []
+  const contentHash = str(raw.contentHash, '').trim() || computeEntryContentHash({ title, summary, body })
 
   return {
     id: str(raw.id, '').trim() || nextId('arch'),
     sourceNoteId: str(raw.sourceNoteId, '').trim(),
+    originId: str(raw.originId, '').trim(),
+    originGlobalId: str(raw.originGlobalId, '').trim(),
     title,
     summary,
     folder,
@@ -537,13 +754,30 @@ function normalizeArchiveItem(raw) {
     tags: normalizeTags(Array.isArray(raw.tags) ? raw.tags : []),
     cold: raw.cold !== false,
     takenOutSessions,
+    chiefMountedSessions,
     organizedBy: ['auto', 'chief', 'user'].includes(raw.organizedBy) ? raw.organizedBy : 'auto',
     points,
     body,
+    contentHash,
     by: clamp(raw.by || 'agent', 40),
     sourceSession: str(raw.sourceSession || raw.session, '').trim(),
     createdAt: Number(raw.createdAt) || Date.now(),
     updatedAt: Number(raw.updatedAt) || Number(raw.createdAt) || Date.now(),
+  }
+}
+
+function normalizeGlobalVaultEntry(raw) {
+  const norm = normalizeArchiveItem({
+    ...(raw || {}),
+    id: str(raw && raw.id, '').trim() || nextId('glob'),
+    cold: true,
+  })
+  if (!norm) return null
+  return {
+    ...norm,
+    takenOutSessions: Array.isArray(norm.takenOutSessions) ? norm.takenOutSessions : [],
+    cold: true,
+    chiefMountedSessions: Array.isArray(norm.chiefMountedSessions) ? norm.chiefMountedSessions : [],
   }
 }
 
@@ -560,8 +794,9 @@ function normalizeArchiveStore(raw) {
     })
   }
 
+  const normalizer = src.isSystemGlobalVault ? normalizeGlobalVaultEntry : normalizeArchiveItem
   const items = (Array.isArray(src.items) ? src.items : [])
-    .map(normalizeArchiveItem)
+    .map(normalizer)
     .filter(Boolean)
     .slice(0, ARCHIVE_CAP)
 
@@ -583,9 +818,12 @@ function normalizeArchiveStore(raw) {
 
   return {
     version: ARCHIVE_VERSION,
-    cabinetId: str(src.cabinetId, 'cab-main').trim() || 'cab-main',
-    cabinetName: clamp(src.cabinetName || '默认主档案柜', 40),
-    projectKey: resolveProjectKey(src.projectKey || 'proj-default'),
+    isSystemGlobalVault: Boolean(src.isSystemGlobalVault),
+    cabinetId: src.isSystemGlobalVault ? '' : (str(src.cabinetId, 'cab-main').trim() || 'cab-main'),
+    cabinetName: src.isSystemGlobalVault
+      ? '🌐 系统全局档案柜'
+      : clamp(src.cabinetName || '默认主档案柜', 40),
+    projectKey: src.isSystemGlobalVault ? 'global' : resolveProjectKey(src.projectKey || 'proj-default'),
     migratedSharedAt: Number(src.migratedSharedAt) || 0,
     updatedAt: Number(src.updatedAt) || Date.now(),
     folders,
@@ -593,8 +831,207 @@ function normalizeArchiveStore(raw) {
   }
 }
 
+/**
+ * Loads the standalone System Global Cold Vault (`global-vault/vault-chief-global.json`).
+ * Structurally peers with `precipitated/vault-global.json`: NEVER shares files with `cabinets/`,
+ * NEVER auto-follows conversation context (0 Token unless explicitly mounted or Chief-searched).
+ */
+export function loadGlobalVaultRaw(targetOpt) {
+  const file = globalChiefVaultFilePath(targetOpt)
+  if (!fs.existsSync(file)) {
+    return normalizeArchiveStore({
+      isSystemGlobalVault: true,
+      projectKey: 'global',
+      updatedAt: 0,
+      items: [],
+    })
+  }
+  const parsed = readJsonSafe(file, null)
+  return normalizeArchiveStore({
+    ...(parsed && typeof parsed === 'object' ? parsed : {}),
+    isSystemGlobalVault: true,
+    projectKey: 'global',
+  })
+}
+
+export function saveGlobalVaultRaw(store, targetOpt) {
+  const file = globalChiefVaultFilePath(targetOpt)
+  const normalized = normalizeArchiveStore({
+    ...(store && typeof store === 'object' ? store : {}),
+    isSystemGlobalVault: true,
+    projectKey: 'global',
+    updatedAt: Date.now(),
+  })
+  atomicWriteJson(file, normalized)
+  return normalized
+}
+
+/**
+ * 0-Token Guard for System Global Vault:
+ * Returns ONLY entries the User explicitly mounted for Chief in THIS conversation (`chiefMountedSessions`).
+ * By default returns `[]` without reading or leaking anything into conversation context.
+ */
+export function getChiefMountedGlobalForSession(rootSessionId = '', targetOpt) {
+  const sid = cleanRootSessionId(rootSessionId)
+  if (!sid) return []
+  const file = globalChiefVaultFilePath(targetOpt)
+  if (!fs.existsSync(file)) return []
+  const store = loadGlobalVaultRaw(targetOpt)
+  return store.items.filter(it => Array.isArray(it.chiefMountedSessions) && it.chiefMountedSessions.includes(sid))
+}
+
+/**
+ * Returns ONLY System Global Vault entries explicitly placed onto THIS session's desk (`takenOutSessions`),
+ * so both Lead & Chief emphasize them in prompt context while sealed global entries stay hidden from Lead.
+ */
+export function getTakenOutGlobalForSession(rootSessionId = '', targetOpt) {
+  const sid = cleanRootSessionId(rootSessionId)
+  if (!sid) return []
+  const file = globalChiefVaultFilePath(targetOpt)
+  if (!fs.existsSync(file)) return []
+  const store = loadGlobalVaultRaw(targetOpt)
+  return store.items.filter(it => Array.isArray(it.takenOutSessions) && it.takenOutSessions.includes(sid))
+}
+
+/**
+ * Computes bidirectional diff between the active conversation's Local Session Cabinet and the System Global Vault.
+ */
+export function computeSessionGlobalDiff(sessionItems = [], globalItems = [], rootSessionId = '') {
+  const sid = cleanRootSessionId(rootSessionId)
+  const sArr = Array.isArray(sessionItems) ? sessionItems : []
+  const gArr = Array.isArray(globalItems) ? globalItems : []
+
+  const gById = new Map()
+  const gByOriginId = new Map()
+  const gByTitle = new Map()
+  for (const g of gArr) {
+    if (!g) continue
+    gById.set(g.id, g)
+    if (g.originId) gByOriginId.set(g.originId, g)
+    const tk = normalizeArchiveTitleKey(g.title)
+    if (tk && !gByTitle.has(tk)) gByTitle.set(tk, g)
+  }
+
+  const sById = new Map()
+  const sByOriginGlobal = new Map()
+  const sByTitle = new Map()
+  for (const s of sArr) {
+    if (!s) continue
+    sById.set(s.id, s)
+    if (s.originGlobalId) sByOriginGlobal.set(s.originGlobalId, s)
+    const tk = normalizeArchiveTitleKey(s.title)
+    if (tk && !sByTitle.has(tk)) sByTitle.set(tk, s)
+  }
+
+  const sessionDiffMap = new Map()
+  const globalDiffMap = new Map()
+  let localOnlyCount = 0
+  let globalOnlyCount = 0
+  let syncedCount = 0
+  let modifiedCount = 0
+  const localOnlyBriefs = []
+
+  if (sid) {
+    for (const s of sArr) {
+      if (!s) continue
+      const gMatch = (s.originGlobalId && gById.get(s.originGlobalId))
+        || gByOriginId.get(s.id)
+        || gByTitle.get(normalizeArchiveTitleKey(s.title))
+        || null
+      if (!gMatch) {
+        localOnlyCount += 1
+        sessionDiffMap.set(s.id, { diffStatus: 'local_only', matchedGlobalId: '' })
+        if (localOnlyBriefs.length < 25) {
+          localOnlyBriefs.push({
+            id: s.id,
+            title: s.title,
+            summary: s.summary,
+            folder: s.folder,
+            paperclip: s.paperclip,
+            diffStatus: 'local_only',
+            updatedAt: s.updatedAt,
+          })
+        }
+      } else {
+        const sHash = computeEntryContentHash(s)
+        const gHash = computeEntryContentHash(gMatch)
+        if (sHash === gHash) {
+          syncedCount += 1
+          sessionDiffMap.set(s.id, { diffStatus: 'synced', matchedGlobalId: gMatch.id })
+        } else {
+          modifiedCount += 1
+          sessionDiffMap.set(s.id, { diffStatus: 'local_modified', matchedGlobalId: gMatch.id })
+          if (localOnlyBriefs.length < 25) {
+            localOnlyBriefs.push({
+              id: s.id,
+              title: s.title,
+              summary: s.summary,
+              folder: s.folder,
+              paperclip: s.paperclip,
+              diffStatus: 'local_modified',
+              matchedGlobalId: gMatch.id,
+              updatedAt: s.updatedAt,
+            })
+          }
+        }
+      }
+    }
+  }
+
+  for (const g of gArr) {
+    if (!g) continue
+    if (!sid) {
+      globalDiffMap.set(g.id, { diffStatus: 'unbound', matchedSessionItemId: '' })
+      continue
+    }
+    const sMatch = sByOriginGlobal.get(g.id)
+      || (g.originId ? sById.get(g.originId) : null)
+      || sByTitle.get(normalizeArchiveTitleKey(g.title))
+      || null
+    if (!sMatch) {
+      globalOnlyCount += 1
+      globalDiffMap.set(g.id, { diffStatus: 'global_only', matchedSessionItemId: '' })
+    } else {
+      const sHash = computeEntryContentHash(sMatch)
+      const gHash = computeEntryContentHash(g)
+      globalDiffMap.set(g.id, {
+        diffStatus: sHash === gHash ? 'synced' : 'differs',
+        matchedSessionItemId: sMatch.id,
+      })
+    }
+  }
+
+  return {
+    sessionDiffMap,
+    globalDiffMap,
+    summary: {
+      unboundSession: !sid,
+      sessionTotal: sid ? sArr.length : 0,
+      globalTotal: gArr.length,
+      localOnlyCount,
+      globalOnlyCount: sid ? globalOnlyCount : gArr.length,
+      syncedCount,
+      modifiedCount,
+      localOnlyBriefs,
+    },
+  }
+}
+
 export function loadArchiveStore(targetOpt) {
   const resolved = ensureProjectCabinet(targetOpt)
+  if (resolved.vaultScope === 'global') {
+    return loadGlobalVaultRaw(targetOpt)
+  }
+  if (resolved.unboundSession || !resolved.cabinetFile) {
+    return {
+      ...normalizeArchiveStore({
+        cabinetId: '',
+        cabinetName: resolved.cabinetName || '本会话尚未开始（空白新对话）',
+        projectKey: resolved.projectKey,
+      }),
+      unboundSession: true,
+    }
+  }
   const file = resolved.cabinetFile
   try {
     const st = fs.statSync(file)
@@ -621,6 +1058,12 @@ export function loadArchiveStore(targetOpt) {
 
 export function saveArchiveStore(store, targetOpt) {
   const resolved = ensureProjectCabinet(targetOpt)
+  if (resolved.vaultScope === 'global') {
+    return saveGlobalVaultRaw(store, targetOpt)
+  }
+  if (resolved.unboundSession || !resolved.cabinetFile) {
+    throw new Error('当前未绑定具体对话（空白新对话），不能写入本会话档案柜')
+  }
   const file = resolved.cabinetFile
   const normalized = normalizeArchiveStore({
     ...store,
@@ -640,6 +1083,23 @@ export function saveArchiveStore(store, targetOpt) {
 
 export function withArchiveLock(targetOpt, fn) {
   const resolved = ensureProjectCabinet(targetOpt)
+  if (resolved.vaultScope === 'global') {
+    const file = globalChiefVaultFilePath(targetOpt)
+    const release = acquireFileLock(file)
+    invalidateArchiveCache()
+    try {
+      return fn(file, resolved)
+    } finally {
+      release()
+    }
+  }
+  if (resolved.unboundSession || !resolved.cabinetFile) {
+    return {
+      ok: false,
+      unboundSession: true,
+      error: '当前为空白新对话（尚未绑定会话 ID），请先在主会话发送一条消息，或切换到「🌐 全局档案柜」',
+    }
+  }
   const file = resolved.cabinetFile
   const release = acquireFileLock(file)
   invalidateArchiveCache()
@@ -878,9 +1338,11 @@ export function smartParseNoteToDossier(rawNote) {
 export function bootstrapArchivesFromSharedBoard({ sharedFile, loadBoard, saveBoard, pushLog }) {
   try {
     if (!sharedFile || !fs.existsSync(sharedFile)) return { migrated: 0 }
-    // Ensure legacy `archives.json` is migrated to `cabinets/cab-main.json` first
-    const resolved = ensureProjectCabinet({ customSharedBoardFile: sharedFile })
-    const existing = loadArchiveStore({ customSharedBoardFile: sharedFile, cabinetId: resolved.cabinetId })
+    // Ensure legacy `archives.json` & old board.notes migrate once into Global Cabinet (not into every blank chat!)
+    const globalTarget = { customSharedBoardFile: sharedFile, vaultScope: 'global' }
+    const resolved = ensureProjectCabinet(globalTarget)
+    const storeTarget = { customSharedBoardFile: sharedFile, vaultScope: 'global', cabinetId: resolved.cabinetId }
+    const existing = loadArchiveStore(storeTarget)
     if (existing.migratedSharedAt > 0 && existing.items.length > 0) {
       return { migrated: 0 }
     }
@@ -889,10 +1351,10 @@ export function bootstrapArchivesFromSharedBoard({ sharedFile, loadBoard, saveBo
     const legacyNotes = Array.isArray(sharedBoard && sharedBoard.notes) ? sharedBoard.notes : []
     if (!legacyNotes.length) {
       if (!existing.migratedSharedAt) {
-        withArchiveLock({ customSharedBoardFile: sharedFile, cabinetId: resolved.cabinetId }, () => {
-          const empty = loadArchiveStore({ customSharedBoardFile: sharedFile, cabinetId: resolved.cabinetId })
+        withArchiveLock(storeTarget, () => {
+          const empty = loadArchiveStore(storeTarget)
           empty.migratedSharedAt = Date.now()
-          saveArchiveStore(empty, { customSharedBoardFile: sharedFile, cabinetId: resolved.cabinetId })
+          saveArchiveStore(empty, storeTarget)
         })
       }
       return { migrated: 0 }
@@ -906,8 +1368,8 @@ export function bootstrapArchivesFromSharedBoard({ sharedFile, loadBoard, saveBo
     } catch {}
 
     let migratedCount = 0
-    withArchiveLock({ customSharedBoardFile: sharedFile, cabinetId: resolved.cabinetId }, () => {
-      const store = loadArchiveStore({ customSharedBoardFile: sharedFile, cabinetId: resolved.cabinetId })
+    withArchiveLock(storeTarget, () => {
+      const store = loadArchiveStore(storeTarget)
       const existingSourceIds = new Set(store.items.map(it => it.sourceNoteId).filter(Boolean))
       const existingTitles = new Set(store.items.map(it => it.title))
 
@@ -943,7 +1405,7 @@ export function bootstrapArchivesFromSharedBoard({ sharedFile, loadBoard, saveBo
       }
 
       store.migratedSharedAt = Date.now()
-      saveArchiveStore(store, { customSharedBoardFile: sharedFile, cabinetId: resolved.cabinetId })
+      saveArchiveStore(store, storeTarget)
     })
 
     if (migratedCount > 0 && typeof saveBoard === 'function') {
@@ -951,7 +1413,7 @@ export function bootstrapArchivesFromSharedBoard({ sharedFile, loadBoard, saveBo
       if (typeof pushLog === 'function') {
         pushLog(
           sharedBoard,
-          `🗄️ 已将 ${migratedCount} 篇历史工程笔记无损沉淀入「档案」柜（默认封存懒加载，不再每轮挤占上下文）`,
+          `🗄️ 已将 ${migratedCount} 篇历史工程笔记无损沉淀入「全局档案柜」（默认封存懒加载，不再每轮挤占上下文）`,
           'system',
           '',
         )
@@ -967,13 +1429,14 @@ export function bootstrapArchivesFromSharedBoard({ sharedFile, loadBoard, saveBo
 
 /* ------------------------------------------- Lazy-Loading Query & Mutations */
 
-/** Ultra-lightweight metadata (<120 bytes) for `/snapshot` polling — ZERO archive text or precipitated reads! */
+/** Ultra-lightweight metadata (<160 bytes) for `/snapshot` polling — ZERO archive text or precipitated reads! */
 export function getArchiveMeta(rootSessionId = '', targetOpt) {
-  const cabInfo = listProjectCabinets(targetOpt)
-  const store = loadArchiveStore(targetOpt)
-  const sid = String(rootSessionId || '').trim()
+  const effectiveTarget = withRootScope(targetOpt, rootSessionId)
+  const cabInfo = listProjectCabinets(effectiveTarget)
+  const store = loadArchiveStore(effectiveTarget)
+  const sid = cleanRootSessionId(rootSessionId)
   const nonEmptyFolders = new Set(store.items.map(it => it.folder).filter(Boolean))
-  const takenOutCount = sid
+  const takenOutCount = (sid && cabInfo.vaultScope !== 'global' && !cabInfo.unboundSession)
     ? store.items.filter(it => Array.isArray(it.takenOutSessions) && it.takenOutSessions.includes(sid)).length
     : 0
   return {
@@ -981,35 +1444,104 @@ export function getArchiveMeta(rootSessionId = '', targetOpt) {
     folderCount: nonEmptyFolders.size || DEFAULT_ARCHIVE_FOLDERS.length,
     takenOutCount,
     unorganizedCount: store.items.filter(it => it.folder === 'inbox' || it.organizedBy === 'auto').length,
+    scope: cabInfo.vaultScope || cabInfo.scope || 'session',
+    vaultScope: cabInfo.vaultScope || cabInfo.scope || 'session',
+    isSystemGlobalVault: Boolean(cabInfo.isSystemGlobalVault),
+    unboundSession: Boolean(cabInfo.unboundSession),
     projectKey: cabInfo.projectKey,
     activeCabinetId: cabInfo.activeCabinetId,
     cabinetCount: cabInfo.cabinets.length,
   }
 }
 
+function hasAnyPrecipitatedFilesOnDisk(targetOpt) {
+  const globalFile = globalPrecipitatedFilePath(targetOpt)
+  if (fs.existsSync(globalFile)) return true
+  const dir = path.dirname(globalFile)
+  try {
+    if (!fs.existsSync(dir)) return false
+    return fs.readdirSync(dir).some(name => name.endsWith('.json'))
+  } catch {
+    return false
+  }
+}
+
+/** Counts across all 3 tiers (`session`, `global`, `precipitated`) for UI tabs & `/snapshot`. */
+export function getThreeTierArchiveCounts(rootSessionId = '', flippedIds = [], targetOpt) {
+  const sid = cleanRootSessionId(rootSessionId)
+  const base = resolveTargetOpts(targetOpt)
+  const sessionStore = sid
+    ? loadArchiveStore({ customSharedBoardFile: base.customSharedBoardFile, cwd: base.cwd, projectKey: base.projectKey, rootSessionId: sid, vaultScope: 'session' })
+    : { items: [], unboundSession: true }
+  const globalStore = loadGlobalVaultRaw(base)
+  let precipitatedCount = 0
+  let flippedCount = Array.isArray(flippedIds) ? flippedIds.length : 0
+  if (hasAnyPrecipitatedFilesOnDisk(base)) {
+    const pStore = loadPrecipitatedStoreRaw(base.projectKey || 'proj-default', base)
+    precipitatedCount = pStore.items.length
+    if (sid) {
+      flippedCount = pStore.items.filter(it => Array.isArray(it.flippedOutSessions) && it.flippedOutSessions.includes(sid)).length
+    }
+  }
+  const globalMountedCount = sid
+    ? globalStore.items.filter(it => Array.isArray(it.chiefMountedSessions) && it.chiefMountedSessions.includes(sid)).length
+    : 0
+  const globalTakenOutCount = sid
+    ? globalStore.items.filter(it => Array.isArray(it.takenOutSessions) && it.takenOutSessions.includes(sid)).length
+    : 0
+  return {
+    sessionCount: Array.isArray(sessionStore.items) ? sessionStore.items.length : 0,
+    globalCount: Array.isArray(globalStore.items) ? globalStore.items.length : 0,
+    globalMountedCount,
+    globalTakenOutCount,
+    precipitatedCount,
+    flippedCount,
+    unboundSession: !sid,
+  }
+}
+
 /**
  * Tier-1 Lazy Load (`GET /api/dsh-chief/archives`):
- * Returns active cabinet drawers + dossier headers + project cabinets list
- * (+ precipitated vault headers ONLY for the Archives tab UI when caller asks for them).
+ * - `scope === 'global'`: reads standalone System Global Cold Vault (`global-vault/vault-chief-global.json`),
+ *   computes live diff against current conversation's Session Cabinet (when bound), and returns `isSystemGlobalVault: true`.
+ * - `scope === 'session'`: reads ONLY this root conversation's Local Session Cabinet (strictly isolated 1:1),
+ *   computes diff against System Global Vault so each card knows whether it is local_only / synced / local_modified.
  */
 export function listArchiveHeaders(rootSessionId = '', opts = {}, targetOpt) {
-  const target = targetOpt !== undefined
+  const sid = cleanRootSessionId(rootSessionId || (opts && (opts.rootSessionId || opts.sessionId)))
+  const requestedScope = normalizeVaultScope((opts && (opts.vaultScope || opts.scope)) || (targetOpt && typeof targetOpt === 'object' && (targetOpt.vaultScope || targetOpt.scope)))
+  const baseTarget = targetOpt !== undefined
     ? (typeof targetOpt === 'string'
-      ? { customSharedBoardFile: targetOpt, cwd: opts && opts.cwd, projectKey: opts && opts.projectKey, cabinetId: opts && opts.cabinetId }
-      : { ...opts, ...targetOpt })
-    : opts
+      ? { customSharedBoardFile: targetOpt, cwd: opts && opts.cwd, projectKey: opts && opts.projectKey, cabinetId: opts && opts.cabinetId, vaultScope: requestedScope }
+      : { ...opts, ...targetOpt, vaultScope: requestedScope })
+    : { ...(opts || {}), vaultScope: requestedScope }
+  const target = withRootScope(baseTarget, sid)
+  const isGlobalReq = requestedScope === 'global'
   const cabInfo = listProjectCabinets(target)
-  const store = loadArchiveStore(target)
-  const sid = String(rootSessionId || '').trim()
+  const store = isGlobalReq ? loadGlobalVaultRaw(baseTarget) : loadArchiveStore(target)
+  const globalVault = isGlobalReq ? store : loadGlobalVaultRaw(baseTarget)
+  const sessionStore = isGlobalReq
+    ? (sid ? loadArchiveStore({ customSharedBoardFile: baseTarget.customSharedBoardFile, cwd: baseTarget.cwd, projectKey: baseTarget.projectKey, rootSessionId: sid, vaultScope: 'session' }) : { items: [], unboundSession: true })
+    : store
+  const diff = computeSessionGlobalDiff(
+    sessionStore && !sessionStore.unboundSession ? sessionStore.items : [],
+    globalVault.items,
+    sid,
+  )
+
   const needle = String((opts && opts.query) || '').trim().toLowerCase()
   const folderFilter = String((opts && opts.folder) || '').trim()
   const clipFilter = String((opts && opts.paperclip) || '').trim()
 
   const clipRank = { gold: 0, silver: 1, copper: 2 }
   const sorted = store.items.slice().sort((a, b) => {
-    const aOut = sid && a.takenOutSessions.includes(sid) ? 0 : 1
-    const bOut = sid && b.takenOutSessions.includes(sid) ? 0 : 1
-    if (aOut !== bOut) return aOut - bOut
+    const aPinned = isGlobalReq
+      ? (sid && Array.isArray(a.chiefMountedSessions) && a.chiefMountedSessions.includes(sid) ? 0 : 1)
+      : (sid && Array.isArray(a.takenOutSessions) && a.takenOutSessions.includes(sid) ? 0 : 1)
+    const bPinned = isGlobalReq
+      ? (sid && Array.isArray(b.chiefMountedSessions) && b.chiefMountedSessions.includes(sid) ? 0 : 1)
+      : (sid && Array.isArray(b.takenOutSessions) && b.takenOutSessions.includes(sid) ? 0 : 1)
+    if (aPinned !== bPinned) return aPinned - bPinned
     const cDiff = (clipRank[a.paperclip] ?? 1) - (clipRank[b.paperclip] ?? 1)
     if (cDiff !== 0) return cDiff
     return (b.updatedAt || 0) - (a.updatedAt || 0)
@@ -1044,46 +1576,74 @@ export function listArchiveHeaders(rootSessionId = '', opts = {}, targetOpt) {
     goldCount: goldByFolder[f.id] || 0,
   }))
 
-  const headers = filtered.map(it => ({
-    id: it.id,
-    title: it.title,
-    summary: it.summary,
-    folder: it.folder,
-    paperclip: it.paperclip,
-    tags: it.tags,
-    cold: it.cold,
-    takenOut: Boolean(sid && it.takenOutSessions.includes(sid)),
-    organizedBy: it.organizedBy,
-    pointCount: Array.isArray(it.points) ? it.points.length : 0,
-    pointPreviews: (Array.isArray(it.points) ? it.points : []).slice(0, 4).map(p => p.title),
-    bodyLength: (it.body || '').length,
-    updatedAt: it.updatedAt,
-    createdAt: it.createdAt,
-  }))
+  const headers = filtered.map((it) => {
+    const diffEntry = (isGlobalReq ? diff.globalDiffMap.get(it.id) : diff.sessionDiffMap.get(it.id)) || {}
+    return {
+      id: it.id,
+      originId: it.originId || '',
+      originGlobalId: it.originGlobalId || '',
+      title: it.title,
+      summary: it.summary,
+      folder: it.folder,
+      paperclip: it.paperclip,
+      tags: it.tags,
+      cold: true,
+      takenOut: Boolean(sid && Array.isArray(it.takenOutSessions) && it.takenOutSessions.includes(sid)),
+      chiefMounted: Boolean(isGlobalReq && sid && Array.isArray(it.chiefMountedSessions) && it.chiefMountedSessions.includes(sid)),
+      diffStatus: diffEntry.diffStatus || (isGlobalReq ? (sid ? 'global_only' : 'unbound') : 'local_only'),
+      matchedGlobalId: !isGlobalReq ? (diffEntry.matchedGlobalId || '') : '',
+      matchedSessionItemId: isGlobalReq ? (diffEntry.matchedSessionItemId || '') : '',
+      contentHash: it.contentHash || computeEntryContentHash(it),
+      organizedBy: it.organizedBy,
+      pointCount: Array.isArray(it.points) ? it.points.length : 0,
+      pointPreviews: (Array.isArray(it.points) ? it.points : []).slice(0, 4).map(p => p.title),
+      bodyLength: (it.body || '').length,
+      updatedAt: it.updatedAt,
+      createdAt: it.createdAt,
+    }
+  })
 
   const includePrecipitated = Boolean(opts && opts.includePrecipitated)
   const precipitated = includePrecipitated
     ? listPrecipitatedHeaders(cabInfo.projectKey, sid, target)
     : undefined
+  const counts = (opts && opts.includeCounts !== false)
+    ? getThreeTierArchiveCounts(sid, (opts && opts.flippedIds) || [], baseTarget)
+    : undefined
 
   return {
     ok: true,
-    projectKey: cabInfo.projectKey,
-    activeCabinetId: cabInfo.activeCabinetId,
-    cabinets: cabInfo.cabinets,
+    scope: isGlobalReq ? 'global' : (cabInfo.vaultScope || cabInfo.scope || 'session'),
+    vaultScope: isGlobalReq ? 'global' : (cabInfo.vaultScope || cabInfo.scope || 'session'),
+    isSystemGlobalVault: isGlobalReq,
+    unboundSession: isGlobalReq ? false : Boolean(cabInfo.unboundSession),
+    rootSessionId: sid,
+    projectKey: isGlobalReq ? 'global' : cabInfo.projectKey,
+    activeCabinetId: isGlobalReq ? '' : cabInfo.activeCabinetId,
+    cabinets: isGlobalReq ? [] : cabInfo.cabinets,
     totalCount: store.items.length,
-    takenOutCount: sid ? store.items.filter(it => it.takenOutSessions.includes(sid)).length : 0,
+    takenOutCount: sid
+      ? store.items.filter(it => Array.isArray(it.takenOutSessions) && it.takenOutSessions.includes(sid)).length
+      : 0,
+    diffSummary: diff.summary,
     folders,
     items: headers,
     ...(precipitated !== undefined ? { precipitated } : {}),
+    ...(counts !== undefined ? { counts } : {}),
   }
 }
 
 export function getArchiveDetail(idOrTitle = '', rootSessionId = '', targetOpt) {
   const target = String(idOrTitle || '').trim()
   if (!target) return { ok: false, error: 'archive id or title required' }
-  const store = loadArchiveStore(targetOpt)
-  const sid = String(rootSessionId || '').trim()
+  const sid = cleanRootSessionId(rootSessionId)
+  const base = resolveTargetOpts(targetOpt)
+  const isGlobal = base.vaultScope === 'global'
+  const resolved = ensureProjectCabinet(withRootScope(targetOpt, sid))
+  if (!isGlobal && resolved.unboundSession) {
+    return { ok: false, error: '当前为空白新对话，尚未建立本会话档案柜' }
+  }
+  const store = isGlobal ? loadGlobalVaultRaw(targetOpt) : loadArchiveStore(withRootScope(targetOpt, sid))
   const hit = store.items.find(it => it.id === target)
     || store.items.find(it => it.title === target)
     || store.items.find(it => it.title.toLowerCase().includes(target.toLowerCase()))
@@ -1091,18 +1651,24 @@ export function getArchiveDetail(idOrTitle = '', rootSessionId = '', targetOpt) 
 
   return {
     ok: true,
+    vaultScope: isGlobal ? 'global' : (resolved.vaultScope || 'session'),
+    isSystemGlobalVault: isGlobal,
     item: {
       id: hit.id,
+      originId: hit.originId || '',
+      originGlobalId: hit.originGlobalId || '',
       title: hit.title,
       summary: hit.summary,
       folder: hit.folder,
       paperclip: hit.paperclip,
       tags: hit.tags,
       cold: hit.cold,
-      takenOut: Boolean(sid && hit.takenOutSessions.includes(sid)),
+      takenOut: Boolean(sid && Array.isArray(hit.takenOutSessions) && hit.takenOutSessions.includes(sid)),
+      chiefMounted: Boolean(isGlobal && sid && Array.isArray(hit.chiefMountedSessions) && hit.chiefMountedSessions.includes(sid)),
       organizedBy: hit.organizedBy,
       points: hit.points,
       body: hit.body,
+      contentHash: hit.contentHash || computeEntryContentHash(hit),
       by: hit.by,
       createdAt: hit.createdAt,
       updatedAt: hit.updatedAt,
@@ -1111,23 +1677,26 @@ export function getArchiveDetail(idOrTitle = '', rootSessionId = '', targetOpt) 
 }
 
 /**
- * Strictly returns ONLY dossiers explicitly taken out onto the current session desk.
- * NEVER reads `precipitated/<projectKey>.json`!
+ * Strictly returns ONLY dossiers explicitly taken out onto the current session desk
+ * FROM THIS CONVERSATION'S SESSION CABINET. NEVER reads Global Cabinet or `precipitated`!
  */
 export function getTakenOutArchivesForSession(rootSessionId = '', targetOpt) {
-  const sid = String(rootSessionId || '').trim()
+  const sid = cleanRootSessionId(rootSessionId)
   if (!sid) return []
-  const store = loadArchiveStore(targetOpt)
+  const base = resolveTargetOpts(targetOpt)
+  const store = loadArchiveStore({
+    customSharedBoardFile: base.customSharedBoardFile,
+    cwd: base.cwd,
+    projectKey: base.projectKey,
+    cabinetId: base.cabinetId,
+    rootSessionId: sid,
+    vaultScope: 'session',
+  })
+  if (store.unboundSession) return []
   return store.items.filter(it => Array.isArray(it.takenOutSessions) && it.takenOutSessions.includes(sid))
 }
 
-/** On-demand search for `chief_board({ action: "archive.search" })` or Chief explicit lookup.
- * Strictly searches ONLY working cabinets — NEVER reads `precipitated/<projectKey>.json`! */
-export function searchArchives(query = '', opts = {}, targetOpt) {
-  const effectiveTarget = targetOpt !== undefined
-    ? targetOpt
-    : (opts && (opts.cwd || opts.projectKey || opts.cabinetId || opts.customSharedBoardFile) ? opts : undefined)
-  const store = loadArchiveStore(effectiveTarget)
+function scoreAndRankArchiveItems(store, query = '', opts = {}) {
   const folder = String((opts && opts.folder) || '').trim()
   const limit = Math.max(1, Math.min(Number(opts && opts.limit) || 8, 25))
   const rawQ = String(query || '').trim().toLowerCase()
@@ -1137,7 +1706,7 @@ export function searchArchives(query = '', opts = {}, targetOpt) {
     .filter(Boolean)
 
   const scored = []
-  for (const it of store.items) {
+  for (const it of (store && Array.isArray(store.items) ? store.items : [])) {
     if (folder && it.folder !== folder) continue
     if (!terms.length) {
       scored.push({ score: it.paperclip === 'gold' ? 5 : 2, it })
@@ -1164,11 +1733,10 @@ export function searchArchives(query = '', opts = {}, targetOpt) {
   }
 
   scored.sort((a, b) => b.score - a.score || (b.it.updatedAt || 0) - (a.it.updatedAt || 0))
-  const folderLabelMap = new Map(store.folders.map(f => [f.id, f.label]))
+  const folderLabelMap = new Map((store && Array.isArray(store.folders) ? store.folders : []).map(f => [f.id, f.label]))
 
   return {
-    ok: true,
-    totalArchives: store.items.length,
+    totalArchives: store && Array.isArray(store.items) ? store.items.length : 0,
     matchCount: scored.length,
     hits: scored.slice(0, limit).map(({ it }) => ({
       id: it.id,
@@ -1184,41 +1752,109 @@ export function searchArchives(query = '', opts = {}, targetOpt) {
   }
 }
 
+/** On-demand search for `chief_board({ action: "archive.search" })` inside THIS conversation's Session Cabinet.
+ * Strictly NEVER reads System Global Vault or `precipitated`! */
+export function searchArchives(query = '', opts = {}, targetOpt) {
+  const rawTarget = targetOpt !== undefined
+    ? (typeof targetOpt === 'string'
+      ? { customSharedBoardFile: targetOpt, vaultScope: 'session' }
+      : { ...targetOpt, vaultScope: 'session' })
+    : (opts && (opts.cwd || opts.projectKey || opts.cabinetId || opts.customSharedBoardFile || opts.rootSessionId || opts.sessionId)
+      ? { ...opts, vaultScope: 'session' }
+      : { vaultScope: 'session' })
+  const store = loadArchiveStore(rawTarget)
+  if (store.unboundSession) {
+    return { ok: true, totalArchives: 0, matchCount: 0, hits: [], unboundSession: true }
+  }
+  return {
+    ok: true,
+    ...scoreAndRankArchiveItems(store, query, opts),
+  }
+}
+
+/** On-demand search strictly for Chief (`askChief`) across the System Global Cold Vault (`global-vault/vault-chief-global.json`).
+ * NEVER exposed to Lead/Subagent `chief_board` tools. */
+export function searchGlobalVaultForChief(query = '', opts = {}, targetOpt) {
+  const rawTarget = targetOpt !== undefined
+    ? (typeof targetOpt === 'string' ? { customSharedBoardFile: targetOpt, vaultScope: 'global' } : { ...targetOpt, vaultScope: 'global' })
+    : { ...(opts || {}), vaultScope: 'global' }
+  const store = loadGlobalVaultRaw(rawTarget)
+  return {
+    ok: true,
+    vaultScope: 'global',
+    isSystemGlobalVault: true,
+    ...scoreAndRankArchiveItems(store, query, opts),
+  }
+}
+
 /* ------------------------------------------- Cabinet & Archive Mutations */
 
 function mutateCabinetRegistry(payload = {}, targetOpt) {
   const op = str(payload.op, '').trim()
   const opts = resolveTargetOpts(targetOpt)
+  const vaultScope = normalizeVaultScope(payload.vaultScope || payload.scope || opts.vaultScope)
+  if (vaultScope === 'global') {
+    if (op === 'listCabinets') {
+      return {
+        ok: true,
+        scope: 'global',
+        vaultScope: 'global',
+        isSystemGlobalVault: true,
+        projectKey: 'global',
+        activeCabinetId: '',
+        cabinets: [],
+      }
+    }
+    return {
+      ok: false,
+      isSystemGlobalVault: true,
+      error: '系统全局档案柜采用单一冷存储卷（与沉淀库同构），不支持多分柜创建、切换或删除',
+    }
+  }
+  const rootSid = cleanRootSessionId(payload.rootSessionId || payload.session || opts.rootSessionId)
   const resolvedInit = ensureProjectCabinet({
     ...opts,
     cwd: str(payload.cwd, opts.cwd),
     projectKey: str(payload.projectKey, opts.projectKey),
+    rootSessionId: rootSid,
+    vaultScope,
   })
   const regFile = cabinetRegistryPath(opts.customSharedBoardFile)
   const projectKey = resolvedInit.projectKey
+  const sessKey = normalizeSessionScopeKey(rootSid)
 
   if (op === 'listCabinets') {
-    return listProjectCabinets({ ...opts, projectKey })
+    return listProjectCabinets({ ...opts, projectKey, rootSessionId: rootSid, vaultScope })
+  }
+
+  if (resolvedInit.unboundSession || !sessKey) {
+    return {
+      ok: false,
+      unboundSession: true,
+      error: '当前为空白新对话（尚未绑定会话 ID），请先在主会话发送一条消息，或切换到「🌐 全局档案柜」',
+    }
   }
 
   const release = acquireFileLock(regFile)
   try {
     const reg = normalizeRegistry(readJsonSafe(regFile, null))
-    const proj = reg.projects[projectKey] || resolvedInit.projectEntry
-    reg.projects[projectKey] = proj
+    if (!reg.sessions[sessKey]) reg.sessions[sessKey] = resolvedInit.projectEntry
+    const container = reg.sessions[sessKey]
+    const scopeMeta = { scope: 'session', vaultScope: 'session', rootSessionId: rootSid }
 
     if (op === 'createCabinet') {
-      const name = clamp(payload.name || payload.label || `工作档案柜 ${proj.cabinets.length + 1}`, 40)
-      const dup = proj.cabinets.find(c => c.name === name)
+      const name = clamp(payload.name || payload.label || `工作档案柜 ${container.cabinets.length + 1}`, 40)
+      const dup = container.cabinets.find(c => c.name === name)
       if (dup) {
-        proj.activeCabinetId = dup.id
+        container.activeCabinetId = dup.id
         writeRegistryRaw(regFile, reg)
         invalidateArchiveCache()
         return {
           ok: true,
+          ...scopeMeta,
           cabinet: dup,
-          activeCabinetId: proj.activeCabinetId,
-          cabinets: proj.cabinets,
+          activeCabinetId: container.activeCabinetId,
+          cabinets: container.cabinets,
           projectKey,
         }
       }
@@ -1228,7 +1864,8 @@ function mutateCabinetRegistry(payload = {}, targetOpt) {
         id,
         name,
         projectKey,
-        cwd: proj.cwd || str(payload.cwd, opts.cwd),
+        ...(rootSid && sessKey ? { rootSessionId: rootSid } : {}),
+        cwd: container.cwd || str(payload.cwd, opts.cwd),
         createdAt: now,
         updatedAt: now,
       }
@@ -1238,41 +1875,43 @@ function mutateCabinetRegistry(payload = {}, targetOpt) {
         cabinetName: name,
         projectKey,
       }))
-      proj.cabinets.push(cabMeta)
-      proj.activeCabinetId = id
+      container.cabinets.push(cabMeta)
+      container.activeCabinetId = id
       writeRegistryRaw(regFile, reg)
       invalidateArchiveCache()
       return {
         ok: true,
+        ...scopeMeta,
         cabinet: cabMeta,
-        activeCabinetId: proj.activeCabinetId,
-        cabinets: proj.cabinets,
+        activeCabinetId: container.activeCabinetId,
+        cabinets: container.cabinets,
         projectKey,
       }
     }
 
     if (op === 'switchCabinet') {
       const targetId = str(payload.cabinetId || payload.id, '').trim()
-      const hit = proj.cabinets.find(c => c.id === targetId)
-      if (!hit) return { ok: false, error: '未找到目标档案柜：' + targetId }
-      proj.activeCabinetId = hit.id
+      const hit = container.cabinets.find(c => c.id === targetId)
+      if (!hit) return { ok: false, error: '当前范围下未找到目标档案柜：' + targetId }
+      container.activeCabinetId = hit.id
       hit.updatedAt = Date.now()
       writeRegistryRaw(regFile, reg)
       invalidateArchiveCache()
       return {
         ok: true,
+        ...scopeMeta,
         cabinet: hit,
-        activeCabinetId: proj.activeCabinetId,
-        cabinets: proj.cabinets,
+        activeCabinetId: container.activeCabinetId,
+        cabinets: container.cabinets,
         projectKey,
       }
     }
 
     if (op === 'renameCabinet') {
-      const targetId = str(payload.cabinetId || payload.id, proj.activeCabinetId).trim()
+      const targetId = str(payload.cabinetId || payload.id, container.activeCabinetId).trim()
       const name = clamp(payload.name || payload.label, 40)
       if (!name) return { ok: false, error: '请输入档案柜新名称' }
-      const hit = proj.cabinets.find(c => c.id === targetId)
+      const hit = container.cabinets.find(c => c.id === targetId)
       if (!hit) return { ok: false, error: '未找到档案柜：' + targetId }
       hit.name = name
       hit.updatedAt = Date.now()
@@ -1284,23 +1923,24 @@ function mutateCabinetRegistry(payload = {}, targetOpt) {
       invalidateArchiveCache()
       return {
         ok: true,
+        ...scopeMeta,
         cabinet: hit,
-        activeCabinetId: proj.activeCabinetId,
-        cabinets: proj.cabinets,
+        activeCabinetId: container.activeCabinetId,
+        cabinets: container.cabinets,
         projectKey,
       }
     }
 
     if (op === 'deleteCabinet') {
       const targetId = str(payload.cabinetId || payload.id, '').trim()
-      if (proj.cabinets.length <= 1) {
-        return { ok: false, error: '每个工程至少需保留一个主档案柜，不可删除最后一个档案柜' }
+      if (container.cabinets.length <= 1) {
+        return { ok: false, error: '每个范围至少需保留一个工作档案柜，不可删除最后一个档案柜' }
       }
-      const idx = proj.cabinets.findIndex(c => c.id === targetId)
+      const idx = container.cabinets.findIndex(c => c.id === targetId)
       if (idx < 0) return { ok: false, error: '未找到要删除的档案柜：' + targetId }
-      const [removed] = proj.cabinets.splice(idx, 1)
-      if (proj.activeCabinetId === removed.id) {
-        proj.activeCabinetId = proj.cabinets[0].id
+      const [removed] = container.cabinets.splice(idx, 1)
+      if (container.activeCabinetId === removed.id) {
+        container.activeCabinetId = container.cabinets[0].id
       }
       writeRegistryRaw(regFile, reg)
       try {
@@ -1310,9 +1950,10 @@ function mutateCabinetRegistry(payload = {}, targetOpt) {
       invalidateArchiveCache()
       return {
         ok: true,
+        ...scopeMeta,
         removedId: removed.id,
-        activeCabinetId: proj.activeCabinetId,
-        cabinets: proj.cabinets,
+        activeCabinetId: container.activeCabinetId,
+        cabinets: container.cabinets,
         projectKey,
       }
     }
@@ -1325,22 +1966,25 @@ function mutateCabinetRegistry(payload = {}, targetOpt) {
 
 export function mutateArchive(payload = {}, targetOpt) {
   const op = str(payload.op, 'save').trim()
-  const rootSessionId = str(payload.rootSessionId || payload.session, '').trim()
   const baseOpts = resolveTargetOpts(targetOpt)
+  const vaultScope = normalizeVaultScope(payload.vaultScope || payload.scope || baseOpts.vaultScope)
+  const rootSessionId = cleanRootSessionId(payload.rootSessionId || payload.session || baseOpts.rootSessionId)
   const effectiveTarget = {
     ...baseOpts,
     cwd: str(payload.cwd, baseOpts.cwd),
     projectKey: str(payload.projectKey, baseOpts.projectKey),
     cabinetId: str(payload.cabinetId, baseOpts.cabinetId),
+    rootSessionId,
+    vaultScope,
   }
 
   if (['listCabinets', 'createCabinet', 'switchCabinet', 'renameCabinet', 'deleteCabinet'].includes(op)) {
-    return mutateCabinetRegistry(payload, effectiveTarget)
+    return mutateCabinetRegistry({ ...payload, vaultScope }, effectiveTarget)
   }
 
   return withArchiveLock(effectiveTarget, (_file, resolved) => {
-    const store = loadArchiveStore({ ...effectiveTarget, cabinetId: resolved.cabinetId })
-    const lockTarget = { ...effectiveTarget, cabinetId: resolved.cabinetId, projectKey: resolved.projectKey }
+    const store = loadArchiveStore({ ...effectiveTarget, cabinetId: resolved.cabinetId, rootSessionId: resolved.rootSessionId, vaultScope: resolved.vaultScope })
+    const lockTarget = { ...effectiveTarget, cabinetId: resolved.cabinetId, projectKey: resolved.projectKey, rootSessionId: resolved.rootSessionId, vaultScope: resolved.vaultScope }
     const runOp = () => {
 
     if (op === 'createFolder' || op === 'saveFolder') {
@@ -1411,16 +2055,25 @@ export function mutateArchive(payload = {}, targetOpt) {
             140,
           )
         }
+        existing.contentHash = computeEntryContentHash(existing)
         existing.updatedAt = Date.now()
         saveArchiveStore(store, lockTarget)
-        return { ok: true, item: existing, meta: getArchiveMeta(rootSessionId, lockTarget) }
+        return {
+          ok: true,
+          isSystemGlobalVault: resolved.vaultScope === 'global',
+          item: existing,
+          meta: getArchiveMeta(rootSessionId, lockTarget),
+        }
       }
 
       const rawTitle = clamp(payload.title || '', 180)
       if (!rawTitle && !nextBody) {
         return { ok: false, error: '新建工程档案需要填写标题或正文内容' }
       }
-      const sameTitle = rawTitle ? store.items.find(it => it.title === rawTitle) : null
+      const titleKey = normalizeArchiveTitleKey(rawTitle)
+      const sameTitle = titleKey
+        ? store.items.find(it => normalizeArchiveTitleKey(it.title) === titleKey)
+        : null
       if (sameTitle && payload.upsertByTitle !== false) {
         sameTitle.body = nextBody || sameTitle.body
         if (payload.folder) sameTitle.folder = str(payload.folder, sameTitle.folder).trim()
@@ -1435,9 +2088,16 @@ export function mutateArchive(payload = {}, targetOpt) {
           payload.summary || (sameTitle.points[0] && sameTitle.points[0].cue) || firstMeaningfulSentence(sameTitle.body) || sameTitle.title,
           140,
         )
+        sameTitle.contentHash = computeEntryContentHash(sameTitle)
         sameTitle.updatedAt = Date.now()
         saveArchiveStore(store, lockTarget)
-        return { ok: true, item: sameTitle, updatedExisting: true, meta: getArchiveMeta(rootSessionId, lockTarget) }
+        return {
+          ok: true,
+          isSystemGlobalVault: resolved.vaultScope === 'global',
+          item: sameTitle,
+          updatedExisting: true,
+          meta: getArchiveMeta(rootSessionId, lockTarget),
+        }
       }
 
       const parsed = smartParseNoteToDossier({
@@ -1447,16 +2107,19 @@ export function mutateArchive(payload = {}, targetOpt) {
         paperclip: payload.paperclip,
         tags: Array.isArray(payload.tags) ? payload.tags : (typeof payload.tags === 'string' ? payload.tags.split(/[,，]/) : []),
       })
-      const created = normalizeArchiveItem({
-        id: nextId('arch'),
+      const baseCreated = {
+        id: nextId(resolved.vaultScope === 'global' ? 'glob' : 'arch'),
         sourceNoteId: str(payload.sourceNoteId, ''),
+        originId: str(payload.originId, ''),
+        originGlobalId: str(payload.originGlobalId, ''),
         title: parsed.title,
         summary: payload.summary || parsed.summary,
         folder: payload.folder || parsed.folder,
         paperclip: payload.paperclip || parsed.paperclip,
         tags: Array.isArray(payload.tags) ? payload.tags : (typeof payload.tags === 'string' ? payload.tags.split(/[,，]/) : []),
         cold: true,
-        takenOutSessions: (payload.takeOutNow || payload.takeOut) && rootSessionId ? [rootSessionId] : [],
+        takenOutSessions: (payload.takeOutNow || payload.takeOut) && rootSessionId && resolved.vaultScope !== 'global' ? [rootSessionId] : [],
+        chiefMountedSessions: resolved.vaultScope === 'global' && payload.mountChief && rootSessionId ? [rootSessionId] : [],
         organizedBy: ['auto', 'chief', 'user'].includes(payload.organizedBy)
           ? payload.organizedBy
           : (Array.isArray(payload.points) && payload.points.length ? 'user' : 'auto'),
@@ -1466,10 +2129,18 @@ export function mutateArchive(payload = {}, targetOpt) {
         sourceSession: rootSessionId,
         createdAt: Date.now(),
         updatedAt: Date.now(),
-      })
+      }
+      const created = resolved.vaultScope === 'global'
+        ? normalizeGlobalVaultEntry(baseCreated)
+        : normalizeArchiveItem(baseCreated)
       store.items.unshift(created)
       saveArchiveStore(store, lockTarget)
-      return { ok: true, item: created, meta: getArchiveMeta(rootSessionId, lockTarget) }
+      return {
+        ok: true,
+        isSystemGlobalVault: resolved.vaultScope === 'global',
+        item: created,
+        meta: getArchiveMeta(rootSessionId, lockTarget),
+      }
     }
 
     if (op === 'delete' || op === 'remove') {
@@ -1494,9 +2165,34 @@ export function mutateArchive(payload = {}, targetOpt) {
       return { ok: true, removedCount, meta: getArchiveMeta(rootSessionId, lockTarget) }
     }
 
+    if (op === 'mountChief' || op === 'unmountChief') {
+      if (resolved.vaultScope !== 'global') {
+        return { ok: false, error: '仅系统全局档案柜支持参谋长参阅挂载操作' }
+      }
+      if (!rootSessionId) {
+        return { ok: false, error: '当前为空白新对话（尚未绑定会话 ID），请先在主会话发送一条消息后再供参谋长参阅' }
+      }
+      const id = str(payload.archiveId || payload.id, '').trim()
+      const item = store.items.find(it => it.id === id)
+      if (!item) return { ok: false, error: '未找到该全局档案：' + id }
+      const set = new Set(item.chiefMountedSessions || [])
+      if (op === 'mountChief') set.add(rootSessionId)
+      else set.delete(rootSessionId)
+      item.chiefMountedSessions = [...set]
+      saveArchiveStore(store, lockTarget)
+      return {
+        ok: true,
+        id: item.id,
+        title: item.title,
+        chiefMounted: op === 'mountChief',
+        isSystemGlobalVault: true,
+        counts: getThreeTierArchiveCounts(rootSessionId, [], lockTarget),
+      }
+    }
+
     if (op === 'takeOut' || op === 'putBack') {
       const id = str(payload.archiveId || payload.id, '').trim()
-      if (!rootSessionId) return { ok: false, error: '当前未绑定对话会话，无法取出挂到桌面' }
+      if (!rootSessionId) return { ok: false, error: '当前未绑定对话会话，无法摆到桌面备选' }
       const item = store.items.find(it => it.id === id)
       if (!item) return { ok: false, error: '未找到该工程档案：' + id }
       const set = new Set(item.takenOutSessions || [])
@@ -1509,6 +2205,8 @@ export function mutateArchive(payload = {}, targetOpt) {
         id: item.id,
         title: item.title,
         takenOut: op === 'takeOut',
+        isSystemGlobalVault: resolved.vaultScope === 'global',
+        counts: getThreeTierArchiveCounts(rootSessionId, [], lockTarget),
         meta: getArchiveMeta(rootSessionId, lockTarget),
       }
     }
@@ -1544,11 +2242,130 @@ export function mutateArchive(payload = {}, targetOpt) {
       return { ok: true, id: item.id, folder: item.folder }
     }
 
+    if (op === 'copyToGlobal' || op === 'copyToSession') {
+      const id = str(payload.archiveId || payload.id, '').trim()
+      const srcItem = store.items.find(it => it.id === id)
+      if (!srcItem) return { ok: false, error: '未找到要复制的工程档案：' + id }
+      const targetScope = op === 'copyToGlobal' ? 'global' : 'session'
+      if (targetScope === 'session' && !rootSessionId) {
+        return { ok: false, error: '当前为空白新对话，请先发送一条消息建立会话后再引入本会话档案柜' }
+      }
+      const dstBase = {
+        customSharedBoardFile: baseOpts.customSharedBoardFile,
+        cwd: effectiveTarget.cwd,
+        projectKey: effectiveTarget.projectKey,
+        rootSessionId: targetScope === 'session' ? rootSessionId : '',
+        vaultScope: targetScope,
+        cabinetId: '',
+      }
+      const titleKey = normalizeArchiveTitleKey(srcItem.title)
+      const copyRes = withArchiveLock(dstBase, (_dstFile, dstResolved) => {
+        const dstTarget = { ...dstBase, cabinetId: dstResolved.cabinetId, projectKey: dstResolved.projectKey, vaultScope: targetScope }
+        const dstStore = targetScope === 'global' ? loadGlobalVaultRaw(dstTarget) : loadArchiveStore(dstTarget)
+        const now = Date.now()
+        let savedItem
+
+        if (targetScope === 'global') {
+          const existing = dstStore.items.find(g =>
+            (srcItem.originGlobalId && g.id === srcItem.originGlobalId)
+            || (g.originId && g.originId === srcItem.id)
+            || (titleKey && normalizeArchiveTitleKey(g.title) === titleKey)
+          )
+          const preservedChiefMounts = existing
+            ? (Array.isArray(existing.chiefMountedSessions) ? existing.chiefMountedSessions : [])
+            : (payload.mountChief && rootSessionId ? [rootSessionId] : [])
+          const nextEntry = normalizeGlobalVaultEntry({
+            ...srcItem,
+            id: existing ? existing.id : nextId('glob'),
+            originId: srcItem.id,
+            originGlobalId: '',
+            chiefMountedSessions: preservedChiefMounts,
+            sourceSession: srcItem.sourceSession || rootSessionId,
+            updatedAt: now,
+          })
+          if (existing) {
+            Object.assign(existing, nextEntry)
+            savedItem = existing
+          } else {
+            dstStore.items.unshift(nextEntry)
+            savedItem = nextEntry
+          }
+          saveGlobalVaultRaw(dstStore, dstTarget)
+          const sessSnapshot = resolved.vaultScope === 'session'
+            ? store.items.map(it => (it.id === srcItem.id && payload.removeSource !== true ? { ...it, originGlobalId: savedItem.id } : it))
+            : []
+          const diff = computeSessionGlobalDiff(sessSnapshot, dstStore.items, rootSessionId)
+          return {
+            ok: true,
+            targetScope: 'global',
+            isSystemGlobalVault: true,
+            targetCabinetId: '',
+            item: savedItem,
+            diffSummary: diff.summary,
+            counts: getThreeTierArchiveCounts(rootSessionId, [], dstBase),
+          }
+        }
+
+        // targetScope === 'session'
+        const mountOnSession = payload.takeOut === true
+        const existingSess = dstStore.items.find(s =>
+          s.originGlobalId === srcItem.id
+          || (srcItem.originId && s.id === srcItem.originId)
+          || (titleKey && normalizeArchiveTitleKey(s.title) === titleKey)
+        )
+        const nextSessItem = normalizeArchiveItem({
+          ...srcItem,
+          id: existingSess ? existingSess.id : nextId('arch'),
+          originGlobalId: srcItem.id,
+          originId: '',
+          takenOutSessions: mountOnSession
+            ? [...new Set([...(existingSess ? (existingSess.takenOutSessions || []) : []), rootSessionId])]
+            : (existingSess ? (existingSess.takenOutSessions || []) : []),
+          sourceSession: rootSessionId,
+          updatedAt: now,
+        })
+        if (existingSess) {
+          Object.assign(existingSess, nextSessItem)
+          savedItem = existingSess
+        } else {
+          dstStore.items.unshift(nextSessItem)
+          savedItem = nextSessItem
+        }
+        saveArchiveStore(dstStore, dstTarget)
+        const globalItems = resolved.vaultScope === 'global' ? store.items : loadGlobalVaultRaw(baseOpts).items
+        const diff = computeSessionGlobalDiff(dstStore.items, globalItems, rootSessionId)
+        return {
+          ok: true,
+          targetScope: 'session',
+          isSystemGlobalVault: false,
+          targetCabinetId: dstResolved.cabinetId,
+          item: savedItem,
+          diffSummary: diff.summary,
+          counts: getThreeTierArchiveCounts(rootSessionId, [], dstBase),
+        }
+      })
+
+      if (copyRes && copyRes.ok) {
+        if (payload.removeSource === true && resolved.vaultScope !== targetScope) {
+          const idx = store.items.findIndex(it => it.id === id)
+          if (idx >= 0) {
+            store.items.splice(idx, 1)
+            saveArchiveStore(store, lockTarget)
+            copyRes.counts = getThreeTierArchiveCounts(rootSessionId, [], dstBase)
+          }
+        } else if (targetScope === 'global' && resolved.vaultScope === 'session' && copyRes.item && srcItem.originGlobalId !== copyRes.item.id) {
+          srcItem.originGlobalId = copyRes.item.id
+          saveArchiveStore(store, lockTarget)
+        }
+      }
+      return copyRes
+    }
+
       return { ok: false, error: '未知的档案操作：' + op }
     }
     const opRes = runOp()
-    return (opRes && opRes.ok && !opRes.cabinetId)
-      ? { cabinetId: resolved.cabinetId, ...opRes }
+    return (opRes && opRes.ok && !opRes.cabinetId && !opRes.isSystemGlobalVault)
+      ? { cabinetId: resolved.cabinetId, isSystemGlobalVault: resolved.vaultScope === 'global', ...opRes }
       : opRes
   })
 }
@@ -1557,7 +2374,13 @@ export function applyChiefArchiveCurations(curations = [], newFolders = [], targ
   if (!Array.isArray(curations) || !curations.length) return { updatedCount: 0 }
   return withArchiveLock(targetOpt, (_file, resolved) => {
     const base = resolveTargetOpts(targetOpt)
-    const lockTarget = { ...base, cabinetId: resolved.cabinetId, projectKey: resolved.projectKey }
+    const lockTarget = {
+      ...base,
+      cabinetId: resolved.cabinetId,
+      projectKey: resolved.projectKey,
+      rootSessionId: resolved.rootSessionId || base.rootSessionId,
+      vaultScope: resolved.vaultScope || base.vaultScope,
+    }
     const store = loadArchiveStore(lockTarget)
     if (Array.isArray(newFolders)) {
       newFolders.forEach((nf, idx) => {
@@ -1650,7 +2473,7 @@ export function copyArchivesBetweenSessionsOrCabinets({
   const mode = ['none', 'mounted', 'drawer', 'all'].includes(policy) ? policy : 'none'
   const fromSid = str(fromRootSessionId, '').trim()
   const toSid = str(toRootSessionId, '').trim()
-  if (mode === 'none' || !toSid) {
+  if (mode === 'none' || !fromSid || !toSid) {
     return { ok: true, policy: mode, transferredCount: 0, mountedCount: 0 }
   }
 
@@ -1658,16 +2481,23 @@ export function copyArchivesBetweenSessionsOrCabinets({
     customSharedBoardFile,
     cwd: fromCwd,
     cabinetId: fromCabinetId,
+    rootSessionId: fromSid,
+    vaultScope: 'session',
   }
   const dstTarget = {
     customSharedBoardFile,
     cwd: toCwd || fromCwd,
     cabinetId: toCabinetId,
+    rootSessionId: toSid,
+    vaultScope: 'session',
   }
 
   const srcResolved = ensureProjectCabinet(srcTarget)
   const dstResolved = ensureProjectCabinet(dstTarget)
-  const srcStore = loadArchiveStore({ customSharedBoardFile, cabinetId: srcResolved.cabinetId, projectKey: srcResolved.projectKey })
+  if (srcResolved.unboundSession || dstResolved.unboundSession) {
+    return { ok: true, policy: mode, transferredCount: 0, mountedCount: 0 }
+  }
+  const srcStore = loadArchiveStore({ customSharedBoardFile, cabinetId: srcResolved.cabinetId, projectKey: srcResolved.projectKey, rootSessionId: fromSid, vaultScope: 'session' })
 
   let selected = []
   if (mode === 'mounted') {
@@ -1692,8 +2522,8 @@ export function copyArchivesBetweenSessionsOrCabinets({
 
   // Same cabinet: update `takenOutSessions` on selected items directly (mount mounted items or selected drawer items for target)
   if (srcResolved.cabinetId === dstResolved.cabinetId) {
-    return withArchiveLock({ customSharedBoardFile, cabinetId: dstResolved.cabinetId, projectKey: dstResolved.projectKey }, () => {
-      const store = loadArchiveStore({ customSharedBoardFile, cabinetId: dstResolved.cabinetId, projectKey: dstResolved.projectKey })
+    return withArchiveLock({ customSharedBoardFile, cabinetId: dstResolved.cabinetId, projectKey: dstResolved.projectKey, rootSessionId: toSid, vaultScope: 'session' }, () => {
+      const store = loadArchiveStore({ customSharedBoardFile, cabinetId: dstResolved.cabinetId, projectKey: dstResolved.projectKey, rootSessionId: toSid, vaultScope: 'session' })
       let mountedCount = 0
       const selectedIds = new Set(selected.map(s => s.id))
       for (const it of store.items) {
@@ -1709,7 +2539,7 @@ export function copyArchivesBetweenSessionsOrCabinets({
         }
       }
       if (mountedCount > 0) {
-        saveArchiveStore(store, { customSharedBoardFile, cabinetId: dstResolved.cabinetId, projectKey: dstResolved.projectKey })
+        saveArchiveStore(store, { customSharedBoardFile, cabinetId: dstResolved.cabinetId, projectKey: dstResolved.projectKey, rootSessionId: toSid, vaultScope: 'session' })
       }
       return {
         ok: true,
@@ -1723,8 +2553,8 @@ export function copyArchivesBetweenSessionsOrCabinets({
   }
 
   // Different cabinets: copy folders metadata & dossiers into destination cabinet
-  return withArchiveLock({ customSharedBoardFile, cabinetId: dstResolved.cabinetId, projectKey: dstResolved.projectKey }, () => {
-    const dstStore = loadArchiveStore({ customSharedBoardFile, cabinetId: dstResolved.cabinetId, projectKey: dstResolved.projectKey })
+  return withArchiveLock({ customSharedBoardFile, cabinetId: dstResolved.cabinetId, projectKey: dstResolved.projectKey, rootSessionId: toSid, vaultScope: 'session' }, () => {
+    const dstStore = loadArchiveStore({ customSharedBoardFile, cabinetId: dstResolved.cabinetId, projectKey: dstResolved.projectKey, rootSessionId: toSid, vaultScope: 'session' })
     const folderIds = new Set(dstStore.folders.map(f => f.id))
     for (const f of srcStore.folders) {
       if (!folderIds.has(f.id)) {
@@ -1760,7 +2590,7 @@ export function copyArchivesBetweenSessionsOrCabinets({
       }
     }
     if (copiedCount > 0 || mountedCount > 0) {
-      saveArchiveStore(dstStore, { customSharedBoardFile, cabinetId: dstResolved.cabinetId, projectKey: dstResolved.projectKey })
+      saveArchiveStore(dstStore, { customSharedBoardFile, cabinetId: dstResolved.cabinetId, projectKey: dstResolved.projectKey, rootSessionId: toSid, vaultScope: 'session' })
     }
     return {
       ok: true,
@@ -1784,7 +2614,7 @@ function normalizePrecipitatedEntry(raw) {
     .map((p, idx) => normalizePoint(p, idx))
     .filter(Boolean)
     .slice(0, POINTS_CAP)
-  const validCategories = ['architecture', 'env', 'contract', 'troubleshooting', 'workflow', 'general']
+  const validCategories = ['coords', 'incidents', 'contracts', 'ops', 'plans', 'architecture', 'env', 'contract', 'troubleshooting', 'workflow', 'general']
   const category = validCategories.includes(raw.category) ? raw.category : 'general'
   const flippedOutSessions = Array.isArray(raw.flippedOutSessions)
     ? [...new Set(raw.flippedOutSessions.map(s => str(s, '').trim()).filter(Boolean))].slice(0, 32)
@@ -1798,8 +2628,9 @@ function normalizePrecipitatedEntry(raw) {
     points: points.length ? points : extractStructuredPoints(title, rawBody),
     rawBody,
     purified: raw.purified !== false,
-    sourceCabinetId: str(raw.sourceCabinetId, '').trim(),
+    sourceCabinetId: str(raw.sourceCabinetId || raw.sourceCabinet, '').trim(),
     sourceDrawer: str(raw.sourceDrawer, '').trim(),
+    sourceSession: str(raw.sourceSession, '').trim(),
     sourceTitles: Array.isArray(raw.sourceTitles) ? raw.sourceTitles.map(t => clamp(t, 80)).slice(0, 40) : [],
     tags: normalizeTags(Array.isArray(raw.tags) ? raw.tags : []),
     flippedOutSessions,
@@ -1809,12 +2640,55 @@ function normalizePrecipitatedEntry(raw) {
   }
 }
 
-function loadPrecipitatedStoreRaw(projectKey = 'proj-default', targetOpt) {
-  const file = precipitatedFilePath(projectKey, targetOpt)
+/** One-time lossless merge from legacy per-project `precipitated/*.json` files into unified `precipitated/vault-global.json`. */
+function ensureGlobalPrecipitatedVault(targetOpt) {
+  const globalFile = globalPrecipitatedFilePath(targetOpt)
+  if (fs.existsSync(globalFile)) return globalFile
+  const dir = path.dirname(globalFile)
+  if (!fs.existsSync(dir)) return globalFile
+  let legacyFiles = []
+  try {
+    legacyFiles = fs.readdirSync(dir)
+      .filter(name => name.endsWith('.json') && name !== 'vault-global.json')
+      .map(name => path.join(dir, name))
+  } catch {
+    legacyFiles = []
+  }
+  if (!legacyFiles.length) return globalFile
+
+  const merged = []
+  const seenIds = new Set()
+  const seenKeys = new Set()
+  for (const lf of legacyFiles) {
+    const parsed = readJsonSafe(lf, null)
+    const rawItems = Array.isArray(parsed && parsed.items) ? parsed.items : []
+    for (const rawItem of rawItems) {
+      const norm = normalizePrecipitatedEntry(rawItem)
+      if (!norm) continue
+      const dedupeKey = `${norm.title}::${norm.createdAt || 0}`
+      if (seenIds.has(norm.id) || seenKeys.has(dedupeKey)) continue
+      seenIds.add(norm.id)
+      seenKeys.add(dedupeKey)
+      merged.push(norm)
+    }
+  }
+  if (!merged.length) return globalFile
+  merged.sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0))
+  atomicWriteJson(globalFile, {
+    version: 1,
+    projectKey: 'global',
+    updatedAt: Date.now(),
+    items: merged.slice(0, PRECIPITATED_CAP),
+  })
+  return globalFile
+}
+
+function loadPrecipitatedStoreRaw(_projectKey = 'proj-default', targetOpt) {
+  const file = ensureGlobalPrecipitatedVault(targetOpt)
   if (!fs.existsSync(file)) {
     return {
       version: 1,
-      projectKey: resolveProjectKey(projectKey),
+      projectKey: 'global',
       updatedAt: 0,
       items: [],
     }
@@ -1826,17 +2700,17 @@ function loadPrecipitatedStoreRaw(projectKey = 'proj-default', targetOpt) {
     .slice(0, PRECIPITATED_CAP)
   return {
     version: 1,
-    projectKey: resolveProjectKey(projectKey),
+    projectKey: 'global',
     updatedAt: Number(parsed && parsed.updatedAt) || Date.now(),
     items,
   }
 }
 
-function savePrecipitatedStoreRaw(projectKey = 'proj-default', store, targetOpt) {
-  const file = precipitatedFilePath(projectKey, targetOpt)
+function savePrecipitatedStoreRaw(_projectKey = 'proj-default', store, targetOpt) {
+  const file = globalPrecipitatedFilePath(targetOpt)
   const normalized = {
     version: 1,
-    projectKey: resolveProjectKey(projectKey),
+    projectKey: 'global',
     updatedAt: Date.now(),
     items: (Array.isArray(store && store.items) ? store.items : [])
       .map(normalizePrecipitatedEntry)
@@ -1861,9 +2735,136 @@ export function getFlippedOutPrecipitatedForSession(projectKey = 'proj-default',
   return store.items.filter(it => Array.isArray(it.flippedOutSessions) && it.flippedOutSessions.includes(sid))
 }
 
+/**
+ * Losslessly copy a precipitated cold-vault entry into `session` or `global` vault WITHOUT deleting the precipitated item.
+ * Reads & releases precipitated lock BEFORE calling `mutateArchive` to strictly prevent lock-order inversion.
+ */
+export function copyPrecipitatedToVault(projectKey = 'proj-default', payload = {}, targetOpt) {
+  const pid = str(payload.id || payload.precipitatedId, '').trim()
+  if (!pid) return { ok: false, error: 'missing precipitated id' }
+  const targetScope = normalizeVaultScope(payload.targetScope || payload.toScope || 'session') === 'global' ? 'global' : 'session'
+  const rootSid = cleanRootSessionId(payload.rootSessionId || payload.session || (targetOpt && targetOpt.rootSessionId))
+  if (targetScope === 'session' && !rootSid) {
+    return { ok: false, error: '当前为空白新对话，请先发送一条消息建立会话后再调入本局档案库' }
+  }
+
+  const base = resolveTargetOpts(targetOpt)
+  const file = globalPrecipitatedFilePath(base)
+  const release = acquireFileLock(file)
+  let snapshot = null
+  try {
+    const pStore = loadPrecipitatedStoreRaw(projectKey, base)
+    const hit = pStore.items.find(it => it.id === pid)
+    if (!hit) return { ok: false, error: '未找到沉淀条目：' + pid }
+    snapshot = {
+      id: hit.id,
+      title: hit.title,
+      category: hit.category || '经验',
+      summary: hit.summary || '',
+      points: Array.isArray(hit.points) ? hit.points.map(p => ({ ...p })) : [],
+      body: hit.body || '',
+      tags: Array.isArray(hit.tags) ? hit.tags.slice() : [],
+    }
+  } finally {
+    release()
+  }
+
+  const catFolderMap = {
+    contracts: 'contracts',
+    architecture: 'architecture',
+    patterns: 'ops',
+    pitfalls: 'pitfalls',
+    toolchain: 'ops',
+  }
+  const folder = catFolderMap[snapshot.category] || 'ops'
+  const pointText = snapshot.points.map(pt => `- ${pt.title}：${pt.detail || pt.cue || ''}`).join('\n')
+  const fullBody = [
+    snapshot.body || snapshot.summary,
+    pointText ? '\n### 精炼要点\n' + pointText : '',
+  ].filter(Boolean).join('\n')
+
+  const saveRes = mutateArchive({
+    op: 'save',
+    vaultScope: targetScope,
+    rootSessionId: rootSid,
+    folder,
+    paperclip: 'silver',
+    title: snapshot.title,
+    summary: snapshot.summary,
+    points: snapshot.points,
+    body: fullBody || snapshot.title,
+    tags: [...new Set(['沉淀调入', snapshot.category, ...snapshot.tags].filter(Boolean))],
+    by: 'user',
+    takeOutNow: Boolean(payload.takeOutNow && targetScope === 'session'),
+  }, {
+    ...base,
+    vaultScope: targetScope,
+    rootSessionId: targetScope === 'session' ? rootSid : '',
+    cabinetId: '',
+  })
+
+  if (!saveRes || !saveRes.ok) return saveRes || { ok: false, error: '调入目标档案库失败' }
+  return {
+    ...saveRes,
+    copiedFromPrecipitatedId: snapshot.id,
+    targetScope,
+    lossless: true,
+  }
+}
+
+/** Listed ONLY for Chief background sealed-archive watch (never injected into Lead prompt unless placed on desk). */
+export function collectSealedWatchSummary(rootSessionId = '', projectKey = 'proj-default', targetOpt, opts = {}) {
+  const sid = cleanRootSessionId(rootSessionId)
+  const base = resolveTargetOpts(targetOpt)
+  const capPerVault = Math.max(2, Math.min(Number(opts.limitPerVault) || 8, 16))
+
+  let sessionSealed = []
+  let globalSealed = []
+  let precipSealed = []
+
+  if (sid) {
+    try {
+      const sStore = loadArchiveStore({
+        customSharedBoardFile: base.customSharedBoardFile,
+        cwd: base.cwd,
+        projectKey: base.projectKey,
+        cabinetId: base.cabinetId,
+        rootSessionId: sid,
+        vaultScope: 'session',
+      })
+      if (!sStore.unboundSession) {
+        sessionSealed = (sStore.items || [])
+          .filter(it => !Array.isArray(it.takenOutSessions) || !it.takenOutSessions.includes(sid))
+          .slice(0, capPerVault)
+          .map(it => ({ id: it.id, scope: 'session', title: it.title, folder: it.folder, summary: it.summary }))
+      }
+    } catch {}
+  }
+
+  try {
+    const gStore = loadGlobalVaultRaw(base)
+    globalSealed = (gStore.items || [])
+      .filter(it => !sid || !Array.isArray(it.takenOutSessions) || !it.takenOutSessions.includes(sid))
+      .slice(0, capPerVault)
+      .map(it => ({ id: it.id, scope: 'global', title: it.title, folder: it.folder, summary: it.summary, chiefMounted: Boolean(sid && Array.isArray(it.chiefMountedSessions) && it.chiefMountedSessions.includes(sid)) }))
+  } catch {}
+
+  if (hasAnyPrecipitatedFilesOnDisk(base)) {
+    try {
+      const pStore = loadPrecipitatedStoreRaw(projectKey || base.projectKey || 'proj-default', base)
+      precipSealed = (pStore.items || [])
+        .filter(it => !sid || !Array.isArray(it.flippedOutSessions) || !it.flippedOutSessions.includes(sid))
+        .slice(0, capPerVault)
+        .map(it => ({ id: it.id, scope: 'precipitated', title: it.title, category: it.category, summary: it.summary }))
+    } catch {}
+  }
+
+  return { sessionSealed, globalSealed, precipSealed }
+}
+
 /** Listed ONLY when user opens the `档案` tab in Web UI (`GET /api/dsh-chief/archives`). */
 export function listPrecipitatedHeaders(projectKey = 'proj-default', rootSessionId = '', targetOpt) {
-  const file = precipitatedFilePath(projectKey, targetOpt)
+  const file = ensureGlobalPrecipitatedVault(targetOpt)
   if (!fs.existsSync(file)) return []
   const sid = str(rootSessionId, '').trim()
   const store = loadPrecipitatedStoreRaw(projectKey, targetOpt)
@@ -1903,7 +2904,7 @@ export function getPrecipitatedDetail(projectKey = 'proj-default', id = '', root
 
 export function savePrecipitatedEntry(projectKey = 'proj-default', entry = {}, targetOpt) {
   const resolvedKey = resolveProjectKey(projectKey)
-  const file = precipitatedFilePath(resolvedKey, targetOpt)
+  const file = globalPrecipitatedFilePath(targetOpt)
   const release = acquireFileLock(file)
   try {
     const store = loadPrecipitatedStoreRaw(resolvedKey, targetOpt)
@@ -1916,7 +2917,7 @@ export function savePrecipitatedEntry(projectKey = 'proj-default', entry = {}, t
       const updated = normalizePrecipitatedEntry({ ...existing, ...entry, id: existing.id, updatedAt: Date.now() })
       Object.assign(existing, updated)
       savePrecipitatedStoreRaw(resolvedKey, store, targetOpt)
-      return { ok: true, item: existing, file }
+      return { ok: true, item: existing, entry: existing, file }
     }
     const created = normalizePrecipitatedEntry({
       ...entry,
@@ -1928,7 +2929,7 @@ export function savePrecipitatedEntry(projectKey = 'proj-default', entry = {}, t
     if (!created) return { ok: false, error: '无法写入空的沉淀经验' }
     store.items.unshift(created)
     savePrecipitatedStoreRaw(resolvedKey, store, targetOpt)
-    return { ok: true, item: created, file }
+    return { ok: true, item: created, entry: created, file }
   } finally {
     release()
   }
@@ -1936,7 +2937,7 @@ export function savePrecipitatedEntry(projectKey = 'proj-default', entry = {}, t
 
 export function mutatePrecipitated(projectKey = 'proj-default', payload = {}, targetOpt) {
   const resolvedKey = resolveProjectKey(projectKey || payload.projectKey || payload.cwd || 'proj-default')
-  const file = precipitatedFilePath(resolvedKey, targetOpt)
+  const file = globalPrecipitatedFilePath(targetOpt)
   const op = str(payload.op, '').trim()
   const sid = str(payload.rootSessionId || payload.session, '').trim()
   const id = str(payload.precipitatedId || payload.id, '').trim()

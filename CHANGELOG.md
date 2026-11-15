@@ -5,6 +5,26 @@ All notable changes to **`dsh-chief`** (**DSH 参谋长**) will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.0] - 2026-11-15
+
+### Added
+- **Three-Tier Archive Vaults with System-Level 0-Token Global Cold Vault & Bidirectional Diff (`session` / `global` / `precipitated`)**:
+  - **💬 本会话档案柜 (`session`)**: Isolated per `rootSessionId` (`registry.sessions[sess:<rootSessionId>]`), visible only to the **User, Current Session (Lead/Subagents), and Chief of Staff**. Unbound blank new chats (including the `'global'` sentinel) render an empty guidance state and never fall back to legacy global cabinets.
+  - **🌐 系统全局档案柜 (`global`)**: System-level **0-Token Global Cold Vault** (`global-vault/vault-chief-global.json`)—does **not** follow conversation context (`chiefMountedSessions: []` by default) and never auto-migrates legacy `cab-main.json` cabinets. Invisible to Lead/Subagents until copied via `⤵️ 引入本会话` (`copyToSession`). Chief sees Global entries **only** when explicitly mounted for that session (`mountChief` / `unmountChief`: 「`👁️ 供本会话参谋参阅`」 / 「`📥 收回冷存`」) or via on-demand Q&A search (`searchGlobalVaultForChief` in `askOrCommandChief`).
+  - **🔄 Local ↔ Global Bidirectional Diff & Anti-Bleed Guards**: Live per-session diff (`computeSessionGlobalDiff`) tracks `local_only`, `synced`, `local_modified`, `global_only`, `differs`, and `unbound` across Session and Global cards plus a quick-push strip (`localOnlyBriefs`). Added separated frontend `globalVaultItems` store and strict stale-host guard blocking pre-restart responses missing `isSystemGlobalVault: true`.
+  - **🏛️ 沉淀档案柜 (`precipitated`)**: Unified machine-wide **0-Token Precipitated Experience Vault** (`precipitated/vault-global.json`). Double-blind by default (**neither Chief nor Lead reads any entry**) until the User explicitly clicks **「📤 取出」 (`flipOut`)** for the active session, and immediately re-hidden upon **「📥 封回」 (`sealBack`)**. Live per-tier counts come from `getThreeTierArchiveCounts`.
+- **Natural Peer Cluster Progress & Zero-Pollution Detach**:
+  - Conversations linked into a federation cluster automatically share live progress across `PeersTab`, `getChiefView`, Chief Q&A, and `/digest` (`协同进度`), with a mandatory pre-link confirmation modal warning about mutual context pollution before joining unrelated sessions.
+  - Detaching (`linked: false`) immediately purges Chief narrative cache via cluster signature validation (`clusterSig`), filters out external `team` facts (`originRootId`/`peerRootIds`), isolates detached mailbox history (`detachedFromCluster`), and blocks stale peer injection on `pre-step`.
+- **Color-Coded Collapsible Drawer Mailbox & Broadcast Deduplication**:
+  - Assigned deterministic theme-adaptive colors per conversation across network peers and messages.
+  - Deduplicated `@all` broadcasts into single cluster-level entries and grouped mailbox history into collapsible channel drawers (`全部 | 🌐 广播 | ↔ 跨窗 | 📁 内部` + folded detached history).
+- **Editable & Pinnable Handoff + Auto-Snapshot Freeze**:
+  - Added manual handoff editing (`handoff.save`, `handoff.reset`), human pinning (`handoff.pin`) to block Chief overwrites, automatic freezing of the rendered preview into `customText` when pinning from auto-render mode (`frozenFromAuto`), a `同步交接单` toggle beside `提炼摘要` in `ChiefTab` (automatically disabled/locked when pinned), a pre-transfer warning modal when the handoff packet is incomplete or stale, and a friendly restart banner when the host process holds stale in-memory backend routes.
+- **`✦ 智选` Co-Managed Compaction, `>= 50%` Hard-Threshold Floor & Centered Composer Controls**:
+  - Replaced `✦ 智设` and context-usage ring badges/popovers with **`✦ 智选` (`tacticalModes.smartCompact`)**: when active, hard percentage thresholds are completely bypassed and compaction timing is jointly managed by Chief (`shouldCompactNow`) and Lead (`chief_board` `action: "context.compact"`) at clean phase boundaries after harvesting details to the Session Cabinet.
+  - Locked `compactThresholdPct` strictly to **`50%–95%`** (preventing capability degradation from sub-50% compaction) and centered the `+` tactical trigger button inside `.dnb-sec-shell`.
+
 ## [1.1.0] - 2026-11-15
 
 ### Added

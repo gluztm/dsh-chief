@@ -296,15 +296,15 @@ export function renderHandoff(board, boundaries, budget = 5200, viewer = '', ext
           lines.push('- 本会话目录：' + (limits.sessionWorkingDirectory || limits.workingDirectory || '—'))
           lines.push('- 部署默认可写根（会话没有 cwd 时用它）：' + (limits.workspaceRoot || '—') + (limits.extraWritableRoots ? ' + ' + limits.extraWritableRoots.join(', ') : ''))
           const items = []
-          // 顺序就是优先级：空间不够时先丢「允许」，绝不先丢「禁止」。
+          // 顺序就是优先级：空间不够时先丢「注意」，绝不先丢「禁止」与「必做」。
           // 板子对每个数组各有 20 条上限，所以最坏是 60 条，挤爆时必须靠这个次序活着。
           for (const forbidden of bounds.forbidden) items.push({ label: '禁止', cap: 200, text: forbidden })
+          for (const allowed of bounds.allowed) items.push({ label: '必做', cap: 200, text: allowed })
           for (const note of bounds.notes) items.push({ label: '注意', cap: 240, text: note })
-          for (const allowed of bounds.allowed) items.push({ label: '允许', cap: 200, text: allowed })
           if (!items.length) return lines
           const left = room - lines.join('\n').length - 2
           // 先按「每条都至少还读得懂」的下限排；排不下就让 takeWhole 从队尾丢
-          // （队尾就是「允许」），并写明还有几条没列出。
+          // （队尾就是「注意」），并写明还有几条没列出。
           // 反面教材：把 60 条全压到 24 字，一条条都是「禁止 第1条：bbbb…」，
           // 读者既不知道禁的是什么，也不知道自己漏了什么，比少列几条贵得多。
           const share = Math.floor(left / items.length) - 8

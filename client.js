@@ -19,6 +19,13 @@ window.__ModuleLoader__.load({
     const API = 'api/dsh-chief'
     const SIDE_ID = 'dsh-chief'
     const BRAND_NAME = 'DSH 参谋长'
+    const EXPECTED_BACKEND_BUILD = '1.2.0-r6'
+
+    function normalizeMaxTurnsVal(raw) {
+      if (raw === 0 || raw === '0') return 0
+      const n = Math.round(Number(raw))
+      return Number.isFinite(n) && n >= 1 ? Math.min(30, n) : 10
+    }
 
     const STATUSES = ['todo', 'doing', 'blocked', 'done']
     const STATUS_LABEL = { todo: '待推进', doing: '推进中', blocked: '受阻', done: '已完成' }
@@ -84,7 +91,7 @@ window.__ModuleLoader__.load({
     }, {})
 
     const BOUND_LISTS = [
-      { field: 'allowed', label: '允许事项', dot: '#30d158' },
+      { field: 'allowed', label: '必做事项', dot: '#30d158' },
       { field: 'forbidden', label: '禁止红线', dot: '#ff453a' },
       { field: 'notes', label: '注意事项', dot: '#f59e0b' },
     ]
@@ -168,15 +175,21 @@ window.__ModuleLoader__.load({
       // DSH Chief state
       chiefMeta: {
         paceMode: 'manual',
+        stopped: false,
+        permissionMode: 'danger-full-access',
         autoPilot: false,
         tacticalModes: {
           intervention: false,
-          maxInterventionTurns: 5,
-          strictVerify: true,
+          maxInterventionTurns: 10,
+          strictVerify: false,
           autoCompact: false,
+          smartCompact: false,
+          compactThresholdMode: 'pct',
           compactThresholdPct: 80,
+          compactThresholdTokens: 64000,
+          compactThresholdInput: '64K',
           redlineSentinel: false,
-          conciseBrief: true,
+          conciseBrief: false,
         },
         runtimeGuard: {
           consecutiveInterventionTurns: 0,
@@ -194,9 +207,29 @@ window.__ModuleLoader__.load({
         factsCount: 0,
         mailboxCount: 0,
         linkedPeersCount: 0,
+        backendBuild: '',
       },
+      staleBackendDetected: false,
+      staleBackendDismissed: false,
       hostCompat: null,
       hostCompatDismissed: false,
+      handoffMeta: {
+        source: 'auto',
+        isCustom: false,
+        pinned: false,
+        syncOnDigest: false,
+        isIncomplete: false,
+        isStale: false,
+        hasNarrativeUpdate: false,
+        autoText: '',
+        updatedAt: 0,
+      },
+      handoffEditing: false,
+      handoffDraft: '',
+      handoffWarnModal: null,
+      peerLinkConfirmModal: null,
+      mailChannelFilter: 'all',
+      mailOpenDrawers: {},
       secView: null,
       secBusy: false,
       secRegenerating: false,
@@ -209,9 +242,22 @@ window.__ModuleLoader__.load({
       secLatestReply: null,
       secModelMenuOpen: false,
       secPaceMenuOpen: false,
+      secPermMenuOpen: false,
       tacticalMenuOpen: false,
       interventionModalOpen: false,
       interventionAgreed: false,
+      unlimitedTurnsModalOpen: false,
+      autoPilotConfirmOpen: false,
+      archiveRelayModal: null,
+      relayArchivesBusy: false,
+      distillGlobalModal: null,
+      distillBusy: false,
+      chiefAdviceModal: null,
+      seenAdvicePopupIds: {},
+      hazardHaltModal: null,
+      seenHazardAlertIds: {},
+      compactInputDraft: null,
+      compactLowWarning: '',
       precipitateModal: null,
       deployArchivePolicy: 'none',
       deployDrawer: '',
@@ -220,11 +266,30 @@ window.__ModuleLoader__.load({
       secNewFactText: '',
       secNewFactCat: 'discipline',
       secShowRawTurns: false,
-      // Engineering Memory Filing Cabinet (档案柜 · Cold Lazy-Loaded Vault)
+      // Engineering Memory Filing Cabinet (三层档案柜 · Session / System Global Cold / Precipitated Cold)
+      archiveTabScope: 'session',
+      archiveUnboundSession: false,
+      archiveSessionLoaded: false,
+      globalVaultLoaded: false,
+      globalVaultStaleBlocked: false,
+      globalVaultDiffFilter: 'all',
+      globalShowLocalOnlyDrawer: false,
+      archiveDiffSummary: null,
+      selectedArchiveMap: {},
+      archiveDeskItems: [],
+      archiveDeskLoaded: false,
+      archiveCounts: {
+        sessionCount: 0,
+        globalCount: 0,
+        globalMountedCount: 0,
+        precipitatedCount: 0,
+        flippedCount: 0,
+        unboundSession: false,
+      },
       archiveMeta: {
         projectKey: '',
-        activeCabinetId: 'cab-main',
-        cabinetCount: 1,
+        activeCabinetId: '',
+        cabinetCount: 0,
         totalCount: 0,
         folderCount: 0,
         takenOutCount: 0,
@@ -241,10 +306,12 @@ window.__ModuleLoader__.load({
       archiveHarvesting: false,
       archivePrecipitating: false,
       archiveProjectKey: '',
-      archiveCabinetId: 'cab-main',
+      archiveCabinetId: '',
       archiveCabinets: [],
       archiveFolders: [],
       archiveItems: [],
+      globalVaultFolders: [],
+      globalVaultItems: [],
       archivePrecipitated: [],
       flippedPrecipitatedIds: [],
       archiveNewCabinetOpen: false,
@@ -835,16 +902,35 @@ window.__ModuleLoader__.load({
       const resolvedRef = (modelsObj && modelsObj.resolvedRef) || pinnedRef || followRef || ''
       const prevMeta = store.chiefMeta || {}
       const cfg = (viewData && viewData.config && typeof viewData.config === 'object') ? viewData.config : {}
-      patch({
+      const seenPopupMap = store.seenAdvicePopupIds || {}
+      const pendingAdvicePopup = Array.isArray(viewData.suggestions)
+        ? viewData.suggestions.find(s => s && s.status === 'pending' && s.kind === 'advice' && s.popup === true && !seenPopupMap[s.id])
+        : null
+      const mergedTactical = cfg.tacticalModes && typeof cfg.tacticalModes === 'object'
+        ? {
+            ...(prevMeta.tacticalModes || {}),
+            ...cfg.tacticalModes,
+            ...(Object.prototype.hasOwnProperty.call(cfg.tacticalModes, 'maxInterventionTurns')
+              ? { maxInterventionTurns: normalizeMaxTurnsVal(cfg.tacticalModes.maxInterventionTurns) }
+              : {}),
+          }
+        : (prevMeta.tacticalModes || {})
+      const patchObj = {
         secView: viewData,
         ...(viewData.models ? { secModelsCatalog: viewData.models } : {}),
+        ...(pendingAdvicePopup && !store.chiefAdviceModal
+          ? {
+              seenAdvicePopupIds: { ...seenPopupMap, [pendingAdvicePopup.id]: true },
+              chiefAdviceModal: pendingAdvicePopup,
+            }
+          : {}),
         chiefMeta: {
           ...prevMeta,
           paceMode: cfg.paceMode || 'manual',
+          stopped: Boolean(cfg.stopped || cfg.paceMode === 'stopped'),
+          permissionMode: cfg.permissionMode || prevMeta.permissionMode || 'danger-full-access',
           autoPilot: Boolean(cfg.autoPilot),
-          tacticalModes: cfg.tacticalModes && typeof cfg.tacticalModes === 'object'
-            ? { ...(prevMeta.tacticalModes || {}), ...cfg.tacticalModes }
-            : (prevMeta.tacticalModes || {}),
+          tacticalModes: mergedTactical,
           runtimeGuard: viewData.runtimeGuard && typeof viewData.runtimeGuard === 'object'
             ? viewData.runtimeGuard
             : (prevMeta.runtimeGuard || {}),
@@ -859,7 +945,14 @@ window.__ModuleLoader__.load({
           mailboxCount,
           linkedPeersCount,
         },
-      })
+      }
+      const nextHazard = viewData.runtimeGuard && viewData.runtimeGuard.hazardAlert
+      const seenHazards = store.seenHazardAlertIds || {}
+      if (nextHazard && nextHazard.id && (nextHazard.reason || nextHazard.title) && !seenHazards[nextHazard.id] && !(store.hazardHaltModal && store.hazardHaltModal.id === nextHazard.id)) {
+        patchObj.seenHazardAlertIds = { ...seenHazards, [nextHazard.id]: true }
+        patchObj.hazardHaltModal = nextHazard
+      }
+      patch(patchObj)
     }
 
     async function call(path, init) {
@@ -880,11 +973,43 @@ window.__ModuleLoader__.load({
       if (value && Array.isArray(value.subagents)) patch({ subagents: value.subagents })
       if (value && value.agentIdentity) patch({ agentIdentity: value.agentIdentity })
       if (value && value.boundaries) patch({ boundaries: value.boundaries })
-      if (value && value.chiefMeta) patch({ chiefMeta: { ...store.chiefMeta, ...value.chiefMeta } })
-      if (value && (value.hostCompat || (value.chiefMeta && value.chiefMeta.hostCompat))) {
-        patch({ hostCompat: value.hostCompat || value.chiefMeta.hostCompat })
+      if (value && (value.chiefMeta || value.hostCompat)) {
+        const patchObj = {}
+        if (value.chiefMeta) {
+          const nextChiefMeta = { ...store.chiefMeta, ...value.chiefMeta }
+          patchObj.chiefMeta = nextChiefMeta
+          if (String(path || '').startsWith('snapshot')) {
+            patchObj.staleBackendDetected = value.chiefMeta.backendBuild !== EXPECTED_BACKEND_BUILD
+            if (value.chiefMeta.backendBuild === EXPECTED_BACKEND_BUILD) patchObj.staleBackendDismissed = false
+          }
+          const rg = value.chiefMeta.runtimeGuard
+          const haz = rg && rg.hazardAlert && typeof rg.hazardAlert === 'object' ? rg.hazardAlert : null
+          const seenH = store.seenHazardAlertIds || {}
+          if (haz && haz.id && (haz.reason || haz.title) && !seenH[haz.id] && !(store.hazardHaltModal && store.hazardHaltModal.id === haz.id)) {
+            patchObj.seenHazardAlertIds = { ...seenH, [haz.id]: true }
+            patchObj.hazardHaltModal = haz
+          }
+        }
+        const compat = value.hostCompat || (value.chiefMeta && value.chiefMeta.hostCompat)
+        if (compat) patchObj.hostCompat = compat
+        patch(patchObj)
       }
-      if (value && value.archiveMeta) patch({ archiveMeta: { ...store.archiveMeta, ...value.archiveMeta } })
+      if (value && value.archiveMeta) {
+        const nextMeta = { ...store.archiveMeta, ...value.archiveMeta }
+        const nextCounts = (value.archiveMeta.counts && typeof value.archiveMeta.counts === 'object')
+          ? { ...store.archiveCounts, ...value.archiveMeta.counts }
+          : store.archiveCounts
+        patch({
+          archiveMeta: nextMeta,
+          archiveCounts: nextCounts,
+          ...(nextCounts && typeof nextCounts.unboundSession === 'boolean'
+            ? { archiveUnboundSession: Boolean(nextCounts.unboundSession) }
+            : {}),
+        })
+      }
+      if (value && Array.isArray(value.deskItems)) {
+        patch({ archiveDeskItems: value.deskItems, archiveDeskLoaded: true })
+      }
       if (value && value.archives && Array.isArray(value.archives.items)) applyArchiveHeaders(value.archives)
       if (value && value.view) applySecView(value.view)
       if (!response.ok || (value && value.ok === false)) {
@@ -893,15 +1018,42 @@ window.__ModuleLoader__.load({
       return value
     }
 
-    async function loadChiefView(regenerate = false) {
+    async function loadChiefView(regenerate = false, opts = {}) {
       if (regenerate) patch({ secRegenerating: true, error: '' })
       try {
         const qs = new URLSearchParams()
         if (store.sessionId) qs.set('session', store.sessionId)
         if (regenerate) qs.set('regenerate', '1')
-        const value = await call('chief/view' + (qs.toString() ? '?' + qs.toString() : ''), regenerate ? { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ session: store.sessionId, regenerate: true }) } : undefined)
+        const syncHandoff = typeof opts.syncHandoff === 'boolean' ? opts.syncHandoff : undefined
+        if (typeof syncHandoff === 'boolean') qs.set('syncHandoff', syncHandoff ? '1' : '0')
+        const usePost = Boolean(regenerate || typeof syncHandoff === 'boolean')
+        const value = await call(
+          'chief/view' + (qs.toString() ? '?' + qs.toString() : ''),
+          usePost
+            ? {
+                method: 'POST',
+                headers: { 'content-type': 'application/json' },
+                body: JSON.stringify({
+                  session: store.sessionId,
+                  ...(regenerate ? { regenerate: true } : {}),
+                  ...(typeof syncHandoff === 'boolean' ? { syncHandoff } : {}),
+                }),
+              }
+            : undefined,
+        )
         if (value && value.ok) applySecView(value)
-        if (regenerate) patch({ notice: '摘要已重新提炼' })
+        if (value && value.handoffSyncResult) {
+          if (value.handoffSyncResult.synced) {
+            patch({ notice: '✦ 摘要已提炼并同步更新至交接单' })
+            void loadHandoff()
+          } else if (value.handoffSyncResult.skipped === 'pinned-by-human') {
+            patch({ notice: regenerate ? '摘要已提炼（交接单已被人类定住，保持未覆写）' : '交接单已被人类定住，跳过同步' })
+          } else if (regenerate) {
+            patch({ notice: '摘要已重新提炼' })
+          }
+        } else if (regenerate) {
+          patch({ notice: '摘要已重新提炼' })
+        }
         return value
       } catch (error) {
         if (regenerate) patch({ error: String((error && error.message) || error) })
@@ -941,23 +1093,64 @@ window.__ModuleLoader__.load({
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ ...nextCfg, session: store.sessionId }),
         })
-        if (nextCfg.emergencyStopIntervention) {
+        if (value && value.requireAutoPilotConfirm) {
+          patch({ autoPilotConfirmOpen: true, secPaceMenuOpen: false })
+          return null
+        }
+        if (!value || value.ok === false) {
+          patch({ error: (value && value.error) || '更新参谋长配置失败' })
+          return null
+        }
+        patch({
+          compactInputDraft: null,
+          compactLowWarning: value.compactLowWarning || '',
+        })
+        if (nextCfg.ackHazardAlertId) {
+          // Quietly acknowledged; no intrusive toast needed
+        } else if (nextCfg.emergencyStopIntervention) {
           patch({ notice: '⏹ 已紧急关停「主动强介入」，自动驱动与巡检续跑已停机' })
+        } else if (typeof nextCfg.permissionMode === 'string') {
+          const savedPerm = (value.config && value.config.permissionMode)
+            || (value.view && value.view.config && value.view.config.permissionMode)
+            || ''
+          if (savedPerm && savedPerm !== nextCfg.permissionMode) {
+            patch({
+              staleBackendDetected: true,
+              staleBackendDismissed: false,
+              error: '参谋长权限未在后端生效（宿主仍在运行旧版内存模块），请重启一次 DeepSeek Harness 客户端。',
+            })
+            return null
+          }
+          const permMap = {
+            'read-only': '已切换参谋长权限：👁 仅可查看（参谋/主模型/子代理只读分析）',
+            'workspace-write': '已切换参谋长权限：📝 工作区内修改（严格守红线）',
+            'danger-full-access': '已切换参谋长权限：🛡️ 完全权限（默认最高实权）',
+            'auto-review': '已切换参谋长权限：🔍 自动审查 EXP（优先实证核验纠偏）',
+          }
+          patch({ notice: permMap[nextCfg.permissionMode] || '已更新参谋长执行权限' })
         } else if (nextCfg.tacticalModes && typeof nextCfg.tacticalModes === 'object') {
-          if (typeof nextCfg.tacticalModes.intervention === 'boolean' && Object.keys(nextCfg.tacticalModes).length === 1) {
+          if (value.compactLowWarning) {
+            patch({ notice: '⚠️ ' + value.compactLowWarning })
+          } else if (normalizeMaxTurnsVal(nextCfg.tacticalModes.maxInterventionTurns) === 0 && Object.prototype.hasOwnProperty.call(nextCfg.tacticalModes, 'maxInterventionTurns') && !nextCfg.confirmedInterventionRisk) {
+            patch({ notice: '♾️ 已启用无限督导轮次（只要参谋长判定未完成就会继续 push）' })
+          } else if (typeof nextCfg.tacticalModes.intervention === 'boolean' && nextCfg.confirmedInterventionRisk) {
+            patch({ notice: nextCfg.tacticalModes.intervention ? '⚡ 已开启「主动强介入」模式' : '已关闭「主动强介入」模式' })
+          } else if (typeof nextCfg.tacticalModes.intervention === 'boolean' && Object.keys(nextCfg.tacticalModes).length === 1) {
             patch({ notice: nextCfg.tacticalModes.intervention ? '⚡ 已开启「主动强介入」模式' : '已关闭「主动强介入」模式' })
           } else {
             patch({ notice: '✦ 已更新参谋长战术驾驶舱开关' })
           }
         } else if (typeof nextCfg.paceMode === 'string') {
-          const paceNotice = nextCfg.paceMode === 'auto'
-            ? '已切为「全自动托管」：节流巡检、跨窗递话与阶段摘要（5分钟冷却）'
-            : nextCfg.paceMode === 'smart'
-              ? '已切为「关键巡检」：仅在撞墙或关键节点节流巡检，摘要按需手动提炼'
-              : '已切为「按需手动」：后台零自动总结，仅在你点提炼或发话时调用模型'
+          const paceNotice = nextCfg.paceMode === 'stopped'
+            ? '⏹ 已停止参谋长：后台强介入、空转监控与断线续跑全部暂停（可随时切回恢复）'
+            : nextCfg.paceMode === 'auto'
+              ? '⚡ 已开启本会话全自动托管（仅管当前对话，完工且摘要收尾后自动停机防空转）'
+              : nextCfg.paceMode === 'smart'
+                ? '已切为「关键巡检」：仅在撞墙或关键节点节流巡检，摘要按需手动提炼'
+                : '已切为「按需手动」：后台零自动总结，仅在你点提炼或发话时调用模型'
           patch({ notice: paceNotice })
         } else if (typeof nextCfg.autoPilot === 'boolean') {
-          patch({ notice: nextCfg.autoPilot ? '已开启全自动协同托管' : '已切换为按需手动模式' })
+          patch({ notice: nextCfg.autoPilot ? '⚡ 已开启本会话全自动协同托管' : '已切换为按需手动模式' })
         } else if (typeof nextCfg.modelRef === 'string') {
           const cat = (value && value.view && value.view.models) || store.secModelsCatalog
           const followHint = (cat && (cat.followLabel || fullModelWithChannel(cat.followRef || cat.defaultRef, cat))) || ''
@@ -981,12 +1174,31 @@ window.__ModuleLoader__.load({
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ session: store.sessionId, peerSession: peerId, linked }),
         })
-        patch({ notice: linked ? '已接入跨对话协同网络' : '已断开跨对话联动' })
+        patch({
+          notice: linked
+            ? '已接入跨对话协同网络（进度与信箱实时同步）'
+            : '已脱离协同网络：参谋摘要与协同上下文已隔离净化',
+        })
         return value
       } catch (error) {
         patch({ error: String((error && error.message) || error) })
         return null
       }
+    }
+
+    function requestTogglePeerLink(sess, nextLinked) {
+      if (!sess || !sess.id) return
+      if (nextLinked) {
+        patch({
+          peerLinkConfirmModal: {
+            peerId: sess.id,
+            peerTitle: sess.name || shortSession(sess.id),
+            peerObjective: sess.objective || '',
+          },
+        })
+        return
+      }
+      void togglePeerSessionLink(sess.id, false)
     }
 
     async function decideSuggestion(sug, decision, editedText = '', boundField = '', pinGlobal = undefined) {
@@ -1016,6 +1228,8 @@ window.__ModuleLoader__.load({
             } else {
               patch({ notice: `${isPinned ? '📌 已批准并定住全局' : '已批准注入本任务'}【${label}】` })
             }
+          } else if (sug.kind === 'advice') {
+            patch({ notice: '💡 已采纳参谋长建议并递交 → @' + (sug.targetLabel || sug.target || '主对话') })
           } else {
             patch({ notice: '已递话 → @' + (sug.targetLabel || sug.target) })
           }
@@ -1073,9 +1287,9 @@ window.__ModuleLoader__.load({
         secTarget: sug.target || 'lead',
         secMode: sug.mode || 'steer',
         secInput: sug.draftText || '',
-        notice: '已填入底部参谋栏，可微调后发送',
+        notice: '已填入底部许愿框，可微调后发送',
       })
-      void decideSuggestion(sug, 'dismiss')
+      if (sug.id && !sug.isSynthetic) void decideSuggestion(sug, 'dismiss')
     }
 
     async function mutateFact(payload) {
@@ -1228,6 +1442,8 @@ window.__ModuleLoader__.load({
             if (r && r.ok) actions.push('→ ' + (r.target || target))
           }
           for (const b of (value.boardOps || [])) actions.push(b)
+          for (const a of (value.archiveOps || [])) actions.push(a)
+          for (const n of (value.networkOps || [])) actions.push(n)
           for (const m of (value.memoryChanges || [])) {
             if (m && m.text) actions.push((m.op === 'remove' ? '移除：' : '记入：') + clampTitle(m.text, 14))
           }
@@ -1241,6 +1457,9 @@ window.__ModuleLoader__.load({
               at: Date.now(),
             },
           })
+          if (Array.isArray(value.archiveOps) && value.archiveOps.length > 0) {
+            void loadArchives(true)
+          }
           if (actions.length) void refresh()
         }
       } catch (error) {
@@ -1253,40 +1472,59 @@ window.__ModuleLoader__.load({
       }
     }
 
-    function applyArchiveHeaders(payload, invalidateIds = null) {
+    function applyArchiveHeaders(payload, invalidateIds = null, requestedScope = '') {
       if (!payload || typeof payload !== 'object') return
-      const folders = Array.isArray(payload.folders) ? payload.folders : store.archiveFolders
-      const items = Array.isArray(payload.items) ? payload.items : store.archiveItems
-      const cabinets = Array.isArray(payload.cabinets) ? payload.cabinets : store.archiveCabinets
-      const activeCabinetId = payload.activeCabinetId || store.archiveCabinetId || 'cab-main'
-      const projectKey = payload.projectKey || store.archiveProjectKey || ''
+      const isSystemGlobalResp = payload.isSystemGlobalVault === true
+      const targetScope = String(
+        requestedScope
+        || payload.requestedScope
+        || payload.vaultScope
+        || payload.scope
+        || ''
+      ).toLowerCase()
+
+      // Hard anti-bleed guard: if Global vault was requested but running host lacks `isSystemGlobalVault: true` (stale memory module),
+      // block writing into `globalVaultItems` or `archiveItems` so local items NEVER bleed into Global!
+      if (targetScope === 'global' && !isSystemGlobalResp) {
+        patch({
+          globalVaultLoaded: false,
+          globalVaultItems: [],
+          globalVaultStaleBlocked: true,
+          staleBackendDetected: true,
+        })
+        return
+      }
+
+      const items = Array.isArray(payload.items) ? payload.items : []
+      const folders = Array.isArray(payload.folders)
+        ? payload.folders
+        : (isSystemGlobalResp ? store.globalVaultFolders : store.archiveFolders)
       const precipitated = Array.isArray(payload.precipitated) ? payload.precipitated : store.archivePrecipitated
       const flippedPrecipitatedIds = Array.isArray(payload.flippedPrecipitatedIds)
         ? payload.flippedPrecipitatedIds
         : store.flippedPrecipitatedIds
-      const openFolders = { ...(store.archiveOpenFolders || {}) }
-      // On very first open of the Filing Cabinet, gently open the first non-empty drawer so the user sees how paperclipped files sit inside
-      if (!store.archiveLoaded && Object.keys(openFolders).length === 0) {
-        const firstNonEmpty = folders.find(f => f && f.count > 0)
-        if (firstNonEmpty) openFolders[firstNonEmpty.id] = true
-      }
+      const nextCounts = (payload.counts && typeof payload.counts === 'object')
+        ? { ...(store.archiveCounts || {}), ...payload.counts }
+        : (store.archiveCounts || {})
+      const nextDiffSummary = (payload.diffSummary && typeof payload.diffSummary === 'object')
+        ? payload.diffSummary
+        : store.archiveDiffSummary
+
       let nextDetails = store.archiveDetails || {}
       if (Array.isArray(invalidateIds) && invalidateIds.length) {
         nextDetails = { ...nextDetails }
         for (const id of invalidateIds) delete nextDetails[id]
       }
-      // Keep takenOut & paperclip & summary in cached details synchronized with latest headers
       if (Object.keys(nextDetails).length > 0 && items.length > 0) {
         let touched = false
         const headerMap = new Map(items.map(it => [it.id, it]))
         const synced = { ...nextDetails }
         for (const [id, det] of Object.entries(synced)) {
           const hdr = headerMap.get(id)
-          if (!hdr) {
-            delete synced[id]
-            touched = true
-          } else if (
+          if (!hdr) continue
+          if (
             det.takenOut !== hdr.takenOut
+            || det.chiefMounted !== hdr.chiefMounted
             || det.paperclip !== hdr.paperclip
             || det.folder !== hdr.folder
             || det.updatedAt !== hdr.updatedAt
@@ -1294,15 +1532,54 @@ window.__ModuleLoader__.load({
             if (det.updatedAt !== hdr.updatedAt) {
               delete synced[id]
             } else {
-              synced[id] = { ...det, takenOut: hdr.takenOut, paperclip: hdr.paperclip, folder: hdr.folder }
+              synced[id] = {
+                ...det,
+                takenOut: hdr.takenOut,
+                chiefMounted: hdr.chiefMounted,
+                paperclip: hdr.paperclip,
+                folder: hdr.folder,
+              }
             }
             touched = true
           }
         }
         if (touched) nextDetails = synced
       }
+
+      if (isSystemGlobalResp) {
+        patch({
+          archiveLoaded: true,
+          globalVaultLoaded: true,
+          globalVaultStaleBlocked: false,
+          globalVaultFolders: folders,
+          globalVaultItems: items,
+          archivePrecipitated: precipitated,
+          flippedPrecipitatedIds,
+          archiveCounts: nextCounts,
+          archiveDiffSummary: nextDiffSummary,
+          archiveDetails: nextDetails,
+          ...(Array.isArray(payload.deskItems) ? { archiveDeskItems: payload.deskItems, archiveDeskLoaded: true } : {}),
+        })
+        return
+      }
+
+      const cabinets = Array.isArray(payload.cabinets) ? payload.cabinets : store.archiveCabinets
+      const activeCabinetId = payload.activeCabinetId !== undefined
+        ? String(payload.activeCabinetId || '')
+        : (store.archiveCabinetId || '')
+      const projectKey = payload.projectKey !== undefined ? String(payload.projectKey || '') : (store.archiveProjectKey || '')
+      const unboundSession = typeof payload.unboundSession === 'boolean'
+        ? payload.unboundSession
+        : Boolean(nextCounts && nextCounts.unboundSession)
+      const openFolders = { ...(store.archiveOpenFolders || {}) }
+      if (!store.archiveSessionLoaded && Object.keys(openFolders).length === 0) {
+        const firstNonEmpty = folders.find(f => f && f.count > 0)
+        if (firstNonEmpty) openFolders[firstNonEmpty.id] = true
+      }
+
       patch({
         archiveLoaded: true,
+        archiveSessionLoaded: true,
         archiveProjectKey: projectKey,
         archiveCabinetId: activeCabinetId,
         archiveCabinets: cabinets,
@@ -1310,28 +1587,40 @@ window.__ModuleLoader__.load({
         archiveItems: items,
         archivePrecipitated: precipitated,
         flippedPrecipitatedIds,
+        archiveCounts: nextCounts,
+        archiveDiffSummary: nextDiffSummary,
+        archiveUnboundSession: unboundSession,
         archiveOpenFolders: openFolders,
         archiveDetails: nextDetails,
+        ...(Array.isArray(payload.deskItems) ? { archiveDeskItems: payload.deskItems, archiveDeskLoaded: true } : {}),
       })
     }
 
-    /** Tier-1 Lazy Load: called ONLY when the user opens or refreshes the `档案` tab */
-    async function loadArchives(force = false, cabinetIdOverride = '') {
+    /** Tier-1 Lazy Load: called ONLY when the user opens or switches scope in the `档案` tab */
+    async function loadArchives(force = false, cabinetIdOverride = '', scopeOverride = '') {
       if (store.archiveLoading) return null
-      if (store.archiveLoaded && !force && !cabinetIdOverride) return null
+      const activeScope = scopeOverride || store.archiveTabScope || 'session'
+      const alreadyLoaded = activeScope === 'global'
+        ? store.globalVaultLoaded
+        : (activeScope === 'precipitated' ? store.archiveLoaded : store.archiveSessionLoaded)
+      if (alreadyLoaded && !force && !cabinetIdOverride && !scopeOverride) return null
       patch({ archiveLoading: true, error: '' })
       try {
         const qs = new URLSearchParams()
         if (store.sessionId) qs.set('session', store.sessionId)
-        const cid = cabinetIdOverride || store.archiveCabinetId || ''
-        if (cid) qs.set('cabinetId', cid)
+        qs.set('scope', activeScope)
+        const cid = (activeScope === 'precipitated' || activeScope === 'global')
+          ? ''
+          : (cabinetIdOverride || store.archiveCabinetId || '')
+        if (cid && cid !== 'cab-global') {
+          qs.set('cabinetId', cid)
+        }
         const value = await call('archives' + (qs.toString() ? '?' + qs.toString() : ''))
         if (value && value.ok) {
-          applyArchiveHeaders(value)
-          // Refresh details of any currently open dossier cards
+          applyArchiveHeaders(value, [], activeScope)
           const openIds = Object.keys(store.archiveOpenFiles || {}).filter(id => store.archiveOpenFiles[id] && !store.archiveDetails[id])
           for (const id of openIds) {
-            void loadArchiveDetail(id, true)
+            void loadArchiveDetail(id, true, { scope: activeScope })
           }
         }
         return value
@@ -1353,9 +1642,11 @@ window.__ModuleLoader__.load({
       if (store.archiveDetailLoading && store.archiveDetailLoading[id]) return null
       patch({ archiveDetailLoading: { ...(store.archiveDetailLoading || {}), [id]: true } })
       try {
+        const activeScope = (opts && (opts.scope || opts.vaultScope)) || store.archiveTabScope || 'session'
         const qs = new URLSearchParams({ id })
         if (store.sessionId) qs.set('session', store.sessionId)
-        if (store.archiveCabinetId) qs.set('cabinetId', store.archiveCabinetId)
+        if (activeScope === 'global') qs.set('scope', 'global')
+        if (store.archiveCabinetId && activeScope === 'session') qs.set('cabinetId', store.archiveCabinetId)
         if (opts && opts.precipitated) qs.set('precipitated', '1')
         const value = await call('archives/detail?' + qs.toString())
         if (value && value.ok && value.item) {
@@ -1380,11 +1671,20 @@ window.__ModuleLoader__.load({
 
     async function mutateArchiveApi(payload, toastLabel = '') {
       try {
-        const cabinetId = (payload && payload.cabinetId) || store.archiveCabinetId || 'cab-main'
+        const vaultScope = (payload && (payload.vaultScope || payload.scope))
+          || (store.archiveTabScope === 'global' ? 'global' : 'session')
+        const cabinetId = vaultScope === 'global'
+          ? ''
+          : ((payload && payload.cabinetId !== undefined) ? payload.cabinetId : (store.archiveCabinetId || ''))
         const value = await call('archives', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ session: store.sessionId, cabinetId, ...payload }),
+          body: JSON.stringify({
+            session: store.sessionId || sessionIdFromUrl(),
+            vaultScope,
+            cabinetId,
+            ...payload,
+          }),
         })
         if (value && value.ok) {
           if (payload.op === 'switchCabinet' || payload.op === 'createCabinet' || payload.op === 'deleteCabinet') {
@@ -1406,7 +1706,32 @@ window.__ModuleLoader__.load({
             delete nextDet[delId]
             patch({ archiveOpenFiles: nextOpen, archiveDetails: nextDet })
           }
-          if (toastLabel) patch({ notice: toastLabel })
+          const extraPatch = {}
+          if (value.diffSummary && typeof value.diffSummary === 'object') {
+            extraPatch.archiveDiffSummary = value.diffSummary
+          }
+          if (value.counts && typeof value.counts === 'object') {
+            extraPatch.archiveCounts = { ...(store.archiveCounts || {}), ...value.counts }
+          }
+          if (Array.isArray(value.deskItems)) {
+            extraPatch.archiveDeskItems = value.deskItems
+            extraPatch.archiveDeskLoaded = true
+          }
+          if (payload.op === 'copyToGlobal') {
+            extraPatch.globalVaultLoaded = false
+          } else if (payload.op === 'copyToSession') {
+            extraPatch.archiveSessionLoaded = false
+          } else if (payload.op === 'pullPrecipitated') {
+            if (payload.targetScope === 'global') extraPatch.globalVaultLoaded = false
+            else extraPatch.archiveSessionLoaded = false
+          }
+          if (toastLabel) extraPatch.notice = toastLabel
+          if (Object.keys(extraPatch).length) patch(extraPatch)
+          if (payload.op === 'copyToGlobal' && store.archiveTabScope === 'global') {
+            void loadArchives(true, '', 'global')
+          } else if (payload.op === 'pullPrecipitated' && store.archiveTabScope === payload.targetScope) {
+            void loadArchives(true, '', payload.targetScope)
+          }
         }
         return value
       } catch (error) {
@@ -1419,12 +1744,14 @@ window.__ModuleLoader__.load({
       if (store.archiveOrganizing) return null
       patch({ archiveOrganizing: true, error: '' })
       try {
+        const vaultScope = opts.vaultScope || (store.archiveTabScope === 'global' ? 'global' : 'session')
         const value = await call('archives/organize', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            session: store.sessionId,
-            cabinetId: opts.cabinetId || store.archiveCabinetId || 'cab-main',
+            session: store.sessionId || sessionIdFromUrl(),
+            vaultScope,
+            cabinetId: vaultScope === 'global' ? '' : (opts.cabinetId !== undefined ? opts.cabinetId : (store.archiveCabinetId || '')),
             ids: Array.isArray(opts.ids) ? opts.ids : [],
             folder: opts.folder || '',
             scope: opts.scope || store.archiveOrganizeScope || 'unorganized',
@@ -1432,7 +1759,6 @@ window.__ModuleLoader__.load({
           }),
         })
         if (value && value.ok) {
-          // Reload open dossier details so newly structured Chief points show immediately
           const openIds = Object.keys(store.archiveOpenFiles || {}).filter(k => store.archiveOpenFiles[k])
           const nextDetails = { ...(store.archiveDetails || {}) }
           for (const k of openIds) delete nextDetails[k]
@@ -1444,8 +1770,9 @@ window.__ModuleLoader__.load({
               ? `✦ 参谋长已按层次整理收纳 ${value.updatedCount} 份工程卷宗（原文 100% 无损保留）`
               : '✦ 当前卷宗已分门别类，无需重复拆整',
           })
+          void loadArchives(true, '', vaultScope)
           for (const k of openIds) {
-            void loadArchiveDetail(k, true)
+            void loadArchiveDetail(k, true, { scope: vaultScope })
           }
         }
         return value
@@ -1457,16 +1784,18 @@ window.__ModuleLoader__.load({
       }
     }
 
-    async function harvestArchivesApi(focusHint = '') {
+    async function harvestArchivesApi(focusHint = '', opts = {}) {
       if (store.archiveHarvesting) return null
       patch({ archiveHarvesting: true, error: '' })
       try {
+        const vaultScope = (opts && opts.vaultScope) || (store.archiveTabScope === 'global' ? 'global' : 'session')
         const value = await call('archives/harvest', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            session: store.sessionId,
-            cabinetId: store.archiveCabinetId || 'cab-main',
+            session: store.sessionId || sessionIdFromUrl(),
+            vaultScope,
+            cabinetId: (opts && opts.cabinetId !== undefined) ? opts.cabinetId : (store.archiveCabinetId || ''),
             focusHint,
           }),
         })
@@ -1491,14 +1820,17 @@ window.__ModuleLoader__.load({
       if (store.archivePrecipitating) return null
       patch({ archivePrecipitating: true, error: '' })
       try {
+        const vaultScope = opts.vaultScope || 'global'
         const value = await call('archives/precipitate', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({
-            session: store.sessionId,
+            session: store.sessionId || sessionIdFromUrl(),
+            vaultScope,
             op: opts.op || 'cabinet',
-            cabinetId: opts.cabinetId || store.archiveCabinetId || 'cab-main',
+            cabinetId: '',
             folder: opts.folder || '',
+            ...(Array.isArray(opts.ids) && opts.ids.length > 0 ? { ids: opts.ids } : {}),
             clearSource: Boolean(opts.clearSource),
           }),
         })
@@ -1509,7 +1841,7 @@ window.__ModuleLoader__.load({
               ? `⏬ 已提炼 ${value.count} 条可复用经验封入冷库（默认 0 Token 隔离）`
               : '⏬ 当前卷宗暂无更多可沉淀经验',
           })
-          void loadArchives(true)
+          void loadArchives(true, '', vaultScope)
         }
         return value
       } catch (error) {
@@ -1517,6 +1849,125 @@ window.__ModuleLoader__.load({
         return null
       } finally {
         patch({ archivePrecipitating: false })
+      }
+    }
+
+    function toggleSelectArchive(id, vaultScope = 'session', title = '') {
+      const aid = String(id || '').trim()
+      if (!aid) return
+      const vs = vaultScope === 'global' ? 'global' : (vaultScope === 'precipitated' ? 'precipitated' : 'session')
+      const key = vs + ':' + aid
+      const prev = { ...(store.selectedArchiveMap || {}) }
+      if (prev[key]) delete prev[key]
+      else prev[key] = { id: aid, vaultScope: vs, title: String(title || aid) }
+      patch({ selectedArchiveMap: prev })
+    }
+
+    function clearSelectedArchives() {
+      patch({ selectedArchiveMap: {} })
+    }
+
+    function openArchiveRelayModal(items) {
+      const list = Array.isArray(items) ? items.filter(x => x && x.id) : []
+      if (!list.length) return
+      patch({
+        archiveRelayModal: {
+          items: list.map(x => ({
+            id: String(x.id),
+            vaultScope: x.vaultScope === 'global' ? 'global' : (x.vaultScope === 'precipitated' ? 'precipitated' : 'session'),
+            title: String(x.title || x.id),
+          })),
+          instruction: '',
+          target: 'lead',
+          mode: 'followup',
+        },
+      })
+    }
+
+    async function relayArchivesWithChiefApi(modalState) {
+      if (store.relayArchivesBusy) return null
+      const items = Array.isArray(modalState && modalState.items) ? modalState.items : []
+      if (!items.length) return null
+      patch({ relayArchivesBusy: true, error: '' })
+      try {
+        const value = await call('chief/relay-archives', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId || sessionIdFromUrl(),
+            cabinetId: store.archiveCabinetId || '',
+            items: items.map(it => ({
+              id: it.id,
+              scope: it.vaultScope || it.scope || 'session',
+              vaultScope: it.vaultScope || it.scope || 'session',
+              title: it.title || it.id,
+            })),
+            instruction: String((modalState && modalState.instruction) || '').trim(),
+            target: (modalState && modalState.target) || 'lead',
+            mode: (modalState && modalState.mode) || 'followup',
+          }),
+        })
+        if (value && value.ok) {
+          patch({
+            archiveRelayModal: null,
+            selectedArchiveMap: {},
+            notice: `📨 参谋长已带要求整合 ${items.length} 条档案并递交给 @${modalState.target === 'lead' || !modalState.target ? '主对话' : shortAgentName(modalState.target, true)}`,
+          })
+          void refresh()
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ relayArchivesBusy: false })
+      }
+    }
+
+    async function distillToGlobalApi(modalState) {
+      if (store.distillBusy) return null
+      patch({ distillBusy: true, error: '' })
+      try {
+        const ids = Array.isArray(modalState && modalState.ids) && modalState.ids.length > 0
+          ? modalState.ids
+          : null
+        const value = await call('archives/distill-to-global', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId || sessionIdFromUrl(),
+            cabinetId: store.archiveCabinetId || '',
+            ids,
+            clearSource: Boolean(modalState && modalState.clearSource),
+            instruction: String((modalState && modalState.instruction) || '').trim(),
+          }),
+        })
+        if (value && value.ok) {
+          const nextPatch = {
+            distillGlobalModal: null,
+            selectedArchiveMap: {},
+            globalVaultLoaded: false,
+            notice: value.createdCount > 0
+              ? `✦ 已从本局提炼 ${value.createdCount} 份可复用工程档案存入「🌐 全局档案柜」`
+              : '✦ 当前本局暂无更多待提炼的新增可复用经验',
+          }
+          if (value.globalArchives && Array.isArray(value.globalArchives.items)) {
+            nextPatch.globalVaultItems = value.globalArchives.items
+            nextPatch.globalVaultLoaded = true
+          }
+          if (Array.isArray(value.deskItems)) {
+            nextPatch.archiveDeskItems = value.deskItems
+            nextPatch.archiveDeskLoaded = true
+          }
+          patch(nextPatch)
+          if (ids && modalState && modalState.clearSource) void loadArchives(true, '', 'session')
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ distillBusy: false })
       }
     }
 
@@ -1569,7 +2020,9 @@ window.__ModuleLoader__.load({
       patch({ archiveSearchBusy: true })
       try {
         const qs = new URLSearchParams({ q })
-        if (store.sessionId) qs.set('session', store.sessionId)
+        const sid = store.sessionId || sessionIdFromUrl()
+        if (sid) qs.set('session', sid)
+        if (store.archiveTabScope === 'global') qs.set('scope', 'global')
         const value = await call('archives?' + qs.toString())
         if (value && value.ok && Array.isArray(value.items)) {
           const folderMap = new Map((value.folders || []).map(f => [f.id, f.label]))
@@ -1621,10 +2074,13 @@ window.__ModuleLoader__.load({
     async function act(action) {
       patch({ busy: true, error: '' })
       try {
+        const effSession = (action && action.session !== undefined)
+          ? action.session
+          : (store.sessionId || sessionIdFromUrl())
         const result = await call('action', {
           method: 'POST',
           headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ...action, session: store.sessionId, by: action.by || 'user' }),
+          body: JSON.stringify({ ...action, session: effSession, by: (action && action.by) || 'user' }),
         })
         let notice = truncationNotice(result)
         if (!notice && result && result.dispatched) {
@@ -1637,7 +2093,16 @@ window.__ModuleLoader__.load({
         if (notice) patch({ notice })
         return result
       } catch (error) {
-        patch({ error: String((error && error.message) || error) })
+        const msg = String((error && error.message) || error)
+        if (/unknown action:/i.test(msg)) {
+          patch({
+            staleBackendDetected: true,
+            staleBackendDismissed: false,
+            error: '检测到客户端内存仍驻留旧版参谋部后端（尚未加载新动作），请完整关闭并重新打开 DeepSeek Harness 客户端即可生效。',
+          })
+        } else {
+          patch({ error: msg })
+        }
         return null
       } finally {
         patch({ busy: false })
@@ -1669,14 +2134,110 @@ window.__ModuleLoader__.load({
       try {
         const value = await call('handoff' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
         const text = value && value.text ? value.text : ''
-        patch({ handoffText: text })
-        return text
+        const nextMeta = {
+          source: (value && value.source) || 'auto',
+          isCustom: Boolean(value && value.isCustom),
+          pinned: Boolean(value && value.pinned),
+          syncOnDigest: Boolean(value && value.syncOnDigest),
+          isIncomplete: Boolean(value && value.isIncomplete),
+          isStale: Boolean(value && value.isStale),
+          hasNarrativeUpdate: Boolean(value && value.hasNarrativeUpdate),
+          autoText: (value && value.autoText) || '',
+          updatedAt: Number(value && (value.updatedAt || value.handoffAt)) || 0,
+        }
+        patch({
+          handoffText: text,
+          handoffMeta: nextMeta,
+          ...(store.handoffEditing ? {} : { handoffDraft: text }),
+        })
+        return value || { ok: true, text, ...nextMeta }
       } catch (error) {
         patch({ error: String((error && error.message) || error) })
-        return ''
+        return null
       } finally {
         patch({ handoffBusy: false })
       }
+    }
+
+    async function saveHandoffCustom(text, pinAfter = false) {
+      const cleanText = String(text || '')
+      const res = await act({ action: 'handoff.save', text: cleanText, source: 'human', by: 'user' })
+      if (res && res.ok) {
+        if (pinAfter) {
+          await act({ action: 'handoff.pin', pinned: true, by: 'user' })
+        }
+        patch({ handoffEditing: false, notice: pinAfter ? '✏️ 已保存交接单并定住防改' : '✏️ 已保存手动交接单' })
+        await loadHandoff()
+      }
+      return res
+    }
+
+    async function toggleHandoffPin(nextPinned, snapshotOverride = '') {
+      let snapshotText = String(
+        snapshotOverride
+        || store.handoffText
+        || (store.handoffMeta && store.handoffMeta.autoText)
+        || '',
+      )
+      if (nextPinned && !snapshotText) {
+        const loaded = await loadHandoff()
+        snapshotText = String((loaded && loaded.text) || store.handoffText || '')
+      }
+      const res = await act({
+        action: 'handoff.pin',
+        pinned: Boolean(nextPinned),
+        ...(nextPinned && snapshotText ? { snapshotText } : {}),
+        by: 'user',
+      })
+      if (res && res.ok) {
+        patch({ notice: nextPinned ? '📌 已定住交接单（已固化当前快照，参谋长不可自动覆写）' : '🔓 已解除交接单定住锁定' })
+        await loadHandoff()
+      }
+      return res
+    }
+
+    async function resetHandoffAuto() {
+      const res = await act({ action: 'handoff.reset', by: 'user' })
+      if (res && res.ok) {
+        patch({ handoffEditing: false, notice: '↺ 已恢复为系统实时自动生成交接单' })
+        await loadHandoff()
+      }
+      return res
+    }
+
+    async function toggleSyncHandoffOnDigest(enabled) {
+      if (store.board && store.board.handoff && store.board.handoff.pinned) {
+        patch({ notice: '🔒 交接单已被人类定住，需先解除定住才能开启自动同步' })
+        return null
+      }
+      const res = await act({ action: 'handoff.setSyncOnDigest', enabled: Boolean(enabled), by: 'user' })
+      if (res && res.ok) {
+        patch({ notice: enabled ? '✦ 提炼摘要后将自动同步至交接单' : '已关闭摘要同步交接单（仅手工更新）' })
+        await loadHandoff()
+      }
+      return res
+    }
+
+    async function requestTransferWithGuard(target, opts = {}) {
+      const info = await loadHandoff()
+      const hMeta = (info && typeof info === 'object') ? info : (store.handoffMeta || {})
+      const pinned = Boolean(hMeta.pinned || (store.board && store.board.handoff && store.board.handoff.pinned))
+      const staleOrIncomplete = !pinned && Boolean(hMeta.isIncomplete || hMeta.isStale || hMeta.hasNarrativeUpdate)
+      if (staleOrIncomplete) {
+        const reason = hMeta.isIncomplete
+          ? '当前交接单内容尚不完整（缺少目标、步骤或最新参谋摘要），直接交接会打乱新对话的上下文衔接。'
+          : '参谋长已更新最新态势摘要，但当前交接单尚未同步更新；直接交接可能让新窗口读到过期进度，建议先等参谋长刷新交接单。'
+        patch({
+          handoffWarnModal: {
+            target,
+            opts,
+            reason,
+            isIncomplete: Boolean(hMeta.isIncomplete),
+          },
+        })
+        return null
+      }
+      return transfer(target, opts)
     }
 
     async function transfer(target, opts = {}) {
@@ -2401,20 +2962,20 @@ window.__ModuleLoader__.load({
       .dnb-primary-btn:disabled { opacity: 0.4; cursor: default; }
 
       .dnb-pill {
-        height: 26px;
-        padding: 0 10px;
+        height: 28px;
+        padding: 0 12px;
         border-radius: 99px;
         border: 1px solid var(--dnb-border);
         background: var(--dnb-card);
         color: var(--dnb-text-2);
         font: inherit;
-        font-size: 11.5px;
+        font-size: 12px;
         font-weight: 500;
         cursor: pointer;
         display: inline-flex;
         align-items: center;
         justify-content: center;
-        gap: 4px;
+        gap: 5px;
         white-space: nowrap;
         transition: all 0.16s cubic-bezier(0.32, 0.72, 0, 1);
       }
@@ -2490,6 +3051,12 @@ window.__ModuleLoader__.load({
       }
       .dnb-switch[data-on="1"] .dnb-switch-thumb {
         transform: translateX(16px);
+      }
+      .dnb-switch:disabled,
+      .dnb-switch[data-disabled="1"] {
+        opacity: 0.45;
+        cursor: not-allowed;
+        pointer-events: none;
       }
 
       /* Progress bar */
@@ -3322,20 +3889,20 @@ window.__ModuleLoader__.load({
       }
       .dnb-sec-targets::-webkit-scrollbar { display: none; }
       .dnb-sec-chip {
-        height: 21px;
-        padding: 0 8px;
+        height: 26px;
+        padding: 0 10px;
         border-radius: 99px;
         border: 1px solid var(--dnb-border);
         background: transparent;
         color: var(--dnb-text-3);
         font: inherit;
-        font-size: 11px;
+        font-size: 11.5px;
         font-weight: 500;
         cursor: pointer;
         white-space: nowrap;
         display: inline-flex;
         align-items: center;
-        gap: 3px;
+        gap: 4px;
         transition: all 0.15s ease;
       }
       .dnb-sec-chip:hover {
@@ -3351,7 +3918,7 @@ window.__ModuleLoader__.load({
         display: flex;
         align-items: center;
         gap: 6px;
-        padding: 4px 5px 4px 7px;
+        padding: 4px 5px 4px 5px;
         border-radius: 20px;
         border: 1px solid var(--dnb-border-strong);
         background: var(--dnb-card);
@@ -3701,13 +4268,13 @@ window.__ModuleLoader__.load({
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        height: 22px;
-        padding: 0 8px;
-        border-radius: 99px;
+        height: 26px;
+        padding: 0 10px;
+        border-radius: 8px;
         border: 1px solid var(--dnb-border);
         background: var(--dnb-card);
         color: var(--dnb-text-2);
-        font-size: 10.5px;
+        font-size: 11.5px;
         font-weight: 500;
         cursor: pointer;
         transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
@@ -3759,6 +4326,9 @@ window.__ModuleLoader__.load({
       .dnb-plus-btn {
         width: 28px;
         height: 28px;
+        padding: 0;
+        margin: 0;
+        box-sizing: border-box;
         border-radius: 50%;
         border: 1px solid var(--dnb-border-strong);
         background: var(--dnb-card);
@@ -3768,9 +4338,7 @@ window.__ModuleLoader__.load({
         justify-content: center;
         flex-shrink: 0;
         cursor: pointer;
-        font-size: 15px;
-        font-weight: 600;
-        line-height: 1;
+        line-height: 0;
         transition: border-color 0.14s ease, background 0.14s ease, color 0.14s ease;
       }
       .dnb-plus-btn:hover {
@@ -3825,16 +4393,17 @@ window.__ModuleLoader__.load({
       .dnb-tac-chip {
         display: inline-flex;
         align-items: center;
-        gap: 4px;
-        height: 22px;
-        padding: 0 8px;
+        gap: 5px;
+        height: 26px;
+        padding: 0 11px;
         border-radius: 99px;
         border: 1px solid var(--dnb-border);
         background: var(--dnb-card);
         color: var(--dnb-text-2);
-        font-size: 11px;
+        font-size: 11.5px;
         font-weight: 500;
         cursor: pointer;
+        transition: all 0.15s ease;
       }
       .dnb-tac-chip[data-tone="amber"] {
         border-color: rgba(245, 158, 11, 0.45);
@@ -3850,19 +4419,87 @@ window.__ModuleLoader__.load({
         display: inline-flex;
         align-items: center;
         gap: 4px;
-        height: 22px;
-        padding: 0 9px;
+        height: 26px;
+        padding: 0 11px;
         border-radius: 99px;
         border: 1px solid rgba(255, 69, 58, 0.55);
         background: rgba(255, 69, 58, 0.16);
         color: #ff453a;
-        font-size: 11px;
+        font-size: 11.5px;
         font-weight: 600;
         cursor: pointer;
         margin-left: auto;
+        transition: background 0.15s ease;
       }
       .dnb-stop-btn:hover {
         background: rgba(255, 69, 58, 0.24);
+      }
+      .dnb-six-brief {
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        margin-top: 2px;
+      }
+      .dnb-six-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        padding: 7px 10px;
+        border-radius: 9px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-elevated);
+      }
+      .dnb-six-tag {
+        flex-shrink: 0;
+        font-size: 10.5px;
+        font-weight: 700;
+        padding: 2px 7px;
+        border-radius: 6px;
+        line-height: 1.35;
+        margin-top: 1px;
+      }
+      .dnb-batch-bar {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        flex-wrap: wrap;
+        padding: 8px 11px;
+        margin-bottom: 9px;
+        border-radius: 10px;
+        border: 1px solid rgba(10, 132, 255, 0.42);
+        background: rgba(10, 132, 255, 0.10);
+      }
+      .dnb-perm-grid {
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
+        margin-top: 5px;
+      }
+      .dnb-perm-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 5px;
+        font-size: 10.5px;
+        line-height: 1.38;
+        color: var(--dnb-text-3);
+        white-space: normal;
+      }
+      .dnb-perm-who {
+        flex-shrink: 0;
+        font-weight: 600;
+        color: var(--dnb-text-2);
+        background: var(--dnb-card);
+        border: 1px solid var(--dnb-border);
+        border-radius: 5px;
+        padding: 0 5px;
+        font-size: 10px;
+      }
+      .dnb-archive-check {
+        width: 15px;
+        height: 15px;
+        flex-shrink: 0;
+        accent-color: var(--dnb-accent);
+        cursor: pointer;
       }
       .dnb-stepper {
         display: inline-flex;
@@ -3934,25 +4571,148 @@ window.__ModuleLoader__.load({
         background: var(--dnb-card);
         overflow: hidden;
       }
+      .dnb-vault-seg {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 4px;
+        padding: 4px;
+        border-radius: 12px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-fill);
+        margin-bottom: 8px;
+      }
+      .dnb-vault-seg-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        gap: 4px;
+        min-height: 28px;
+        padding: 4px 6px;
+        border-radius: 9px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--dnb-text-2);
+        font-size: 11.5px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease, box-shadow 0.15s ease;
+      }
+      .dnb-vault-seg-btn:hover {
+        color: var(--dnb-text);
+        background: rgba(255, 255, 255, 0.04);
+      }
+      .dnb-vault-seg-btn[data-active="1"] {
+        background: var(--dnb-elevated);
+        border-color: var(--dnb-border-strong);
+        color: var(--dnb-text);
+        box-shadow: 0 2px 6px rgba(0, 0, 0, 0.16);
+      }
+      .dnb-vault-seg-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        min-width: 16px;
+        height: 16px;
+        padding: 0 4px;
+        border-radius: 99px;
+        font-size: 10px;
+        font-weight: 700;
+        background: var(--dnb-card);
+        color: var(--dnb-text-2);
+      }
+      .dnb-vault-seg-btn[data-active="1"] .dnb-vault-seg-badge {
+        background: rgba(10, 132, 255, 0.16);
+        color: var(--dnb-accent);
+      }
+      .dnb-vault-perm-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 7px 10px;
+        margin-bottom: 9px;
+        border-radius: 10px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-card);
+        font-size: 11px;
+        line-height: 1.45;
+        color: var(--dnb-text-2);
+      }
+      .dnb-drawer-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 11px;
+        cursor: pointer;
+        border-left: 3px solid transparent;
+        transition: background 0.14s ease;
+      }
+      .dnb-drawer-head:hover {
+        background: var(--dnb-hover);
+      }
     `
 
     function Style() {
       return h('style', { 'data-dnb': '3' }, CSS)
     }
 
-    function Switch({ checked, onChange }) {
+    function Switch({ checked, onChange, disabled = false, title = '', small = false }) {
       return h(
         'button',
         {
           type: 'button',
           role: 'switch',
+          disabled: Boolean(disabled),
           'aria-checked': checked ? 'true' : 'false',
+          'aria-disabled': disabled ? 'true' : 'false',
+          'data-disabled': disabled ? '1' : '0',
+          title: title || undefined,
           className: 'dnb-switch',
           'data-on': checked ? '1' : '0',
-          onClick: () => onChange(!checked),
+          style: small ? { transform: 'scale(0.82)', transformOrigin: 'center' } : undefined,
+          onClick: () => {
+            if (disabled) return
+            onChange(!checked)
+          },
         },
         h('span', { className: 'dnb-switch-thumb' }),
       )
+    }
+
+    const SESSION_PALETTE = [
+      { dot: '#3b82f6', bg: 'rgba(59,130,246,0.12)', border: 'rgba(59,130,246,0.38)', text: '#60a5fa', label: '蓝' },
+      { dot: '#10b981', bg: 'rgba(16,185,129,0.12)', border: 'rgba(16,185,129,0.38)', text: '#34d399', label: '绿' },
+      { dot: '#f59e0b', bg: 'rgba(245,158,11,0.12)', border: 'rgba(245,158,11,0.38)', text: '#fbbf24', label: '橙' },
+      { dot: '#a855f7', bg: 'rgba(168,85,247,0.12)', border: 'rgba(168,85,247,0.38)', text: '#c084fc', label: '紫' },
+      { dot: '#ec4899', bg: 'rgba(236,72,153,0.12)', border: 'rgba(236,72,153,0.38)', text: '#f472b6', label: '粉' },
+      { dot: '#06b6d4', bg: 'rgba(6,182,212,0.12)', border: 'rgba(6,182,212,0.38)', text: '#22d3ee', label: '青' },
+    ]
+
+    function colorForRootSession(rootId, selfRootId = '') {
+      const id = String(rootId || '').trim()
+      if (!id || id === 'lead' || id === 'self' || (selfRootId && id === selfRootId)) {
+        return SESSION_PALETTE[0]
+      }
+      let hash = 0
+      for (let i = 0; i < id.length; i += 1) {
+        hash = ((hash * 31) + id.charCodeAt(i)) >>> 0
+      }
+      return SESSION_PALETTE[1 + (hash % (SESSION_PALETTE.length - 1))]
+    }
+
+    function fmtCompactTokens(num) {
+      const n = Math.max(0, Math.round(Number(num) || 0))
+      if (n >= 1000000) {
+        const m = n / 1000000
+        return (Math.abs(m - Math.round(m)) < 0.05 ? String(Math.round(m)) : m.toFixed(1).replace(/\.0$/, '')) + 'M'
+      }
+      if (n >= 100000) return Math.round(n / 1000) + 'K'
+      if (n >= 1000) {
+        const k = n / 1000
+        return (Math.abs(k - Math.round(k)) < 0.05 ? String(Math.round(k)) : k.toFixed(1).replace(/\.0$/, '')) + 'K'
+      }
+      return String(n)
     }
 
     /* ---------------------------------------------------- Spotlight Search */
@@ -7207,8 +7967,9 @@ window.__ModuleLoader__.load({
         void loadTargets()
       }, [view.sessionId])
 
-      const current = objective === null ? ((board && board.objective) || '') : objective
       const savedObj = String((board && board.objective) || '').trim()
+      const isInterventionLocked = Boolean(view.chiefMeta && view.chiefMeta.tacticalModes && view.chiefMeta.tacticalModes.intervention === true)
+      const current = isInterventionLocked ? savedObj : (objective === null ? ((board && board.objective) || '') : objective)
       const steps = (board && Array.isArray(board.plan)) ? board.plan : []
       const doneCount = steps.filter(s => s && s.done).length
       const isGoalMode = (board && board.mode) === 'goal'
@@ -7324,6 +8085,19 @@ window.__ModuleLoader__.load({
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
             h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, '核心目标'),
+            isInterventionLocked
+              ? h('span', {
+                  style: {
+                    padding: '1px 7px',
+                    borderRadius: 99,
+                    fontSize: 10.5,
+                    fontWeight: 600,
+                    background: 'rgba(245, 158, 11, 0.18)',
+                    color: '#fbbf24',
+                    border: '1px solid rgba(245, 158, 11, 0.36)',
+                  },
+                }, '🔒 强介入锁定目的地')
+              : null,
             isGoalMode
               ? h('span', {
                   style: {
@@ -7377,27 +8151,33 @@ window.__ModuleLoader__.load({
           'div',
           {
             className: 'dnb-group',
-            style: isGoalMode
+            style: (isInterventionLocked || isGoalMode)
               ? {
-                  borderColor: 'rgba(245, 158, 11, 0.38)',
-                  boxShadow: '0 0 0 1px rgba(245, 158, 11, 0.10)',
+                  borderColor: 'rgba(245, 158, 11, 0.45)',
+                  boxShadow: '0 0 0 1px rgba(245, 158, 11, 0.12)',
                 }
               : undefined,
           },
           h('textarea', {
             className: 'dnb-bare-area',
-            placeholder: '输入当前阶段核心目标，点击右上「🎯 设为目标」即可开启持续督导…',
+            readOnly: isInterventionLocked,
+            style: isInterventionLocked
+              ? { opacity: 0.9, cursor: 'not-allowed', color: 'var(--dnb-text)' }
+              : undefined,
+            placeholder: isInterventionLocked
+              ? '主动强介入进行中，核心目标已锁定…'
+              : '输入当前阶段核心目标，点击右上「🎯 设为目标」即可开启持续督导…',
             value: current,
-            onChange: e => setObjective(e.target.value),
-            onBlur: saveObjective,
+            onChange: e => { if (!isInterventionLocked) setObjective(e.target.value) },
+            onBlur: () => { if (!isInterventionLocked) saveObjective() },
             onKeyDown: e => {
-              if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+              if (!isInterventionLocked && (e.ctrlKey || e.metaKey) && e.key === 'Enter') {
                 e.preventDefault()
                 saveObjective()
               }
             },
           }),
-          (isGoalMode || objective !== null || (current || '').trim())
+          (isInterventionLocked || isGoalMode || objective !== null || (current || '').trim())
             ? h(
                 'div',
                 {
@@ -7409,17 +8189,27 @@ window.__ModuleLoader__.load({
                     padding: '5px 10px 7px',
                     borderTop: '1px solid var(--dnb-border)',
                     fontSize: 11,
-                    color: isGoalMode ? '#fbbf24' : 'var(--dnb-text-3)',
+                    color: (isInterventionLocked || isGoalMode) ? '#fbbf24' : 'var(--dnb-text-3)',
                   },
                 },
                 h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-                  isGoalMode
-                    ? '🎯 目标督导生效中：达成后将向您请示结项，未获批准不自动退回'
-                    : '标准计划推进模式（点击右上「🎯 设为目标」开启持续督导）'),
+                  isInterventionLocked
+                    ? '🔒 强介入监督目的地已锁定：所有自动介入均以本目标为终局，关闭强介入可解锁'
+                    : isGoalMode
+                      ? '🎯 目标督导生效中：达成后将向您请示结项，未获批准不自动退回'
+                      : '标准计划推进模式（点击右上「🎯 设为目标」开启持续督导）'),
                 h(
                   'div',
                   { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
-                  objective !== null
+                  isInterventionLocked
+                    ? h('button', {
+                        className: 'dnb-pill',
+                        style: { height: 21, padding: '0 8px', fontSize: 10.5, borderColor: 'rgba(245, 158, 11, 0.42)', color: '#fbbf24' },
+                        title: '关闭主动强介入以解锁修改核心目标',
+                        onClick: () => void updateSecConfig({ emergencyStopIntervention: true }),
+                      }, '🔓 停用强介入以解锁')
+                    : null,
+                  !isInterventionLocked && objective !== null
                     ? h('button', {
                         className: 'dnb-pill dnb-pill-accent',
                         style: { height: 21, padding: '0 8px', fontSize: 10.5 },
@@ -7877,12 +8667,55 @@ window.__ModuleLoader__.load({
           const target = options.some(i => i.id === view.target) ? view.target : 'new'
           const policy = view.deployArchivePolicy || 'none'
           const drawers = Array.isArray(view.archiveFolders) ? view.archiveFolders : []
+          const handoffObj = (board && board.handoff) || {}
+          const hMeta = view.handoffMeta || {}
+          const isPinned = Boolean(handoffObj.pinned || hMeta.pinned)
+          const isCustom = Boolean((handoffObj.customText && handoffObj.customText.trim()) || hMeta.isCustom)
+          const hSource = isCustom ? (handoffObj.source || hMeta.source || 'human') : 'auto'
+          const sourceBadge = hSource === 'human'
+            ? { label: '✏️ 人类手改', tone: 'accent' }
+            : hSource === 'chief'
+              ? { label: '✦ 参谋已同步', tone: 'green' }
+              : { label: '自动渲染', tone: undefined }
+
+          const buildTransferOpts = () => ({
+            deployChief: true,
+            archiveTransferPolicy: policy,
+            archiveDrawer: policy === 'drawer' ? (view.deployDrawer || (drawers[0] && drawers[0].id) || 'inbox') : '',
+          })
+
           return h(
             React.Fragment,
             null,
             h('div', { className: 'dnb-section-head', style: { marginTop: 14 } },
-              h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, '🚀 跨会话接力 & 一键部署参谋'),
-              h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } }, '冷库保持 0 Token 隔离'),
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+                h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, '🚀 跨会话接力 & 一键部署参谋'),
+                h('span', {
+                  className: 'dnb-tag',
+                  style: {
+                    fontSize: 10,
+                    background: sourceBadge.tone === 'accent'
+                      ? 'rgba(10,132,255,0.14)'
+                      : sourceBadge.tone === 'green'
+                        ? 'rgba(48,209,88,0.14)'
+                        : undefined,
+                    color: sourceBadge.tone === 'accent'
+                      ? 'var(--dnb-accent)'
+                      : sourceBadge.tone === 'green'
+                        ? '#30d158'
+                        : 'var(--dnb-text-3)',
+                  },
+                }, sourceBadge.label),
+              ),
+              h('button', {
+                type: 'button',
+                className: 'dnb-mini-btn',
+                'data-tone': isPinned ? 'amber' : undefined,
+                title: isPinned
+                  ? '已定住交接单：参谋长摘要更新时不会覆盖您手写/审定的内容，点击可解除定住'
+                  : '定住交接单后，参谋长提炼摘要时将禁止自动覆写交接单',
+                onClick: () => void toggleHandoffPin(!isPinned),
+              }, isPinned ? '📌 已定住(禁参谋改)' : '📌 定住防改'),
             ),
             h(
               'div',
@@ -7931,11 +8764,7 @@ window.__ModuleLoader__.load({
                   className: 'dnb-primary-btn',
                   style: { flex: 1, height: 30, fontSize: 11.5 },
                   disabled: Boolean(view.handoffBusy),
-                  onClick: () => void transfer('create', {
-                    deployChief: true,
-                    archiveTransferPolicy: policy,
-                    archiveDrawer: policy === 'drawer' ? (view.deployDrawer || (drawers[0] && drawers[0].id) || 'inbox') : '',
-                  }),
+                  onClick: () => void requestTransferWithGuard('create', buildTransferOpts()),
                 }, '🚀 新建窗口并部署参谋长'),
                 h('button', {
                   type: 'button',
@@ -7943,7 +8772,7 @@ window.__ModuleLoader__.load({
                   style: { height: 30, padding: '0 10px', fontSize: 11.5 },
                   disabled: Boolean(view.handoffBusy),
                   onClick: async () => {
-                    const text = store.handoffText || (await loadHandoff())
+                    const text = store.handoffText || (await loadHandoff())?.text || ''
                     if (text) copyText(text, '自包含交接单已复制')
                   },
                 }, h(Icon, { name: 'copy', size: 12 }), '复制交接单'),
@@ -7962,31 +8791,97 @@ window.__ModuleLoader__.load({
                   className: 'dnb-pill dnb-pill-accent',
                   style: { height: 28, padding: '0 10px', fontSize: 11.5 },
                   disabled: Boolean(view.handoffBusy),
-                  onClick: () => void transfer(target === 'new' ? 'create' : target, {
-                    deployChief: true,
-                    archiveTransferPolicy: policy,
-                    archiveDrawer: policy === 'drawer' ? (view.deployDrawer || (drawers[0] && drawers[0].id) || 'inbox') : '',
-                  }),
+                  onClick: () => void requestTransferWithGuard(target === 'new' ? 'create' : target, buildTransferOpts()),
                 }, '投递并部署'),
               ),
               h(
                 'div',
-                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between' } },
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-mini-btn',
-                  onClick: () => {
-                    const nextShow = !showHandoffPreview
-                    setShowHandoffPreview(nextShow)
-                    if (nextShow && !view.handoffText) void loadHandoff()
-                  },
-                }, showHandoffPreview ? '收起交接单预览' : '预览自包含交接单'),
+                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+                h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    'data-tone': view.handoffEditing ? 'accent' : undefined,
+                    onClick: async () => {
+                      if (view.handoffEditing) {
+                        patch({ handoffEditing: false })
+                        return
+                      }
+                      const res = await loadHandoff()
+                      const curText = (res && res.text) || store.handoffText || ''
+                      patch({ handoffEditing: true, handoffDraft: curText })
+                      setShowHandoffPreview(false)
+                    },
+                  }, view.handoffEditing ? '收起编辑' : '✏️ 编辑交接单'),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    onClick: () => {
+                      const nextShow = !showHandoffPreview
+                      setShowHandoffPreview(nextShow)
+                      if (nextShow) void loadHandoff()
+                    },
+                  }, showHandoffPreview ? '收起预览' : '预览交接单'),
+                  isCustom
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        title: '放弃手工版本，恢复由系统与参谋实时渲染交接单',
+                        onClick: () => void resetHandoffAuto(),
+                      }, '↺ 恢复自动')
+                    : null,
+                ),
                 view.transferNote
                   ? h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, view.transferNote)
                   : null,
               ),
-              showHandoffPreview
-                ? h('pre', { className: 'dnb-pre', style: { maxHeight: 160, marginTop: 2 } }, view.handoffText || '加载中…')
+              view.handoffEditing
+                ? h(
+                    'div',
+                    { style: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 2 } },
+                    h('textarea', {
+                      className: 'dnb-input',
+                      rows: 8,
+                      style: {
+                        width: '100%',
+                        fontSize: 11.5,
+                        lineHeight: 1.5,
+                        fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                        resize: 'vertical',
+                        padding: '8px 10px',
+                      },
+                      value: view.handoffDraft || '',
+                      placeholder: '在此手动修订交接单（支持 Markdown）。可点击下方「保存并定住」防止被参谋长自动覆写…',
+                      onChange: e => patch({ handoffDraft: e.target.value }),
+                    }),
+                    h(
+                      'div',
+                      { style: { display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' } },
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-pill',
+                        style: { height: 26, padding: '0 10px', fontSize: 11 },
+                        onClick: () => patch({ handoffEditing: false }),
+                      }, '取消'),
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-pill dnb-pill-accent',
+                        style: { height: 26, padding: '0 10px', fontSize: 11 },
+                        onClick: () => void saveHandoffCustom(view.handoffDraft, false),
+                      }, '保存修改'),
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-primary-btn',
+                        style: { height: 26, padding: '0 11px', fontSize: 11, background: '#f59e0b', color: '#111', fontWeight: 700 },
+                        onClick: () => void saveHandoffCustom(view.handoffDraft, true),
+                      }, '📌 保存并定住'),
+                    ),
+                  )
+                : null,
+              showHandoffPreview && !view.handoffEditing
+                ? h('pre', { className: 'dnb-pre', style: { maxHeight: 170, marginTop: 2 } }, view.handoffText || '加载中…')
                 : null,
             ),
           )
@@ -8442,9 +9337,11 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function ArchiveEditorCard({ folders, editor }) {
+    function ArchiveEditorCard({ folders, editor, defaultScope = '' }) {
       if (!editor) return null
       const isEdit = Boolean(editor.id)
+      const editorScope = editor.vaultScope || defaultScope || store.archiveTabScope || 'session'
+      const isGlobalEditor = editorScope === 'global'
       const folderList = Array.isArray(folders) && folders.length
         ? folders
         : [{ id: 'coords', label: '工程坐标与部署锚点' }, { id: 'incidents', label: '排障实录与硬事实' }, { id: 'inbox', label: '待分拣工作便签' }]
@@ -8459,6 +9356,7 @@ window.__ModuleLoader__.load({
         if (!title && !body) return
         const out = await mutateArchiveApi({
           op: 'save',
+          vaultScope: editorScope,
           archiveId: editor.id || '',
           title,
           summary: String(editor.summary || '').trim(),
@@ -8467,7 +9365,9 @@ window.__ModuleLoader__.load({
           tags: String(editor.tags || '').split(/[,，]/).map(s => s.trim()).filter(Boolean),
           body,
           upsertByTitle: !isEdit ? false : undefined,
-        }, isEdit ? '工程卷宗已更新' : '新卷宗已分块归入档案柜')
+        }, isEdit
+          ? (isGlobalEditor ? '系统全局冷档案已更新' : '工程卷宗已更新')
+          : (isGlobalEditor ? '已存入系统全局冷库（0 Token 不跟上下文）' : '新卷宗已分块归入本会话档案柜'))
         if (out && out.ok) {
           const savedItem = out.item
           const nextOpenFolders = { ...(store.archiveOpenFolders || {}) }
@@ -8496,7 +9396,9 @@ window.__ModuleLoader__.load({
           'div',
           { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 8 } },
           h('span', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-accent)' } },
-            isEdit ? '✎ 编辑工程档案卷宗' : '📎 新建工程档案卷宗（默认封存懒加载）'),
+            isGlobalEditor
+              ? (isEdit ? '🌐 编辑系统全局冷档案（0 Token）' : '🌐 新建系统全局冷档案（0 Token 不跟上下文）')
+              : (isEdit ? '✎ 编辑本会话工程档案卷宗' : '📎 新建本会话工程卷宗（默认封存懒加载）')),
           h('button', {
             className: 'dnb-icon-btn',
             style: { width: 22, height: 22 },
@@ -8565,13 +9467,28 @@ window.__ModuleLoader__.load({
       )
     }
 
-    function ArchiveDossierCard({ item, idx, folders, view }) {
+    function diffBadgeForArchive(diffStatus, isGlobalScope) {
+      if (isGlobalScope) {
+        if (diffStatus === 'synced') return { label: '✓ 与本会话同步', bg: 'rgba(16, 185, 129, 0.14)', color: '#10b981', border: 'rgba(16, 185, 129, 0.35)' }
+        if (diffStatus === 'differs') return { label: '⚡ 与本会话版本不同', bg: 'rgba(245, 158, 11, 0.16)', color: '#f59e0b', border: 'rgba(245, 158, 11, 0.4)' }
+        if (diffStatus === 'global_only') return { label: '🌐 全局独有', bg: 'rgba(10, 132, 255, 0.13)', color: 'var(--dnb-accent)', border: 'rgba(10, 132, 255, 0.32)' }
+        return { label: '系统冷库', bg: 'var(--dnb-elevated)', color: 'var(--dnb-text-3)', border: 'var(--dnb-border)' }
+      }
+      if (diffStatus === 'synced') return { label: '✓ 已同步全局', bg: 'rgba(16, 185, 129, 0.14)', color: '#10b981', border: 'rgba(16, 185, 129, 0.35)' }
+      if (diffStatus === 'local_modified') return { label: '⚡ 本地已改（未同步全局）', bg: 'rgba(245, 158, 11, 0.16)', color: '#f59e0b', border: 'rgba(245, 158, 11, 0.4)' }
+      return { label: '仅本会话', bg: 'var(--dnb-elevated)', color: 'var(--dnb-text-3)', border: 'var(--dnb-border)' }
+    }
+
+    function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '' }) {
+      const activeScope = scopeOverride || view.archiveTabScope || 'session'
+      const isGlobalScope = activeScope === 'global'
       const isOpen = Boolean(view.archiveOpenFiles && view.archiveOpenFiles[item.id])
       const detail = view.archiveDetails && view.archiveDetails[item.id] ? view.archiveDetails[item.id] : null
       const loadingDetail = Boolean(view.archiveDetailLoading && view.archiveDetailLoading[item.id])
       const showRaw = Boolean(view.archiveRawView && view.archiveRawView[item.id])
       const movingThis = view.archiveMoveId === item.id
       const clip = PAPERCLIP_META[item.paperclip] || PAPERCLIP_META.silver
+      const diffBadge = diffBadgeForArchive(item.diffStatus, isGlobalScope)
       const points = detail && Array.isArray(detail.points) ? detail.points : []
       const pointCount = points.length || item.pointCount || 0
 
@@ -8584,7 +9501,7 @@ window.__ModuleLoader__.load({
           },
         })
         if (nextOpen && !detail) {
-          void loadArchiveDetail(item.id, false)
+          void loadArchiveDetail(item.id, false, { scope: activeScope })
         }
       }
 
@@ -8605,11 +9522,12 @@ window.__ModuleLoader__.load({
       }
 
       const openEditorForThis = async () => {
-        const full = detail || (await loadArchiveDetail(item.id, false))
+        const full = detail || (await loadArchiveDetail(item.id, false, { scope: activeScope }))
         if (!full) return
         patch({
           archiveEditor: {
             id: full.id,
+            vaultScope: activeScope,
             title: full.title || '',
             summary: full.summary || '',
             folder: full.folder || item.folder || 'coords',
@@ -8620,18 +9538,21 @@ window.__ModuleLoader__.load({
         })
       }
 
+      const selKey = (isGlobalScope ? 'global' : 'session') + ':' + item.id
+      const isSelected = Boolean(view.selectedArchiveMap && view.selectedArchiveMap[selKey])
+
       return h(
         'div',
         {
           className: 'dnb-dossier-card',
           'data-open': isOpen ? '1' : '0',
-          'data-out': item.takenOut ? '1' : '0',
+          'data-out': (item.takenOut || (isGlobalScope && item.chiefMounted)) ? '1' : '0',
           style: { animationDelay: Math.min(idx * 24, 140) + 'ms' },
         },
         // Clipped Paperclip Pin on Top-Left Edge
         h(PaperclipPin, {
           paperclip: item.paperclip,
-          onClick: () => void mutateArchiveApi({ op: 'cycleClip', archiveId: item.id }, '已切换卷宗曲别针等级'),
+          onClick: () => void mutateArchiveApi({ op: 'cycleClip', archiveId: item.id, vaultScope: activeScope }, '已切换卷宗曲别针等级'),
         }),
 
         // Clickable Dossier Header (Unfolds Structured Memory Points)
@@ -8647,8 +9568,21 @@ window.__ModuleLoader__.load({
             { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 } },
             h(
               'div',
-              { style: { fontWeight: 600, fontSize: 12.5, color: 'var(--dnb-text)', lineHeight: 1.4, flex: 1, minWidth: 0 } },
-              item.title || '未命名工程卷宗',
+              { style: { display: 'flex', alignItems: 'flex-start', gap: 7, flex: 1, minWidth: 0 } },
+              h('input', {
+                type: 'checkbox',
+                className: 'dnb-archive-check',
+                style: { marginTop: 2.5 },
+                checked: isSelected,
+                title: '勾选以便多选并让参谋长带要求一起递话',
+                onClick: e => e.stopPropagation(),
+                onChange: () => toggleSelectArchive(item.id, isGlobalScope ? 'global' : 'session', item.title),
+              }),
+              h(
+                'div',
+                { style: { fontWeight: 600, fontSize: 12.5, color: 'var(--dnb-text)', lineHeight: 1.4, flex: 1, minWidth: 0 } },
+                item.title || '未命名工程卷宗',
+              ),
             ),
             h(
               'span',
@@ -8703,13 +9637,13 @@ window.__ModuleLoader__.load({
             : null,
         ),
 
-        // Always-Visible Flat Action Strip (Take Out / Put Back + Deliver to Chat)
+        // Always-Visible Flat Action Strip (Session vs System Global Cold Vault isolation rules)
         h(
           'div',
           { className: 'dnb-dossier-actions' },
           h(
             'div',
-            { style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 10.5, color: 'var(--dnb-text-3)' } },
+            { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', fontSize: 10.5, color: 'var(--dnb-text-3)' } },
             h('span', {
               style: {
                 display: 'inline-flex',
@@ -8725,40 +9659,197 @@ window.__ModuleLoader__.load({
                 fontWeight: 600,
               },
             }, clip.short),
-            h('span', null, item.takenOut ? '桌面备查中' : '封存懒加载'),
+            h('span', {
+              style: (item.takenOut || (isGlobalScope && item.chiefMounted))
+                ? {
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    padding: '0 6px',
+                    height: 18,
+                    borderRadius: 99,
+                    background: item.takenOut ? 'rgba(245, 158, 11, 0.16)' : 'rgba(129, 140, 248, 0.16)',
+                    border: item.takenOut ? '1px solid rgba(245, 158, 11, 0.42)' : '1px solid rgba(129, 140, 248, 0.42)',
+                    color: item.takenOut ? '#f59e0b' : '#a5b4fc',
+                    fontSize: 10,
+                    fontWeight: 600,
+                  }
+                : undefined,
+            },
+              isGlobalScope
+                ? (item.takenOut
+                    ? '📌 已摆上桌面（主+参谋可见）'
+                    : (item.chiefMounted ? '👁️ 本会话参谋参阅中' : '0 Token 封存中'))
+                : (item.takenOut ? '📌 已摆上桌面（主+参谋可见）' : '封存懒加载')),
+            h('span', {
+              style: {
+                display: 'inline-flex',
+                alignItems: 'center',
+                padding: '0 6px',
+                height: 18,
+                borderRadius: 99,
+                background: diffBadge.bg,
+                border: '1px solid ' + diffBadge.border,
+                color: diffBadge.color,
+                fontSize: 10,
+                fontWeight: 600,
+              },
+            }, diffBadge.label),
             item.updatedAt ? h('span', null, timeLabel(item.updatedAt)) : null,
           ),
-          h(
-            'div',
-            { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
-            h('button', {
-              type: 'button',
-              className: 'dnb-mini-btn',
-              'data-tone': item.takenOut ? 'amber' : undefined,
-              title: item.takenOut
-                ? '当前已取出挂在本会话桌面（注入本会话参考）；点击放回档案柜恢复冷封存'
-                : '将此卷宗临时取出摆到当前会话桌面（仅本会话生效，其他会话仍保持零注入）',
-              onClick: e => {
-                e.stopPropagation()
-                void mutateArchiveApi(
-                  { op: item.takenOut ? 'putBack' : 'takeOut', archiveId: item.id },
-                  item.takenOut ? '已放回档案柜封存（停止自动注入）' : '📎 已取出摆到本会话桌面备查',
-                )
+          (() => {
+            const isBoundSession = Boolean(view.sessionId && !view.archiveUnboundSession)
+            if (isGlobalScope) {
+              const isMounted = Boolean(item.chiefMounted)
+              const isOnDesk = Boolean(item.takenOut)
+              const importLabel = item.diffStatus === 'synced'
+                ? '✓ 已在本局'
+                : (item.diffStatus === 'differs' ? '⤵️ 覆盖本局' : '⤵️ 调入本局')
+              return h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  'data-tone': isOnDesk ? 'amber' : undefined,
+                  disabled: !isOnDesk && !isBoundSession,
+                  title: isOnDesk
+                    ? '从本会话桌面放回全局封存（恢复主对话不可见，全局冷库保留）'
+                    : (isBoundSession
+                        ? '摆上桌面备查：主模型与参谋长均重点可见此全局卷宗（不删全局原档）'
+                        : '需先发送消息建立具体会话才可摆上桌面'),
+                  onClick: e => {
+                    e.stopPropagation()
+                    if (!isOnDesk && !isBoundSession) return
+                    void mutateArchiveApi(
+                      { op: isOnDesk ? 'putBack' : 'takeOut', archiveId: item.id, vaultScope: 'global' },
+                      isOnDesk ? '📥 已从桌面放回全局封存' : '📌 已摆上本会话桌面（主模型与参谋长均重点可见）',
+                    )
+                  },
+                }, isOnDesk ? '📥 放回冷存' : '📌 摆上桌面'),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  'data-tone': isMounted ? 'accent' : undefined,
+                  disabled: !isMounted && !isBoundSession,
+                  title: isMounted
+                    ? '取消参谋长专属挂载（恢复 0 Token）'
+                    : (isBoundSession
+                        ? '仅让当前会话的参谋长参阅此全局卷宗（主对话仍隔离）'
+                        : '需先发送消息建立具体会话才可让参谋长参阅'),
+                  onClick: e => {
+                    e.stopPropagation()
+                    if (!isMounted && !isBoundSession) return
+                    void mutateArchiveApi(
+                      { op: isMounted ? 'unmountChief' : 'mountChief', archiveId: item.id, vaultScope: 'global' },
+                      isMounted ? '📥 已取消参谋参阅挂载' : '👁️ 已开放本会话参谋长参阅',
+                    )
+                  },
+                }, isMounted ? '👁️ 参谋参阅中' : '👁️ 仅参谋参阅'),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  'data-tone': isBoundSession && item.diffStatus !== 'synced' ? 'accent' : undefined,
+                  disabled: !isBoundSession,
+                  title: isBoundSession
+                    ? '无损调入本会话档案柜（保留全局库原档不删除）'
+                    : '需先发送消息建立具体会话才可调入本局',
+                  onClick: e => {
+                    e.stopPropagation()
+                    if (!isBoundSession) return
+                    void mutateArchiveApi(
+                      { op: 'copyToSession', archiveId: item.id, vaultScope: 'global' },
+                      '⤵️ 已无损调入本会话档案柜（全局原档保留）',
+                    )
+                  },
+                }, importLabel),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  'data-tone': 'accent',
+                  title: '点击填好要求，由参谋长带要求递交给主对话或子代理',
+                  onClick: e => {
+                    e.stopPropagation()
+                    openArchiveRelayModal([{ id: item.id, vaultScope: 'global', title: item.title }])
+                  },
+                }, h(Icon, { name: 'send', size: 11 }), '递话'),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  title: '遵循三层梯度：从全局工作卷宗提炼封存至 0-Token 沉淀冷档案柜',
+                  onClick: e => {
+                    e.stopPropagation()
+                    patch({
+                      precipitateModal: {
+                        op: 'single',
+                        vaultScope: 'global',
+                        cabinetId: '',
+                        ids: [item.id],
+                        label: `全局卷宗《${clampTitle(item.title, 24)}》`,
+                        clearSource: false,
+                      },
+                    })
+                  },
+                }, '🏛️ 沉淀冷库'),
+              )
+            }
+            const copyGlobalLabel = item.diffStatus === 'synced'
+              ? '✓ 已升全局'
+              : (item.diffStatus === 'local_modified' ? '↻ 同步全局' : '🌐 升级入全局')
+            return h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
+              h('button', {
+                type: 'button',
+                className: 'dnb-mini-btn',
+                'data-tone': item.takenOut ? 'amber' : undefined,
+                title: item.takenOut
+                  ? '当前已摆到本会话桌面（主模型与参谋均可见）；点击放回档案柜恢复封存'
+                  : '将此卷宗摆上桌面备查（主模型与参谋长均重点可见，其余会话仍隔离）',
+                onClick: e => {
+                  e.stopPropagation()
+                  void mutateArchiveApi(
+                    { op: item.takenOut ? 'putBack' : 'takeOut', archiveId: item.id, vaultScope: 'session' },
+                    item.takenOut ? '已放回档案柜封存（主对话恢复隔离）' : '📌 已摆上桌面（主模型与参谋长均重点可见）',
+                  )
+                },
               },
-            },
-              h(Icon, { name: item.takenOut ? 'trayIn' : 'trayOut', size: 11 }),
-              item.takenOut ? '放回封存' : '取出备查',
-            ),
-            h('button', {
-              type: 'button',
-              className: 'dnb-mini-btn',
-              title: '把这份卷宗的提要与结构化记忆点直接递给主对话模型查阅',
-              onClick: e => {
-                e.stopPropagation()
-                void deliverArchiveToChat(detail || item, null)
-              },
-            }, h(Icon, { name: 'send', size: 10.5 }), '递对话'),
-          ),
+                h(Icon, { name: item.takenOut ? 'trayIn' : 'trayOut', size: 11 }),
+                item.takenOut ? '放回封存' : '📌 摆上桌面',
+              ),
+              h('button', {
+                type: 'button',
+                className: 'dnb-mini-btn',
+                'data-tone': item.diffStatus === 'local_modified' ? 'amber' : undefined,
+                style: item.diffStatus === 'synced'
+                  ? { borderColor: 'rgba(16, 185, 129, 0.42)', color: '#10b981' }
+                  : undefined,
+                title: item.diffStatus === 'local_modified'
+                  ? '本地卷宗已修改，点击将最新版本同步覆盖至系统全局冷库'
+                  : (item.diffStatus === 'synced'
+                      ? '与系统全局冷库版本一致（点击可再次同步覆盖）'
+                      : '升入系统全局档案柜（逐级上升第一步）'),
+                onClick: e => {
+                  e.stopPropagation()
+                  void mutateArchiveApi(
+                    { op: 'copyToGlobal', archiveId: item.id, vaultScope: 'session' },
+                    item.diffStatus === 'local_modified'
+                      ? '↻ 已将本地改动同步更新至系统全局冷库'
+                      : '🌐 已升级入系统全局档案柜（0 Token 封存）',
+                  )
+                },
+              }, copyGlobalLabel),
+              h('button', {
+                type: 'button',
+                className: 'dnb-mini-btn',
+                'data-tone': 'accent',
+                title: '点击填好要求，由参谋长带要求递交给主对话或子代理查阅',
+                onClick: e => {
+                  e.stopPropagation()
+                  openArchiveRelayModal([{ id: item.id, vaultScope: 'session', title: item.title }])
+                },
+              }, h(Icon, { name: 'send', size: 11 }), '递话'),
+            )
+          })(),
         ),
 
         // Tier-3 Unfolded Sheet: Structured Memory Points -> Click to Expand Sub-Point Detail
@@ -8786,7 +9877,7 @@ window.__ModuleLoader__.load({
                     'data-tone': 'accent',
                     disabled: view.archiveOrganizing,
                     title: '请 DSH 参谋长重新精炼本卷摘要并拆分为清晰的分条记忆点与小点记忆（原文 100% 保留）',
-                    onClick: () => void requestOrganizeArchives({ ids: [item.id], scope: 'selected' }),
+                    onClick: () => void requestOrganizeArchives({ ids: [item.id], scope: 'selected', vaultScope: activeScope }),
                   },
                     h(Icon, { name: 'sparkles', size: 10.5 }),
                     view.archiveOrganizing ? '整理中…' : '请参谋长重拆此卷',
@@ -8802,12 +9893,14 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { style: { display: 'flex', alignItems: 'center', gap: 4 } },
-                  h('button', {
-                    type: 'button',
-                    className: 'dnb-mini-btn',
-                    title: '移入其他档案柜抽屉',
-                    onClick: () => patch({ archiveMoveId: movingThis ? '' : item.id }),
-                  }, h(Icon, { name: 'folder', size: 10.5 }), '移抽屉'),
+                  !isGlobalScope
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        title: '移入其他档案柜抽屉',
+                        onClick: () => patch({ archiveMoveId: movingThis ? '' : item.id }),
+                      }, h(Icon, { name: 'folder', size: 10.5 }), '移抽屉')
+                    : null,
                   h('button', {
                     type: 'button',
                     className: 'dnb-icon-btn',
@@ -8822,14 +9915,14 @@ window.__ModuleLoader__.load({
                     title: '删除此卷宗',
                     onClick: () => {
                       if (!confirm('确认从档案柜删除卷宗《' + clampTitle(item.title, 20) + '》？')) return
-                      void mutateArchiveApi({ op: 'delete', archiveId: item.id }, '已删除工程卷宗')
+                      void mutateArchiveApi({ op: 'delete', archiveId: item.id, vaultScope: activeScope }, '已删除工程卷宗')
                     },
                   }, h(Icon, { name: 'trash', size: 11.5 })),
                 ),
               ),
 
-              // Inline Folder Switcher Pills (when `移抽屉` clicked)
-              movingThis
+              // Inline Folder Switcher Pills (when `移抽屉` clicked in session scope)
+              !isGlobalScope && movingThis
                 ? h(
                     'div',
                     {
@@ -8856,7 +9949,7 @@ window.__ModuleLoader__.load({
                             archiveMoveId: '',
                             archiveOpenFolders: { ...(view.archiveOpenFolders || {}), [f.id]: true },
                           })
-                          void mutateArchiveApi({ op: 'moveFolder', archiveId: item.id, folder: f.id }, '已移入「' + f.label + '」抽屉')
+                          void mutateArchiveApi({ op: 'moveFolder', archiveId: item.id, folder: f.id, vaultScope: activeScope }, '已移入「' + f.label + '」抽屉')
                         },
                       }, f.label),
                     ),
@@ -8998,20 +10091,75 @@ window.__ModuleLoader__.load({
     }
 
     function ArchiveTab({ board, view }) {
-      // Lazy-load folder & file headers ONLY when user actually enters the `档案` tab
+      const activeScope = view.archiveTabScope || 'session'
+      const counts = view.archiveCounts || {}
+      const isBoundSession = Boolean(view.sessionId && !view.archiveUnboundSession)
+
+      // Lazy-load archive headers when entering tab, switching session, or switching vault tier
       React.useEffect(() => {
-        void loadArchives(false)
-      }, [view.sessionId])
+        void loadArchives(false, '', activeScope)
+      }, [view.sessionId, activeScope])
 
       const meta = view.archiveMeta || {}
-      const folders = Array.isArray(view.archiveFolders) ? view.archiveFolders : []
-      const items = Array.isArray(view.archiveItems) ? view.archiveItems : []
+      const sessionFolders = Array.isArray(view.archiveFolders) ? view.archiveFolders : []
+      const globalFolders = Array.isArray(view.globalVaultFolders) && view.globalVaultFolders.length
+        ? view.globalVaultFolders
+        : sessionFolders
+      const folders = activeScope === 'global' ? globalFolders : sessionFolders
+      const sessionItems = isBoundSession && Array.isArray(view.archiveItems) ? view.archiveItems : []
+      const globalItems = Array.isArray(view.globalVaultItems) ? view.globalVaultItems : []
+      const items = activeScope === 'global' ? globalItems : sessionItems
+      const diff = (view.archiveDiffSummary && typeof view.archiveDiffSummary === 'object') ? view.archiveDiffSummary : {}
+      const precipList = Array.isArray(view.archivePrecipitated) ? view.archivePrecipitated : []
+      const flippedSet = new Set(Array.isArray(view.flippedPrecipitatedIds) ? view.flippedPrecipitatedIds : [])
       const tempNotes = (board && Array.isArray(board.notes)) ? board.notes : []
       const query = String(view.archiveQuery || '').trim().toLowerCase()
       const clipFilter = view.archiveFilterClip || 'all'
+      const globalDiffFilter = view.globalVaultDiffFilter || 'all'
 
-      // Filter headers client-side for instant zero-lag drawer filtering
-      const filteredItems = items.filter(it => {
+      const sessionBadgeCount = isBoundSession
+        ? (view.archiveSessionLoaded ? sessionItems.length : Number(counts.sessionCount || 0))
+        : 0
+      const globalBadgeCount = view.globalVaultLoaded
+        ? globalItems.length
+        : Number(counts.globalCount || 0)
+      const precipBadgeCount = precipList.length || Number(counts.precipitatedCount || 0)
+      const flippedBadgeCount = flippedSet.size || Number(counts.flippedCount || 0)
+
+      const switchScope = nextScope => {
+        if (!nextScope || nextScope === activeScope) return
+        patch({
+          archiveTabScope: nextScope,
+          archiveDetails: {},
+          archiveMoveId: '',
+          archiveOrganizeOpen: false,
+          archiveEditor: null,
+          archiveNewCabinetOpen: false,
+          archiveNewFolderOpen: false,
+          ...(nextScope === 'session' && view.archiveCabinetId === 'cab-global' ? { archiveCabinetId: '' } : {}),
+        })
+        void loadArchives(true, '', nextScope)
+      }
+
+      const scopeBannerInfo = activeScope === 'global'
+        ? {
+            icon: '🌐',
+            color: 'var(--dnb-accent)',
+            text: '0-Token 全局档案柜 · 封存卷宗默认不注入主对话（参谋长后台关注）；点「📌 摆上桌面」即向主模型与参谋重点强调；支持无损「⤵️ 调入本局」（保留全局原档）或沉淀至冷库',
+          }
+        : activeScope === 'precipitated'
+          ? {
+              icon: '🏛️',
+              color: '#f59e0b',
+              text: '0-Token 沉淀冷档案柜 · 跨对话长期经验；封存态不注入主对话（参谋长后台关注）；点「📌 摆上桌面」即重点强调，或一键无损「⤵️ 调入本局 / 🌐 调入全局」（原沉淀档案不删）',
+            }
+          : {
+              icon: '🔒',
+              color: '#10b981',
+              text: '本会话档案柜 · 封存卷宗默认不注入主对话（参谋长关注）；一旦「📌 摆上桌面」主模型与参谋均可见；须先升入全局才可逐级沉淀，不可越级直接沉淀',
+            }
+
+      const matchesArchiveFilter = it => {
         if (!it) return false
         if (clipFilter !== 'all' && it.paperclip !== clipFilter) return false
         if (!query) return true
@@ -9022,11 +10170,45 @@ window.__ModuleLoader__.load({
           (it.pointPreviews || []).join(' '),
         ].join(' ').toLowerCase()
         return hay.includes(query)
+      }
+
+      // Filter session headers client-side for instant zero-lag drawer filtering
+      const filteredItems = sessionItems.filter(matchesArchiveFilter)
+
+      // Global Cold Vault filter + live diff counters
+      const gMountedCount = isBoundSession ? globalItems.filter(it => it && it.chiefMounted).length : 0
+      const gOnlyCount = globalItems.filter(it => it && (it.diffStatus === 'global_only' || !isBoundSession)).length
+      const gSyncedCount = isBoundSession ? globalItems.filter(it => it && it.diffStatus === 'synced').length : 0
+      const gDiffersCount = isBoundSession ? globalItems.filter(it => it && it.diffStatus === 'differs').length : 0
+      const localBriefs = isBoundSession && Array.isArray(diff.localOnlyBriefs) ? diff.localOnlyBriefs : []
+      const filteredGlobalItems = globalItems.filter(it => {
+        if (!matchesArchiveFilter(it)) return false
+        if (!isBoundSession || globalDiffFilter === 'all') return true
+        if (globalDiffFilter === 'mounted') return Boolean(it.chiefMounted)
+        if (globalDiffFilter === 'global_only') return it.diffStatus === 'global_only'
+        if (globalDiffFilter === 'synced') return it.diffStatus === 'synced'
+        if (globalDiffFilter === 'differs') return it.diffStatus === 'differs'
+        return true
       })
 
-      const takenOutItems = items.filter(it => it && it.takenOut)
+      const filteredPrecip = precipList.filter(p => {
+        if (!p) return false
+        if (!query) return true
+        const hay = [p.title, p.summary, p.category, (p.tags || []).join(' ')].join(' ').toLowerCase()
+        return hay.includes(query)
+      })
+
+      const takenOutItems = activeScope === 'session' ? sessionItems.filter(it => it && it.takenOut) : []
+      const rawDesk = Array.isArray(view.archiveDeskItems) ? view.archiveDeskItems : []
+      const fallbackDesk = [
+        ...sessionItems.filter(it => it && it.takenOut).map(it => ({ ...it, vaultScope: 'session' })),
+        ...globalItems.filter(it => it && it.takenOut).map(it => ({ ...it, vaultScope: 'global' })),
+        ...precipList.filter(p => p && flippedSet.has(p.id)).map(p => ({ ...p, vaultScope: 'precipitated' })),
+      ]
+      const deskList = view.archiveDeskLoaded ? rawDesk : fallbackDesk
+      const selectedArchivesList = Object.values(view.selectedArchiveMap || {}).filter(x => x && x.id)
       const byFolder = new Map()
-      for (const f of folders) byFolder.set(f.id, [])
+      for (const f of sessionFolders) byFolder.set(f.id, [])
       for (const it of filteredItems) {
         const fId = it.folder || 'inbox'
         if (!byFolder.has(fId)) byFolder.set(fId, [])
@@ -9034,7 +10216,7 @@ window.__ModuleLoader__.load({
       }
 
       // Build ordered folder drawers (include any orphan folder id gracefully)
-      const drawerList = [...folders]
+      const drawerList = [...sessionFolders]
       for (const fId of byFolder.keys()) {
         if (!drawerList.some(f => f.id === fId)) {
           drawerList.push({ id: fId, label: fId, hint: '工程记忆抽屉', accent: '#64748b', count: byFolder.get(fId).length })
@@ -9059,7 +10241,7 @@ window.__ModuleLoader__.load({
       const submitNewFolder = async () => {
         const name = String(view.archiveNewFolderName || '').trim()
         if (!name) return
-        const out = await mutateArchiveApi({ op: 'createFolder', label: name }, '已新增档案柜抽屉「' + name + '」')
+        const out = await mutateArchiveApi({ op: 'createFolder', label: name, vaultScope: 'session' }, '已新增档案柜抽屉「' + name + '」')
         if (out && out.ok && out.folder) {
           patch({
             archiveNewFolderOpen: false,
@@ -9069,284 +10251,186 @@ window.__ModuleLoader__.load({
         }
       }
 
-      const totalCount = items.length || meta.totalCount || 0
+      const renderOrganizeDeck = (targetScope) => {
+        if (!view.archiveOrganizeOpen) return null
+        return h(
+          'div',
+          {
+            className: 'dnb-group',
+            style: {
+              padding: '9px 11px',
+              marginBottom: 9,
+              borderColor: 'rgba(10, 132, 255, 0.36)',
+            },
+          },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 } },
+            h('span', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-accent)' } },
+              targetScope === 'global' ? '✦ 吩咐 DSH 参谋长精编系统全局冷档案' : '✦ 吩咐 DSH 参谋长整理收纳本会话档案柜'),
+            h('button', {
+              className: 'dnb-icon-btn',
+              style: { width: 20, height: 20 },
+              onClick: () => patch({ archiveOrganizeOpen: false }),
+            }, h(Icon, { name: 'x', size: 12 })),
+          ),
+          h('div', { style: { fontSize: 11, color: 'var(--dnb-text-2)', lineHeight: 1.45, marginBottom: 7 } },
+            '参谋长会自动归纳类别、标记金/银/铜曲别针、提炼一句话提要，并将长文拆解为层次清晰的「记忆点 → 小点记忆」，同时 100% 无损保留原始正文。'),
+          h(
+            'div',
+            { style: { display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 7 } },
+            [
+              { key: 'unorganized', label: '整理待精编卷宗' + (meta.unorganizedCount ? ` (${meta.unorganizedCount})` : '') },
+              { key: 'all', label: '全柜重新梳理' },
+            ].map(opt =>
+              h('button', {
+                key: opt.key,
+                type: 'button',
+                className: 'dnb-mini-btn',
+                'data-tone': (view.archiveOrganizeScope || 'unorganized') === opt.key ? 'accent' : undefined,
+                onClick: () => patch({ archiveOrganizeScope: opt.key }),
+              }, opt.label),
+            ),
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+            h('input', {
+              className: 'dnb-input',
+              style: { height: 28, fontSize: 11.5, borderRadius: 99, padding: '0 11px' },
+              placeholder: '可选补充要求（如：把命令与路径单独拆成小点）…',
+              value: view.archiveOrganizePrompt || '',
+              onChange: e => patch({ archiveOrganizePrompt: e.target.value }),
+              onKeyDown: e => {
+                if (e.key === 'Enter') void requestOrganizeArchives({ vaultScope: targetScope })
+              },
+            }),
+            h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: { height: 28, padding: '0 12px', fontSize: 11.5, flexShrink: 0 },
+              disabled: view.archiveOrganizing,
+              onClick: () => void requestOrganizeArchives({ vaultScope: targetScope }),
+            }, view.archiveOrganizing ? '整理中…' : '立即整理'),
+          ),
+        )
+      }
+
+      const renderPrecipFooter = () => h(
+        'div',
+        {
+          className: 'dnb-cell dnb-cell-hover',
+          style: { marginTop: 10, borderRadius: 10, border: '1px solid var(--dnb-border)', background: 'var(--dnb-card)', padding: '7px 11px', justifyContent: 'space-between', cursor: 'pointer' },
+          onClick: () => switchScope('precipitated'),
+        },
+        h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } },
+          `🏛️ 沉淀档案柜现有 ${precipBadgeCount} 条跨对话冷封存经验` + (flippedBadgeCount > 0 ? `（本会话已取出 ${flippedBadgeCount} 条）` : '（默认双盲 0 Token）')),
+        h('span', { style: { fontSize: 11, color: 'var(--dnb-accent)', fontWeight: 600 } }, '前往管理 →'),
+      )
+
+      const totalCount = sessionItems.length || meta.totalCount || 0
 
       return h(
         'div',
         { className: 'dnb-view' },
 
-        // 0. Project Multi-Cabinet Switcher Bar
-        (() => {
-          const cabinets = Array.isArray(view.archiveCabinets) && view.archiveCabinets.length
-            ? view.archiveCabinets
-            : [{ id: view.archiveCabinetId || 'cab-main', name: '默认工程档案柜', count: items.length }]
-          const activeCabId = view.archiveCabinetId || 'cab-main'
-          return h(
-            'div',
-            { className: 'dnb-cab-bar' },
-            h('span', { style: { fontSize: 11.5, fontWeight: 600, color: 'var(--dnb-text-2)' } }, '档案柜：'),
-            h('select', {
-              className: 'dnb-input',
-              style: { flex: 1, minWidth: 120, height: 26, padding: '0 8px', borderRadius: 8, fontSize: 11.5 },
-              value: activeCabId,
-              onChange: e => {
-                const nextCid = e.target.value
-                patch({ archiveCabinetId: nextCid })
-                void mutateArchiveApi({ op: 'switchCabinet', cabinetId: nextCid }, '已切换工程档案柜')
-              },
-            }, cabinets.map(c => h('option', { key: c.id, value: c.id }, `${c.name} (${c.count ?? 0})`))),
-            h('button', {
-              type: 'button',
-              className: 'dnb-mini-btn',
-              onClick: () => patch({ archiveNewCabinetOpen: !view.archiveNewCabinetOpen }),
-            }, '+ 新柜'),
-            view.archiveNewCabinetOpen
-              ? h(
-                  'div',
-                  { style: { display: 'flex', gap: 5, width: '100%', marginTop: 2 } },
-                  h('input', {
-                    className: 'dnb-input',
-                    style: { height: 26, fontSize: 11.5, borderRadius: 8, flex: 1 },
-                    placeholder: '输入新档案柜名称（如：压测专项档案柜）…',
-                    value: view.archiveNewCabinetName || '',
-                    onChange: e => patch({ archiveNewCabinetName: e.target.value }),
-                    onKeyDown: async e => {
-                      if (e.key === 'Enter' && (view.archiveNewCabinetName || '').trim()) {
-                        const nm = view.archiveNewCabinetName.trim()
-                        patch({ archiveNewCabinetName: '', archiveNewCabinetOpen: false })
-                        await mutateArchiveApi({ op: 'createCabinet', name: nm }, `已新建并切入「${nm}」`)
-                      }
-                    },
-                  }),
-                  h('button', {
-                    type: 'button',
-                    className: 'dnb-primary-btn',
-                    style: { height: 26, padding: '0 10px', fontSize: 11 },
-                    onClick: async () => {
-                      const nm = String(view.archiveNewCabinetName || '').trim()
-                      if (!nm) return
-                      patch({ archiveNewCabinetName: '', archiveNewCabinetOpen: false })
-                      await mutateArchiveApi({ op: 'createCabinet', name: nm }, `已新建并切入「${nm}」`)
-                    },
-                  }, '创建'),
-                )
-              : null,
-          )
-        })(),
-
-        // 1. Top Vault Status & Chief Curation Bar
+        // Three-Tier Vault Scope Segmented Switcher
         h(
           'div',
-          { className: 'dnb-vault-banner' },
-          h(
-            'div',
-            { style: { minWidth: 0 } },
+          { className: 'dnb-vault-seg', role: 'tablist', 'aria-label': '三层工程档案柜' },
+          [
+            { key: 'session', label: '💬 本会话档案柜', count: sessionBadgeCount },
+            { key: 'global', label: '🌐 全局档案柜', count: globalBadgeCount },
+            { key: 'precipitated', label: '🏛️ 沉淀档案柜', count: precipBadgeCount, extra: flippedBadgeCount },
+          ].map(seg =>
             h(
-              'div',
-              { style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } },
-              h(Icon, { name: 'archive', size: 13.5, style: { color: '#f59e0b' } }),
-              `工作卷宗 · ${totalCount} 卷`,
+              'button',
+              {
+                key: seg.key,
+                type: 'button',
+                role: 'tab',
+                'aria-selected': activeScope === seg.key ? 'true' : 'false',
+                className: 'dnb-vault-seg-btn',
+                'data-active': activeScope === seg.key ? '1' : '0',
+                onClick: () => switchScope(seg.key),
+              },
+              h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, seg.label),
+              h('span', { className: 'dnb-vault-seg-badge' }, String(seg.count)),
+              seg.extra > 0
+                ? h('span', {
+                    className: 'dnb-vault-seg-badge',
+                    style: { background: 'rgba(10,132,255,0.18)', color: 'var(--dnb-accent)' },
+                    title: `本会话已取出 ${seg.extra} 条沉淀经验`,
+                  }, `取${seg.extra}`)
+                : null,
             ),
-            h(
-              'div',
-              { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
-              takenOutItems.length > 0
-                ? `已取出 ${takenOutItems.length} 卷供本会话参考 · 其余封存懒加载`
-                : '默认冷存储封存 · 懒加载不占上下文，仅在点阅或取出时调取',
-            ),
-          ),
-          h(
-            'div',
-            { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' } },
-            h('button', {
-              type: 'button',
-              className: 'dnb-pill',
-              style: { height: 26, padding: '0 9px', fontSize: 11, borderColor: 'rgba(16, 185, 129, 0.4)', color: '#10b981' },
-              disabled: Boolean(view.archiveHarvesting),
-              title: '从最近对话中抢救命令、文件路径、接口决策与踩坑细节并归档（防上下文压缩遗忘）',
-              onClick: () => void harvestArchivesApi(),
-            }, view.archiveHarvesting ? '抢救中…' : '📥 抢救细节'),
-            h('button', {
-              type: 'button',
-              className: 'dnb-pill dnb-pill-accent',
-              style: { height: 26, padding: '0 9px', fontSize: 11 },
-              disabled: view.archiveOrganizing,
-              title: '请 DSH 参谋长把档案按抽屉分类、打曲别针等级，并拆成可展开的记忆点与小点记忆',
-              onClick: () => patch({ archiveOrganizeOpen: !view.archiveOrganizeOpen }),
-            },
-              view.archiveOrganizing
-                ? h(Icon, { name: 'refresh', size: 11.5, style: { animation: 'dnb-spin 0.9s linear infinite' } })
-                : h(Icon, { name: 'sparkles', size: 11.5 }),
-              view.archiveOrganizing ? '参谋长收纳中…' : '✦ 参谋一键整理',
-            ),
-            h('button', {
-              type: 'button',
-              className: 'dnb-pill',
-              style: { height: 26, padding: '0 9px', fontSize: 11 },
-              disabled: Boolean(view.archivePrecipitating),
-              title: '从当前档案柜提炼通用经验进入跨会话 0-Token 沉淀冷库',
-              onClick: () => patch({
-                precipitateModal: {
-                  op: 'cabinet',
-                  cabinetId: view.archiveCabinetId || 'cab-main',
-                  label: '当前工程档案柜',
-                  clearSource: false,
-                },
-              }),
-            }, '⏬ 沉淀可复用经验'),
-            h('button', {
-              type: 'button',
-              className: 'dnb-pill',
-              style: { height: 26, padding: '0 9px', fontSize: 11 },
-              onClick: () => patch({
-                archiveEditor: {
-                  id: '',
-                  title: '',
-                  summary: '',
-                  folder: 'coords',
-                  paperclip: 'silver',
-                  tags: '',
-                  body: '',
-                },
-              }),
-            }, h(Icon, { name: 'plus', size: 11.5 }), '建卷宗'),
           ),
         ),
 
-        // 2. Collapsible Chief Organize Command Deck
-        view.archiveOrganizeOpen
-          ? h(
-              'div',
-              {
-                className: 'dnb-group',
-                style: {
-                  padding: '9px 11px',
-                  marginBottom: 9,
-                  borderColor: 'rgba(10, 132, 255, 0.36)',
-                },
-              },
-              h(
-                'div',
-                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 6 } },
-                h('span', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-accent)' } }, '✦ 吩咐 DSH 参谋长整理收纳档案柜'),
-                h('button', {
-                  className: 'dnb-icon-btn',
-                  style: { width: 20, height: 20 },
-                  onClick: () => patch({ archiveOrganizeOpen: false }),
-                }, h(Icon, { name: 'x', size: 12 })),
-              ),
-              h('div', { style: { fontSize: 11, color: 'var(--dnb-text-2)', lineHeight: 1.45, marginBottom: 7 } },
-                '参谋长会自动归纳文件夹抽屉、标记金/银/铜曲别针、提炼一句话提要，并将长文拆解为层次清晰的「记忆点 → 小点记忆」，同时 100% 无损保留原始正文。'),
-              h(
-                'div',
-                { style: { display: 'flex', gap: 5, flexWrap: 'wrap', marginBottom: 7 } },
-                [
-                  { key: 'unorganized', label: '整理待精编卷宗' + (meta.unorganizedCount ? ` (${meta.unorganizedCount})` : '') },
-                  { key: 'all', label: '全柜重新梳理' },
-                ].map(opt =>
-                  h('button', {
-                    key: opt.key,
-                    type: 'button',
-                    className: 'dnb-mini-btn',
-                    'data-tone': (view.archiveOrganizeScope || 'unorganized') === opt.key ? 'accent' : undefined,
-                    onClick: () => patch({ archiveOrganizeScope: opt.key }),
-                  }, opt.label),
-                ),
-              ),
-              h(
-                'div',
-                { style: { display: 'flex', gap: 6, alignItems: 'center' } },
-                h('input', {
-                  className: 'dnb-input',
-                  style: { height: 28, fontSize: 11.5, borderRadius: 99, padding: '0 11px' },
-                  placeholder: '可选补充要求（如：把命令与路径单独拆成小点）…',
-                  value: view.archiveOrganizePrompt || '',
-                  onChange: e => patch({ archiveOrganizePrompt: e.target.value }),
-                  onKeyDown: e => {
-                    if (e.key === 'Enter') void requestOrganizeArchives({})
-                  },
-                }),
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-primary-btn',
-                  style: { height: 28, padding: '0 12px', fontSize: 11.5, flexShrink: 0 },
-                  disabled: view.archiveOrganizing,
-                  onClick: () => void requestOrganizeArchives({}),
-                }, view.archiveOrganizing ? '整理中…' : '立即整理'),
-              ),
-            )
-          : null,
+        // 1-Line Visibility Boundary Banner
+        h(
+          'div',
+          { className: 'dnb-vault-perm-banner' },
+          h('span', { style: { color: scopeBannerInfo.color, fontWeight: 600, flexShrink: 0 } }, scopeBannerInfo.icon),
+          h('span', { style: { flex: 1, minWidth: 0 } }, scopeBannerInfo.text),
+        ),
 
-        // 3. Inline Dossier Creator / Editor
-        view.archiveEditor ? h(ArchiveEditorCard, { folders: drawerList, editor: view.archiveEditor }) : null,
-
-        // 4. Temporary Session Notes Precipitation Banner (if any active un-archived notes exist on board.notes)
-        tempNotes.length > 0
-          ? h(
-              'div',
-              {
-                className: 'dnb-group',
-                style: {
-                  padding: '8px 11px',
-                  marginBottom: 9,
-                  borderColor: 'rgba(16, 185, 129, 0.38)',
-                  background: 'rgba(16, 185, 129, 0.07)',
-                },
-              },
-              h(
-                'div',
-                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-                h(
-                  'div',
-                  { style: { fontSize: 11.5, color: 'var(--dnb-text)', lineHeight: 1.45 } },
-                  h('strong', { style: { color: '#10b981' } }, `发现 ${tempNotes.length} 篇本轮临时便签`),
-                  ' · 沉淀入档案柜后即可分抽屉封存，不再每轮挤占提示词。',
-                ),
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-mini-btn',
-                  style: { borderColor: 'rgba(16, 185, 129, 0.45)', color: '#10b981', flexShrink: 0 },
-                  onClick: () => void mutateArchiveApi({ op: 'precipitateNotes' }, '已将临时便签沉淀封存入档案柜'),
-                }, h(Icon, { name: 'archive', size: 11 }), '一键沉淀入柜'),
-              ),
-            )
-          : null,
-
-        // 5. Active Desk Tray: Dossiers Explicitly Taken Out for Current Session
-        takenOutItems.length > 0
+        // Unified 3-Vault Active Desk Tray (Items placed on Desk are high-priority & visible to BOTH @lead and Chief)
+        deskList.length > 0
           ? h(
               'div',
               { className: 'dnb-desk-tray' },
               h(
                 'div',
-                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 6 } },
+                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 6, flexWrap: 'wrap' } },
                 h(
                   'span',
-                  { style: { fontSize: 11.5, fontWeight: 600, color: '#f59e0b', display: 'inline-flex', alignItems: 'center', gap: 5 } },
-                  h(Icon, { name: 'paperclip', size: 12 }),
-                  `本会话桌面备查（${takenOutItems.length} 卷生效中）`,
+                  { style: { fontSize: 12, fontWeight: 600, color: '#f59e0b', display: 'inline-flex', alignItems: 'center', gap: 5 } },
+                  h(Icon, { name: 'paperclip', size: 12.5 }),
+                  `📌 桌面重点备查（${deskList.length} 卷生效中 · 主模型与参谋均可见）`,
                 ),
-                takenOutItems.length > 1
-                  ? h('button', {
-                      type: 'button',
-                      className: 'dnb-mini-btn',
-                      onClick: async () => {
-                        for (const it of takenOutItems) {
-                          await mutateArchiveApi({ op: 'putBack', archiveId: it.id })
-                        }
-                        patch({ notice: '已全部放回档案柜恢复冷封存' })
-                      },
-                    }, '全部放回封存')
-                  : null,
+                h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    'data-tone': 'accent',
+                    onClick: () => openArchiveRelayModal(deskList.map(it => ({
+                      id: it.id,
+                      vaultScope: it.vaultScope || 'session',
+                      title: it.title,
+                    }))),
+                  }, '📨 全桌面带要求递话'),
+                  deskList.length > 1
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        onClick: async () => {
+                          for (const it of deskList) {
+                            const vs = it.vaultScope || 'session'
+                            if (vs === 'precipitated') {
+                              await mutateArchiveApi({ op: 'sealBack', id: it.id, vaultScope: 'precipitated' })
+                            } else {
+                              await mutateArchiveApi({ op: 'putBack', archiveId: it.id, vaultScope: vs })
+                            }
+                          }
+                          patch({ notice: '已全部放回原档案柜封存（主对话恢复隔离）' })
+                        },
+                      }, '全部放回封存')
+                    : null,
+                ),
               ),
               h(
                 'div',
                 { style: { display: 'flex', flexDirection: 'column', gap: 5 } },
-                takenOutItems.map(it =>
-                  h(
+                deskList.map(it => {
+                  const vs = it.vaultScope || 'session'
+                  const vsTag = vs === 'global' ? '全局' : (vs === 'precipitated' ? '沉淀' : '本局')
+                  return h(
                     'div',
                     {
-                      key: 'desk-' + it.id,
+                      key: 'desk-' + vs + '-' + it.id,
                       style: {
                         display: 'flex',
                         alignItems: 'center',
@@ -9361,398 +10445,1013 @@ window.__ModuleLoader__.load({
                     h(
                       'div',
                       {
-                        style: { fontSize: 11.5, fontWeight: 500, color: 'var(--dnb-text)', cursor: 'pointer', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
-                        title: '点击在抽屉中展开查看此卷宗',
+                        style: { fontSize: 11.5, fontWeight: 500, color: 'var(--dnb-text)', cursor: 'pointer', flex: 1, minWidth: 0, display: 'flex', alignItems: 'center', gap: 5 },
+                        title: '点击切换至所在档案柜并展开查看此卷宗',
                         onClick: () => {
-                          patch({
-                            archiveOpenFolders: { ...(view.archiveOpenFolders || {}), [it.folder]: true },
-                            archiveOpenFiles: { ...(view.archiveOpenFiles || {}), [it.id]: true },
-                          })
-                          void loadArchiveDetail(it.id, false)
+                          if (vs !== activeScope) switchScope(vs)
+                          if (vs === 'precipitated') {
+                            patch({ archiveOpenFiles: { ...(view.archiveOpenFiles || {}), ['prec_' + it.id]: true } })
+                            void loadArchiveDetail(it.id, false, { precipitated: true })
+                          } else {
+                            patch({
+                              archiveOpenFolders: { ...(view.archiveOpenFolders || {}), [it.folder || 'inbox']: true },
+                              archiveOpenFiles: { ...(view.archiveOpenFiles || {}), [it.id]: true },
+                            })
+                            void loadArchiveDetail(it.id, false, { scope: vs })
+                          }
                         },
                       },
-                      '📎 ' + it.title,
+                      h('span', {
+                        className: 'dnb-tag',
+                        style: {
+                          fontSize: 10,
+                          flexShrink: 0,
+                          color: vs === 'global' ? 'var(--dnb-accent)' : (vs === 'precipitated' ? '#f59e0b' : '#10b981'),
+                        },
+                      }, vsTag),
+                      h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, '📌 ' + (it.title || it.id)),
                     ),
                     h(
                       'div',
-                      { style: { display: 'flex', gap: 4, flexShrink: 0 } },
+                      { style: { display: 'flex', gap: 5, flexShrink: 0 } },
                       h('button', {
                         type: 'button',
                         className: 'dnb-mini-btn',
-                        onClick: () => void deliverArchiveToChat(it, null),
-                      }, '递对话'),
+                        onClick: () => openArchiveRelayModal([{ id: it.id, vaultScope: vs, title: it.title }]),
+                      }, '📨 递话'),
                       h('button', {
                         type: 'button',
                         className: 'dnb-mini-btn',
                         'data-tone': 'amber',
-                        onClick: () => void mutateArchiveApi({ op: 'putBack', archiveId: it.id }, '已放回档案柜封存'),
+                        onClick: () => {
+                          if (vs === 'precipitated') {
+                            void mutateArchiveApi({ op: 'sealBack', id: it.id, vaultScope: 'precipitated' }, '📥 已封回沉淀冷库')
+                          } else {
+                            void mutateArchiveApi({ op: 'putBack', archiveId: it.id, vaultScope: vs }, '已放回原档案柜封存')
+                          }
+                        },
                       }, '放回'),
                     ),
-                  ),
-                ),
+                  )
+                }),
               ),
             )
           : null,
 
-        // 6. Filter, Clip Selector & Drawer Master Controls
-        h(
-          'div',
-          { style: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 } },
-          h(
-            'div',
-            { style: { display: 'flex', gap: 6, alignItems: 'center' } },
-            h('input', {
-              className: 'dnb-input',
-              style: { height: 28, borderRadius: 99, padding: '0 11px', fontSize: 11.5 },
-              placeholder: '筛选档案标题、标签、记忆点线索…',
-              value: view.archiveQuery || '',
-              onChange: e => patch({ archiveQuery: e.target.value }),
-            }),
-            view.archiveQuery
-              ? h('button', {
-                  type: 'button',
-                  className: 'dnb-mini-btn',
-                  onClick: () => patch({ archiveQuery: '' }),
-                }, '清空')
-              : null,
-          ),
-          h(
-            'div',
-            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5, flexWrap: 'wrap' } },
-            h(
-              'div',
-              { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
-              [
-                { key: 'all', label: '全部' },
-                { key: 'gold', label: '📎 核心金针' },
-                { key: 'silver', label: '标准银针' },
-                { key: 'copper', label: '历史铜针' },
-              ].map(c =>
-                h('button', {
-                  key: c.key,
-                  type: 'button',
-                  className: 'dnb-mini-btn',
-                  'data-tone': clipFilter === c.key ? 'accent' : undefined,
-                  onClick: () => patch({ archiveFilterClip: c.key }),
-                }, c.label),
-              ),
-            ),
-            h(
-              'div',
-              { style: { display: 'flex', gap: 4, alignItems: 'center' } },
-              h('button', {
-                type: 'button',
-                className: 'dnb-mini-btn',
-                onClick: () => patch({ archiveNewFolderOpen: !view.archiveNewFolderOpen }),
-              }, '+ 抽屉'),
-              h('button', {
-                type: 'button',
-                className: 'dnb-mini-btn',
-                onClick: toggleAllDrawers,
-              }, anyDrawerOpen ? '合上抽屉' : '拉开抽屉'),
-            ),
-          ),
-          view.archiveNewFolderOpen
-            ? h(
-                'div',
-                { style: { display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 } },
-                h('input', {
-                  className: 'dnb-input',
-                  style: { height: 27, fontSize: 11.5, borderRadius: 99, padding: '0 11px' },
-                  placeholder: '新文件夹抽屉名称（如：云端网关与反代）…',
-                  value: view.archiveNewFolderName || '',
-                  onChange: e => patch({ archiveNewFolderName: e.target.value }),
-                  onKeyDown: e => { if (e.key === 'Enter') void submitNewFolder() },
-                }),
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-primary-btn',
-                  style: { height: 27, padding: '0 11px', fontSize: 11 },
-                  onClick: () => void submitNewFolder(),
-                }, '创建'),
-              )
-            : null,
-        ),
-
-        // 7. Filing Cabinet Folder Drawers -> Pull Drawer to Unfold Paperclipped Dossiers
-        view.archiveLoading && !view.archiveLoaded
+        // Multi-Select Batch Relay Bar (across any vault tier)
+        selectedArchivesList.length > 0
           ? h(
               'div',
-              { className: 'dnb-empty' },
-              h(Icon, { name: 'refresh', size: 14, style: { animation: 'dnb-spin 0.9s linear infinite', marginRight: 6 } }),
-              '正在打开工程档案柜…',
+              { className: 'dnb-batch-bar' },
+              h('span', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-accent)' } },
+                `已勾选 ${selectedArchivesList.length} 条档案（支持跨库合并递话）`),
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 6, marginLeft: 'auto', flexWrap: 'wrap' } },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  'data-tone': 'accent',
+                  onClick: () => openArchiveRelayModal(selectedArchivesList),
+                }, '📨 带要求合并递话'),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  onClick: () => clearSelectedArchives(),
+                }, '清空勾选'),
+              ),
             )
-          : visibleDrawers.length === 0
-            ? h('div', { className: 'dnb-empty' }, query || clipFilter !== 'all' ? '没有匹配的工程档案卷宗' : '档案柜暂空，可点击右上角「建卷宗」收纳长期工程记忆')
-            : visibleDrawers.map(folder => {
-                const fItems = byFolder.get(folder.id) || []
-                const autoOpen = Boolean(query || clipFilter !== 'all')
-                const drawerOpen = autoOpen || Boolean(view.archiveOpenFolders && view.archiveOpenFolders[folder.id])
-                const accent = folder.accent || '#0a84ff'
-                const earTag = FOLDER_EAR_TAG[folder.id] || 'CABINET · 抽屉'
-                const goldCount = fItems.filter(it => it.paperclip === 'gold').length
+          : null,
 
-                return h(
-                  'div',
-                  {
-                    key: folder.id,
-                    className: 'dnb-cabinet-drawer',
-                    'data-open': drawerOpen ? '1' : '0',
-                  },
-                  // Raised Manilla Folder Tab Ear
-                  h(
+        // Scope A: Precipitated Cold Vault Dedicated Page
+        activeScope === 'precipitated'
+          ? h(
+              React.Fragment,
+              null,
+              h(
+                'div',
+                { style: { display: 'flex', gap: 6, alignItems: 'center', marginBottom: 8 } },
+                h('input', {
+                  className: 'dnb-input',
+                  style: { height: 28, borderRadius: 99, padding: '0 11px', fontSize: 11.5 },
+                  placeholder: '筛选沉淀经验标题、类别、关键词…',
+                  value: view.archiveQuery || '',
+                  onChange: e => patch({ archiveQuery: e.target.value }),
+                }),
+                view.archiveQuery
+                  ? h('button', {
+                      type: 'button',
+                      className: 'dnb-mini-btn',
+                      onClick: () => patch({ archiveQuery: '' }),
+                    }, '清空')
+                  : null,
+              ),
+              filteredPrecip.length === 0
+                ? h(
                     'div',
-                    { className: 'dnb-folder-ear' },
-                    h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: accent } }),
-                    earTag,
-                  ),
-                  h(
+                    { className: 'dnb-group', style: { padding: '16px 14px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' } },
+                    h('div', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } },
+                      precipList.length === 0 ? '🏛️ 沉淀档案柜暂空' : '没有匹配的沉淀经验条目'),
+                    h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)', lineHeight: 1.5, maxWidth: 320 } },
+                      precipList.length === 0
+                        ? '实行三层档案梯度：本会话卷宗须先「🌐 升级入全局」，再前往「🌐 全局档案柜」点击「⏬ 沉淀可复用经验」或单卡「🏛️ 沉淀冷库」封存于此。'
+                        : '可尝试清空搜索词查看全部跨对话沉淀条目。'),
+                  )
+                : h(
                     'div',
-                    { className: 'dnb-drawer-box' },
-                    // Drawer Front Handle Bar
-                    h(
-                      'div',
-                      {
-                        className: 'dnb-drawer-front',
-                        onClick: () => patch({
-                          archiveOpenFolders: {
-                            ...(view.archiveOpenFolders || {}),
-                            [folder.id]: !drawerOpen,
-                          },
-                        }),
-                        title: drawerOpen ? '点击推回合上抽屉' : '点击拉开抽屉逐条查看卷宗',
-                      },
-                      h('span', { className: 'dnb-drawer-spine', style: { background: accent } }),
-                      h(Icon, {
-                        name: drawerOpen ? 'folderOpen' : 'folder',
-                        size: 16,
-                        style: { color: accent },
-                      }),
-                      h(
+                    { style: { display: 'flex', flexDirection: 'column', gap: 7 } },
+                    filteredPrecip.map(p => {
+                      const isFlipped = flippedSet.has(p.id)
+                      const isOpen = Boolean(view.archiveOpenFiles && view.archiveOpenFiles['prec_' + p.id])
+                      const detail = (view.archiveDetails && view.archiveDetails[p.id]) || null
+                      const isChecked = Boolean(view.selectedArchiveMap && view.selectedArchiveMap['precipitated:' + p.id])
+                      return h(
                         'div',
-                        { style: { flex: 1, minWidth: 0 } },
+                        {
+                          key: p.id,
+                          style: {
+                            borderRadius: 10,
+                            border: isFlipped ? '1px solid rgba(245, 158, 11, 0.48)' : '1px solid var(--dnb-border)',
+                            background: isFlipped ? 'rgba(245, 158, 11, 0.06)' : 'var(--dnb-elevated)',
+                            padding: '9px 11px',
+                            display: 'flex',
+                            flexDirection: 'column',
+                            gap: 5,
+                          },
+                        },
                         h(
                           'div',
-                          { style: { display: 'flex', alignItems: 'center', gap: 6 } },
-                          h('span', { style: { fontWeight: 600, fontSize: 13, color: 'var(--dnb-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, folder.label),
-                          goldCount > 0
-                            ? h('span', {
-                                style: {
-                                  fontSize: 10,
-                                  padding: '0 5px',
-                                  borderRadius: 99,
-                                  background: 'rgba(245, 158, 11, 0.14)',
-                                  color: '#f59e0b',
-                                  fontWeight: 600,
-                                  flexShrink: 0,
-                                },
-                              }, '📎 ' + goldCount)
-                            : null,
-                        ),
-                        folder.hint
-                          ? h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 } }, folder.hint)
-                          : null,
-                      ),
-                      h('span', { className: 'dnb-tag', style: { fontWeight: 600, flexShrink: 0 } }, fItems.length + ' 卷'),
-                      h(
-                        'span',
-                        { className: 'dnb-drawer-handle' },
-                        h(Icon, {
-                          name: 'chevron',
-                          size: 12,
-                          style: {
-                            transform: drawerOpen ? 'rotate(90deg)' : 'none',
-                            transition: 'transform 0.18s ease',
+                          {
+                            style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, cursor: 'pointer' },
+                            onClick: () => {
+                              const key = 'prec_' + p.id
+                              const nextOpen = !isOpen
+                              patch({ archiveOpenFiles: { ...(view.archiveOpenFiles || {}), [key]: nextOpen } })
+                              if (nextOpen && !detail) void loadArchiveDetail(p.id, false, { precipitated: true })
+                            },
                           },
-                        }),
+                          h(
+                            'div',
+                            { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 } },
+                            h('input', {
+                              type: 'checkbox',
+                              className: 'dnb-archive-check',
+                              checked: isChecked,
+                              title: '勾选以便多选合并递话',
+                              onClick: e => e.stopPropagation(),
+                              onChange: () => toggleSelectArchive(p.id, 'precipitated', p.title),
+                            }),
+                            h('span', { className: 'dnb-tag', style: { fontSize: 10, flexShrink: 0 } }, p.category || '经验'),
+                            h('span', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, p.title),
+                            isFlipped
+                              ? h('span', { className: 'dnb-tag', style: { fontSize: 10, background: 'rgba(245,158,11,0.18)', color: '#f59e0b', flexShrink: 0 } }, '📌 已摆上桌面')
+                              : h('span', { className: 'dnb-tag', style: { fontSize: 10, color: 'var(--dnb-text-3)', flexShrink: 0 } }, '封存中'),
+                          ),
+                          h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', flexShrink: 0 } }, isOpen ? '收起' : `${p.pointsCount || 0} 要点`),
+                        ),
+                        p.summary
+                          ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.45 } }, p.summary)
+                          : null,
+                        isOpen && detail
+                          ? h(
+                              'div',
+                              { style: { padding: '6px 8px', borderRadius: 7, background: 'var(--dnb-card)', fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.5, display: 'flex', flexDirection: 'column', gap: 4 } },
+                              Array.isArray(detail.points) && detail.points.length
+                                ? detail.points.map((pt, pidx) => h('div', { key: pidx }, h('strong', { style: { color: 'var(--dnb-text)' } }, `• ${pt.title}：`), pt.detail || pt.cue || ''))
+                                : h('div', { style: { whiteSpace: 'pre-wrap' } }, detail.body || detail.summary || ''),
+                            )
+                          : null,
+                        h(
+                          'div',
+                          { style: { display: 'flex', alignItems: 'center', gap: 5, marginTop: 2, flexWrap: 'wrap' } },
+                          h('button', {
+                            type: 'button',
+                            className: 'dnb-mini-btn',
+                            'data-tone': isFlipped ? 'amber' : undefined,
+                            disabled: !isFlipped && !isBoundSession,
+                            title: !isBoundSession && !isFlipped
+                              ? '当前处于空白未绑定新窗口；请先进入具体会话后再点击摆上桌面'
+                              : (isFlipped
+                                  ? '放回冷库后立即从主对话可见桌面隐藏（恢复零注入，参谋长仅后台关注）'
+                                  : '摆上桌面备查后，主对话与参谋长均重点可见此条沉淀经验'),
+                            onClick: () => void mutateArchiveApi(
+                              { op: isFlipped ? 'sealBack' : 'flipOut', id: p.id, vaultScope: 'precipitated' },
+                              isFlipped ? '📥 已封回冷库（恢复仅参谋关注）' : '📌 已摆上桌面（主对话与参谋长均重点可见）',
+                            ),
+                          }, isFlipped ? '📥 放回冷库' : '📌 摆上桌面'),
+                          h('button', {
+                            type: 'button',
+                            className: 'dnb-mini-btn',
+                            disabled: !isBoundSession,
+                            title: isBoundSession
+                              ? '无损调入本会话档案柜作为本地参考卷宗（原沉淀冷库档案保留不删）'
+                              : '需先发送消息建立具体会话才可调入本局',
+                            onClick: () => void mutateArchiveApi(
+                              { op: 'pullPrecipitated', id: p.id, targetScope: 'session', vaultScope: 'precipitated' },
+                              '⤵️ 已无损调入本会话档案柜（沉淀原档保留）',
+                            ),
+                          }, '⤵️ 调入本局'),
+                          h('button', {
+                            type: 'button',
+                            className: 'dnb-mini-btn',
+                            title: '无损调入全局档案柜长期备用（原沉淀冷库档案保留不删）',
+                            onClick: () => void mutateArchiveApi(
+                              { op: 'pullPrecipitated', id: p.id, targetScope: 'global', vaultScope: 'precipitated' },
+                              '🌐 已无损调入全局档案柜（沉淀原档保留）',
+                            ),
+                          }, '🌐 调入全局'),
+                          h('button', {
+                            type: 'button',
+                            className: 'dnb-mini-btn',
+                            'data-tone': 'accent',
+                            title: '带要求让参谋长递交给主对话或子代理',
+                            onClick: () => openArchiveRelayModal([{ id: p.id, vaultScope: 'precipitated', title: p.title }]),
+                          }, '📨 递话'),
+                          h('button', {
+                            type: 'button',
+                            className: 'dnb-mini-btn',
+                            style: { marginLeft: 'auto', color: '#ff453a' },
+                            onClick: () => {
+                              if (!confirm('确认永久删除沉淀条目《' + clampTitle(p.title, 20) + '》？')) return
+                              void mutateArchiveApi({ op: 'deletePrecipitated', id: p.id, vaultScope: 'precipitated' }, '已删除沉淀条目')
+                            },
+                          }, '删除'),
+                        ),
+                      )
+                    }),
+                  ),
+            )
+          // Scope B: System Global Cold Vault (`global-vault/vault-chief-global.json`) + Local ↔ Global Bidirectional Diff
+          : activeScope === 'global'
+            ? (view.globalVaultStaleBlocked
+                ? h(
+                    'div',
+                    {
+                      className: 'dnb-group',
+                      style: {
+                        padding: '18px 14px',
+                        textAlign: 'center',
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 9,
+                        alignItems: 'center',
+                        borderColor: 'rgba(245, 158, 11, 0.45)',
+                        background: 'rgba(245, 158, 11, 0.08)',
+                      },
+                    },
+                    h('div', { style: { fontSize: 13, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 检测到 DeepSeek Harness 宿主仍在运行旧版内存模块'),
+                    h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.55, maxWidth: 350 } },
+                      '为防止旧后端接口将当前对话的本地档案误返回并串入全局柜，前端已主动拦截旧模块响应。请重启一次 DeepSeek Harness 客户端以启用 v1.2.0-r5 独立「系统全局冷库（global-vault）」。'),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-mini-btn',
+                      'data-tone': 'amber',
+                      onClick: () => void loadArchives(true, '', 'global'),
+                    }, '重新检测宿主版本'),
+                  )
+                : h(
+                    React.Fragment,
+                    null,
+                    // G1. System Global Cold Vault Status & Curation Banner (no session cab switcher / no current-turn harvest)
+                    h(
+                      'div',
+                      { className: 'dnb-vault-banner' },
+                      h(
+                        'div',
+                        { style: { minWidth: 0 } },
+                        h(
+                          'div',
+                          { style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } },
+                          h(Icon, { name: 'archive', size: 13.5, style: { color: 'var(--dnb-accent)' } }),
+                          `🌐 系统全局档案柜 · ${globalItems.length} 卷`,
+                        ),
+                        h(
+                          'div',
+                          { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
+                          gMountedCount > 0
+                            ? `本会话参谋参阅中 ${gMountedCount} 卷 · 其余 0 Token 冷封存 · 不随对话上下文跟跑`
+                            : '系统级 0-Token 冷封存（不跟对话上下文跑）· 仅提问检索或手动挂载时参谋可见，主对话不可直读',
+                        ),
+                      ),
+                      h(
+                        'div',
+                        { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' } },
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-pill dnb-pill-accent',
+                          style: { height: 26, padding: '0 9px', fontSize: 11 },
+                          disabled: view.archiveOrganizing || globalItems.length === 0,
+                          title: '请 DSH 参谋长精编整理系统全局冷库中的卷宗（原文 100% 无损保留）',
+                          onClick: () => patch({ archiveOrganizeOpen: !view.archiveOrganizeOpen }),
+                        },
+                          view.archiveOrganizing
+                            ? h(Icon, { name: 'refresh', size: 11.5, style: { animation: 'dnb-spin 0.9s linear infinite' } })
+                            : h(Icon, { name: 'sparkles', size: 11.5 }),
+                          view.archiveOrganizing ? '参谋长收纳中…' : '✦ 参谋一键整理',
+                        ),
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-pill',
+                          style: { height: 26, padding: '0 9px', fontSize: 11 },
+                          disabled: Boolean(view.archivePrecipitating) || globalItems.length === 0,
+                          title: '从系统全局档案柜提炼通用经验进入 0-Token 沉淀冷库',
+                          onClick: () => patch({
+                            precipitateModal: {
+                              op: 'cabinet',
+                              vaultScope: 'global',
+                              cabinetId: '',
+                              label: '🌐 系统全局档案柜',
+                              clearSource: false,
+                            },
+                          }),
+                        }, '⏬ 沉淀可复用经验'),
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-pill',
+                          style: { height: 26, padding: '0 9px', fontSize: 11 },
+                          onClick: () => patch({
+                            archiveEditor: {
+                              id: '',
+                              vaultScope: 'global',
+                              title: '',
+                              summary: '',
+                              folder: 'coords',
+                              paperclip: 'silver',
+                              tags: '',
+                              body: '',
+                            },
+                          }),
+                        }, h(Icon, { name: 'plus', size: 11.5 }), '新建全局档案'),
                       ),
                     ),
 
-                    // Pulled-Open Drawer Well containing Paperclipped Dossiers
-                    drawerOpen
+                    // G2. Collapsible Organize Command Deck & Inline Global Editor
+                    renderOrganizeDeck('global'),
+                    view.archiveEditor ? h(ArchiveEditorCard, { folders: globalFolders, editor: view.archiveEditor, defaultScope: 'global' }) : null,
+
+                    // G3. Local ↔ Global Bidirectional Diff Strip
+                    isBoundSession
                       ? h(
                           'div',
-                          { className: 'dnb-drawer-well' },
-                          h(
-                            'div',
-                            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '0 2px 2px' } },
-                            h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
-                              fItems.length ? '点击文件展开记忆点 · 再点记忆点展开小点记忆' : '此抽屉暂无卷宗'),
-                            h(
-                              'div',
-                              { style: { display: 'flex', gap: 5 } },
-                              fItems.length > 0
-                                ? h('button', {
-                                    type: 'button',
-                                    className: 'dnb-mini-btn',
-                                    'data-tone': 'accent',
-                                    disabled: view.archiveOrganizing,
-                                    onClick: () => void requestOrganizeArchives({ folder: folder.id, scope: 'folder' }),
-                                  }, h(Icon, { name: 'sparkles', size: 10 }), '整理本抽屉')
-                                : null,
-                              fItems.length > 0
-                                ? h('button', {
-                                    type: 'button',
-                                    className: 'dnb-mini-btn',
-                                    disabled: view.archivePrecipitating,
-                                    title: '从本抽屉提炼高价值可复用经验到项目沉淀冷库（默认 0 Token 隔离）',
-                                    onClick: () => patch({
-                                      precipitateModal: {
-                                        op: 'drawer',
-                                        cabinetId: view.archiveCabinetId || 'cab-main',
-                                        folder: folder.id,
-                                        label: folder.label + '抽屉',
-                                        clearSource: false,
-                                      },
-                                    }),
-                                  }, '⏬ 沉淀')
-                                : null,
-                              h('button', {
-                                type: 'button',
-                                className: 'dnb-mini-btn',
-                                onClick: () => patch({
-                                  archiveEditor: {
-                                    id: '',
-                                    title: '',
-                                    summary: '',
-                                    folder: folder.id,
-                                    paperclip: 'silver',
-                                    tags: '',
-                                    body: '',
-                                  },
-                                }),
-                              }, h(Icon, { name: 'plus', size: 10 }), '在此建卷'),
-                            ),
-                          ),
-                          fItems.map((it, idx) =>
-                            h(ArchiveDossierCard, {
-                              key: it.id,
-                              item: it,
-                              idx,
-                              folders: drawerList,
-                              view,
-                            }),
-                          ),
-                        )
-                      : null,
-                  ),
-                )
-              }),
-
-        // 8. Project-wide Precipitated Cold Vault (0-Token isolated unless explicitly flipped out)
-        (() => {
-          const precipList = Array.isArray(view.archivePrecipitated) ? view.archivePrecipitated : []
-          const flippedSet = new Set(Array.isArray(view.flippedPrecipitatedIds) ? view.flippedPrecipitatedIds : [])
-          return h(
-            'div',
-            { className: 'dnb-precip-box' },
-            h(
-              'div',
-              {
-                className: 'dnb-cell dnb-cell-hover',
-                style: { cursor: 'pointer', justifyContent: 'space-between', padding: '9px 11px' },
-                onClick: () => patch({ archiveOpenFolders: { ...(view.archiveOpenFolders || {}), __precip: !(view.archiveOpenFolders && view.archiveOpenFolders.__precip) } }),
-              },
-              h(
-                'div',
-                { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
-                h('span', { style: { fontSize: 12, fontWeight: 700, color: 'var(--dnb-text)' } }, '🏛️ 跨会话沉淀冷库'),
-                h('span', { className: 'dnb-tag', style: { fontSize: 10 } }, `${precipList.length} 条 · 默认 0 Token 隔离`),
-                flippedSet.size > 0
-                  ? h('span', { className: 'dnb-tag', style: { fontSize: 10, background: 'rgba(10,132,255,0.14)', color: 'var(--dnb-accent)' } }, `本会话已翻出 ${flippedSet.size}`)
-                  : null,
-              ),
-              h(Icon, {
-                name: 'chevron',
-                size: 13,
-                style: {
-                  color: 'var(--dnb-text-3)',
-                  transform: (view.archiveOpenFolders && view.archiveOpenFolders.__precip) ? 'rotate(90deg)' : 'none',
-                  transition: 'transform 0.16s ease',
-                },
-              }),
-            ),
-            (view.archiveOpenFolders && view.archiveOpenFolders.__precip)
-              ? h(
-                  'div',
-                  { style: { padding: '8px 11px 10px', borderTop: '1px solid var(--dnb-border)', display: 'flex', flexDirection: 'column', gap: 7 } },
-                  precipList.length === 0
-                    ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)', lineHeight: 1.5 } },
-                        '冷库尚空。可点击上方「⏬ 沉淀可复用经验」或抽屉右上「⏬ 沉淀」，将通用踩坑、架构约定与验收经验提炼封存于此。')
-                    : precipList.map(p => {
-                        const isFlipped = flippedSet.has(p.id)
-                        const isOpen = Boolean(view.archiveOpenFiles && view.archiveOpenFiles['prec_' + p.id])
-                        const detail = (view.archiveDetails && view.archiveDetails[p.id]) || null
-                        return h(
-                          'div',
                           {
-                            key: p.id,
-                            style: {
-                              borderRadius: 9,
-                              border: isFlipped ? '1px solid rgba(10, 132, 255, 0.45)' : '1px solid var(--dnb-border)',
-                              background: isFlipped ? 'rgba(10, 132, 255, 0.06)' : 'var(--dnb-elevated)',
-                              padding: '8px 10px',
-                              display: 'flex',
-                              flexDirection: 'column',
-                              gap: 5,
-                            },
+                            className: 'dnb-group',
+                            style: { padding: '8px 10px', marginBottom: 8, display: 'flex', flexDirection: 'column', gap: 6 },
                           },
                           h(
                             'div',
-                            {
-                              style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, cursor: 'pointer' },
-                              onClick: () => {
-                                const key = 'prec_' + p.id
-                                const nextOpen = !isOpen
-                                patch({ archiveOpenFiles: { ...(view.archiveOpenFiles || {}), [key]: nextOpen } })
-                                if (nextOpen && !detail) void loadArchiveDetail(p.id, false, { precipitated: true })
-                              },
-                            },
+                            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+                            h('span', { style: { fontSize: 11, fontWeight: 600, color: 'var(--dnb-text-2)' } }, '⇄ 本会话 ↔ 系统全局 双向差分'),
                             h(
                               'div',
-                              { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 } },
-                              h('span', { className: 'dnb-tag', style: { fontSize: 10, flexShrink: 0 } }, p.category || '经验'),
-                              h('span', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, p.title),
+                              { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
+                              [
+                                { key: 'all', label: `全部 (${globalItems.length})` },
+                                { key: 'global_only', label: `🌐 全局独有 (${gOnlyCount})` },
+                                { key: 'synced', label: `✓ 双端已同步 (${gSyncedCount})` },
+                                { key: 'differs', label: `⚡ 双端内容有异 (${gDiffersCount})` },
+                                { key: 'mounted', label: `👁️ 参谋参阅中 (${gMountedCount})` },
+                              ].map(opt =>
+                                h('button', {
+                                  key: opt.key,
+                                  type: 'button',
+                                  className: 'dnb-mini-btn',
+                                  'data-tone': globalDiffFilter === opt.key ? 'accent' : undefined,
+                                  onClick: () => patch({ globalVaultDiffFilter: opt.key }),
+                                }, opt.label),
+                              ),
                             ),
-                            h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', flexShrink: 0 } }, isOpen ? '收起' : `${p.pointsCount || 0} 要点`),
                           ),
-                          p.summary
-                            ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.45 } }, p.summary)
-                            : null,
-                          isOpen && detail
+                          localBriefs.length > 0
                             ? h(
                                 'div',
-                                { style: { padding: '6px 8px', borderRadius: 7, background: 'var(--dnb-card)', fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.5, display: 'flex', flexDirection: 'column', gap: 4 } },
-                                Array.isArray(detail.points) && detail.points.length
-                                  ? detail.points.map((pt, pidx) => h('div', { key: pidx }, h('strong', { style: { color: 'var(--dnb-text)' } }, `• ${pt.title}：`), pt.detail || pt.cue || ''))
-                                  : h('div', { style: { whiteSpace: 'pre-wrap' } }, detail.body || detail.summary || ''),
+                                {
+                                  style: {
+                                    borderTop: '1px dashed var(--dnb-border)',
+                                    paddingTop: 6,
+                                    display: 'flex',
+                                    flexDirection: 'column',
+                                    gap: 5,
+                                  },
+                                },
+                                h(
+                                  'div',
+                                  {
+                                    style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, cursor: 'pointer', fontSize: 11.5 },
+                                    onClick: () => patch({ globalShowLocalOnlyDrawer: !view.globalShowLocalOnlyDrawer }),
+                                  },
+                                  h('span', { style: { color: '#f59e0b', fontWeight: 600 } },
+                                    `⇄ 本地差分：本会话尚有 ${diff.localOnlyCount || 0} 卷未入全局`
+                                    + ((diff.modifiedCount || 0) > 0 ? ` · ${diff.modifiedCount} 卷本地已改待更新` : '')),
+                                  h('span', { style: { color: 'var(--dnb-accent)', fontSize: 11, fontWeight: 600, flexShrink: 0 } },
+                                    view.globalShowLocalOnlyDrawer ? '收起 ∧' : '展开逐条推送 ∨'),
+                                ),
+                                view.globalShowLocalOnlyDrawer
+                                  ? h(
+                                      'div',
+                                      { style: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 2 } },
+                                      localBriefs.map(b =>
+                                        h(
+                                          'div',
+                                          {
+                                            key: 'lb-' + b.id,
+                                            style: {
+                                              display: 'flex',
+                                              alignItems: 'center',
+                                              justifyContent: 'space-between',
+                                              gap: 8,
+                                              padding: '5px 8px',
+                                              borderRadius: 8,
+                                              background: 'var(--dnb-elevated)',
+                                              border: '1px solid var(--dnb-border)',
+                                            },
+                                          },
+                                          h(
+                                            'div',
+                                            { style: { flex: 1, minWidth: 0 } },
+                                            h(
+                                              'div',
+                                              { style: { display: 'flex', alignItems: 'center', gap: 5, minWidth: 0 } },
+                                              h('span', {
+                                                className: 'dnb-tag',
+                                                style: b.diffStatus === 'local_modified'
+                                                  ? { fontSize: 10, background: 'rgba(245, 158, 11, 0.16)', color: '#f59e0b', flexShrink: 0 }
+                                                  : { fontSize: 10, color: 'var(--dnb-text-3)', flexShrink: 0 },
+                                              }, b.diffStatus === 'local_modified' ? '⚡ 本地已改' : '仅本会话'),
+                                              h('span', {
+                                                style: { fontSize: 11.5, fontWeight: 600, color: 'var(--dnb-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
+                                              }, b.title || '未命名卷宗'),
+                                            ),
+                                            b.summary
+                                              ? h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 } }, b.summary)
+                                              : null,
+                                          ),
+                                          h('button', {
+                                            type: 'button',
+                                            className: 'dnb-mini-btn',
+                                            'data-tone': b.diffStatus === 'local_modified' ? 'amber' : 'accent',
+                                            style: { flexShrink: 0 },
+                                            onClick: () => void mutateArchiveApi(
+                                              { op: 'copyToGlobal', archiveId: b.id, vaultScope: 'session' },
+                                              b.diffStatus === 'local_modified' ? '↻ 已将本地改动同步覆盖至系统全局冷库' : '🌐 已推送存入系统全局冷库（0 Token 冷封存）',
+                                            ),
+                                          }, b.diffStatus === 'local_modified' ? '↻ 覆盖更新全局' : '🌐 推送至全局'),
+                                        ),
+                                      ),
+                                    )
+                                  : null,
                               )
                             : null,
+                        )
+                      : null,
+
+                    // G4. Search & Clip Filters
+                    h(
+                      'div',
+                      { style: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 } },
+                      h(
+                        'div',
+                        { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+                        h('input', {
+                          className: 'dnb-input',
+                          style: { height: 28, borderRadius: 99, padding: '0 11px', fontSize: 11.5 },
+                          placeholder: '筛选全局档案标题、标签、记忆点线索…',
+                          value: view.archiveQuery || '',
+                          onChange: e => patch({ archiveQuery: e.target.value }),
+                        }),
+                        view.archiveQuery
+                          ? h('button', {
+                              type: 'button',
+                              className: 'dnb-mini-btn',
+                              onClick: () => patch({ archiveQuery: '' }),
+                            }, '清空')
+                          : null,
+                      ),
+                      h(
+                        'div',
+                        { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
+                        [
+                          { key: 'all', label: '全部曲别针' },
+                          { key: 'gold', label: '📎 核心金针' },
+                          { key: 'silver', label: '标准银针' },
+                          { key: 'copper', label: '历史铜针' },
+                        ].map(c =>
+                          h('button', {
+                            key: c.key,
+                            type: 'button',
+                            className: 'dnb-mini-btn',
+                            'data-tone': clipFilter === c.key ? 'accent' : undefined,
+                            onClick: () => patch({ archiveFilterClip: c.key }),
+                          }, c.label),
+                        ),
+                      ),
+                    ),
+
+                    // G5. Global Cold Vault Dossier Card List
+                    view.archiveLoading && !view.globalVaultLoaded
+                      ? h(
+                          'div',
+                          { className: 'dnb-empty' },
+                          h(Icon, { name: 'refresh', size: 14, style: { animation: 'dnb-spin 0.9s linear infinite', marginRight: 6 } }),
+                          '正在读取系统全局冷库…',
+                        )
+                      : filteredGlobalItems.length === 0
+                        ? h(
+                            'div',
+                            { className: 'dnb-group', style: { padding: '16px 14px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' } },
+                            h('div', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } },
+                              globalItems.length === 0 ? '🌐 系统全局冷库暂空' : '没有匹配的全局冷档案'),
+                            h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)', lineHeight: 1.5, maxWidth: 340 } },
+                              globalItems.length === 0
+                                ? '系统全局档案柜保存在本机系统冷库（global-vault），默认不随任何对话上下文跟跑。您可点右上角「新建全局档案」录入，或从「💬 本会话档案柜」点「🌐 存入全局」推送沉淀。'
+                                : '可尝试清空搜索词或切换上方差分筛选标签查看全部全局条目。'),
+                          )
+                        : h(
+                            'div',
+                            { style: { display: 'flex', flexDirection: 'column', gap: 7 } },
+                            filteredGlobalItems.map((it, idx) =>
+                              h(ArchiveDossierCard, {
+                                key: 'glob-' + it.id,
+                                item: it,
+                                idx,
+                                folders: globalFolders,
+                                view,
+                                scopeOverride: 'global',
+                              }),
+                            ),
+                          ),
+
+                    renderPrecipFooter(),
+                  ))
+          // Scope C: Unbound Blank Session Empty State (when activeScope === 'session' and no sessionId bound)
+          : !isBoundSession
+            ? h(
+                'div',
+                {
+                  className: 'dnb-group',
+                  style: { padding: '18px 14px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 9, alignItems: 'center' },
+                },
+                h('div', { style: { fontSize: 13, fontWeight: 700, color: 'var(--dnb-text)' } }, '💬 尚未进入具体会话 · 本会话档案柜暂未激活'),
+                h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.55, maxWidth: 340 } },
+                  '为防止与历史窗口串柜，新建空白对话不会回退展示全局或其他对话的工作档案。在主对话发出第一条消息建立会话后，本会话专属档案柜即自动创建；您也可以先切到全局冷库或沉淀冷库。'),
+                h(
+                  'div',
+                  { style: { display: 'flex', gap: 6, flexWrap: 'wrap', justifyContent: 'center', marginTop: 2 } },
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    'data-tone': 'accent',
+                    onClick: () => switchScope('global'),
+                  }, `🌐 查看全局档案柜 (${globalBadgeCount})`),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    onClick: () => switchScope('precipitated'),
+                  }, `🏛️ 查看沉淀冷库 (${precipBadgeCount})`),
+                ),
+              )
+            // Scope D: Active Session Working Cabinet (1:1 isolated per root conversation)
+            : h(
+                React.Fragment,
+                null,
+                // 0. Session Cabinet Switcher Bar
+                (() => {
+                  const cabinets = Array.isArray(view.archiveCabinets) && view.archiveCabinets.length
+                    ? view.archiveCabinets
+                    : [{
+                        id: view.archiveCabinetId || '',
+                        name: '本会话工作档案柜',
+                        count: sessionItems.length,
+                      }]
+                  const activeCabId = view.archiveCabinetId || (cabinets[0] && cabinets[0].id) || ''
+                  return h(
+                    'div',
+                    { className: 'dnb-cab-bar' },
+                    h('span', { style: { fontSize: 11.5, fontWeight: 600, color: 'var(--dnb-text-2)' } }, '本会话分柜：'),
+                    h('select', {
+                      className: 'dnb-input',
+                      style: { flex: 1, minWidth: 110, height: 26, padding: '0 8px', borderRadius: 8, fontSize: 11.5 },
+                      value: activeCabId,
+                      onChange: e => {
+                        const nextCid = e.target.value
+                        patch({ archiveCabinetId: nextCid })
+                        void mutateArchiveApi({ op: 'switchCabinet', cabinetId: nextCid, vaultScope: 'session' }, '已切换工作档案柜')
+                      },
+                    }, cabinets.map(c => h('option', { key: c.id, value: c.id }, `${c.name} (${c.count ?? 0})`))),
+                    h('span', {
+                      className: 'dnb-tag',
+                      style: { fontSize: 10, background: 'rgba(16,185,129,0.12)', color: '#10b981', fontWeight: 600 },
+                      title: '本会话档案柜按当前根会话严格隔离，绝不与其他对话混用',
+                    }, '🔒 仅限本对话'),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-mini-btn',
+                      onClick: () => patch({ archiveNewCabinetOpen: !view.archiveNewCabinetOpen }),
+                    }, '+ 新柜'),
+                    view.archiveNewCabinetOpen
+                      ? h(
+                          'div',
+                          { style: { display: 'flex', gap: 5, width: '100%', marginTop: 2 } },
+                          h('input', {
+                            className: 'dnb-input',
+                            style: { height: 26, fontSize: 11.5, borderRadius: 8, flex: 1 },
+                            placeholder: '输入本会话新分柜名称（如：压测专项）…',
+                            value: view.archiveNewCabinetName || '',
+                            onChange: e => patch({ archiveNewCabinetName: e.target.value }),
+                            onKeyDown: async e => {
+                              if (e.key === 'Enter' && (view.archiveNewCabinetName || '').trim()) {
+                                const nm = view.archiveNewCabinetName.trim()
+                                patch({ archiveNewCabinetName: '', archiveNewCabinetOpen: false })
+                                await mutateArchiveApi({ op: 'createCabinet', name: nm, vaultScope: 'session' }, `已新建并切入「${nm}」`)
+                              }
+                            },
+                          }),
+                          h('button', {
+                            type: 'button',
+                            className: 'dnb-primary-btn',
+                            style: { height: 26, padding: '0 10px', fontSize: 11 },
+                            onClick: async () => {
+                              const nm = String(view.archiveNewCabinetName || '').trim()
+                              if (!nm) return
+                              patch({ archiveNewCabinetName: '', archiveNewCabinetOpen: false })
+                              await mutateArchiveApi({ op: 'createCabinet', name: nm, vaultScope: 'session' }, `已新建并切入「${nm}」`)
+                            },
+                          }, '创建'),
+                        )
+                      : null,
+                  )
+                })(),
+
+                // 1. Top Session Vault Status & Chief Curation Bar
+                h(
+                  'div',
+                  { className: 'dnb-vault-banner' },
+                  h(
+                    'div',
+                    { style: { minWidth: 0 } },
+                    h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } },
+                      h(Icon, { name: 'archive', size: 13.5, style: { color: '#f59e0b' } }),
+                      `工作卷宗 · ${totalCount} 卷`,
+                    ),
+                    h(
+                      'div',
+                      { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
+                      takenOutItems.length > 0
+                        ? `本局已摆上桌面 ${takenOutItems.length} 卷（主对话与参谋长均可见）· 其余封存`
+                        : '封存卷宗主对话不可见（参谋长后台关注）；点「📌 摆上桌面」即向主对话与参谋重点强调',
+                    ),
+                  ),
+                  h(
+                    'div',
+                    { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, flexWrap: 'wrap', justifyContent: 'flex-end' } },
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-pill',
+                      style: { borderColor: 'rgba(16, 185, 129, 0.4)', color: '#10b981' },
+                      disabled: Boolean(view.archiveHarvesting || !isBoundSession),
+                      title: '从最近对话中抢救命令、文件路径、接口决策与踩坑细节并归档入本会话柜',
+                      onClick: () => void harvestArchivesApi('', { vaultScope: 'session' }),
+                    }, view.archiveHarvesting ? '抢救中…' : '📥 抢救细节'),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-pill',
+                      style: { borderColor: 'rgba(10, 132, 255, 0.42)', color: 'var(--dnb-accent)' },
+                      disabled: Boolean(view.distillBusy || !isBoundSession || sessionItems.length === 0),
+                      title: '让参谋长从本局档案库摘除可跨对话复用的经验，总结提炼后存入全局档案柜（已勾选则优先按勾选提炼）',
+                      onClick: () => {
+                        const selSessionIds = selectedArchivesList
+                          .filter(s => s && s.vaultScope === 'session')
+                          .map(s => s.id)
+                        patch({
+                          distillGlobalModal: {
+                            ids: selSessionIds.length > 0 ? selSessionIds : null,
+                            instruction: '',
+                            clearSource: false,
+                          },
+                        })
+                      },
+                    }, view.distillBusy ? '提炼中…' : '✦ 提炼入全局'),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-pill dnb-pill-accent',
+                      disabled: view.archiveOrganizing,
+                      title: '请 DSH 参谋长把本会话档案按抽屉分类、打曲别针等级，并拆成可展开的记忆点与小点记忆',
+                      onClick: () => patch({ archiveOrganizeOpen: !view.archiveOrganizeOpen }),
+                    },
+                      view.archiveOrganizing
+                        ? h(Icon, { name: 'refresh', size: 11.5, style: { animation: 'dnb-spin 0.9s linear infinite' } })
+                        : h(Icon, { name: 'sparkles', size: 11.5 }),
+                      view.archiveOrganizing ? '参谋长收纳中…' : '✦ 参谋一键整理',
+                    ),
+                    null,
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-pill',
+                      onClick: () => patch({
+                        archiveEditor: {
+                          id: '',
+                          vaultScope: 'session',
+                          title: '',
+                          summary: '',
+                          folder: 'coords',
+                          paperclip: 'silver',
+                          tags: '',
+                          body: '',
+                        },
+                      }),
+                    }, h(Icon, { name: 'plus', size: 11.5 }), '建卷宗'),
+                  ),
+                ),
+
+                // 2. Collapsible Chief Organize Command Deck
+                renderOrganizeDeck('session'),
+
+                // 3. Inline Dossier Creator / Editor
+                view.archiveEditor ? h(ArchiveEditorCard, { folders: drawerList, editor: view.archiveEditor, defaultScope: 'session' }) : null,
+
+                // 4. Temporary Session Notes Precipitation Banner (session tab only)
+                activeScope === 'session' && tempNotes.length > 0
+                  ? h(
+                      'div',
+                      {
+                        className: 'dnb-group',
+                        style: {
+                          padding: '8px 11px',
+                          marginBottom: 9,
+                          borderColor: 'rgba(16, 185, 129, 0.38)',
+                          background: 'rgba(16, 185, 129, 0.07)',
+                        },
+                      },
+                      h(
+                        'div',
+                        { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+                        h(
+                          'div',
+                          { style: { fontSize: 11.5, color: 'var(--dnb-text)', lineHeight: 1.45 } },
+                          h('strong', { style: { color: '#10b981' } }, `发现 ${tempNotes.length} 篇本轮临时便签`),
+                          ' · 沉淀入本会话档案柜后即可分抽屉封存，不再每轮挤占提示词。',
+                        ),
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-mini-btn',
+                          style: { borderColor: 'rgba(16, 185, 129, 0.45)', color: '#10b981', flexShrink: 0 },
+                          onClick: () => void mutateArchiveApi({ op: 'precipitateNotes', vaultScope: 'session' }, '已将临时便签封存入本会话档案柜'),
+                        }, h(Icon, { name: 'archive', size: 11 }), '一键收纳入柜'),
+                      ),
+                    )
+                  : null,
+
+                // 5. Filter, Clip Selector & Drawer Master Controls
+                h(
+                  'div',
+                  { style: { display: 'flex', flexDirection: 'column', gap: 6, marginBottom: 8 } },
+                  h(
+                    'div',
+                    { style: { display: 'flex', gap: 6, alignItems: 'center' } },
+                    h('input', {
+                      className: 'dnb-input',
+                      style: { height: 28, borderRadius: 99, padding: '0 11px', fontSize: 11.5 },
+                      placeholder: '筛选档案标题、标签、记忆点线索…',
+                      value: view.archiveQuery || '',
+                      onChange: e => patch({ archiveQuery: e.target.value }),
+                    }),
+                    view.archiveQuery
+                      ? h('button', {
+                          type: 'button',
+                          className: 'dnb-mini-btn',
+                          onClick: () => patch({ archiveQuery: '' }),
+                        }, '清空')
+                      : null,
+                  ),
+                  h(
+                    'div',
+                    { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 5, flexWrap: 'wrap' } },
+                    h(
+                      'div',
+                      { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
+                      [
+                        { key: 'all', label: '全部' },
+                        { key: 'gold', label: '📎 核心金针' },
+                        { key: 'silver', label: '标准银针' },
+                        { key: 'copper', label: '历史铜针' },
+                      ].map(c =>
+                        h('button', {
+                          key: c.key,
+                          type: 'button',
+                          className: 'dnb-mini-btn',
+                          'data-tone': clipFilter === c.key ? 'accent' : undefined,
+                          onClick: () => patch({ archiveFilterClip: c.key }),
+                        }, c.label),
+                      ),
+                    ),
+                    h(
+                      'div',
+                      { style: { display: 'flex', gap: 4, alignItems: 'center' } },
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        onClick: () => patch({ archiveNewFolderOpen: !view.archiveNewFolderOpen }),
+                      }, '+ 抽屉'),
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        onClick: toggleAllDrawers,
+                      }, anyDrawerOpen ? '合上抽屉' : '拉开抽屉'),
+                    ),
+                  ),
+                  view.archiveNewFolderOpen
+                    ? h(
+                        'div',
+                        { style: { display: 'flex', gap: 6, alignItems: 'center', marginTop: 2 } },
+                        h('input', {
+                          className: 'dnb-input',
+                          style: { height: 27, fontSize: 11.5, borderRadius: 99, padding: '0 11px' },
+                          placeholder: '新文件夹抽屉名称（如：云端网关与反代）…',
+                          value: view.archiveNewFolderName || '',
+                          onChange: e => patch({ archiveNewFolderName: e.target.value }),
+                          onKeyDown: e => { if (e.key === 'Enter') void submitNewFolder() },
+                        }),
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-primary-btn',
+                          style: { height: 27, padding: '0 11px', fontSize: 11 },
+                          onClick: () => void submitNewFolder(),
+                        }, '创建'),
+                      )
+                    : null,
+                ),
+
+                // 7. Filing Cabinet Folder Drawers -> Pull Drawer to Unfold Paperclipped Dossiers
+                view.archiveLoading && !view.archiveSessionLoaded
+                  ? h(
+                      'div',
+                      { className: 'dnb-empty' },
+                      h(Icon, { name: 'refresh', size: 14, style: { animation: 'dnb-spin 0.9s linear infinite', marginRight: 6 } }),
+                      '正在打开本会话工程档案柜…',
+                    )
+                  : visibleDrawers.length === 0
+                    ? h('div', { className: 'dnb-empty' },
+                        query || clipFilter !== 'all'
+                          ? '没有匹配的工程档案卷宗'
+                          : '本会话档案柜暂空，可点击右上角「建卷宗」或「📥 抢救细节」收纳本对话工程记忆')
+                    : visibleDrawers.map(folder => {
+                        const fItems = byFolder.get(folder.id) || []
+                        const autoOpen = Boolean(query || clipFilter !== 'all')
+                        const drawerOpen = autoOpen || Boolean(view.archiveOpenFolders && view.archiveOpenFolders[folder.id])
+                        const accent = folder.accent || '#0a84ff'
+                        const earTag = FOLDER_EAR_TAG[folder.id] || 'CABINET · 抽屉'
+                        const goldCount = fItems.filter(it => it.paperclip === 'gold').length
+
+                        return h(
+                          'div',
+                          {
+                            key: folder.id,
+                            className: 'dnb-cabinet-drawer',
+                            'data-open': drawerOpen ? '1' : '0',
+                          },
                           h(
                             'div',
-                            { style: { display: 'flex', alignItems: 'center', gap: 5, marginTop: 2 } },
-                            h('button', {
-                              type: 'button',
-                              className: 'dnb-mini-btn',
-                              'data-tone': isFlipped ? 'accent' : undefined,
-                              onClick: () => void mutateArchiveApi(
-                                { op: isFlipped ? 'sealBack' : 'flipOut', id: p.id },
-                                isFlipped ? '🔒 已封回冷库（本会话恢复 0 Token 隔离）' : '📂 已翻出并注入当前会话参谋参考',
+                            { className: 'dnb-folder-ear' },
+                            h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: accent } }),
+                            earTag,
+                          ),
+                          h(
+                            'div',
+                            { className: 'dnb-drawer-box' },
+                            h(
+                              'div',
+                              {
+                                className: 'dnb-drawer-front',
+                                onClick: () => patch({
+                                  archiveOpenFolders: {
+                                    ...(view.archiveOpenFolders || {}),
+                                    [folder.id]: !drawerOpen,
+                                  },
+                                }),
+                                title: drawerOpen ? '点击推回合上抽屉' : '点击拉开抽屉逐条查看卷宗',
+                              },
+                              h('span', { className: 'dnb-drawer-spine', style: { background: accent } }),
+                              h(Icon, {
+                                name: drawerOpen ? 'folderOpen' : 'folder',
+                                size: 16,
+                                style: { color: accent },
+                              }),
+                              h(
+                                'div',
+                                { style: { flex: 1, minWidth: 0 } },
+                                h(
+                                  'div',
+                                  { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+                                  h('span', { style: { fontWeight: 600, fontSize: 13, color: 'var(--dnb-text)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, folder.label),
+                                  goldCount > 0
+                                    ? h('span', {
+                                        style: {
+                                          fontSize: 10,
+                                          padding: '0 5px',
+                                          borderRadius: 99,
+                                          background: 'rgba(245, 158, 11, 0.14)',
+                                          color: '#f59e0b',
+                                          fontWeight: 600,
+                                          flexShrink: 0,
+                                        },
+                                      }, '📎 ' + goldCount)
+                                    : null,
+                                ),
+                                folder.hint
+                                  ? h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', marginTop: 1 } }, folder.hint)
+                                  : null,
                               ),
-                            }, isFlipped ? '🔒 封回冷库' : '📂 翻出注入本会话'),
-                            h('button', {
-                              type: 'button',
-                              className: 'dnb-mini-btn',
-                              style: { marginLeft: 'auto', color: '#ff453a' },
-                              onClick: () => void mutateArchiveApi({ op: 'deletePrecipitated', id: p.id }, '已删除沉淀条目'),
-                            }, '删除'),
+                              h('span', { className: 'dnb-tag', style: { fontWeight: 600, flexShrink: 0 } }, fItems.length + ' 卷'),
+                              h(
+                                'span',
+                                { className: 'dnb-drawer-handle' },
+                                h(Icon, {
+                                  name: 'chevron',
+                                  size: 12,
+                                  style: {
+                                    transform: drawerOpen ? 'rotate(90deg)' : 'none',
+                                    transition: 'transform 0.18s ease',
+                                  },
+                                }),
+                              ),
+                            ),
+                            drawerOpen
+                              ? h(
+                                  'div',
+                                  { className: 'dnb-drawer-well' },
+                                  h(
+                                    'div',
+                                    { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, padding: '0 2px 2px' } },
+                                    h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
+                                      fItems.length ? '点击文件展开记忆点 · 再点记忆点展开小点记忆' : '此抽屉暂无卷宗'),
+                                    h(
+                                      'div',
+                                      { style: { display: 'flex', gap: 5 } },
+                                      fItems.length > 0
+                                        ? h('button', {
+                                            type: 'button',
+                                            className: 'dnb-mini-btn',
+                                            'data-tone': 'accent',
+                                            disabled: view.archiveOrganizing,
+                                            onClick: () => void requestOrganizeArchives({ folder: folder.id, scope: 'folder', vaultScope: activeScope }),
+                                          }, h(Icon, { name: 'sparkles', size: 10 }), '整理本抽屉')
+                                        : null,
+                                      fItems.length > 0 && activeScope === 'global'
+                                        ? h('button', {
+                                            type: 'button',
+                                            className: 'dnb-mini-btn',
+                                            disabled: view.archivePrecipitating,
+                                            title: '仅全局档案可从抽屉提炼通用经验进入 0-Token 沉淀冷库（三级梯度制度）',
+                                            onClick: () => patch({
+                                              precipitateModal: {
+                                                op: 'drawer',
+                                                vaultScope: 'global',
+                                                cabinetId: view.archiveCabinetId || '',
+                                                folder: folder.id,
+                                                label: '全局 ' + folder.label + '抽屉',
+                                                clearSource: false,
+                                              },
+                                            }),
+                                          }, '⏬ 沉淀')
+                                        : null,
+                                      h('button', {
+                                        type: 'button',
+                                        className: 'dnb-mini-btn',
+                                        onClick: () => patch({
+                                          archiveEditor: {
+                                            id: '',
+                                            vaultScope: 'session',
+                                            title: '',
+                                            summary: '',
+                                            folder: folder.id,
+                                            paperclip: 'silver',
+                                            tags: '',
+                                            body: '',
+                                          },
+                                        }),
+                                      }, h(Icon, { name: 'plus', size: 10 }), '在此建卷'),
+                                    ),
+                                  ),
+                                  fItems.map((it, idx) =>
+                                    h(ArchiveDossierCard, {
+                                      key: it.id,
+                                      item: it,
+                                      idx,
+                                      folders: drawerList,
+                                      view,
+                                      scopeOverride: 'session',
+                                    }),
+                                  ),
+                                )
+                              : null,
                           ),
                         )
                       }),
-                )
-              : null,
-          )
-        })(),
+
+                // Lightweight Footer Pointer to Precipitated Vault
+                renderPrecipFooter(),
+              ),
       )
     }
 
@@ -10272,7 +11971,7 @@ window.__ModuleLoader__.load({
       ) {
         return { bg: 'rgba(255, 69, 58, 0.16)', fg: '#ff6961', border: 'rgba(255, 69, 58, 0.30)', spinning: false }
       }
-      if (/完成|已完|结论|允许|已解|就绪|已验证|通过|已执行|已处理|兜底|保障|达成/.test(t)) {
+      if (/完成|已完|结论|必做|允许|已解|就绪|已验证|通过|已执行|已处理|兜底|保障|达成/.test(t)) {
         return { bg: 'rgba(48, 209, 88, 0.15)', fg: '#30d158', border: 'rgba(48, 209, 88, 0.28)', spinning: false }
       }
       if (/待办|待收尾|待推进|未完|未开始|待定|搁置|排队|空闲|休眠/.test(t)) {
@@ -10448,8 +12147,53 @@ window.__ModuleLoader__.load({
       )
     }
 
+    const SIX_GOAL_ROWS_META = [
+      { key: '总目标', aliases: ['总目标'], color: '#409cff', bg: 'rgba(10, 132, 255, 0.14)' },
+      { key: '当前推进目标', aliases: ['当前推进目标', '当前推进'], color: '#10b981', bg: 'rgba(16, 185, 129, 0.14)' },
+      { key: '受阻目标', aliases: ['受阻目标', '卡点', '受阻'], color: '#ff453a', bg: 'rgba(255, 69, 58, 0.15)' },
+      { key: '需要什么', aliases: ['需要什么', '尚需条件'], color: '#a855f7', bg: 'rgba(168, 85, 247, 0.14)' },
+      { key: '用户需要提供什么', aliases: ['用户需要提供什么', '用户需要提供', '需用户提供'], color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' },
+      { key: '参谋长建议', aliases: ['参谋长建议', '参谋长的建议'], color: 'var(--dnb-accent)', bg: 'rgba(10, 132, 255, 0.16)' },
+    ]
+
+    function parseSixGoalBrief(raw) {
+      const text = String(raw || '').trim()
+      if (!text) return null
+      const rowsByKey = {}
+      for (const rawLine of text.split(/\r?\n/)) {
+        const clean = rawLine.trim().replace(/^(?:[-*•]\s+)/, '')
+        const m = clean.match(/^【([^】]{2,18})】\s*[：:]?\s*(.+)$/)
+        if (!m) continue
+        const tag = m[1].trim().replace(/^[^\u4e00-\u9fa5A-Za-z]+/, '').trim()
+        const body = m[2].trim()
+        const def = SIX_GOAL_ROWS_META.find(r => r.aliases.includes(tag))
+        if (def && body && !rowsByKey[def.key]) {
+          rowsByKey[def.key] = { ...def, body }
+        }
+      }
+      const matched = SIX_GOAL_ROWS_META.filter(r => rowsByKey[r.key]).map(r => rowsByKey[r.key])
+      return matched.length >= 2 ? matched : null
+    }
+
+    function orderChatHistoryNewestFirst(rawList) {
+      const items = Array.isArray(rawList) ? rawList.filter(Boolean) : []
+      const groups = []
+      for (let i = 0; i < items.length; i += 1) {
+        const cur = items[i]
+        const next = items[i + 1]
+        if (cur && cur.role === 'user' && next && next.role === 'chief') {
+          groups.push([cur, next])
+          i += 1
+        } else {
+          groups.push([cur])
+        }
+      }
+      groups.reverse()
+      return groups.flat()
+    }
+
     function ChiefTab({ board, view }) {
-      const [showHistory, setShowHistory] = React.useState(false)
+      const [showHistory, setShowHistory] = React.useState(true)
       const [editingFactId, setEditingFactId] = React.useState('')
       const [editingFactText, setEditingFactText] = React.useState('')
 
@@ -10458,11 +12202,32 @@ window.__ModuleLoader__.load({
       }, [view.sessionId])
 
       const sec = view.secView || {}
+      const pendingAdviceSug = React.useMemo(() => {
+        const list = Array.isArray(sec.suggestions) ? sec.suggestions : []
+        return list.find(s => s && s.status === 'pending' && s.kind === 'advice') || null
+      }, [sec.suggestions])
+
+      React.useEffect(() => {
+        const list = Array.isArray(sec.suggestions) ? sec.suggestions : []
+        const seen = store.seenAdvicePopupIds || {}
+        const popupSug = list.find(s => s && s.status === 'pending' && s.kind === 'advice' && s.popup === true && !seen[s.id])
+        if (popupSug && !store.chiefAdviceModal) {
+          patch({
+            seenAdvicePopupIds: { ...seen, [popupSug.id]: true },
+            chiefAdviceModal: popupSug,
+          })
+        }
+      }, [sec.suggestions])
+
       const subTab = view.secSubTab || 'digest'
       const narrative = sec.narrative || {}
       const facts = Array.isArray(sec.facts) ? sec.facts : []
       const chat = Array.isArray(sec.chat) ? sec.chat : []
       const notes = (board && Array.isArray(board.notes)) ? board.notes : []
+      const isConciseMode = Boolean(view.chiefMeta && view.chiefMeta.tacticalModes && view.chiefMeta.tacticalModes.conciseBrief)
+      const sixGoalRows = parseSixGoalBrief(narrative.text || '')
+      const useSixBriefCards = Boolean(sixGoalRows && (isConciseMode || sixGoalRows.length >= 4))
+      const adviceRow = sixGoalRows ? sixGoalRows.find(r => r.key === '参谋长建议') : null
       const blocks = parseNarrativeBlocks(narrative.text || '')
 
       const submitNewFact = () => {
@@ -10495,46 +12260,83 @@ window.__ModuleLoader__.load({
             }, '纪律与条目', facts.length ? h('span', { className: 'dnb-seg-dot' }, String(facts.length)) : null),
           ),
           subTab === 'digest'
-            ? h('button', {
-                className: 'dnb-pill',
-                style: {
-                  height: 24,
-                  padding: '0 9px',
-                  fontSize: 11,
-                  gap: 4,
-                  borderColor: (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
-                    ? 'rgba(10, 132, 255, 0.45)'
-                    : undefined,
-                  color: (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
-                    ? 'var(--dnb-accent)'
-                    : undefined,
-                },
-                disabled: view.secRegenerating || narrative.summarizing,
-                title: narrative.hasUnsummarizedChanges
-                  ? '上下文有新进展，点击让参谋长按需提炼最新摘要（平时后台不空转耗费 Token）'
-                  : '立即让参谋长提炼结构化摘要',
-                onClick: () => void loadChiefView(true),
-              },
-                (view.secRegenerating || narrative.summarizing)
-                  ? h(Icon, { name: 'refresh', size: 11.5, style: { animation: 'dnb-spin 0.9s linear infinite' } })
-                  : h(Icon, { name: 'sparkles', size: 11.5 }),
-                (view.secRegenerating || narrative.summarizing) ? '提炼中…' : '提炼摘要',
-                (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
-                  ? h('span', {
+            ? (() => {
+                const hState = (board && board.handoff) || {}
+                const hMeta = view.handoffMeta || {}
+                const isHandoffPinned = Boolean(hState.pinned || hMeta.pinned)
+                const syncOnDigest = Boolean(hState.syncOnDigest ?? hMeta.syncOnDigest)
+                return h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' } },
+                  h(
+                    'div',
+                    {
                       style: {
-                        width: 5.5,
-                        height: 5.5,
-                        borderRadius: '50%',
-                        background: 'var(--dnb-accent)',
-                        flexShrink: 0,
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                        padding: '1px 8px',
+                        height: 26,
+                        borderRadius: 99,
+                        border: isHandoffPinned ? '1px solid rgba(245,158,11,0.4)' : '1px solid var(--dnb-border)',
+                        background: isHandoffPinned ? 'rgba(245,158,11,0.08)' : 'var(--dnb-card)',
+                        opacity: isHandoffPinned ? 0.65 : 1,
                       },
-                    })
-                  : null,
-              )
+                      title: isHandoffPinned
+                        ? '交接单已被人类定住锁定，参谋长不可覆盖；如需恢复同步请前往「规划」页解除定住'
+                        : '开启后，点击「提炼摘要」完成时会自动一键同步更新交接单',
+                    },
+                    h('span', { style: { fontSize: 11, color: isHandoffPinned ? '#f59e0b' : 'var(--dnb-text-2)', fontWeight: 500 } },
+                      isHandoffPinned ? '🔒 定住禁同步' : '同步交接单'),
+                    h(Switch, {
+                      small: true,
+                      disabled: isHandoffPinned,
+                      checked: !isHandoffPinned && syncOnDigest,
+                      onChange: v => void toggleSyncHandoffOnDigest(v),
+                    }),
+                  ),
+                  h('button', {
+                    className: 'dnb-pill',
+                    style: {
+                      height: 26,
+                      padding: '0 11px',
+                      fontSize: 11.5,
+                      gap: 4,
+                      borderColor: (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
+                        ? 'rgba(10, 132, 255, 0.45)'
+                        : undefined,
+                      color: (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
+                        ? 'var(--dnb-accent)'
+                        : undefined,
+                    },
+                    disabled: view.secRegenerating || narrative.summarizing,
+                    title: narrative.hasUnsummarizedChanges
+                      ? '上下文有新进展，点击让参谋长按需提炼最新摘要（平时后台不空转耗费 Token）'
+                      : '立即让参谋长提炼结构化摘要',
+                    onClick: () => void loadChiefView(true, { syncHandoff: !isHandoffPinned && syncOnDigest }),
+                  },
+                    (view.secRegenerating || narrative.summarizing)
+                      ? h(Icon, { name: 'refresh', size: 11.5, style: { animation: 'dnb-spin 0.9s linear infinite' } })
+                      : h(Icon, { name: 'sparkles', size: 11.5 }),
+                    (view.secRegenerating || narrative.summarizing) ? '提炼中…' : '提炼摘要',
+                    (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
+                      ? h('span', {
+                          style: {
+                            width: 5.5,
+                            height: 5.5,
+                            borderRadius: '50%',
+                            background: 'var(--dnb-accent)',
+                            flexShrink: 0,
+                          },
+                        })
+                      : null,
+                  ),
+                )
+              })()
             : null,
         ),
 
-        // Sub-view 1: Concise Structured Bullet Digest (`摘要`)
+        // Sub-view 1: Concise 6-Sentence Goal Brief or Standard Structured Digest
         subTab === 'digest'
           ? h(
               React.Fragment,
@@ -10548,7 +12350,8 @@ window.__ModuleLoader__.load({
                   h(
                     'div',
                     { style: { display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0, flexWrap: 'wrap' } },
-                    h('span', { style: { fontWeight: 600, fontSize: 13.5, color: 'var(--dnb-text)' } }, '摘要'),
+                    h('span', { style: { fontWeight: 600, fontSize: 13.5, color: 'var(--dnb-text)' } },
+                      useSixBriefCards ? '⚡ 极简目标战报' : '摘要'),
                     h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } },
                       (narrative.summarizing || view.secRegenerating)
                         ? '正在提炼最新上下文…'
@@ -10557,25 +12360,94 @@ window.__ModuleLoader__.load({
                           : ((narrative.at ? '更新于 ' + relativeTimeLabel(narrative.at) : '已提炼')
                               + (narrative.hasUnsummarizedChanges ? ' · 有新进展待提炼' : ''))),
                   ),
-                  narrative.byModel
-                    ? h('span', {
-                        className: 'dnb-tag',
-                        style: { fontSize: 10.5 },
-                        title: narrative.byModel,
-                      }, shortModelName(narrative.byModel, view.secModelsCatalog || (secView && secView.models), true))
-                    : null,
+                  h(
+                    'div',
+                    { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, flexWrap: 'wrap' } },
+                    (pendingAdviceSug || adviceRow)
+                      ? h('button', {
+                          type: 'button',
+                          className: 'dnb-mini-btn',
+                          'data-tone': 'accent',
+                          title: '弹窗查看参谋长建议并一键决定是否递交主对话',
+                          onClick: () => patch({
+                            chiefAdviceModal: pendingAdviceSug || {
+                              isSynthetic: true,
+                              title: adviceRow.body,
+                              draftText: adviceRow.body,
+                              target: 'lead',
+                            },
+                          }),
+                        }, '💡 参谋长建议')
+                      : null,
+                    (() => {
+                      const hState = (board && board.handoff) || {}
+                      const hMeta = view.handoffMeta || {}
+                      const isPinned = Boolean(hState.pinned || hMeta.pinned)
+                      return h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        disabled: isPinned || view.secRegenerating || narrative.summarizing,
+                        style: isPinned ? { opacity: 0.45, cursor: 'not-allowed' } : undefined,
+                        title: isPinned ? '交接单已被人类定住，无法一键同步覆盖' : '将当前参谋摘要与态势一键写入交接单',
+                        onClick: () => void loadChiefView(false, { syncHandoff: true }),
+                      }, isPinned ? '🔒 交接已定住' : '↪ 更新交接单')
+                    })(),
+                    narrative.byModel
+                      ? h('span', {
+                          className: 'dnb-tag',
+                          style: { fontSize: 10.5 },
+                          title: narrative.byModel,
+                        }, shortModelName(narrative.byModel, view.secModelsCatalog || (sec && sec.models), true))
+                      : null,
+                  ),
                 ),
-                blocks.length
-                  ? blocks.map((blk, i) =>
-                      h(
-                        'div',
-                        { key: i, style: { marginTop: i === 0 ? 0 : 12 } },
-                        blk.heading ? renderStructuredHeading(blk.heading, false) : null,
-                        (blk.items || []).map((it, j) => renderStructuredItem(it, `${i}-${j}`)),
+                useSixBriefCards
+                  ? h(
+                      'div',
+                      { className: 'dnb-six-brief' },
+                      sixGoalRows.map(row =>
+                        h(
+                          'div',
+                          { key: row.key, className: 'dnb-six-row' },
+                          h(
+                            'span',
+                            {
+                              className: 'dnb-six-tag',
+                              style: { color: row.color, background: row.bg },
+                            },
+                            row.key,
+                          ),
+                          h('span', { style: { flex: 1, fontSize: 12.2, color: 'var(--dnb-text)', lineHeight: 1.5 } }, row.body),
+                          row.key === '参谋长建议'
+                            ? h('button', {
+                                type: 'button',
+                                className: 'dnb-mini-btn',
+                                'data-tone': 'accent',
+                                style: { flexShrink: 0 },
+                                onClick: () => patch({
+                                  chiefAdviceModal: pendingAdviceSug || {
+                                    isSynthetic: true,
+                                    title: row.body,
+                                    draftText: row.body,
+                                    target: 'lead',
+                                  },
+                                }),
+                              }, '💡 弹窗决策')
+                            : null,
+                        ),
                       ),
                     )
-                  : h('p', { className: 'dnb-prose-p' },
-                      '当前会话尚未沉淀持久规矩或阶段结论。你可以在下方参谋栏直接立规矩、查进展，或用自然语言拆话安排主对话与各个子代理。'),
+                  : blocks.length
+                    ? blocks.map((blk, i) =>
+                        h(
+                          'div',
+                          { key: i, style: { marginTop: i === 0 ? 0 : 12 } },
+                          blk.heading ? renderStructuredHeading(blk.heading, false) : null,
+                          (blk.items || []).map((it, j) => renderStructuredItem(it, `${i}-${j}`)),
+                        ),
+                      )
+                    : h('p', { className: 'dnb-prose-p' },
+                        '当前会话尚未沉淀持久规矩或阶段结论。你可以在下方许愿框直接立规矩、整档案、定边界或吩咐参谋长调度。'),
               ),
 
               // Collapsible Recent Chief Receipts
@@ -10603,7 +12475,7 @@ window.__ModuleLoader__.load({
                       }),
                     ),
                     showHistory
-                      ? chat.slice(-8).map(item =>
+                      ? orderChatHistoryNewestFirst(chat.slice(-24)).map(item =>
                           h(
                             'div',
                             { key: item.id, className: 'dnb-cell', style: { flexDirection: 'column', alignItems: 'flex-start', gap: 4 } },
@@ -10807,6 +12679,7 @@ window.__ModuleLoader__.load({
       }, [view.sessionId])
 
       const sec = view.secView || {}
+      const selfRootId = view.sessionId || ''
       const rawPeers = Array.isArray(sec.peers) ? sec.peers : []
       const hiddenProbePeers = view.showInternalProbes
         ? []
@@ -10816,6 +12689,103 @@ window.__ModuleLoader__.load({
       const otherSessions = Array.isArray(sec.otherSessions) ? sec.otherSessions : []
       const mailbox = Array.isArray(sec.mailbox) ? sec.mailbox : []
 
+      // Build human-readable session title lookup & color resolver across cluster
+      const rootNameMap = new Map()
+      if (selfRootId) rootNameMap.set(selfRootId, '主对话')
+      for (const p of peers) {
+        if (p && p.kind === 'lead') rootNameMap.set(p.rootSessionId || p.id || selfRootId, p.name || '主对话')
+        else if (p && p.kind === 'peer-session') rootNameMap.set(p.id || p.rootSessionId, p.name || shortSession(p.id))
+      }
+      for (const s of otherSessions) {
+        if (s && s.id && !rootNameMap.has(s.id)) rootNameMap.set(s.id, s.name || shortSession(s.id))
+      }
+      const labelForRoot = (rid) => {
+        if (!rid || (selfRootId && rid === selfRootId)) return '主对话'
+        return clampTitle(rootNameMap.get(rid) || shortSession(rid), 14)
+      }
+
+      // Classify and group mailbox messages into clean color-coded drawers
+      const mailFilter = view.mailChannelFilter || 'all'
+      const openDrawers = (view.mailOpenDrawers && typeof view.mailOpenDrawers === 'object') ? view.mailOpenDrawers : {}
+      const drawersMap = new Map()
+      const ensureDrawer = (key, meta) => {
+        if (!drawersMap.has(key)) drawersMap.set(key, { key, ...meta, items: [] })
+        return drawersMap.get(key)
+      }
+
+      for (const mail of mailbox) {
+        if (!mail) continue
+        if (mail.detachedFromCluster) {
+          ensureDrawer('detached', {
+            kind: 'detached',
+            title: '已脱离协同历史（已隔离不注入）',
+            colors: [{ dot: '#8e8e93', bg: 'rgba(142,142,147,0.1)', border: 'rgba(142,142,147,0.3)' }],
+            order: 99,
+            defaultOpen: false,
+          }).items.push(mail)
+          continue
+        }
+        const fromR = String(mail.fromRootId || mail.fromSession || selfRootId || '').trim()
+        const toR = String(mail.toRootId || '').trim()
+        const participants = Array.isArray(mail.participantRoots)
+          ? [...new Set(mail.participantRoots.filter(Boolean).map(String))]
+          : []
+        const isBroadcast = mail.channelType === 'broadcast' || toR === 'all' || String(mail.toSession || mail.to || '').toLowerCase() === 'all'
+        if (isBroadcast) {
+          const cols = (participants.length > 0 ? participants : [selfRootId].filter(Boolean))
+            .slice(0, 4)
+            .map(id => colorForRootSession(id, selfRootId))
+          ensureDrawer('broadcast', {
+            kind: 'broadcast',
+            title: '🌐 全网广播 (@全体)',
+            colors: cols.length ? cols : [SESSION_PALETTE[0], SESSION_PALETTE[1]],
+            order: 0,
+            defaultOpen: true,
+          }).items.push(mail)
+          continue
+        }
+        const uniqueRoots = [...new Set([...participants, fromR, (toR && toR !== 'all' ? toR : '')].filter(Boolean))]
+        if (mail.channelType === 'multi' || uniqueRoots.length > 2) {
+          const sorted = uniqueRoots.slice().sort()
+          ensureDrawer('multi:' + sorted.join('|'), {
+            kind: 'cross',
+            title: `🔀 ${sorted.slice(0, 3).map(labelForRoot).join(' · ')}${sorted.length > 3 ? ` 等${sorted.length}窗` : ''} 多方协同`,
+            colors: sorted.slice(0, 4).map(id => colorForRootSession(id, selfRootId)),
+            order: 1,
+            defaultOpen: true,
+          }).items.push(mail)
+          continue
+        }
+        if (mail.channelType === 'pair' || (fromR && toR && fromR !== toR && toR !== 'all')) {
+          const pair = [fromR || selfRootId, toR || fromR].filter(Boolean).sort()
+          if (pair.length >= 2 && pair[0] !== pair[1]) {
+            ensureDrawer('pair:' + pair.join('|'), {
+              kind: 'cross',
+              title: `↔ ${labelForRoot(pair[0])} ↔ ${labelForRoot(pair[1])} 跨窗传话`,
+              colors: pair.map(id => colorForRootSession(id, selfRootId)),
+              order: 2,
+              defaultOpen: true,
+            }).items.push(mail)
+            continue
+          }
+        }
+        const internalRoot = fromR || (toR && toR !== 'all' ? toR : '') || selfRootId || 'self'
+        const col = colorForRootSession(internalRoot, selfRootId)
+        ensureDrawer('internal:' + internalRoot, {
+          kind: 'internal',
+          title: `📁 ${labelForRoot(internalRoot)} 内部信箱`,
+          colors: [col],
+          order: internalRoot === selfRootId ? 3 : 4,
+          defaultOpen: internalRoot === selfRootId,
+        }).items.push(mail)
+      }
+
+      const drawerList = [...drawersMap.values()]
+        .filter(d => mailFilter === 'all' || (mailFilter === 'detached' ? d.kind === 'detached' : d.kind === mailFilter))
+        .sort((a, b) => a.order - b.order)
+
+      const hasLinkedNetwork = peers.some(p => p && p.kind === 'peer-session')
+
       return h(
         'div',
         { className: 'dnb-view' },
@@ -10823,7 +12793,18 @@ window.__ModuleLoader__.load({
         h(
           'div',
           { className: 'dnb-section-head' },
-          h('span', null, '当前互通对话网络'),
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+            h('span', null, '当前互通对话网络'),
+            hasLinkedNetwork
+              ? h('span', {
+                  className: 'dnb-tag',
+                  style: { fontSize: 10, background: 'rgba(16,185,129,0.12)', color: '#10b981', fontWeight: 600 },
+                  title: '已入网的独立对话会自动共享进度与协同信箱；断开联动后参谋摘要立即净化隔离',
+                }, '进度实时互通中')
+              : null,
+          ),
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 5 } },
@@ -10854,9 +12835,22 @@ window.__ModuleLoader__.load({
                 const isRunning = peer.status === 'running'
                 const kindBadge = peer.kind === 'lead' ? '主对话' : peer.kind === 'peer-session' ? '联动窗口' : '子代理'
                 const isSelected = view.secTarget === peer.key
+                const peerRootId = peer.kind === 'peer-session'
+                  ? (peer.id || peer.rootSessionId)
+                  : (peer.rootSessionId || selfRootId)
+                const col = colorForRootSession(peerRootId, selfRootId)
+                const subText = peer.taskTitle || peer.progressSummary || ''
                 return h(
                   'div',
-                  { key: peer.key, className: 'dnb-cell dnb-cell-hover', style: { justifyContent: 'space-between', gap: 8 } },
+                  {
+                    key: peer.key,
+                    className: 'dnb-cell dnb-cell-hover',
+                    style: {
+                      justifyContent: 'space-between',
+                      gap: 8,
+                      borderLeft: `3px solid ${col.dot}`,
+                    },
+                  },
                   h(
                     'div',
                     { style: { flex: 1, minWidth: 0 } },
@@ -10864,20 +12858,24 @@ window.__ModuleLoader__.load({
                       'div',
                       { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
                       isRunning
-                        ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9px', color: '#409cff' } })
+                        ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9px', color: col.dot } })
                         : h('span', {
                             style: {
-                              width: 7.5,
-                              height: 7.5,
+                              width: 8,
+                              height: 8,
                               borderRadius: '50%',
-                              background: 'var(--dnb-text-3)',
+                              background: col.dot,
+                              boxShadow: `0 0 0 2px ${col.bg}`,
                               flexShrink: 0,
                             },
                           }),
                       h('span', { style: { fontWeight: 600, fontSize: 12.5 } }, peer.name),
-                      h('span', { className: 'dnb-tag', style: { fontSize: 10.5 } }, kindBadge),
+                      h('span', {
+                        className: 'dnb-tag',
+                        style: { fontSize: 10, background: col.bg, color: col.text, border: `1px solid ${col.border}` },
+                      }, kindBadge),
                     ),
-                    peer.taskTitle
+                    subText
                       ? h('div', {
                           style: {
                             fontSize: 11.5,
@@ -10887,7 +12885,8 @@ window.__ModuleLoader__.load({
                             textOverflow: 'ellipsis',
                             whiteSpace: 'nowrap',
                           },
-                        }, peer.taskTitle)
+                          title: subText,
+                        }, subText)
                       : null,
                   ),
                   h(
@@ -10922,7 +12921,7 @@ window.__ModuleLoader__.load({
             )
           : h('div', { className: 'dnb-group' }, h('div', { className: 'dnb-empty', style: { padding: '16px 12px' } }, '等待会话连接…')),
 
-        // Section 2: Cross-Window Federation Switches
+        // Section 2: Cross-Window Federation Switches (with pollution warning before link)
         h(
           'div',
           { className: 'dnb-section-head', style: { marginTop: 12 } },
@@ -10938,10 +12937,19 @@ window.__ModuleLoader__.load({
           ? h(
               'div',
               { className: 'dnb-group' },
-              otherSessions.map(sess =>
-                h(
+              otherSessions.map(sess => {
+                const col = colorForRootSession(sess.id, selfRootId)
+                return h(
                   'div',
-                  { key: sess.id, className: 'dnb-cell', style: { justifyContent: 'space-between', gap: 10 } },
+                  {
+                    key: sess.id,
+                    className: 'dnb-cell',
+                    style: {
+                      justifyContent: 'space-between',
+                      gap: 10,
+                      borderLeft: `3px solid ${sess.linked ? col.dot : col.border}`,
+                    },
+                  },
                   h(
                     'div',
                     { style: { flex: 1, minWidth: 0 } },
@@ -10949,37 +12957,38 @@ window.__ModuleLoader__.load({
                       'div',
                       { style: { display: 'flex', alignItems: 'center', gap: 6 } },
                       sess.status === 'running'
-                        ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#409cff' } })
+                        ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: col.dot } })
                         : h('span', {
                             style: {
-                              width: 6.5,
-                              height: 6.5,
+                              width: 7.5,
+                              height: 7.5,
                               borderRadius: '50%',
-                              background: 'var(--dnb-text-3)',
+                              background: col.dot,
+                              flexShrink: 0,
                             },
                           }),
                       h('span', { style: { fontWeight: 500, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, sess.name),
-                      sess.openTasks ? h('span', { className: 'dnb-tag', style: { fontSize: 10 } }, sess.openTasks + ' 待办') : null,
+                      sess.openTasks ? h('span', { className: 'dnb-tag', style: { fontSize: 10, background: col.bg, color: col.text } }, sess.openTasks + ' 待办') : null,
                     ),
-                    sess.objective
-                      ? h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, sess.objective)
+                    (sess.objective || sess.progressSummary)
+                      ? h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, sess.objective || sess.progressSummary)
                       : null,
                   ),
                   h(Switch, {
                     checked: Boolean(sess.linked),
-                    onChange: on => void togglePeerSessionLink(sess.id, on),
+                    onChange: on => requestTogglePeerLink(sess, on),
                   }),
-                ),
-              ),
+                )
+              }),
             )
           : h(
               'div',
               { className: 'dnb-group' },
               h('div', { style: { padding: '12px 14px', fontSize: 11.5, color: 'var(--dnb-text-3)', lineHeight: 1.5 } },
-                '当你同时打开多个独立主对话窗口时，这里会出现联动开关——轻轻一拨即可把它们接入同一个参谋长协同频道，互相递话与共享记忆。'),
+                '当你同时打开多个独立主对话窗口时，这里会出现联动开关——接入后共享进度与信箱（接入无关任务会提示防污染警告）。'),
             ),
 
-        // Section 3: Cross-Session Mailbox Timeline
+        // Section 3: Color-Coded Collapsible Drawer Mailbox
         h(
           'div',
           { className: 'dnb-section-head', style: { marginTop: 12 } },
@@ -10989,36 +12998,160 @@ window.__ModuleLoader__.load({
             h(Icon, { name: 'mail', size: 12 }),
             '参谋部协同信箱',
           ),
-          mailbox.length ? h('span', null, String(mailbox.length)) : null,
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' } },
+            [
+              { key: 'all', label: '全部' },
+              { key: 'broadcast', label: '🌐 广播' },
+              { key: 'cross', label: '↔ 跨窗' },
+              { key: 'internal', label: '📁 内部' },
+            ].map(f =>
+              h('button', {
+                key: f.key,
+                type: 'button',
+                className: 'dnb-mini-btn',
+                'data-tone': mailFilter === f.key ? 'accent' : undefined,
+                style: { height: 20, padding: '0 7px', fontSize: 10.5 },
+                onClick: () => patch({ mailChannelFilter: f.key }),
+              }, f.label),
+            ),
+            mailbox.length ? h('span', { style: { marginLeft: 3 } }, String(mailbox.length)) : null,
+          ),
         ),
-        mailbox.length
+        drawerList.length
           ? h(
               'div',
-              { className: 'dnb-group' },
-              mailbox.slice(0, 20).map(mail => {
-                const modeLabel = mail.mode === 'steer' ? '⚡ 插话' : mail.mode === 'silent' ? '📌 备忘' : '📨 递话'
+              { style: { display: 'flex', flexDirection: 'column', gap: 7 } },
+              drawerList.map(drawer => {
+                const hasExplicit = Object.prototype.hasOwnProperty.call(openDrawers, drawer.key)
+                const isOpen = hasExplicit ? Boolean(openDrawers[drawer.key]) : drawer.defaultOpen
+                const primaryColor = drawer.colors[0] || SESSION_PALETTE[0]
+                const secondColor = drawer.colors[1] || primaryColor
+                const accentBorder = drawer.colors.length > 1
+                  ? `linear-gradient(180deg, ${primaryColor.dot}, ${secondColor.dot})`
+                  : primaryColor.dot
+
                 return h(
                   'div',
-                  { key: mail.id, className: 'dnb-cell', style: { flexDirection: 'column', alignItems: 'flex-start', gap: 4 } },
+                  {
+                    key: drawer.key,
+                    className: 'dnb-group',
+                    style: {
+                      marginBottom: 0,
+                      overflow: 'hidden',
+                      opacity: drawer.kind === 'detached' ? 0.72 : 1,
+                    },
+                  },
                   h(
                     'div',
-                    { style: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+                    {
+                      className: 'dnb-drawer-head',
+                      style: {
+                        borderLeft: 'none',
+                        boxShadow: drawer.colors.length > 1 ? undefined : `inset 3px 0 0 ${primaryColor.dot}`,
+                        position: 'relative',
+                        background: isOpen ? primaryColor.bg : undefined,
+                      },
+                      onClick: () => patch({
+                        mailOpenDrawers: { ...openDrawers, [drawer.key]: !isOpen },
+                      }),
+                    },
+                    drawer.colors.length > 1
+                      ? h('span', {
+                          style: {
+                            position: 'absolute',
+                            left: 0,
+                            top: 0,
+                            bottom: 0,
+                            width: 3,
+                            background: accentBorder,
+                          },
+                        })
+                      : null,
                     h(
                       'div',
-                      { style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600 } },
-                      h('span', { style: { color: 'var(--dnb-text-2)' } }, mail.from || '参谋长'),
-                      h('span', { style: { color: 'var(--dnb-text-3)' } }, '→'),
-                      h('span', { style: { color: 'var(--dnb-accent)' } }, '@' + (mail.to || 'lead')),
-                      h('span', { className: 'dnb-tag', style: { fontSize: 10, fontWeight: 500 } }, modeLabel),
+                      { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 } },
+                      h(
+                        'span',
+                        { style: { display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 } },
+                        drawer.colors.map((c, idx) =>
+                          h('span', {
+                            key: idx,
+                            style: {
+                              width: 7,
+                              height: 7,
+                              borderRadius: '50%',
+                              background: c.dot,
+                              marginLeft: idx > 0 ? -2 : 0,
+                              border: '1px solid var(--dnb-card)',
+                            },
+                          })),
+                      ),
+                      h('span', {
+                        style: {
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: 'var(--dnb-text)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        },
+                      }, drawer.title),
+                      h('span', { className: 'dnb-tag', style: { fontSize: 10 } }, `${drawer.items.length}`),
                     ),
-                    h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, relativeTimeLabel(mail.at)),
+                    h(Icon, {
+                      name: 'chevron',
+                      size: 13,
+                      style: {
+                        color: 'var(--dnb-text-3)',
+                        transform: isOpen ? 'rotate(90deg)' : 'none',
+                        transition: 'transform 0.16s ease',
+                        flexShrink: 0,
+                      },
+                    }),
                   ),
-                  mail.subject ? h('div', { style: { fontSize: 12, fontWeight: 600 } }, mail.subject) : null,
-                  h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, mail.text),
+                  isOpen
+                    ? drawer.items.slice(0, 15).map(mail => {
+                        const modeLabel = mail.mode === 'steer' ? '⚡ 插话' : mail.mode === 'silent' ? '📌 备忘' : '📨 递话'
+                        const fColor = colorForRootSession(mail.fromRootId || mail.fromSession || selfRootId, selfRootId)
+                        const tRoot = mail.toRootId && mail.toRootId !== 'all' ? mail.toRootId : ''
+                        const tColor = tRoot ? colorForRootSession(tRoot, selfRootId) : primaryColor
+                        return h(
+                          'div',
+                          {
+                            key: mail.id,
+                            className: 'dnb-cell',
+                            style: {
+                              flexDirection: 'column',
+                              alignItems: 'flex-start',
+                              gap: 4,
+                              borderTop: '1px solid var(--dnb-border)',
+                            },
+                          },
+                          h(
+                            'div',
+                            { style: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+                            h(
+                              'div',
+                              { style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600 } },
+                              h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: fColor.dot, flexShrink: 0 } }),
+                              h('span', { style: { color: fColor.text || 'var(--dnb-text-2)' } }, mail.from || '参谋长'),
+                              h('span', { style: { color: 'var(--dnb-text-3)' } }, '→'),
+                              h('span', { style: { color: mail.to === 'all' ? 'var(--dnb-accent)' : tColor.text } }, '@' + (mail.to || 'lead')),
+                              h('span', { className: 'dnb-tag', style: { fontSize: 10, fontWeight: 500 } }, modeLabel),
+                            ),
+                            h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, relativeTimeLabel(mail.at)),
+                          ),
+                          mail.subject ? h('div', { style: { fontSize: 12, fontWeight: 600 } }, mail.subject) : null,
+                          h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, mail.text),
+                        )
+                      })
+                    : null,
                 )
               }),
             )
-          : h('div', { className: 'dnb-group' }, h('div', { className: 'dnb-empty', style: { padding: '18px 12px' } }, '暂无跨对话通信记录')),
+          : h('div', { className: 'dnb-group' }, h('div', { className: 'dnb-empty', style: { padding: '18px 12px' } }, '当前筛选下暂无协同通信记录')),
       )
     }
 
@@ -11181,7 +13314,12 @@ window.__ModuleLoader__.load({
         {
           key: 'auto',
           title: '⚡ 全自动托管',
-          desc: '带冷却节流（5分钟）自动刷新阶段摘要、巡检进度并跨窗口自动递话。',
+          desc: '仅限本对话生效：自动打理本局档案/非定住边界/阶段摘要，主代理与子代理完工且摘要收尾后自动停机防空转（开启需确认）。',
+        },
+        {
+          key: 'stopped',
+          title: '⏹ 停止参谋长（暂停自动化）',
+          desc: '暂停后台强介入推跑、空转拦截与断线自动续跑；保留手动问答与手工档案操作，可随时切回恢复。',
         },
       ]
       return h(
@@ -11199,7 +13337,7 @@ window.__ModuleLoader__.load({
               position: 'absolute',
               top: 42,
               right: 12,
-              width: 268,
+              width: 280,
               zIndex: 9999,
             },
           },
@@ -11219,6 +13357,10 @@ window.__ModuleLoader__.load({
                   color: active ? 'var(--dnb-accent)' : undefined,
                 },
                 onClick: () => {
+                  if (opt.key === 'auto' && currentPace !== 'auto') {
+                    patch({ secPaceMenuOpen: false, autoPilotConfirmOpen: true })
+                    return
+                  }
                   patch({ secPaceMenuOpen: false })
                   void updateSecConfig({ paceMode: opt.key })
                 },
@@ -11252,7 +13394,7 @@ window.__ModuleLoader__.load({
 
       const BOUND_FIELD_META = {
         forbidden: { label: '禁止红线', color: '#ff453a', bg: 'rgba(255, 69, 58, 0.14)' },
-        allowed: { label: '允许范围', color: '#30d158', bg: 'rgba(48, 209, 88, 0.14)' },
+        allowed: { label: '必做事项', color: '#30d158', bg: 'rgba(48, 209, 88, 0.14)' },
         notes: { label: '注意事项', color: '#fbbf24', bg: 'rgba(245, 158, 11, 0.14)' },
       }
 
@@ -11526,6 +13668,62 @@ window.__ModuleLoader__.load({
             )
           }
 
+          if (sug.kind === 'advice') {
+            return h(
+              'div',
+              {
+                key: sug.id,
+                className: 'dnb-sug-card',
+                style: {
+                  background: 'rgba(10, 132, 255, 0.08)',
+                  borderColor: 'rgba(10, 132, 255, 0.34)',
+                },
+              },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 4 } },
+                h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11, fontWeight: 700, color: 'var(--dnb-accent)' } },
+                  '💡 参谋长主动建议',
+                ),
+                h('button', {
+                  className: 'dnb-icon-btn',
+                  style: { width: 20, height: 20 },
+                  title: '忽略此条建议',
+                  onClick: () => void decideSuggestion(sug, 'dismiss'),
+                }, h(Icon, { name: 'x', size: 12 })),
+              ),
+              h('div', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)', marginBottom: 3, lineHeight: 1.45 } }, sug.title),
+              sug.reason
+                ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.45, marginBottom: 7 } }, sug.reason)
+                : null,
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+                h('button', {
+                  className: 'dnb-primary-btn',
+                  style: { height: 27, padding: '0 11px', fontSize: 11.5 },
+                  disabled: view.secBusy,
+                  onClick: () => void decideSuggestion(sug, 'approve'),
+                }, '📨 采纳递话'),
+                h('button', {
+                  className: 'dnb-pill',
+                  style: { height: 27, padding: '0 10px', fontSize: 11.5 },
+                  onClick: () => patch({ chiefAdviceModal: sug }),
+                }, '💡 弹窗详看'),
+                h('button', {
+                  className: 'dnb-pill',
+                  style: { height: 27, padding: '0 10px', fontSize: 11.5 },
+                  onClick: () => {
+                    prefillSuggestion(sug)
+                    focusSecInput()
+                  },
+                }, '填入许愿框'),
+              ),
+            )
+          }
+
           return h(
             'div',
             { key: sug.id, className: 'dnb-sug-card' },
@@ -11564,16 +13762,16 @@ window.__ModuleLoader__.load({
               : null,
             h(
               'div',
-              { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+              { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
               h('button', {
                 className: 'dnb-primary-btn',
-                style: { height: 25, padding: '0 10px', fontSize: 11.5 },
+                style: { height: 27, padding: '0 11px', fontSize: 11.5 },
                 disabled: view.secBusy,
                 onClick: () => void decideSuggestion(sug, 'approve'),
               }, '一键递话'),
               h('button', {
                 className: 'dnb-pill',
-                style: { height: 25, padding: '0 9px', fontSize: 11.5 },
+                style: { height: 27, padding: '0 10px', fontSize: 11.5 },
                 onClick: () => {
                   prefillSuggestion(sug)
                   focusSecInput()
@@ -11582,7 +13780,7 @@ window.__ModuleLoader__.load({
               sug.draftText
                 ? h('button', {
                     className: 'dnb-pill',
-                    style: { height: 25, padding: '0 8px', fontSize: 11, marginLeft: 'auto' },
+                    style: { height: 27, padding: '0 10px', fontSize: 11.5, marginLeft: 'auto' },
                     onClick: () => setExpandedId(openDraft ? '' : sug.id),
                   }, openDraft ? '收起草稿' : '预览草稿')
                 : null,
@@ -11625,15 +13823,120 @@ window.__ModuleLoader__.load({
       const meta = view.chiefMeta || {}
       const tm = meta.tacticalModes || {}
       const guard = meta.runtimeGuard || {}
-      const maxTurns = Number(tm.maxInterventionTurns) || 5
-      const pct = Number(tm.compactThresholdPct) || 80
+      const permMode = meta.permissionMode || 'danger-full-access'
+      const PERM_OPTIONS = [
+        {
+          key: 'read-only',
+          icon: '👁',
+          shortLabel: '仅可查看',
+          title: '仅可查看',
+          desc: '仅可查看与检索态势，严禁修改文件、执行命令或触发压缩。',
+          bounds: [
+            { who: '参谋长', text: '只读巡检、总结与回答，禁改任务/边界、禁自动递话或压缩' },
+            { who: '主模型', text: '保持只读分析，参谋长不向其下发写文件或改代码要求' },
+            { who: '子代理', text: '禁新建或调度写操作子代理，仅允许读取态势' },
+          ],
+        },
+        {
+          key: 'workspace-write',
+          icon: '📝',
+          shortLabel: '工作区内修改',
+          title: '工作区内修改',
+          desc: '可在项目工作区内读写改文件与运行验证命令（遵守禁止红线）。',
+          bounds: [
+            { who: '参谋长', text: '可打理本局任务/边界/档案、向主对话递话及触发压缩' },
+            { who: '主模型', text: '可在项目工作区内读写代码与跑常规测试，禁越界目录' },
+            { who: '子代理', text: '仅限在当前工作区内并行读写与测试，严守禁止红线' },
+          ],
+        },
+        {
+          key: 'danger-full-access',
+          icon: '🛡️',
+          shortLabel: '完全权限',
+          title: '完全权限',
+          desc: '最高实权默认档：全权限查改文件、执行命令、直接调度/中断子代理（仍守红线）。',
+          bounds: [
+            { who: '参谋长', text: '默认最高实权，可全权打理本局/档案/网络、强介入与抢救压缩' },
+            { who: '主模型', text: '跨目录读写、环境配置、脚本执行与排障全权限（须守红线）' },
+            { who: '子代理', text: '可全权限并行执行研发、构建、验证与跨模块协同任务' },
+          ],
+        },
+        {
+          key: 'auto-review',
+          icon: '🔍',
+          shortLabel: '自动审查',
+          title: '自动审查',
+          exp: true,
+          desc: '自动审查闭环：聚焦核验、审查风险并按需修复或呈报。',
+          bounds: [
+            { who: '参谋长', text: '实权督导 + 独立实证复核，未见命令/文件实证严禁放行结项' },
+            { who: '主模型', text: '正常实现，但结论须附可核验实证并接受参谋长质询纠偏' },
+            { who: '子代理', text: '优先承担独立复核、测试验证与回归检查任务' },
+          ],
+        },
+      ]
+      const activePermObj = PERM_OPTIONS.find(p => p.key === permMode) || PERM_OPTIONS[2]
+      const maxTurns = normalizeMaxTurnsVal(tm.maxInterventionTurns)
+      const isUnlimitedTurns = maxTurns === 0
+      const pct = Math.min(95, Math.max(10, Math.round(Number(tm.compactThresholdPct) || 80)))
+      const thresholdMode = tm.compactThresholdMode === 'tokens' ? 'tokens' : 'pct'
+      const thresholdTokensNum = Math.max(4000, Number(tm.compactThresholdTokens) || 64000)
+      const thresholdInputVal = view.compactInputDraft !== null && view.compactInputDraft !== undefined
+        ? String(view.compactInputDraft)
+        : String(tm.compactThresholdInput || '64K')
+      const isLowTokenThreshold = thresholdMode === 'tokens' && thresholdTokensNum < 32000
+      const isLowPctThreshold = thresholdMode === 'pct' && pct < 25
+      const pctSelectChoices = Array.from(new Set([10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, pct])).sort((a, b) => a - b)
+      const isSmartCompact = Boolean(tm.smartCompact)
       const activeChipsCount = (tm.intervention ? 1 : 0)
         + (tm.autoCompact ? 1 : 0)
         + (tm.redlineSentinel ? 1 : 0)
-        + (tm.strictVerify === false ? 0 : 0)
+      const commitTokenThresholdInput = (rawText) => {
+        const valStr = String(rawText ?? '').trim() || '64K'
+        void updateSecConfig({
+          tacticalModes: {
+            ...tm,
+            compactThresholdMode: 'tokens',
+            compactThresholdInput: valStr,
+          },
+        })
+      }
       const toggleTacticalField = (key, val) => {
         if (key === 'intervention' && val === true) {
-          patch({ tacticalMenuOpen: false, interventionModalOpen: true, interventionAgreed: false })
+          patch({ tacticalMenuOpen: false, unlimitedTurnsModalOpen: false, interventionModalOpen: true, interventionAgreed: false })
+          return
+        }
+        if (key === 'maxInterventionTurns') {
+          if (val === 0 || val === '0') {
+            if (!isUnlimitedTurns) {
+              patch({ tacticalMenuOpen: false, unlimitedTurnsModalOpen: true })
+            }
+            return
+          }
+          const safeN = Math.min(30, Math.max(1, Math.round(Number(val) || 1)))
+          void updateSecConfig({ tacticalModes: { ...tm, maxInterventionTurns: safeN } })
+          return
+        }
+        if (key === 'compactThresholdPct') {
+          const targetPct = Math.min(95, Math.max(10, Math.round(Number(val) || 80)))
+          void updateSecConfig({ tacticalModes: { ...tm, compactThresholdMode: 'pct', compactThresholdPct: targetPct } })
+          return
+        }
+        if (key === 'compactThresholdMode') {
+          const nextM = val === 'tokens' ? 'tokens' : 'pct'
+          patch({ compactInputDraft: null })
+          void updateSecConfig({ tacticalModes: { ...tm, compactThresholdMode: nextM } })
+          return
+        }
+        if (key === 'smartCompact') {
+          const nextSmart = Boolean(val)
+          void updateSecConfig({
+            tacticalModes: {
+              ...tm,
+              smartCompact: nextSmart,
+              ...(nextSmart ? { autoCompact: true } : {}),
+            },
+          })
           return
         }
         void updateSecConfig({ tacticalModes: { ...tm, [key]: val } })
@@ -11641,7 +13944,7 @@ window.__ModuleLoader__.load({
       const placeholder = secImages.length > 0
         ? ('已附 ' + secImages.length + ' 张图，回车可直接发送或补充说明…')
         : (activeTarget === 'auto'
-            ? '问实时进展、诊卡点、浓缩边界，或吩咐参谋长拆话调度…'
+            ? '✦ 许愿框：整理/提炼档案、设定边界、重设任务、调整协同网络或吩咐参谋长…'
             : activeTarget === 'all'
               ? '向全体成员广播（' + modeObj.label + '）…'
               : ('给 @' + shortAgentName(activePeer ? activePeer.name : activeTarget, true) + ' ' + modeObj.label + '…'))
@@ -11702,36 +14005,175 @@ window.__ModuleLoader__.load({
                   { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
                   h(
                     'div',
-                    { className: 'dnb-stepper', title: '连续主动介入轮数上限' },
-                    h('button', { type: 'button', onClick: () => toggleTacticalField('maxInterventionTurns', Math.max(1, maxTurns - 1)) }, '-'),
-                    h('span', null, `${maxTurns}轮`),
-                    h('button', { type: 'button', onClick: () => toggleTacticalField('maxInterventionTurns', Math.min(15, maxTurns + 1)) }, '+'),
+                    { className: 'dnb-stepper', title: '连续主动介入轮数上限（从 1 轮点「-」可切为 ♾️ 无限督导）' },
+                    h('button', {
+                      type: 'button',
+                      disabled: isUnlimitedTurns,
+                      style: isUnlimitedTurns ? { opacity: 0.35, cursor: 'not-allowed' } : undefined,
+                      title: isUnlimitedTurns ? '当前已为无限轮次' : (maxTurns <= 1 ? '点按将弹窗确认是否切换为 ♾️ 无限督导' : '减少轮次上限'),
+                      onClick: () => {
+                        if (isUnlimitedTurns) return
+                        toggleTacticalField('maxInterventionTurns', maxTurns <= 1 ? 0 : maxTurns - 1)
+                      },
+                    }, '-'),
+                    h('span', { style: isUnlimitedTurns ? { color: 'var(--dnb-accent)', fontWeight: 700 } : undefined }, isUnlimitedTurns ? '♾️' : `${maxTurns}轮`),
+                    h('button', {
+                      type: 'button',
+                      disabled: !isUnlimitedTurns && maxTurns >= 30,
+                      style: (!isUnlimitedTurns && maxTurns >= 30) ? { opacity: 0.35, cursor: 'not-allowed' } : undefined,
+                      onClick: () => {
+                        if (isUnlimitedTurns) toggleTacticalField('maxInterventionTurns', 1)
+                        else toggleTacticalField('maxInterventionTurns', Math.min(30, maxTurns + 1))
+                      },
+                    }, '+'),
                   ),
                   h(Switch, { checked: Boolean(tm.intervention), onChange: v => toggleTacticalField('intervention', v) }),
                 ),
               ),
-              // Row 2: Auto-Compact + Threshold% Stepper
+              // Row 2: Auto-Compact + Smart Co-Managed Mode (✦ 智选) + Dual Threshold (Pct 10%-95% | Context Tokens)
               h(
                 'div',
-                { className: 'dnb-tactical-row' },
+                { className: 'dnb-tactical-row', style: { flexDirection: 'column', alignItems: 'stretch', gap: 7 } },
                 h(
                   'div',
-                  { style: { flex: 1, minWidth: 0 } },
-                  h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '🗜 压缩前抢救 + 自动压缩'),
-                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '达阈值时先写实档并核验落盘，再静默压缩上下文'),
-                ),
-                h(
-                  'div',
-                  { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
+                  { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
                   h(
                     'div',
-                    { className: 'dnb-stepper', title: '触发抢救与压缩的上下文占用阈值' },
-                    h('button', { type: 'button', onClick: () => toggleTacticalField('compactThresholdPct', Math.max(50, pct - 5)) }, '-'),
-                    h('span', null, `${pct}%`),
-                    h('button', { type: 'button', onClick: () => toggleTacticalField('compactThresholdPct', Math.min(95, pct + 5)) }, '+'),
+                    { style: { flex: 1, minWidth: 0 } },
+                    h('div', { style: { fontSize: 12, fontWeight: 600, color: isSmartCompact ? 'var(--dnb-accent)' : 'var(--dnb-text)' } },
+                      '🗜 压缩前抢救 + 自动压缩（每轮核查）'),
+                    h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1, lineHeight: 1.4 } },
+                      isSmartCompact
+                        ? '✦ 智选已开启：每轮结束后由参谋长与主对话在阶段收口处协同压缩'
+                        : (thresholdMode === 'tokens'
+                            ? `每轮结束后核查：上下文达 ${thresholdInputVal} 时先抢救实档再静默压缩`
+                            : `每轮结束后核查：占用达 ${pct}% 时先抢救实档再压缩`)),
                   ),
-                  h(Switch, { checked: Boolean(tm.autoCompact), onChange: v => toggleTacticalField('autoCompact', v) }),
+                  h(
+                    'div',
+                    { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-mini-btn',
+                      'data-tone': isSmartCompact ? 'accent' : undefined,
+                      title: isSmartCompact
+                        ? '当前已开启 ✦ 智选（每轮协同判断压缩时机）；点击切回固定阈值模式'
+                        : '开启 ✦ 智选：由参谋长与主对话在阶段收口处协同把控压缩时机',
+                      onClick: () => toggleTacticalField('smartCompact', !isSmartCompact),
+                    }, isSmartCompact ? '✦ 智选中' : '✦ 智选'),
+                    h(Switch, { checked: Boolean(tm.autoCompact), onChange: v => toggleTacticalField('autoCompact', v) }),
+                  ),
                 ),
+                !isSmartCompact
+                  ? h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap', paddingTop: 2 } },
+                      h(
+                        'div',
+                        { style: { display: 'inline-flex', borderRadius: 8, overflow: 'hidden', border: '1px solid var(--dnb-border-strong)' } },
+                        h('button', {
+                          type: 'button',
+                          style: {
+                            padding: '3px 9px',
+                            fontSize: 11,
+                            fontWeight: 500,
+                            border: 'none',
+                            cursor: 'pointer',
+                            background: thresholdMode === 'pct' ? 'var(--dnb-accent)' : 'transparent',
+                            color: thresholdMode === 'pct' ? '#fff' : 'var(--dnb-text-2)',
+                          },
+                          onClick: () => toggleTacticalField('compactThresholdMode', 'pct'),
+                        }, '按比例'),
+                        h('button', {
+                          type: 'button',
+                          style: {
+                            padding: '3px 9px',
+                            fontSize: 11,
+                            fontWeight: 500,
+                            border: 'none',
+                            cursor: 'pointer',
+                            background: thresholdMode === 'tokens' ? 'var(--dnb-accent)' : 'transparent',
+                            color: thresholdMode === 'tokens' ? '#fff' : 'var(--dnb-text-2)',
+                          },
+                          onClick: () => toggleTacticalField('compactThresholdMode', 'tokens'),
+                        }, '自填上下文'),
+                      ),
+                      thresholdMode === 'pct'
+                        ? h('select', {
+                            value: String(pct),
+                            title: '选择触发抢救与自动压缩的上下文占用比例（10%–95%，低于 25% 会提示过早压缩风险）',
+                            style: {
+                              height: 26,
+                              minWidth: 74,
+                              borderRadius: 8,
+                              border: isLowPctThreshold ? '1px solid rgba(245, 158, 11, 0.7)' : '1px solid var(--dnb-border-strong)',
+                              background: 'var(--dnb-card)',
+                              color: 'var(--dnb-text)',
+                              fontSize: 11.5,
+                              fontWeight: 600,
+                              padding: '0 8px',
+                              cursor: 'pointer',
+                            },
+                            onChange: e => toggleTacticalField('compactThresholdPct', Number(e.target.value)),
+                          }, pctSelectChoices.map(v =>
+                            h('option', { key: v, value: String(v) }, `${v}%`),
+                          ))
+                        : h(
+                            'div',
+                            { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+                            h('input', {
+                              type: 'text',
+                              value: thresholdInputVal,
+                              placeholder: '如 1M 或 64(默认K)',
+                              title: '输入 1M 即 1M tokens；不填单位默认为 K（如填 64 即 64K）；低于 32K 会警告',
+                              style: {
+                                width: 112,
+                                height: 26,
+                                borderRadius: 8,
+                                border: isLowTokenThreshold ? '1px solid rgba(245, 158, 11, 0.7)' : '1px solid var(--dnb-border-strong)',
+                                background: 'var(--dnb-card)',
+                                color: 'var(--dnb-text)',
+                                fontSize: 11.5,
+                                padding: '0 8px',
+                              },
+                              onChange: e => patch({ compactInputDraft: e.target.value }),
+                              onKeyDown: e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  commitTokenThresholdInput(e.currentTarget.value)
+                                }
+                              },
+                              onBlur: e => {
+                                if (view.compactInputDraft !== null && view.compactInputDraft !== undefined) {
+                                  commitTokenThresholdInput(e.currentTarget.value)
+                                }
+                              },
+                            }),
+                            h('button', {
+                              type: 'button',
+                              className: 'dnb-mini-btn',
+                              'data-tone': 'accent',
+                              onClick: () => commitTokenThresholdInput(thresholdInputVal),
+                            }, '应用'),
+                          ),
+                    )
+                  : null,
+                !isSmartCompact && (isLowTokenThreshold || isLowPctThreshold || view.compactLowWarning)
+                  ? h('div', {
+                      style: {
+                        fontSize: 10.5,
+                        color: '#f59e0b',
+                        background: 'rgba(245, 158, 11, 0.1)',
+                        border: '1px solid rgba(245, 158, 11, 0.32)',
+                        borderRadius: 6,
+                        padding: '3px 7px',
+                      },
+                    }, isLowTokenThreshold
+                      ? `⚠️ 当前自填阈值（${tm.compactThresholdInput || '低于32K'}）低于安全建议线 32K，可能导致上下文频繁压缩丢失现场细节`
+                      : (view.compactLowWarning
+                          ? ('⚠️ ' + view.compactLowWarning)
+                          : `⚠️ 当前压缩比例（${pct}%）低于 25%，可能导致上下文过早频繁压缩，建议设为 30%–80%`))
+                  : null,
               ),
               // Row 3: Strict Verify
               h(
@@ -11743,7 +14185,7 @@ window.__ModuleLoader__.load({
                   h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '✓ 严格实证核验'),
                   h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '要求结论附文件/命令证据，未核实不放行结项'),
                 ),
-                h(Switch, { checked: tm.strictVerify !== false, onChange: v => toggleTacticalField('strictVerify', v) }),
+                h(Switch, { checked: Boolean(tm.strictVerify), onChange: v => toggleTacticalField('strictVerify', v) }),
               ),
               // Row 4: Redline Sentinel
               h(
@@ -11765,17 +14207,22 @@ window.__ModuleLoader__.load({
                   'div',
                   { style: { flex: 1, minWidth: 0 } },
                   h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '📝 极简战报模式'),
-                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '汇报直击卡点、决定与可验证证据，压缩废话'),
+                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '分结构多条短句汇报、剥离繁琐数字参数（细节归其他页）'),
                 ),
-                h(Switch, { checked: tm.conciseBrief !== false, onChange: v => toggleTacticalField('conciseBrief', v) }),
+                h(Switch, { checked: Boolean(tm.conciseBrief), onChange: v => toggleTacticalField('conciseBrief', v) }),
               ),
               // Dual Mandatory Disclaimer Footer
               h(
                 'div',
                 { className: 'dnb-disclaimer-box' },
-                h('strong', null, '⚠️ 能力与提示词免责提示：'),
-                '1. 参谋长的一切自动审查、强介入驱动、压缩前抢救与红线拦截能力均高度依赖您为参谋长配置的底层大模型能力与上下文质量，不同模型在规划严谨度与遵循指令上的表现存在客观差异。',
-                ' 2. 若主会话或当前项目中挂载了过多的系统提示词（System Prompt）、Rules 或硬性规则，可能与本插件的自主干预逻辑产生指令冲突，进而导致介入循环异常、提前熔断或执行偏离预期。',
+                h('div', { style: { marginBottom: 4 } },
+                  h('strong', null, '免责声明 1（模型依赖）：'),
+                  '参谋长的一切自动审查、强介入驱动、压缩前抢救与红线拦截能力均高度依赖您为参谋长配置的底层大模型能力与上下文质量，不同模型在规划严谨度与遵循指令上的表现存在客观差异。',
+                ),
+                h('div', null,
+                  h('strong', null, '免责声明 2（规则冲突）：'),
+                  '若主会话或当前项目中挂载了过多的系统提示词（System Prompt）、Rules 或硬性规则，可能与本插件的自主干预逻辑产生指令冲突，进而导致介入循环异常、提前熔断或执行偏离预期。',
+                ),
               ),
             )
           : null,
@@ -11810,8 +14257,8 @@ window.__ModuleLoader__.load({
             )
           : null,
 
-        // Active Tactical Mode Strip (only shown when non-default modes or intervention/circuitBreaker active)
-        (tm.intervention || tm.autoCompact || tm.redlineSentinel || guard.circuitBroken)
+        // Active Tactical Mode Strip (shows smart-compact or hard threshold chip)
+        activeChipsCount > 0 || guard.circuitBroken
           ? h(
               'div',
               { className: 'dnb-tactical-strip' },
@@ -11821,7 +14268,7 @@ window.__ModuleLoader__.load({
                     className: 'dnb-tac-chip',
                     'data-tone': 'amber',
                     onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen }),
-                  }, `⚡ 强介入 ${Number(guard.interventionTurns ?? guard.consecutiveInterventionTurns ?? 0)}/${maxTurns}`)
+                  }, `⚡ 强介入 ${Number(guard.interventionTurns ?? guard.consecutiveInterventionTurns ?? 0)}/${isUnlimitedTurns ? '♾️' : maxTurns}`)
                 : null,
               tm.autoCompact
                 ? h('button', {
@@ -11829,7 +14276,12 @@ window.__ModuleLoader__.load({
                     className: 'dnb-tac-chip',
                     'data-tone': 'accent',
                     onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen }),
-                  }, `🗜 自动压缩 ${pct}%`)
+                    title: isSmartCompact
+                      ? '✦ 智选已开启：参谋长与主对话协同把控压缩时机'
+                      : (thresholdMode === 'tokens'
+                          ? `固定上下文压缩线：${tm.compactThresholdInput || '64K'}`
+                          : `按比例自动压缩线：${pct}%`),
+                  }, isSmartCompact ? '✦ 智选压缩' : `🗜 自动压缩 ${thresholdMode === 'tokens' ? (tm.compactThresholdInput || '64K') : (pct + '%')}`)
                 : null,
               tm.redlineSentinel
                 ? h('button', {
@@ -11856,14 +14308,99 @@ window.__ModuleLoader__.load({
             )
           : null,
 
-        // Compact Target & Posture Strip
+        // Permission Picker Popover (Anchored above permission pill with 3-party boundaries)
+        view.secPermMenuOpen
+          ? h(
+              React.Fragment,
+              null,
+              h('div', {
+                style: { position: 'fixed', inset: 0, zIndex: 68 },
+                onClick: () => patch({ secPermMenuOpen: false }),
+              }),
+              h(
+                'div',
+                {
+                  className: 'dnb-menu',
+                  style: {
+                    position: 'absolute',
+                    left: 12,
+                    bottom: 'calc(100% + 6px)',
+                    width: 332,
+                    maxWidth: 'calc(100% - 24px)',
+                    maxHeight: 380,
+                    overflowY: 'auto',
+                    zIndex: 70,
+                  },
+                },
+                h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } }, '参谋长权限等级与三方能力边界'),
+                PERM_OPTIONS.map(opt => {
+                  const active = permMode === opt.key
+                  return h(
+                    'div',
+                    {
+                      key: opt.key,
+                      className: 'dnb-menu-item',
+                      title: opt.desc,
+                      style: {
+                        alignItems: 'flex-start',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        padding: '8px 10px',
+                        color: active ? 'var(--dnb-accent)' : undefined,
+                      },
+                      onClick: () => {
+                        patch({ secPermMenuOpen: false })
+                        void updateSecConfig({ permissionMode: opt.key })
+                      },
+                    },
+                    h(
+                      'div',
+                      { style: { minWidth: 0, flex: 1 } },
+                      h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: active ? 700 : 600 } },
+                        h('span', null, opt.icon),
+                        h('span', null, opt.title),
+                        opt.exp
+                          ? h('span', { style: { fontSize: 9.5, opacity: 0.72, letterSpacing: '0.03em' } }, 'EXP')
+                          : null,
+                      ),
+                      h(
+                        'div',
+                        { className: 'dnb-perm-grid' },
+                        (opt.bounds || []).map(b =>
+                          h(
+                            'div',
+                            { key: b.who, className: 'dnb-perm-row' },
+                            h('span', { className: 'dnb-perm-who' }, b.who),
+                            h('span', null, b.text),
+                          ),
+                        ),
+                      ),
+                    ),
+                    active ? h(Icon, { name: 'check', size: 13, style: { marginTop: 2, flexShrink: 0 } }) : null,
+                  )
+                }),
+              ),
+            )
+          : null,
+
+        // Compact Target, Permission & Posture Strip
         h(
           'div',
           { className: 'dnb-sec-targets' },
           h('button', {
+            type: 'button',
+            className: 'dnb-sec-chip',
+            'data-active': view.secPermMenuOpen ? '1' : '0',
+            style: permMode === 'danger-full-access'
+              ? { borderColor: 'rgba(245, 158, 11, 0.42)', color: '#f59e0b' }
+              : (permMode === 'read-only' ? { borderColor: 'rgba(148, 163, 184, 0.45)', color: 'var(--dnb-text-2)' } : undefined),
+            title: activePermObj.desc + '（点击切换参谋长权限等级与查看三方能力边界）',
+            onClick: () => patch({ secPermMenuOpen: !view.secPermMenuOpen, tacticalMenuOpen: false, secModelMenuOpen: false, secPaceMenuOpen: false }),
+          }, `${activePermObj.icon} ${activePermObj.shortLabel}`),
+          h('button', {
             className: 'dnb-sec-chip',
             'data-active': activeTarget === 'auto' ? '1' : '0',
-            title: '由 DSH 参谋长研判实时进展、诊断卡点、浓缩边界，或自动拆话递给对应成员',
+            title: '由 DSH 参谋长研判实时进展、亲自实权查改/调度子代理或拆话递给对应成员',
             onClick: () => patch({ secTarget: 'auto' }),
           }, '✦ 参谋/拆话'),
           targetChips.map(p =>
@@ -11939,7 +14476,7 @@ window.__ModuleLoader__.load({
             )
           : null,
 
-        // DS-Bot Style Rounded Pill Input + `+` Tactical Button + Attach Image + Up-Arrow Send Button
+        // DS-Bot Style Rounded Pill Input + Centered `+` Tactical Button + Attach Image + Up-Arrow Send Button
         h(
           'div',
           { className: 'dnb-sec-shell' },
@@ -11948,9 +14485,9 @@ window.__ModuleLoader__.load({
             className: 'dnb-plus-btn',
             'data-active': (view.tacticalMenuOpen || activeChipsCount > 0) ? '1' : '0',
             'data-danger': tm.intervention ? '1' : '0',
-            title: '打开参谋长战术驾驶舱（强介入 / 压缩抢救 / 红线哨兵 / 核验开关）',
-            onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen, secModelMenuOpen: false, secPaceMenuOpen: false }),
-          }, view.tacticalMenuOpen ? '×' : '+'),
+            title: '打开参谋长战术驾驶舱（强介入 / 智选压缩 / 红线哨兵 / 核验开关）',
+            onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen, secPermMenuOpen: false, secModelMenuOpen: false, secPaceMenuOpen: false }),
+          }, h(Icon, { name: view.tacticalMenuOpen ? 'x' : 'plus', size: 14, style: { display: 'block', verticalAlign: 0 } })),
           h('input', {
             ref: fileInputRef,
             type: 'file',
@@ -12027,75 +14564,235 @@ window.__ModuleLoader__.load({
     /* ----------------------------------------------------------- Main Panel */
 
     function InterventionConfirmModal({ view, board }) {
-      if (!view.interventionModalOpen) return null
       const meta = view.chiefMeta || {}
       const tm = meta.tacticalModes || {}
-      const bnd = view.boundaries || { forbidden: [], allowed: [], notes: [] }
-      const obj = (board && board.objective) ? String(board.objective).trim() : ''
-      const forbiddenList = Array.isArray(bnd.forbidden) ? bnd.forbidden.filter(Boolean) : []
-      const missingPrerequisite = !obj || forbiddenList.length === 0
+      const rawBounds = (board && board.bounds) || (view.board && view.board.bounds) || {}
+      const savedBoardObj = (board && board.objective) ? String(board.objective).trim() : ''
+      const forbiddenList = (Array.isArray(rawBounds.forbidden) ? rawBounds.forbidden : [])
+        .map(f => (typeof f === 'string' ? f.trim() : String((f && f.text) || '').trim()))
+        .filter(Boolean)
+
+      const [objDraft, setObjDraft] = React.useState(savedBoardObj)
+      const [objLocked, setObjLocked] = React.useState(false)
+      const [suggestBusy, setSuggestBusy] = React.useState(false)
+      const [suggestHistory, setSuggestHistory] = React.useState([])
+      const [lastAiText, setLastAiText] = React.useState('')
+      const [lastWasAiGuess, setLastWasAiGuess] = React.useState(false)
+      const [suggestRationale, setSuggestRationale] = React.useState('')
+      const [confirmBusy, setConfirmBusy] = React.useState(false)
+
+      React.useEffect(() => {
+        if (!view.interventionModalOpen) return
+        setObjDraft(savedBoardObj)
+        setObjLocked(false)
+        setSuggestBusy(false)
+        setSuggestHistory([])
+        setLastAiText('')
+        setLastWasAiGuess(false)
+        setSuggestRationale('')
+        setConfirmBusy(false)
+      }, [view.interventionModalOpen])
+
+      if (!view.interventionModalOpen) return null
+      const trimmedDraft = String(objDraft || '').trim()
+      const missingPrerequisite = !trimmedDraft || forbiddenList.length === 0
+
+      const handleSuggestObjective = async () => {
+        if (suggestBusy) return
+        if (objLocked) {
+          patch({ notice: '当前核心目标输入框已锁定，请先点击「解锁」后再点建议或微调' })
+          return
+        }
+        const curText = String(objDraft || '').trim()
+        const shouldGuess = !curText || (lastWasAiGuess && lastAiText && curText === lastAiText.trim())
+        const nextMode = shouldGuess ? 'guess' : 'refine'
+        setSuggestBusy(true)
+        try {
+          const out = await call('chief/suggest-objective', {
+            method: 'POST',
+            headers: { 'content-type': 'application/json' },
+            body: JSON.stringify({
+              session: view.sessionId,
+              draft: curText,
+              mode: nextMode,
+              previousSuggestions: suggestHistory,
+            }),
+          })
+          if (out && out.suggestion) {
+            const nextText = String(out.suggestion).trim()
+            setObjDraft(nextText)
+            setLastAiText(nextText)
+            setLastWasAiGuess(nextMode === 'guess')
+            setSuggestHistory(prev => prev.concat(nextText).slice(-12))
+            setSuggestRationale(String(out.rationale || ''))
+          }
+        } catch (error) {
+          patch({ error: String((error && error.message) || error) })
+        } finally {
+          setSuggestBusy(false)
+        }
+      }
 
       return h(
         'div',
         {
           className: 'dnb-modal-backdrop',
           onClick: e => {
-            if (e.target === e.currentTarget) patch({ interventionModalOpen: false })
+            if (e.target === e.currentTarget && !confirmBusy) patch({ interventionModalOpen: false })
           },
         },
         h(
           'div',
-          { className: 'dnb-modal-card' },
+          { className: 'dnb-modal-card', style: { maxHeight: '86vh', overflowY: 'auto' } },
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚡ 启用「主动强介入」前置风险与边界核对'),
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚡ 启用「主动强介入」— 设定核心目标与风险核对'),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
               style: { width: 22, height: 22 },
+              disabled: confirmBusy,
               onClick: () => patch({ interventionModalOpen: false }),
             }, h(Icon, { name: 'x', size: 13 })),
           ),
-          // Live Objective & Redline Readback
+          // Core Objective Destination Editor inside Modal (建议 + 锁定)
+          h(
+            'div',
+            {
+              style: {
+                borderRadius: 9,
+                padding: '9px 10px',
+                border: objLocked
+                  ? '1px solid rgba(245, 158, 11, 0.55)'
+                  : (!trimmedDraft ? '1px solid rgba(255, 69, 58, 0.45)' : '1px solid var(--dnb-border)'),
+                background: objLocked ? 'rgba(245, 158, 11, 0.07)' : 'var(--dnb-card)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+                fontSize: 11.5,
+              },
+            },
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+              h('span', { style: { fontWeight: 700, color: 'var(--dnb-text)' } },
+                '🎯 强介入核心目标（默认带入规划核心目标，开启后将自动锁定）'),
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  'data-tone': 'blue',
+                  disabled: suggestBusy || objLocked,
+                  title: trimmedDraft && !(lastWasAiGuess && trimmedDraft === lastAiText.trim())
+                    ? '在您输入框已有文字的基础上由参谋长微调润色'
+                    : '由参谋长结合对话现状自动猜测建议（可反复点击继续换角度猜意图）',
+                  onClick: () => void handleSuggestObjective(),
+                }, suggestBusy
+                  ? '推演中…'
+                  : (trimmedDraft && !(lastWasAiGuess && trimmedDraft === lastAiText.trim()) ? '✦ 微调建议' : '✦ 建议')),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  'data-tone': objLocked ? 'amber' : 'blue',
+                  title: objLocked ? '点击解锁以继续编辑或点建议' : '锁定当前核心目标避免误改',
+                  onClick: () => setObjLocked(v => !v),
+                }, objLocked ? '🔒 已锁定' : '🔒 锁定'),
+              ),
+            ),
+            h('textarea', {
+              className: 'dnb-input',
+              rows: 3,
+              readOnly: objLocked,
+              placeholder: '输入核心目标，或留空直接点右上「✦ 建议」让参谋长为您揣摩填写（可反复点建议）…',
+              style: {
+                width: '100%',
+                minHeight: 62,
+                padding: '7px 9px',
+                borderRadius: 7,
+                fontSize: 12,
+                lineHeight: 1.45,
+                resize: 'vertical',
+                opacity: objLocked ? 0.88 : 1,
+                cursor: objLocked ? 'not-allowed' : 'text',
+              },
+              value: objDraft,
+              onChange: e => {
+                if (objLocked) return
+                setObjDraft(e.target.value)
+                setLastWasAiGuess(false)
+              },
+            }),
+            suggestRationale
+              ? h('div', { style: { fontSize: 11, color: '#60a5fa', lineHeight: 1.4 } }, '💡 参谋长思路：' + suggestRationale)
+              : null,
+            h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', lineHeight: 1.4 } },
+              !trimmedDraft
+                ? h('span', { style: { color: '#ff6961', fontWeight: 600 } }, '⚠ 尚未填写核心目标：建议直接点右上「✦ 建议」自动填充（可反复点猜意图），或自行填写。')
+                : '后续参谋长每次介入都会对照此核心目标与「必做事项」核查完成度；开启强介入后将锁定本目标直到关闭。'),
+          ),
+          // Live Redline Readback
           h(
             'div',
             {
               style: {
                 borderRadius: 9,
                 padding: '8px 10px',
-                border: missingPrerequisite ? '1px solid rgba(255, 69, 58, 0.45)' : '1px solid var(--dnb-border)',
-                background: missingPrerequisite ? 'rgba(255, 69, 58, 0.08)' : 'var(--dnb-card)',
+                border: forbiddenList.length === 0 ? '1px solid rgba(255, 69, 58, 0.45)' : '1px solid var(--dnb-border)',
+                background: forbiddenList.length === 0 ? 'rgba(255, 69, 58, 0.08)' : 'var(--dnb-card)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 5,
                 fontSize: 11.5,
               },
             },
-            h('div', null, h('strong', null, '当前主目标：'), obj ? obj : h('span', { style: { color: '#ff453a', fontWeight: 600 } }, '未设定（建议先设定清晰长期目标）')),
-            h('div', null, h('strong', null, '已设禁止红线：'), forbiddenList.length
-              ? forbiddenList.slice(0, 3).map(f => '「' + f.text + '」').join('、') + (forbiddenList.length > 3 ? ` 等 ${forbiddenList.length} 条` : '')
-              : h('span', { style: { color: '#ff453a', fontWeight: 600 } }, '未设定（缺少禁止红线时强介入风险较高）')),
-            missingPrerequisite
+            forbiddenList.length === 0
+              ? h('div', null,
+                  h('strong', null, '已设禁止红线：'),
+                  h('span', { style: { color: '#ff453a', fontWeight: 600 } }, '未设定（缺少禁止红线时强介入风险较高）'),
+                )
+              : h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+                  h('div', null,
+                    h('strong', null, '已设禁止红线：'),
+                    h('span', { style: { color: '#34d399', fontWeight: 700 } }, `已生效 ${forbiddenList.length} 条`),
+                  ),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    'data-tone': 'blue',
+                    onClick: () => patch({ interventionModalOpen: false, tab: 'boundaries', boundSubTab: 'rules' }),
+                  }, '管理红线'),
+                ),
+            forbiddenList.length > 0
+              ? h(
+                  'div',
+                  { style: { display: 'flex', flexDirection: 'column', gap: 3, paddingTop: 2 } },
+                  forbiddenList.slice(0, 3).map((item, idx) =>
+                    h('div', {
+                      key: idx,
+                      style: { fontSize: 11, color: 'var(--dnb-text-2)', lineHeight: 1.45, wordBreak: 'break-word' },
+                    }, '• ' + (item.length > 88 ? item.slice(0, 88) + '…' : item)),
+                  ),
+                  forbiddenList.length > 3
+                    ? h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
+                        `…另有 ${forbiddenList.length - 3} 条禁止红线共同生效中`)
+                    : null,
+                )
+              : null,
+            forbiddenList.length === 0
               ? h(
                   'div',
                   { style: { display: 'flex', gap: 6, marginTop: 3 } },
-                  !obj
-                    ? h('button', {
-                        type: 'button',
-                        className: 'dnb-mini-btn',
-                        'data-tone': 'amber',
-                        onClick: () => patch({ interventionModalOpen: false, tab: 'plan' }),
-                      }, '前往设定目标')
-                    : null,
-                  !forbiddenList.length
-                    ? h('button', {
-                        type: 'button',
-                        className: 'dnb-mini-btn',
-                        'data-tone': 'amber',
-                        onClick: () => patch({ interventionModalOpen: false, tab: 'boundaries', boundarySubTab: 'rules' }),
-                      }, '前往设定红线')
-                    : null,
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    'data-tone': 'amber',
+                    onClick: () => patch({ interventionModalOpen: false, tab: 'boundaries', boundSubTab: 'rules' }),
+                  }, '前往设定红线'),
                 )
               : null,
           ),
@@ -12106,7 +14803,7 @@ window.__ModuleLoader__.load({
             h('div', { style: { fontWeight: 600, color: 'var(--dnb-text)', marginBottom: 3 } }, '开启后的行为与实操风险：'),
             h('div', null, '• Token 额外消耗：主对话每轮停顿都将唤醒参谋长核验并可能继续发指令。'),
             h('div', null, '• 对话节奏接管：参谋长会主动插话纠偏与派发下步，点击红色「⏹ 急停」可随时中断。'),
-            h('div', null, `• 防死循环熔断：达到 ${Number(tm.maxInterventionTurns) || 5} 轮上限或连续 3 轮无实际进展将自动熔断退回待命。`),
+            h('div', null, `• 防死循环熔断：达到 ${normalizeMaxTurnsVal(tm.maxInterventionTurns) === 0 ? '♾️ 无限轮次' : (normalizeMaxTurnsVal(tm.maxInterventionTurns) + ' 轮上限')} 或连续无实际进展将触发熔断保护。`),
           ),
           // Dual Mandatory Disclaimers
           h(
@@ -12135,26 +14832,594 @@ window.__ModuleLoader__.load({
           ),
           h(
             'div',
-            { style: { display: 'flex', justifyContent: 'flex-end', gap: 7, marginTop: 2 } },
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 } },
             h('button', {
               type: 'button',
               className: 'dnb-pill',
-              style: { height: 28, padding: '0 12px', fontSize: 12 },
+              style: { height: 32, padding: '0 14px', fontSize: 12.5 },
               onClick: () => patch({ interventionModalOpen: false, interventionAgreed: false }),
             }, '取消'),
             h('button', {
               type: 'button',
               className: 'dnb-primary-btn',
-              style: { height: 28, padding: '0 14px', fontSize: 12, background: '#f59e0b', color: '#111', fontWeight: 700, opacity: view.interventionAgreed ? 1 : 0.45 },
-              disabled: !view.interventionAgreed,
+              style: { height: 32, padding: '0 15px', fontSize: 12.5, background: '#f59e0b', color: '#111', fontWeight: 700, opacity: (view.interventionAgreed && !confirmBusy) ? 1 : 0.45 },
+              disabled: !view.interventionAgreed || confirmBusy,
+              onClick: async () => {
+                setConfirmBusy(true)
+                try {
+                  const curMax = normalizeMaxTurnsVal(tm.maxInterventionTurns)
+                  const ok = await updateSecConfig({
+                    tacticalModes: { ...tm, intervention: true, maxInterventionTurns: curMax },
+                    confirmedInterventionRisk: true,
+                    ...(curMax === 0 ? { confirmedUnlimitedTurns: true } : {}),
+                    ...(trimmedDraft ? { coreObjective: trimmedDraft } : {}),
+                  })
+                  if (ok) patch({ interventionModalOpen: false, interventionAgreed: false })
+                } finally {
+                  setConfirmBusy(false)
+                }
+              },
+            }, confirmBusy ? '开启并锁定中…' : (trimmedDraft ? '确认锁定目标并开启强介入' : '确认启用主动强介入')),
+          ),
+        ),
+      )
+    }
+
+    function UnlimitedTurnsConfirmModal({ view }) {
+      if (!view.unlimitedTurnsModalOpen) return null
+      const meta = view.chiefMeta || {}
+      const tm = meta.tacticalModes || {}
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget) patch({ unlimitedTurnsModalOpen: false })
+          },
+        },
+        h(
+          'div',
+          { className: 'dnb-modal-card' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '♾️ 开启无限主动督导轮次 — 作者风险确认'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 24, height: 24 },
+              onClick: () => patch({ unlimitedTurnsModalOpen: false }),
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          h(
+            'div',
+            { className: 'dnb-disclaimer-box' },
+            h('div', { style: { marginBottom: 4 } },
+              h('strong', null, '持续推跑风险：'),
+              '进入 ♾️ 无限督导模式后，只要参谋长评估主会话仍未完成当前任务，就会持续发送推进/纠偏指令而不再受固定轮数限制。',
+            ),
+            h('div', null,
+              h('strong', null, '拉锯与费用提示：'),
+              '参谋长与主对话模型在复杂疑难处可能持续来回探讨或拉锯很久，并显著增加 Token 消耗（仅连续 8 轮无实质变化时才触发兜底防卡死熔断，且您可随时点「⏹ 急停」或把参谋长切为「⏹ 停止」）。',
+            ),
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 32, padding: '0 14px', fontSize: 12.5 },
+              onClick: () => patch({ unlimitedTurnsModalOpen: false }),
+            }, '保留有限轮次'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: { height: 32, padding: '0 15px', fontSize: 12.5, background: '#f59e0b', color: '#111', fontWeight: 700 },
               onClick: async () => {
                 const ok = await updateSecConfig({
-                  tacticalModes: { ...tm, intervention: true },
-                  confirmedInterventionRisk: true,
+                  tacticalModes: { ...tm, maxInterventionTurns: 0 },
+                  confirmedUnlimitedTurns: true,
                 })
-                if (ok) patch({ interventionModalOpen: false, interventionAgreed: false })
+                if (ok) patch({ unlimitedTurnsModalOpen: false })
               },
-            }, '确认启用主动强介入'),
+            }, '确认启用 ♾️ 无限督导'),
+          ),
+        ),
+      )
+    }
+
+    function AutoPilotConfirmModal({ view }) {
+      if (!view.autoPilotConfirmOpen) return null
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget) patch({ autoPilotConfirmOpen: false })
+          },
+        },
+        h(
+          'div',
+          { className: 'dnb-modal-card' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '⚡ 开启本会话全自动托管 — 作用域与防空转确认'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 24, height: 24 },
+              onClick: () => patch({ autoPilotConfirmOpen: false }),
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          h(
+            'div',
+            { className: 'dnb-disclaimer-box' },
+            h('div', { style: { marginBottom: 4 } },
+              h('strong', null, '1. 仅管当前对话（严格会话隔离）：'),
+              '全自动模式下，参谋长会自主打理本对话内的档案分类/归纳、非定住边界、任务进展更新与阶段摘要；绝不触碰全局定住红线、绝不写全局冷库，也绝不向外部对话窗口自动递话或串窗。',
+            ),
+            h('div', { style: { marginBottom: 4 } },
+              h('strong', null, '2. 防空转自动停机机制：'),
+              '当主对话代理与所有已派发子代理均结束工作且收尾摘要提炼完成后，参谋长会自动退出全自动托管并恢复为「⏸ 按需手动」，防止后台持续空转浪费算力。',
+            ),
+            h('div', null,
+              h('strong', null, '3. 随时可控：'),
+              '您随时可以点击顶部节奏按钮切回手动，或切至「⏹ 停止参谋长」。',
+            ),
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 4 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 32, padding: '0 14px', fontSize: 12.5 },
+              onClick: () => patch({ autoPilotConfirmOpen: false }),
+            }, '暂不开启'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: { height: 32, padding: '0 15px', fontSize: 12.5, fontWeight: 700 },
+              onClick: async () => {
+                const ok = await updateSecConfig({
+                  paceMode: 'auto',
+                  confirmedAutoPilot: true,
+                })
+                if (ok) patch({ autoPilotConfirmOpen: false })
+              },
+            }, '⚡ 确认开启本对话全自动托管'),
+          ),
+        ),
+      )
+    }
+
+    function ArchiveRelayModal({ view }) {
+      const m = view.archiveRelayModal
+      if (!m) return null
+      const items = Array.isArray(m.items) ? m.items : []
+      const peers = (view.secView && Array.isArray(view.secView.peers)) ? view.secView.peers : []
+      const busy = Boolean(view.relayArchivesBusy)
+      const scopeBadgeText = s => (s === 'global' ? '全局' : (s === 'precipitated' ? '沉淀' : '本局'))
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget && !busy) patch({ archiveRelayModal: null })
+          },
+        },
+        h(
+          'div',
+          { className: 'dnb-modal-card' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } },
+              `📨 让参谋长带要求递话（已选 ${items.length} 条档案）`),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 24, height: 24 },
+              disabled: busy,
+              onClick: () => patch({ archiveRelayModal: null }),
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', flexWrap: 'wrap', gap: 5, maxHeight: 108, overflowY: 'auto' } },
+            items.map((it, idx) =>
+              h(
+                'span',
+                {
+                  key: (it.vaultScope || 'session') + ':' + (it.id || idx),
+                  className: 'dnb-tag',
+                  style: { fontSize: 11, padding: '2px 8px', background: 'var(--dnb-card)', border: '1px solid var(--dnb-border)' },
+                },
+                `[${scopeBadgeText(it.vaultScope)}] ${clampTitle(it.title || it.id, 22)}`,
+              ),
+            ),
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
+            h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } }, '递达对象：'),
+            h('select', {
+              value: m.target || 'lead',
+              disabled: busy,
+              style: {
+                height: 28,
+                borderRadius: 7,
+                border: '1px solid var(--dnb-border-strong)',
+                background: 'var(--dnb-card)',
+                color: 'var(--dnb-text)',
+                fontSize: 11.5,
+                padding: '0 8px',
+                flex: 1,
+                minWidth: 120,
+              },
+              onChange: e => patch({ archiveRelayModal: { ...m, target: e.target.value } }),
+            },
+              h('option', { value: 'lead' }, '@主对话 (lead)'),
+              peers.filter(p => p && p.key && p.key !== 'lead').map(p =>
+                h('option', { key: p.key, value: p.key }, '@' + shortAgentName(p.name || p.key, true)),
+              ),
+            ),
+            h('select', {
+              value: m.mode || 'followup',
+              disabled: busy,
+              style: {
+                height: 28,
+                borderRadius: 7,
+                border: '1px solid var(--dnb-border-strong)',
+                background: 'var(--dnb-card)',
+                color: 'var(--dnb-text)',
+                fontSize: 11.5,
+                padding: '0 8px',
+              },
+              onChange: e => patch({ archiveRelayModal: { ...m, mode: e.target.value } }),
+            },
+              h('option', { value: 'followup' }, '排队递话'),
+              h('option', { value: 'steer' }, '运行中插话'),
+            ),
+          ),
+          h('textarea', {
+            className: 'dnb-textarea',
+            rows: 3,
+            disabled: busy,
+            style: { fontSize: 12, minHeight: 74, resize: 'vertical' },
+            placeholder: '告诉参谋长这批档案要带上什么要求再递给主对话（如：请严格按档案里的接口签名与边界重构，勿修改已有测试契约）…',
+            value: m.instruction || '',
+            onChange: e => patch({ archiveRelayModal: { ...m, instruction: e.target.value } }),
+          }),
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 2 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 32, padding: '0 14px', fontSize: 12.5 },
+              disabled: busy,
+              onClick: () => patch({ archiveRelayModal: null }),
+            }, '取消'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: { height: 32, padding: '0 15px', fontSize: 12.5, fontWeight: 700 },
+              disabled: busy || items.length === 0,
+              onClick: () => void relayArchivesWithChiefApi(m),
+            }, busy ? '正在整理并递话…' : `📨 递给 @${m.target === 'lead' || !m.target ? '主对话' : shortAgentName(m.target, true)}`),
+          ),
+        ),
+      )
+    }
+
+    function DistillToGlobalModal({ view }) {
+      const m = view.distillGlobalModal
+      if (!m) return null
+      const busy = Boolean(view.distillBusy)
+      const countLabel = Array.isArray(m.ids) && m.ids.length > 0
+        ? `已勾选的 ${m.ids.length} 卷本局档案`
+        : '本会话档案柜中全部可复用经验'
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget && !busy) patch({ distillGlobalModal: null })
+          },
+        },
+        h(
+          'div',
+          { className: 'dnb-modal-card' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '✦ 让参谋长总结提炼入全局档案库'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 24, height: 24 },
+              disabled: busy,
+              onClick: () => patch({ distillGlobalModal: null }),
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          h(
+            'div',
+            { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5 } },
+            `参谋长将自动审查「${countLabel}」，剔除纯一次性过程碎屑，提炼跨对话可复用的工程坐标、规范与排障结论存入「🌐 全局档案柜」（默认保留原会话卷宗，遵守先升全局再沉淀的梯度）。`,
+          ),
+          h('textarea', {
+            className: 'dnb-textarea',
+            rows: 2,
+            disabled: busy,
+            style: { fontSize: 12, minHeight: 56, resize: 'vertical' },
+            placeholder: '可选补充提炼侧重（如：重点摘除可跨项目复用的构建命令与架构踩坑结论）…',
+            value: m.instruction || '',
+            onChange: e => patch({ distillGlobalModal: { ...m, instruction: e.target.value } }),
+          }),
+          h(
+            'label',
+            { style: { display: 'flex', alignItems: 'flex-start', gap: 7, fontSize: 11.5, color: 'var(--dnb-text)', cursor: 'pointer', lineHeight: 1.45 } },
+            h('input', {
+              type: 'checkbox',
+              checked: Boolean(m.clearSource),
+              disabled: busy,
+              style: { marginTop: 2 },
+              onChange: e => patch({ distillGlobalModal: { ...m, clearSource: Boolean(e.target.checked) } }),
+            }),
+            '提炼成功后同步移除已提炼来源的本局原卷宗（默认不勾选，保留本局原档）',
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 2 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 32, padding: '0 14px', fontSize: 12.5 },
+              disabled: busy,
+              onClick: () => patch({ distillGlobalModal: null }),
+            }, '取消'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: { height: 32, padding: '0 15px', fontSize: 12.5, fontWeight: 700 },
+              disabled: busy,
+              onClick: () => void distillToGlobalApi(m),
+            }, busy ? '参谋长正在提炼…' : '✦ 开始提炼入全局'),
+          ),
+        ),
+      )
+    }
+
+    function ChiefAdviceModal({ view }) {
+      const m = view.chiefAdviceModal
+      if (!m) return null
+      const busy = Boolean(view.secBusy)
+      const draft = String(m.draftText || m.title || '').trim()
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget && !busy) patch({ chiefAdviceModal: null })
+          },
+        },
+        h(
+          'div',
+          { className: 'dnb-modal-card' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '💡 参谋长主动建议'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 24, height: 24 },
+              disabled: busy,
+              onClick: () => patch({ chiefAdviceModal: null }),
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          h(
+            'div',
+            { style: { fontSize: 13, fontWeight: 600, color: 'var(--dnb-text)', lineHeight: 1.5 } },
+            m.title || '参谋长提出了一条阶段调整建议',
+          ),
+          m.reason
+            ? h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5 } }, m.reason)
+            : null,
+          m.draftText && m.draftText !== m.title
+            ? h(
+                'div',
+                {
+                  style: {
+                    padding: '8px 10px',
+                    borderRadius: 9,
+                    border: '1px solid var(--dnb-border)',
+                    background: 'var(--dnb-card)',
+                    fontSize: 12,
+                    color: 'var(--dnb-text-2)',
+                    lineHeight: 1.5,
+                    whiteSpace: 'pre-wrap',
+                  },
+                },
+                m.draftText,
+              )
+            : null,
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: 7, flexWrap: 'wrap', marginTop: 2 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 32, padding: '0 12px', fontSize: 12 },
+              disabled: busy,
+              onClick: () => patch({ chiefAdviceModal: null }),
+            }, '暂不处理'),
+            !m.isSynthetic && m.id
+              ? h('button', {
+                  type: 'button',
+                  className: 'dnb-pill',
+                  style: { height: 32, padding: '0 12px', fontSize: 12, color: 'var(--dnb-text-3)' },
+                  disabled: busy,
+                  onClick: async () => {
+                    await decideSuggestion(m, 'dismiss')
+                    patch({ chiefAdviceModal: null })
+                  },
+                }, '忽略驳回')
+              : null,
+            draft
+              ? h('button', {
+                  type: 'button',
+                  className: 'dnb-pill',
+                  style: { height: 32, padding: '0 12px', fontSize: 12 },
+                  disabled: busy,
+                  onClick: () => {
+                    prefillSuggestion({ ...m, draftText: draft, target: m.target || 'auto' })
+                    patch({ chiefAdviceModal: null })
+                    focusSecInput()
+                  },
+                }, '填入许愿框微调')
+              : null,
+            h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: { height: 32, padding: '0 15px', fontSize: 12.5, fontWeight: 700 },
+              disabled: busy,
+              onClick: async () => {
+                if (m.isSynthetic || !m.id) {
+                  patch({ chiefAdviceModal: null })
+                  await submitChiefBar('请采纳此参谋建议并递交主对话推进：' + draft)
+                } else {
+                  await decideSuggestion(m, 'approve')
+                  patch({ chiefAdviceModal: null })
+                }
+              },
+            }, busy ? '递交中…' : '📨 采纳并递交主对话'),
+          ),
+        ),
+      )
+    }
+
+    function HazardHaltModal({ view }) {
+      const m = view.hazardHaltModal
+      const [ackBusy, setAckBusy] = React.useState(false)
+      if (!m) return null
+      const isBoundHit = m.category === 'boundary_collision'
+      const dismissAndAck = async (goTab) => {
+        if (ackBusy) return
+        setAckBusy(true)
+        const alertId = m.id
+        patch({
+          hazardHaltModal: null,
+          ...(goTab ? { tab: goTab, ...(goTab === 'boundaries' ? { boundSubTab: 'rules' } : {}) } : {}),
+        })
+        try {
+          if (alertId) {
+            await updateSecConfig({ ackHazardAlertId: alertId })
+          }
+        } finally {
+          setAckBusy(false)
+        }
+      }
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget && !ackBusy) void dismissAndAck('')
+          },
+        },
+        h(
+          'div',
+          {
+            className: 'dnb-modal-card',
+            style: { borderColor: 'rgba(255, 69, 58, 0.65)', boxShadow: '0 14px 40px rgba(255, 69, 58, 0.22)' },
+          },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h(
+              'span',
+              { style: { fontSize: 13.5, fontWeight: 700, color: '#ff6961' } },
+              isBoundHit ? '🚫 撞边界熔断 · 主动强介入已紧急停机' : '🚨 重大不可逆风险拦截 · 主动强介入已紧急停机',
+            ),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 22, height: 22 },
+              disabled: ackBusy,
+              onClick: () => void dismissAndAck(''),
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+            h(
+              'span',
+              {
+                className: 'dnb-tag',
+                style: {
+                  background: 'rgba(255, 69, 58, 0.16)',
+                  color: '#ff6961',
+                  border: '1px solid rgba(255, 69, 58, 0.35)',
+                  fontWeight: 700,
+                },
+              },
+              isBoundHit ? '必然撞边界拦阻' : '不可逆风险煞车',
+            ),
+            m.title
+              ? h('span', { style: { fontSize: 12.5, fontWeight: 700, color: 'var(--dnb-text)' } }, m.title)
+              : null,
+          ),
+          h(
+            'div',
+            {
+              style: {
+                padding: '9px 11px',
+                borderRadius: 9,
+                border: '1px solid rgba(255, 69, 58, 0.36)',
+                background: 'rgba(255, 69, 58, 0.08)',
+                fontSize: 12,
+                color: 'var(--dnb-text)',
+                lineHeight: 1.55,
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              },
+            },
+            m.reason || '继续推进可能造成不可逆损失或触犯工作边界，参谋长已立即停下后续推送。',
+          ),
+          m.objective
+            ? h(
+                'div',
+                { style: { fontSize: 11, color: 'var(--dnb-text-3)', lineHeight: 1.4 } },
+                '停机前锁定核心目标：',
+                m.objective,
+              )
+            : null,
+          h(
+            'div',
+            { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.45 } },
+            '已为您自动关闭「主动强介入」并取消自动续跑，彻底防止继续推进造成损失；请先人工核实或调整方案后再决定是否重启。',
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: 7, flexWrap: 'wrap', marginTop: 2 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 32, padding: '0 12px', fontSize: 12 },
+              disabled: ackBusy,
+              onClick: () => void dismissAndAck('boundaries'),
+            }, '查看边界红线'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: { height: 32, padding: '0 16px', fontSize: 12.5, fontWeight: 700, background: '#ff453a', color: '#fff' },
+              disabled: ackBusy,
+              onClick: () => void dismissAndAck(''),
+            }, ackBusy ? '确认中…' : '我知道了（已交还人工控制）'),
           ),
         ),
       )
@@ -12222,11 +15487,157 @@ window.__ModuleLoader__.load({
               disabled: Boolean(view.archivePrecipitating),
               onClick: () => void precipitateArchivesApi({
                 op: m.op || 'cabinet',
-                cabinetId: m.cabinetId || view.archiveCabinetId || 'cab-main',
+                vaultScope: m.vaultScope || 'global',
+                cabinetId: '',
                 folder: m.folder || '',
+                ...(Array.isArray(m.ids) && m.ids.length > 0 ? { ids: m.ids } : {}),
                 clearSource: Boolean(m.clearSource),
               }),
             }, view.archivePrecipitating ? '正在提炼沉淀…' : '开始提炼沉淀'),
+          ),
+        ),
+      )
+    }
+
+    function PeerLinkConfirmModal({ view }) {
+      const m = view.peerLinkConfirmModal
+      if (!m) return null
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget) patch({ peerLinkConfirmModal: null })
+          },
+        },
+        h(
+          'div',
+          { className: 'dnb-modal-card' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 接入互通协同网络 — 上下文防污染确认'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 22, height: 22 },
+              onClick: () => patch({ peerLinkConfirmModal: null }),
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          h(
+            'div',
+            {
+              style: {
+                borderRadius: 9,
+                padding: '8px 10px',
+                border: '1px solid var(--dnb-border)',
+                background: 'var(--dnb-card)',
+                fontSize: 11.5,
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 4,
+              },
+            },
+            h('div', null, h('strong', null, '拟接入窗口：'), m.peerTitle || shortSession(m.peerId)),
+            m.peerObjective
+              ? h('div', { style: { color: 'var(--dnb-text-2)' } }, h('strong', null, '对方当前目标：'), m.peerObjective)
+              : null,
+          ),
+          h(
+            'div',
+            { className: 'dnb-disclaimer-box' },
+            '一旦接入同一协同网络，两个独立会话将自动共享实时进度、协同信箱与参谋态势。\n',
+            h('strong', null, '如果这两个对话处理的并非同一个或强关联的任务，强制联动会同时污染两个对话的上下文与参谋长摘要！'),
+            '\n请确认二者任务相关后再接入（后续若随时断开，系统会自动净化并隔离协同摘要与残余记忆）。',
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: 7 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 28, padding: '0 12px', fontSize: 12 },
+              onClick: () => patch({ peerLinkConfirmModal: null }),
+            }, '取消（不联动）'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: { height: 28, padding: '0 14px', fontSize: 12, background: '#f59e0b', color: '#111', fontWeight: 700 },
+              onClick: async () => {
+                const pid = m.peerId
+                patch({ peerLinkConfirmModal: null })
+                await togglePeerSessionLink(pid, true)
+              },
+            }, '确认任务相关并接入网络'),
+          ),
+        ),
+      )
+    }
+
+    function HandoffWarnModal({ view }) {
+      const m = view.handoffWarnModal
+      if (!m) return null
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget && !view.secRegenerating) patch({ handoffWarnModal: null })
+          },
+        },
+        h(
+          'div',
+          { className: 'dnb-modal-card' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 交接前提醒：交接单尚未对齐最新状态'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 22, height: 22 },
+              disabled: Boolean(view.secRegenerating),
+              onClick: () => patch({ handoffWarnModal: null }),
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          h(
+            'div',
+            { className: 'dnb-disclaimer-box' },
+            m.reason || '当前交接单若未写好或未同步最新进展，强行交接将打乱下一窗口的上下文！建议先让参谋长提炼并更新交接单后再投递。',
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 28, padding: '0 10px', fontSize: 11.5 },
+              disabled: Boolean(view.secRegenerating),
+              onClick: () => {
+                patch({ handoffWarnModal: null, handoffEditing: true, handoffDraft: view.handoffText || '' })
+              },
+            }, '去手动修改'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 28, padding: '0 10px', fontSize: 11.5 },
+              disabled: Boolean(view.secRegenerating),
+              onClick: () => {
+                patch({ handoffWarnModal: null })
+                void transfer(m.target, m.opts)
+              },
+            }, '仍直接交接'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: { height: 28, padding: '0 12px', fontSize: 11.5, fontWeight: 700 },
+              disabled: Boolean(view.secRegenerating),
+              onClick: async () => {
+                await loadChiefView(true, { syncHandoff: true })
+                patch({ handoffWarnModal: null })
+                await transfer(m.target, m.opts)
+              },
+            }, view.secRegenerating ? '参谋长更新交接单中…' : '✦ 让参谋长更新交接单并交接'),
           ),
         ),
       )
@@ -12347,7 +15758,7 @@ window.__ModuleLoader__.load({
                 })(),
                 onClick: () => {
                   const nextOpen = !view.secModelMenuOpen
-                  patch({ secModelMenuOpen: nextOpen, secPaceMenuOpen: false })
+                  patch({ secModelMenuOpen: nextOpen, secPaceMenuOpen: false, secPermMenuOpen: false })
                   if (nextOpen) void loadChiefModels(true)
                 },
               }, (() => {
@@ -12360,19 +15771,22 @@ window.__ModuleLoader__.load({
               h('button', {
                 className: 'dnb-head-pill',
                 'data-pilot': (meta.paceMode === 'auto') ? '1' : '0',
-                style: meta.paceMode === 'smart'
-                  ? { borderColor: 'rgba(10, 132, 255, 0.38)', color: 'var(--dnb-accent)' }
-                  : undefined,
+                style: meta.paceMode === 'stopped'
+                  ? { borderColor: 'rgba(255, 69, 58, 0.52)', color: '#ff6961', background: 'rgba(255, 69, 58, 0.10)' }
+                  : (meta.paceMode === 'smart'
+                      ? { borderColor: 'rgba(10, 132, 255, 0.38)', color: 'var(--dnb-accent)' }
+                      : undefined),
                 title: (() => {
                   const pm = meta.paceMode || 'manual'
+                  if (pm === 'stopped') return '当前节奏：已停止参谋长（强介入、空转监控与断线续跑已全部暂停 · 点击切换恢复）'
                   if (pm === 'auto') return '当前节奏：全自动托管（节流自动巡检、递话与摘要 · 点击切换节奏）'
                   if (pm === 'smart') return '当前节奏：关键巡检（仅撞墙/阶段节点节流巡检，摘要按需手动 · 点击切换节奏）'
                   return '当前节奏：按需手动（后台零自动总结，省 Token 不空转 · 点击切换节奏）'
                 })(),
-                onClick: () => patch({ secPaceMenuOpen: !view.secPaceMenuOpen, secModelMenuOpen: false }),
+                onClick: () => patch({ secPaceMenuOpen: !view.secPaceMenuOpen, secModelMenuOpen: false, secPermMenuOpen: false }),
               },
                 meta.paceMode === 'auto' ? h(Icon, { name: 'bolt', size: 11 }) : null,
-                meta.paceMode === 'auto' ? '托管' : meta.paceMode === 'smart' ? '👁 巡检' : '⏸ 按需',
+                meta.paceMode === 'stopped' ? '⏹ 已停' : (meta.paceMode === 'auto' ? '托管' : (meta.paceMode === 'smart' ? '👁 巡检' : '⏸ 按需')),
               ),
               h('button', {
                 className: 'dnb-icon-btn',
@@ -12490,7 +15904,31 @@ window.__ModuleLoader__.load({
             ),
           ),
 
-          // Host Compatibility Banner (when DSH host is pre-rc.2 without named subagent tree APIs)
+          // Stale Backend Module Notice (if desktop host still holds pre-1.2.0-r5 backend in RAM)
+          view.staleBackendDetected && !view.staleBackendDismissed
+            ? h(
+                'div',
+                {
+                  style: {
+                    margin: '0 12px 8px',
+                    padding: '6px 10px',
+                    borderRadius: 10,
+                    border: '1px solid rgba(245, 158, 11, 0.42)',
+                    background: 'rgba(245, 158, 11, 0.12)',
+                    color: '#f59e0b',
+                    fontSize: 11.5,
+                    lineHeight: 1.45,
+                    display: 'flex',
+                    justifyContent: 'space-between',
+                    alignItems: 'center',
+                    gap: 8,
+                  },
+                },
+                h('span', null, '⚠ 检测到宿主进程仍在运行旧版内存模块（非 1.2.0-r6），状态问答防泄漏、强介入核心目标锁定、高危急停弹窗与必做事项督导核验需重启 DeepSeek Harness 客户端后完全生效。'),
+                h('span', { style: { cursor: 'pointer', paddingLeft: 6, flexShrink: 0 }, onClick: () => patch({ staleBackendDismissed: true }) }, '×'),
+              )
+            : null,
+
           view.hostCompat && view.hostCompat.present && view.hostCompat.namedSubagentsSupported === false && !view.hostCompatDismissed
             ? h(
                 'div',
@@ -12549,7 +15987,15 @@ window.__ModuleLoader__.load({
 
           // Scoped Modal Overlays (Strictly bounded inside .dnb-panel)
           h(InterventionConfirmModal, { view, board }),
+          h(HazardHaltModal, { view }),
+          h(UnlimitedTurnsConfirmModal, { view }),
+          h(AutoPilotConfirmModal, { view }),
+          h(ArchiveRelayModal, { view }),
+          h(DistillToGlobalModal, { view }),
+          h(ChiefAdviceModal, { view }),
           h(PrecipitateConfirmModal, { view }),
+          h(PeerLinkConfirmModal, { view }),
+          h(HandoffWarnModal, { view }),
 
           // Floating iOS Toast
           view.notice ? h('div', { className: 'dnb-toast' }, view.notice) : null,
@@ -12564,6 +16010,80 @@ window.__ModuleLoader__.load({
     /* -------------------------------------------------- Session & Triggers */
 
     const SESSION_SOURCES = new Map()
+    let sessionClearTimer = null
+
+    function clearBoundSessionToBlank() {
+      sessionClearTimer = null
+      let stillActive = ''
+      for (const value of SESSION_SOURCES.values()) {
+        if (value) stillActive = value
+      }
+      if (stillActive || sessionIdFromUrl()) return
+      if (!store.sessionId) return
+      store.sessionId = ''
+      patch({
+        sessionId: '',
+        open: false,
+        board: null,
+        secView: null,
+        secLatestReply: null,
+        secTarget: 'auto',
+        selectedTaskId: '',
+        focusTaskId: '',
+        fleetShowAll: false,
+        pyramidShowAllAgents: false,
+        editTaskId: '',
+        editNoteId: '',
+        newNote: false,
+        askHits: null,
+        handoffText: '',
+        handoffEdit: null,
+        handoffEditing: false,
+        handoffDraft: '',
+        handoffMeta: {
+          source: 'auto',
+          isCustom: false,
+          pinned: false,
+          syncOnDigest: false,
+          isIncomplete: false,
+          isStale: false,
+          hasNarrativeUpdate: false,
+          autoText: '',
+          updatedAt: 0,
+        },
+        handoffWarnModal: null,
+        peerLinkConfirmModal: null,
+        mailChannelFilter: 'all',
+        mailOpenDrawers: {},
+        tacticalMenuOpen: false,
+        interventionModalOpen: false,
+        interventionAgreed: false,
+        precipitateModal: null,
+        autoPilotConfirmOpen: false,
+        archiveRelayModal: null,
+        distillGlobalModal: null,
+        chiefAdviceModal: null,
+        seenAdvicePopupIds: {},
+        selectedArchiveMap: {},
+        archiveDeskItems: [],
+        archiveDeskLoaded: false,
+        compactLowWarning: '',
+        archiveLoaded: false,
+        archiveSessionLoaded: false,
+        globalVaultLoaded: false,
+        archiveDiffSummary: null,
+        archiveCabinetId: '',
+        archiveCabinets: [],
+        archiveFolders: [],
+        archiveItems: [],
+        archiveDetails: {},
+        archiveOpenFolders: {},
+        archiveOpenFiles: {},
+        archiveUnboundSession: true,
+      })
+      void refresh()
+      if (store.tab === 'archive') void loadArchives(true)
+    }
 
     function adoptSession(source, sessionId, inputActions) {
       if (sessionId) SESSION_SOURCES.set(source, sessionId)
@@ -12574,8 +16094,17 @@ window.__ModuleLoader__.load({
       for (const value of SESSION_SOURCES.values()) {
         if (value) next = value
       }
-      // Keep last known sessionId if all probes transiently unmount during layout switch
-      if (!next && store.sessionId) return
+      if (next && sessionClearTimer) {
+        clearTimeout(sessionClearTimer)
+        sessionClearTimer = null
+      }
+      // When navigating back to a blank new-chat screen without a session UUID, debounce-clear after 180ms
+      if (!next && store.sessionId) {
+        if (!sessionClearTimer && !sessionIdFromUrl()) {
+          sessionClearTimer = setTimeout(clearBoundSessionToBlank, 180)
+        }
+        return
+      }
       if (next === store.sessionId) return
 
       const switchedConversation = Boolean(store.sessionId && next && store.sessionId !== next)
@@ -12599,6 +16128,23 @@ window.__ModuleLoader__.load({
               askHits: null,
               handoffText: '',
               handoffEdit: null,
+              handoffEditing: false,
+              handoffDraft: '',
+              handoffMeta: {
+                source: 'auto',
+                isCustom: false,
+                pinned: false,
+                syncOnDigest: false,
+                isIncomplete: false,
+                isStale: false,
+                hasNarrativeUpdate: false,
+                autoText: '',
+                updatedAt: 0,
+              },
+              handoffWarnModal: null,
+              peerLinkConfirmModal: null,
+              mailChannelFilter: 'all',
+              mailOpenDrawers: {},
               memSections: [],
               memCount: 0,
               memDigest: '',
@@ -12609,14 +16155,34 @@ window.__ModuleLoader__.load({
               interventionModalOpen: false,
               interventionAgreed: false,
               precipitateModal: null,
+              autoPilotConfirmOpen: false,
+              archiveRelayModal: null,
+              distillGlobalModal: null,
+              chiefAdviceModal: null,
+              seenAdvicePopupIds: {},
+              hazardHaltModal: null,
+              seenHazardAlertIds: {},
+              selectedArchiveMap: {},
+              archiveDeskItems: [],
+              archiveDeskLoaded: false,
+              compactLowWarning: '',
               archiveLoaded: false,
+              archiveSessionLoaded: false,
+              globalVaultLoaded: false,
+              archiveDiffSummary: null,
+              archiveCabinetId: '',
+              archiveCabinets: [],
+              archiveFolders: [],
+              archiveItems: [],
               archiveDetails: {},
               archiveOpenFolders: {},
               archiveOpenFiles: {},
+              archiveUnboundSession: !next,
             }
           : {}),
       })
       void refresh()
+      if (switchedConversation && store.tab === 'archive') void loadArchives(true)
     }
 
     function SessionProbe(props) {

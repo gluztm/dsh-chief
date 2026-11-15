@@ -37,46 +37,62 @@ import {
   resolveWorkspaceConfig,
   getLinkedCluster,
   setPeerLink,
+  collectClusterPeerProgress,
   invalidateChiefModelCatalog,
   listChiefModels,
   listPeerDirectory,
+  buildMessageEnvelope,
   deliverCrossMessage,
   consumePreStepDelta,
   getChiefView,
+  recommendAndSetCompactThreshold,
   askOrCommandChief,
   consolidateBoundsWithChief,
   organizeArchivesWithChief,
   harvestTurnDetailsToArchive,
   precipitateExperienceWithChief,
+  distillSessionArchivesToGlobal,
   deployChiefWorkspaceState,
   updateWorkspaceFlippedIds,
+  requestSmartCompactFromLead,
   maybeRunPreCompaction,
   runTurnReview,
   proposeBoundToChief,
   scheduleChiefTurnReview,
   handleSuggestionDecision,
   updateChiefConfig,
+  suggestCoreObjectiveWithChief,
+  relayArchivesWithChief,
   mutateChiefFact,
   readMailboxForAgent,
 } from './chief.js'
+import { createAutoContinueEngine } from './auto-continue.js'
 import {
   bootstrapArchivesFromSharedBoard,
   resolveProjectKey,
   listProjectCabinets,
   getArchiveMeta,
+  getThreeTierArchiveCounts,
   listArchiveHeaders,
   getArchiveDetail,
   searchArchives,
   mutateArchive,
   copyArchivesBetweenSessionsOrCabinets,
   getTakenOutArchivesForSession,
+  getTakenOutGlobalForSession,
   getFlippedOutPrecipitatedForSession,
   listPrecipitatedHeaders,
   getPrecipitatedDetail,
   mutatePrecipitated,
+  copyPrecipitatedToVault,
 } from './archives.js'
+import {
+  DEFAULT_CHIEF_PERMISSION_MODE,
+  normalizePermissionMode,
+} from './chief-executor.js'
 
 const API = '/api/dsh-chief'
+const BACKEND_BUILD = '1.2.0-r6'
 const BOARD_VERSION = 1
 const LOG_CAP = 60
 const BODY_LIMIT = 24 * 1024 * 1024
@@ -195,6 +211,8 @@ function boardFile() {
 /** Active runtime reference for resolving subagent tree lineage and live status. */
 let activeRuntime = null
 let activeLlm = null
+let activeAutoContinue = null
+const autoSteeredTurns = new Map()
 const subagentRootMap = new Map()
 const subagentTreeCache = new Map()
 
@@ -416,7 +434,18 @@ function emptyBoard() {
     // is, and what is blocking it. Long tasks die from losing that one line, so
     // it is a first-class field and the digest leads with it.
     cursor: { at: 0, step: '', next: '', blocked: '', by: '', session: '' },
-    handoff: { at: 0, by: '', session: '' },
+    handoff: {
+      at: 0,
+      by: '',
+      session: '',
+      customText: '',
+      pinned: false,
+      pinnedAt: 0,
+      pinnedBy: '',
+      updatedAt: 0,
+      source: 'auto',
+      syncOnDigest: false,
+    },
     plan: [],
     tasks: [],
     notes: [],
@@ -624,6 +653,13 @@ function normalizeNote(raw) {
 
 const BOUND_FIELDS = ['allowed', 'forbidden', 'notes']
 
+/** Normalize boundary field names, accepting `'must'` as an alias for `'allowed'` (必做事项). */
+function normalizeBoundFieldName(raw) {
+  const f = str(raw, '').trim().toLowerCase()
+  if (f === 'must' || f === 'must_do' || f === 'mustdo') return 'allowed'
+  return BOUND_FIELDS.includes(f) ? f : ''
+}
+
 // Hard cap on one bounds column. Two different jobs read this number: loading
 // clamps to it (an old or hand-edited board file must never be able to throw
 // while being read), and every write path checks it BEFORE storing anything.
@@ -733,6 +769,14 @@ function normalizeBoard(raw) {
       at: board.handoff && typeof board.handoff.at === 'number' ? board.handoff.at : 0,
       by: str(board.handoff && board.handoff.by, ''),
       session: str(board.handoff && board.handoff.session, ''),
+      customText: str(board.handoff && board.handoff.customText, '').slice(0, 16000),
+      pinned: board.handoff ? board.handoff.pinned === true : false,
+      frozenFromAuto: board.handoff ? board.handoff.frozenFromAuto === true : false,
+      pinnedAt: board.handoff && typeof board.handoff.pinnedAt === 'number' ? board.handoff.pinnedAt : 0,
+      pinnedBy: str(board.handoff && board.handoff.pinnedBy, ''),
+      updatedAt: board.handoff && typeof board.handoff.updatedAt === 'number' ? board.handoff.updatedAt : 0,
+      source: ['human', 'chief', 'auto'].includes(str(board.handoff && board.handoff.source, '')) ? board.handoff.source : 'auto',
+      syncOnDigest: board.handoff ? board.handoff.syncOnDigest === true : false,
     },
     cursor: {
       at: board.cursor && typeof board.cursor.at === 'number' ? board.cursor.at : 0,
@@ -941,6 +985,19 @@ function forcesShared(action, args) {
   return action === 'note.write' && asBool(args.pinned) === true
 }
 
+/** Check whether Strong Intervention (`主动强介入`) is active and locks `board.objective` for a session tree. */
+function isObjectiveLockedByIntervention(sessionId) {
+  const rawSid = str(sessionId, '').trim()
+  if (!rawSid) return false
+  try {
+    const rootSid = resolveRootSessionId(rawSid) || rawSid
+    const cfg = resolveWorkspaceConfig(loadChiefState(), rootSid)
+    return Boolean(cfg && cfg.tacticalModes && cfg.tacticalModes.intervention === true)
+  } catch {
+    return false
+  }
+}
+
 function runAction(input) {
   const args = input && typeof input === 'object' ? input : {}
   const action = str(args.action, 'snapshot')
@@ -972,12 +1029,19 @@ function runActionUnlocked(input) {
   const shared = forcesShared(action, args)
   const file = shared ? boardFile() : boardFileFor(session)
 
-  // Cold-storage Engineering Archives: strictly on-demand lookup/save, never auto-loaded.
+  // Session-scoped Engineering Archives: Lead/Subagents may ONLY access THIS session's cabinet (never global or unflipped precipitated!).
   if (action === 'archive.search') {
     const q = str(args.query !== undefined ? args.query : (args.question !== undefined ? args.question : args.text), '')
     const folder = str(args.folder, '')
     const rootSid = resolveRootSessionId(session) || session
-    const res = searchArchives(q, { folder, limit: 10 }, archiveTarget(activeRuntime, rootSid, str(args.cabinetId, '')))
+    if (!rootSid) {
+      return {
+        ok: true,
+        archiveSearch: { ok: true, totalArchives: 0, matchCount: 0, hits: [], unboundSession: true },
+        board: emptyBoard(),
+      }
+    }
+    const res = searchArchives(q, { folder, limit: 10, vaultScope: 'session' }, archiveTarget(activeRuntime, rootSid, { cabinetId: str(args.cabinetId, ''), vaultScope: 'session' }))
     return {
       ok: true,
       archiveSearch: res,
@@ -989,7 +1053,8 @@ function runActionUnlocked(input) {
     const target = str(args.archiveId !== undefined ? args.archiveId : (args.id !== undefined ? args.id : args.title), '').trim()
     if (!target) return { ok: false, error: 'archive.read requires archiveId, id, or title' }
     const rootSid = resolveRootSessionId(session) || session
-    const res = getArchiveDetail(target, rootSid, archiveTarget(activeRuntime, rootSid, str(args.cabinetId, '')))
+    if (!rootSid) return { ok: false, error: '当前未绑定对话会话，无法读取本会话档案柜' }
+    const res = getArchiveDetail(target, rootSid, archiveTarget(activeRuntime, rootSid, { cabinetId: str(args.cabinetId, ''), vaultScope: 'session' }))
     if (!res.ok) return { ok: false, error: res.error }
     return {
       ok: true,
@@ -1000,8 +1065,10 @@ function runActionUnlocked(input) {
 
   if (action === 'archive.save') {
     const rootSid = resolveRootSessionId(session) || session
+    if (!rootSid) return { ok: false, error: '当前未绑定对话会话，无法保存到本会话档案柜' }
     const res = mutateArchive({
       op: 'save',
+      vaultScope: 'session',
       archiveId: str(args.archiveId !== undefined ? args.archiveId : args.id, ''),
       title: str(args.title, ''),
       body: typeof args.body === 'string' ? args.body : undefined,
@@ -1012,7 +1079,7 @@ function runActionUnlocked(input) {
       points: Array.isArray(args.points) ? args.points : undefined,
       by,
       rootSessionId: rootSid,
-    }, archiveTarget(activeRuntime, rootSid, str(args.cabinetId, '')))
+    }, archiveTarget(activeRuntime, rootSid, { cabinetId: str(args.cabinetId, ''), vaultScope: 'session' }))
     if (!res.ok) return { ok: false, error: res.error }
     if (session) {
       withBoardLock(file, () => {
@@ -1040,6 +1107,29 @@ function runActionUnlocked(input) {
   if (action === 'snapshot') return { ok: true, board: loadBoard(file) }
 
   const board = loadBoard(file)
+
+  if (action === 'task.reset') {
+    const mode = str(args.mode, 'clear').trim().toLowerCase()
+    const hadCount = Array.isArray(board.tasks) ? board.tasks.length : 0
+    if (mode === 'reopen') {
+      board.tasks = (board.tasks || []).map(t => ({
+        ...t,
+        status: 'todo',
+        evidence: '',
+        updatedAt: nowMs(),
+      }))
+      reconcileTaskDependencies(board, by, session)
+      pushLog(board, '已将本会话全部任务重置为待推进（共 ' + board.tasks.length + ' 项）', by, session)
+    } else {
+      board.tasks = []
+      if (asBool(args.alsoResetPlan) === true) {
+        board.plan = []
+        board.cursor = { at: nowMs(), step: '', next: '', blocked: '', by, session }
+      }
+      pushLog(board, '已重设清空本会话任务列表（原 ' + hadCount + ' 项）', by, session)
+    }
+    return { ok: true, clearedTasks: hadCount, mode, board: saveBoard(board, file) }
+  }
 
   if (action === 'task.add') {
     const title = str(args.title, '').trim()
@@ -1073,9 +1163,15 @@ function runActionUnlocked(input) {
   if (action === 'graph.plan' || action === 'task.batch') {
     const clips = []
     if (typeof args.objective === 'string' && args.objective.trim()) {
-      board.objective = clipInto(clips, 'objective', args.objective.trim(), CAP_OBJECTIVE)
-      board.objectiveBy = session
-      board.objectiveAt = nowMs()
+      if (isObjectiveLockedByIntervention(session) && asBool(args._fromInterventionSetup) !== true) {
+        if (args.objective.trim() !== String(board.objective || '').trim()) {
+          pushLog(board, '🔒 主动强介入已锁定核心目标，忽略本次任务图目标改写', by, session)
+        }
+      } else {
+        board.objective = clipInto(clips, 'objective', args.objective.trim(), CAP_OBJECTIVE)
+        board.objectiveBy = session
+        board.objectiveAt = nowMs()
+      }
     }
     const rawList = Array.isArray(args.tasks) ? args.tasks : (Array.isArray(args.nodes) ? args.nodes : [])
     if (!rawList.length) return { ok: false, error: 'graph.plan requires a non-empty tasks array' }
@@ -1265,17 +1361,23 @@ function runActionUnlocked(input) {
   if (action === 'plan.set') {
     const clips = []
     if (typeof args.objective === 'string') {
-      board.objective = clipInto(clips, 'objective', args.objective, CAP_OBJECTIVE)
-      // Whoever writes the objective owns it. Leaving the previous owner in
-      // place made the panel header name the Session that set the *old* text,
-      // so a fresh save looked like it came from somebody else.
-      board.objectiveBy = session
-      board.objectiveAt = nowMs()
-      // objective.set logged this write and plan.set did not, so retargeting a
-      // board through plan.set left no trace in the log: the objective page
-      // said the goal had changed and the log page said nothing had happened.
-      // One action, two entry points, one line either way.
-      pushLog(board, '目标改为：' + board.objective.slice(0, 60), by, session)
+      if (isObjectiveLockedByIntervention(session) && asBool(args._fromInterventionSetup) !== true) {
+        if (args.objective.trim() !== String(board.objective || '').trim()) {
+          pushLog(board, '🔒 主动强介入已锁定核心目标，保留原核心目标（仅更新计划步骤）', by, session)
+        }
+      } else {
+        board.objective = clipInto(clips, 'objective', args.objective, CAP_OBJECTIVE)
+        // Whoever writes the objective owns it. Leaving the previous owner in
+        // place made the panel header name the Session that set the *old* text,
+        // so a fresh save looked like it came from somebody else.
+        board.objectiveBy = session
+        board.objectiveAt = nowMs()
+        // objective.set logged this write and plan.set did not, so retargeting a
+        // board through plan.set left no trace in the log: the objective page
+        // said the goal had changed and the log page said nothing had happened.
+        // One action, two entry points, one line either way.
+        pushLog(board, '目标改为：' + board.objective.slice(0, 60), by, session)
+      }
     }
     const steps = asList(args.steps)
     if (steps) {
@@ -1407,6 +1509,13 @@ function runActionUnlocked(input) {
   }
 
   if (action === 'objective.set') {
+    if (isObjectiveLockedByIntervention(session) && asBool(args._fromInterventionSetup) !== true) {
+      return {
+        ok: false,
+        locked: true,
+        error: '当前处于「主动强介入」模式，核心目标已锁定；如需修改请先关闭强介入模式。',
+      }
+    }
     const objective = str(args.objective, '').trim()
     if (!objective) return { ok: false, error: 'objective required' }
     const clips = []
@@ -1450,17 +1559,18 @@ function runActionUnlocked(input) {
     // Naming the column makes "this list is now empty" and "I did not touch
     // that list" two different sentences.
     const items = asList(args.items)
-    if (BOUND_FIELDS.indexOf(str(args.field, '')) >= 0 && items) {
+    const explicitCol = normalizeBoundFieldName(args.field)
+    if (explicitCol && items) {
       if (overCap(items)) return { ok: false, error: tooLongNote(items.length) }
-      current[str(args.field, '')] = normalizeList(items)
+      current[explicitCol] = normalizeList(items)
       board.bounds = current
-      pushLog(board, '更新边界（允许 ' + current.allowed.length + ' / 禁止 ' + current.forbidden.length + ' / 注意 ' + current.notes.length + '）', by, session)
+      pushLog(board, '更新边界（必做 ' + current.allowed.length + ' / 禁止 ' + current.forbidden.length + ' / 注意 ' + current.notes.length + '）', by, session)
       return { ok: true, bounds: current, board: saveBoard(board, file) }
     }
     // The whole-table form checks every list it was handed before touching
     // any of them: a refusal must leave the two valid columns alone as well,
     // otherwise the error message and the board disagree about what happened.
-    const given = { allowed: asList(args.allowed), forbidden: asList(args.forbidden), notes: asList(args.notes) }
+    const given = { allowed: asList(args.allowed !== undefined ? args.allowed : args.must), forbidden: asList(args.forbidden), notes: asList(args.notes) }
     const tooLong = BOUND_FIELDS.filter(name => overCap(given[name]))
     if (tooLong.length) {
       return {
@@ -1473,14 +1583,14 @@ function runActionUnlocked(input) {
     if (given.forbidden) current.forbidden = normalizeList(given.forbidden)
     if (given.notes) current.notes = normalizeList(given.notes)
     board.bounds = current
-    pushLog(board, '更新边界（允许 ' + current.allowed.length + ' / 禁止 ' + current.forbidden.length + ' / 注意 ' + current.notes.length + '）', by, session)
+    pushLog(board, '更新边界（必做 ' + current.allowed.length + ' / 禁止 ' + current.forbidden.length + ' / 注意 ' + current.notes.length + '）', by, session)
     return { ok: true, bounds: current, board: saveBoard(board, file) }
   }
 
   if (action === 'bounds.add' || action === 'bounds.pin' || action === 'bounds.remove' || action === 'bounds.edit' || action === 'bounds.consolidate') {
-    const col = str(args.field, '').trim()
-    if (!BOUND_FIELDS.includes(col)) {
-      return { ok: false, error: 'bounds operation requires field: allowed | forbidden | notes' }
+    const col = normalizeBoundFieldName(args.field)
+    if (!col) {
+      return { ok: false, error: 'bounds operation requires field: allowed (必做) | forbidden (禁止) | notes (注意)' }
     }
     const sharedFile = boardFile()
     const isSameFile = file === sharedFile
@@ -1758,8 +1868,115 @@ function runActionUnlocked(input) {
   }
 
   if (action === 'handoff.mark') {
-    board.handoff = { at: nowMs(), by, session }
+    const prev = board.handoff || {}
+    board.handoff = { ...prev, at: nowMs(), by, session }
     pushLog(board, '生成并交接给参谋看板：交接单已更新', by, session)
+    return { ok: true, handoff: board.handoff, board: saveBoard(board, file) }
+  }
+
+  if (action === 'handoff.save') {
+    const prev = board.handoff || {}
+    const reqSource = str(args.source, '')
+    const isChief = by === 'chief' || by === 'DSH 参谋长' || reqSource === 'chief'
+    if (prev.pinned && isChief && asBool(args.force) !== true) {
+      return { ok: false, pinned: true, error: '交接单已被人类固定锁定，参谋长不可覆盖' }
+    }
+    const rawText = args.text !== undefined ? args.text : args.customText
+    const customText = str(rawText, '').slice(0, 16000)
+    const now = nowMs()
+    board.handoff = {
+      ...prev,
+      at: now,
+      by,
+      session: session || prev.session || '',
+      customText,
+      frozenFromAuto: false,
+      updatedAt: now,
+      source: isChief ? 'chief' : 'human',
+    }
+    pushLog(board, isChief ? '✦ 参谋长摘要已同步写入交接单' : '✏️ 人类已手动修订并保存交接单', by, session)
+    return { ok: true, handoff: board.handoff, board: saveBoard(board, file) }
+  }
+
+  if (action === 'handoff.pin') {
+    const prev = board.handoff || {}
+    const nextPinned = asBool(args.pinned) !== undefined ? asBool(args.pinned) : !Boolean(prev.pinned)
+    const now = nowMs()
+    let nextCustomText = str(prev.customText, '')
+    let nextSource = prev.source || 'auto'
+    let nextFrozenFromAuto = Boolean(prev.frozenFromAuto)
+    let nextUpdatedAt = Number(prev.updatedAt) || 0
+
+    if (nextPinned && !nextCustomText.trim()) {
+      const providedSnap = str(args.snapshotText, '').trim()
+      let autoSnap = providedSnap
+      if (!autoSnap) {
+        try {
+          const eff = resolveEffectiveHandoff(activeRuntime, session || prev.session || '', board)
+          autoSnap = str((eff && (eff.text || eff.autoText)) || '', '').trim()
+        } catch {}
+      }
+      if (autoSnap) {
+        nextCustomText = autoSnap.slice(0, 16000)
+        nextFrozenFromAuto = true
+        nextSource = prev.source || 'auto'
+        nextUpdatedAt = now
+      }
+    } else if (!nextPinned && prev.frozenFromAuto === true) {
+      nextCustomText = ''
+      nextFrozenFromAuto = false
+      nextSource = 'auto'
+      nextUpdatedAt = now
+    }
+
+    board.handoff = {
+      ...prev,
+      pinned: nextPinned,
+      pinnedAt: nextPinned ? now : 0,
+      pinnedBy: nextPinned ? by : '',
+      customText: nextCustomText,
+      frozenFromAuto: nextFrozenFromAuto,
+      source: nextSource,
+      updatedAt: nextUpdatedAt,
+    }
+    pushLog(
+      board,
+      nextPinned
+        ? (nextFrozenFromAuto ? '📌 交接单已定住锁定（已冻结当前自动渲染快照，禁止参谋长覆写）' : '📌 交接单已定住锁定：参谋长自动更新已禁止覆写')
+        : (prev.frozenFromAuto ? '🔓 交接单已解除定住并恢复自动实时渲染' : '🔓 交接单已解除定住锁定'),
+      by,
+      session,
+    )
+    return { ok: true, handoff: board.handoff, board: saveBoard(board, file) }
+  }
+
+  if (action === 'handoff.reset') {
+    const prev = board.handoff || {}
+    const keepPin = asBool(args.keepPin) === true
+    board.handoff = {
+      ...prev,
+      at: nowMs(),
+      by,
+      session: session || prev.session || '',
+      customText: '',
+      frozenFromAuto: false,
+      updatedAt: nowMs(),
+      source: 'auto',
+      pinned: keepPin ? Boolean(prev.pinned) : false,
+      pinnedAt: keepPin ? (prev.pinnedAt || 0) : 0,
+      pinnedBy: keepPin ? (prev.pinnedBy || '') : '',
+    }
+    pushLog(board, '↺ 已恢复为自动实时渲染的交接单', by, session)
+    return { ok: true, handoff: board.handoff, board: saveBoard(board, file) }
+  }
+
+  if (action === 'handoff.setSyncOnDigest') {
+    const prev = board.handoff || {}
+    const enabled = asBool(args.enabled !== undefined ? args.enabled : args.syncOnDigest) === true
+    board.handoff = {
+      ...prev,
+      syncOnDigest: enabled,
+    }
     return { ok: true, handoff: board.handoff, board: saveBoard(board, file) }
   }
 
@@ -2410,40 +2627,361 @@ function getSessionCwd(runtime, sessionId) {
   return process.cwd()
 }
 
-function archiveTarget(runtime, sessionId, explicitCabinetId = '') {
+function resolveArchiveHttpScope(raw) {
+  const s = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+  if (s === 'global') return 'global'
+  if (s === 'precipitated' || s === 'cold' || s === 'vault') return 'precipitated'
+  return 'session'
+}
+
+function resolveBoundRootSid(sessionId = '') {
+  const raw = String(sessionId || '').trim()
+  if (!raw || raw === 'global') return ''
+  const root = String(resolveRootSessionId(raw) || raw).trim()
+  return (!root || root === 'global') ? '' : root
+}
+
+function archiveTarget(runtime, sessionId, optOrId = '') {
+  const opts = optOrId && typeof optOrId === 'object'
+    ? optOrId
+    : { cabinetId: typeof optOrId === 'string' ? optOrId : '' }
+  const vaultScope = opts.vaultScope === 'global' ? 'global' : 'session'
   const sid = String(sessionId || '').trim()
-  const rootSid = sid ? (resolveRootSessionId(sid) || sid) : ''
-  let cabinetId = typeof explicitCabinetId === 'string' ? explicitCabinetId.trim() : ''
-  if (!cabinetId && rootSid) {
+  const rootSid = resolveBoundRootSid(sid)
+  let cabinetId = vaultScope !== 'global' && typeof opts.cabinetId === 'string' ? opts.cabinetId.trim() : ''
+  if (vaultScope !== 'global' && !cabinetId && rootSid) {
     try {
       cabinetId = loadBoard(boardFileFor(rootSid)).activeCabinetId || ''
     } catch {}
   }
   return {
     customSharedBoardFile: boardFile(),
-    cwd: getSessionCwd(runtime, rootSid || sid),
-    ...(cabinetId ? { cabinetId } : {}),
+    cwd: getSessionCwd(runtime, rootSid || (sid !== 'global' ? sid : '')),
+    vaultScope,
+    ...(vaultScope !== 'global' && rootSid ? { rootSessionId: rootSid } : {}),
+    ...(vaultScope !== 'global' && cabinetId ? { cabinetId } : {}),
   }
 }
 
-/** Combine working-cabinet mounted items with explicitly flipped precipitated entries (0 disk reads when empty!). */
+function getSessionContextBreakdown(runtime, sessionId, agentArg = null) {
+  const rt = runtime || activeRuntime
+  const sid = String(sessionId || (agentArg && agentArg.id) || '').trim()
+  const rootSid = sid ? (resolveRootSessionId(sid, agentArg) || sid) : ''
+  const agents = rt ? rt.get('agents') : null
+  const ag = agentArg
+    || (sid && agents && typeof agents.get === 'function' ? agents.get(sid) : null)
+    || (rootSid && agents && typeof agents.get === 'function' ? agents.get(rootSid) : null)
+
+  let contextWindow = 128_000
+  let totalTokens = 0
+  let seq = 0
+  let systemTokens = 0
+  let toolsTokens = 0
+  let messageTokens = 0
+  let modelRef = ''
+  let source = 'estimate'
+
+  try {
+    const projectionsSvc = rt ? rt.get('sessionProjections') : null
+    if (ag && ag.session && projectionsSvc && typeof projectionsSvc.snapshot === 'function') {
+      const snap = projectionsSvc.snapshot(ag.session, ['contextPressure', 'contextBreakdown', 'contextTimeline'])
+      const values = (snap && snap.values) || {}
+      const bd = values.contextBreakdown
+      const pressure = values.contextPressure
+      const timeline = values.contextTimeline
+      if (bd && typeof bd === 'object') {
+        if (Number(bd.systemTokens) >= 0) systemTokens = Math.round(Number(bd.systemTokens))
+        if (Number(bd.toolsTokens) >= 0) toolsTokens = Math.round(Number(bd.toolsTokens))
+        if (Number(bd.messageTokens) >= 0) messageTokens = Math.round(Number(bd.messageTokens))
+        if (Number(bd.contextWindow) > 0) contextWindow = Math.round(Number(bd.contextWindow))
+        const bdTotal = Number(bd.totalTokens) || (systemTokens + toolsTokens + messageTokens)
+        if (bdTotal > 0) {
+          totalTokens = Math.round(bdTotal)
+          source = 'projection'
+        }
+      }
+      if (pressure && typeof pressure === 'object') {
+        if (Number(pressure.contextWindow) > 0) contextWindow = Math.round(Number(pressure.contextWindow))
+        const pTok = Number(pressure.projectedTokens) || Number(pressure.pressureTokens) || 0
+        if (pTok > totalTokens) {
+          totalTokens = Math.round(pTok)
+          source = 'projection'
+        }
+      }
+      if (timeline && timeline.current && typeof timeline.current === 'object') {
+        const cur = timeline.current
+        if (!systemTokens && Number(cur.system) > 0) systemTokens = Math.round(Number(cur.system))
+        if (!toolsTokens && Number(cur.tools) > 0) toolsTokens = Math.round(Number(cur.tools))
+        if (!totalTokens && Number(cur.total) > 0) totalTokens = Math.round(Number(cur.total))
+      }
+    }
+  } catch {}
+
+  let provider = ''
+  let model = ''
+  try {
+    if (ag && ag.session && typeof ag.session.ownEvents === 'function') {
+      const events = ag.session.ownEvents() || []
+      seq = events.length
+      for (let i = events.length - 1; i >= 0; i -= 1) {
+        const ev = events[i]
+        if (!ev) continue
+        if (!provider && ev.type === 'request/header' && ev.data && ev.data.header && ev.data.header.config) {
+          provider = String(ev.data.header.config.provider || '')
+          model = String(ev.data.header.config.model || '')
+        }
+        const usage = ev.usage || (ev.message && ev.message.usage) || (ev.data && ev.data.usage)
+        if (!totalTokens && usage && typeof usage === 'object') {
+          const calc = (Number(usage.inputTokens) || 0)
+            + (Number(usage.cacheReadTokens) || 0)
+            + (Number(usage.outputTokens) || 0)
+          const uTotal = Number(usage.totalTokens) || calc
+          if (uTotal > 0) {
+            totalTokens = Math.round(uTotal)
+            if (source === 'estimate') source = 'usage'
+          }
+          if (Number(usage.contextWindow) > 0) contextWindow = Math.round(Number(usage.contextWindow))
+          if (!systemTokens && Number(usage.systemTokens) > 0) systemTokens = Math.round(Number(usage.systemTokens))
+          if (!toolsTokens && Number(usage.toolsTokens) > 0) toolsTokens = Math.round(Number(usage.toolsTokens))
+        }
+        if (provider && model && totalTokens > 0) break
+      }
+    }
+  } catch {}
+
+  try {
+    const llm = activeLlm || (rt ? rt.get('llm') : null)
+    if (!provider && ag && ag.session && typeof ag.session.requestHeader === 'function') {
+      const h = ag.session.requestHeader()
+      if (h && h.config) {
+        provider = String(h.config.provider || '')
+        model = String(h.config.model || '')
+      }
+    }
+    if (provider && model) {
+      modelRef = `${provider}/${model}`
+      if (llm && typeof llm.resolveModelInfo === 'function') {
+        const info = llm.resolveModelInfo(provider, model)
+        if (info && Number(info.contextWindow) > 0) contextWindow = Math.round(Number(info.contextWindow))
+      }
+    }
+  } catch {}
+
+  // Fallback rough split only when official projection breakdown isn't populated yet
+  if (totalTokens > 0 && systemTokens === 0 && toolsTokens === 0 && messageTokens === 0) {
+    systemTokens = Math.min(totalTokens, Math.round(Math.min(52_000, Math.max(12_000, contextWindow * 0.04))))
+    toolsTokens = Math.min(Math.max(0, totalTokens - systemTokens), 1500)
+    messageTokens = Math.max(0, totalTokens - systemTokens - toolsTokens)
+  } else if (totalTokens > 0 && messageTokens === 0) {
+    messageTokens = Math.max(0, totalTokens - systemTokens - toolsTokens)
+  }
+
+  const overheadTokens = systemTokens + toolsTokens
+  const usedTokens = Math.max(totalTokens, overheadTokens + messageTokens)
+  const otherTokens = Math.max(0, usedTokens - overheadTokens - messageTokens)
+  const pct = contextWindow > 0 ? Math.min(100, Math.round((usedTokens / contextWindow) * 100)) : 0
+
+  return {
+    totalTokens: usedTokens,
+    usedTokens,
+    contextWindow,
+    pct,
+    systemTokens,
+    toolsTokens,
+    messageTokens,
+    otherTokens,
+    overheadTokens,
+    modelRef,
+    seq,
+    source,
+  }
+}
+
+function linkedPeersForSession(runtime, rootId) {
+  if (!rootId) return { linkedPeersCount: 0, linkedPeersProgress: [] }
+  const state = loadChiefState()
+  const cluster = getLinkedCluster(state, rootId)
+  if (!Array.isArray(cluster) || cluster.length <= 1) {
+    return { linkedPeersCount: 0, linkedPeersProgress: [] }
+  }
+  const linkedPeersProgress = collectClusterPeerProgress(makeChiefDeps(runtime), cluster, rootId)
+  return {
+    linkedPeersCount: Math.max(0, cluster.length - 1),
+    linkedPeersProgress,
+  }
+}
+
+function composeHandoffFromNarrative({ board, narrativeText = '', cluster = [] } = {}) {
+  const b = board || emptyBoard()
+  const lines = ['# 交接单（参谋长提炼同步版）', '']
+  if (b.objective) {
+    lines.push('## 总目标', `- ${b.objective}`, '')
+  }
+  if (b.cursor && (b.cursor.step || b.cursor.next || b.cursor.blocked)) {
+    lines.push('## 当前断点', `- 当前步骤：${b.cursor.step || '无'}`, b.cursor.next ? `- 下一步：${b.cursor.next}` : '', b.cursor.blocked ? `- 阻塞点：${b.cursor.blocked}` : '', '')
+  }
+  if (narrativeText) {
+    lines.push('## 参谋长态势研判与进展摘要', narrativeText.trim(), '')
+  }
+  const openSteps = (b.plan || []).filter(s => s && !s.done)
+  if (openSteps.length) {
+    lines.push('## 待推进计划', ...openSteps.slice(0, 8).map((s, i) => `${i + 1}. ${s.text}`), '')
+  }
+  const openTasks = (b.tasks || []).filter(t => t && t.status !== 'done')
+  if (openTasks.length) {
+    lines.push('## 未完任务', ...openTasks.slice(0, 8).map(t => `- [${t.status}] #${t.id} ${t.title}${t.note ? `（${String(t.note).slice(0, 100)}）` : ''}`), '')
+  }
+  const fb = (b.bounds && b.bounds.forbidden) || []
+  const al = (b.bounds && b.bounds.allowed) || []
+  const nt = (b.bounds && b.bounds.notes) || []
+  if (fb.length || al.length || nt.length) {
+    lines.push('## 生效红线与工作边界')
+    if (fb.length) lines.push(...fb.slice(0, 6).map(x => `- 🚫 禁止：${x}`))
+    if (al.length) lines.push(...al.slice(0, 4).map(x => `- ✅ 必做：${x}`))
+    if (nt.length) lines.push(...nt.slice(0, 4).map(x => `- 📌 注意：${x}`))
+    lines.push('')
+  }
+  if (Array.isArray(cluster) && cluster.length > 1) {
+    lines.push(`## 当前协同网络`, `- 已联通协同群组共 ${cluster.length} 个独立会话。`, '')
+  }
+  return lines.filter((l, i, arr) => !(l === '' && arr[i - 1] === '')).join('\n').slice(0, 12000)
+}
+
+function resolveEffectiveHandoff(runtime, sessionId, board, extraTeamTasks = undefined) {
+  const b = board || emptyBoard()
+  const h = b.handoff || {}
+  const rootSid = sessionId ? (resolveRootSessionId(sessionId) || sessionId) : ''
+  const customText = typeof h.customText === 'string' ? h.customText.trim() : ''
+  const pinned = Boolean(h.pinned)
+  const syncOnDigest = Boolean(h.syncOnDigest)
+
+  const teamTasks = extraTeamTasks !== undefined
+    ? extraTeamTasks
+    : fetchTeamTasks(runtime, sessionId ? { id: sessionId } : null)
+  const takenOutArchives = rootSid ? collectTakenOutAndFlipped(runtime, rootSid, b.activeCabinetId) : []
+  const autoText = renderHandoff(b, boundaries(runtime, sessionId), 5200, sessionId, {
+    teamTasks,
+    takenOutArchives,
+  })
+
+  const effectiveText = customText ? h.customText : autoText
+  let chiefNarrativeAt = 0
+  let chiefNarrativeText = ''
+  try {
+    const st = loadChiefState()
+    const ws = st && st.workspaces && st.workspaces[rootSid || 'global']
+    if (ws && ws.narrative && ws.narrative.text) {
+      chiefNarrativeText = ws.narrative.text
+      chiefNarrativeAt = Number(ws.narrative.at) || 0
+    }
+  } catch {}
+
+  const updatedAt = Number(h.updatedAt) || Number(h.at) || 0
+  const hasRichWork = Boolean(b.objective || (b.plan && b.plan.length) || (b.tasks && b.tasks.length) || (b.memory && b.memory.length))
+  const isIncomplete = !effectiveText.trim() || (!customText && !b.objective && !(b.tasks && b.tasks.length) && !(b.plan && b.plan.length))
+  const isStale = !pinned && Boolean(
+    hasRichWork && (
+      (chiefNarrativeText && h.source !== 'human' && chiefNarrativeAt > updatedAt + 2000)
+      || (Number(b.updatedAt) > updatedAt + 60_000 && !customText)
+    ),
+  )
+
+  return {
+    text: effectiveText,
+    autoText,
+    source: customText ? (h.source || 'human') : 'auto',
+    isCustom: Boolean(customText),
+    pinned,
+    pinnedAt: Number(h.pinnedAt) || 0,
+    pinnedBy: h.pinnedBy || '',
+    updatedAt,
+    handoffAt: Number(h.at) || 0,
+    syncOnDigest,
+    isIncomplete,
+    isStale,
+    hasNarrativeUpdate: Boolean(chiefNarrativeText && chiefNarrativeAt > updatedAt + 2000),
+  }
+}
+
+/** Combine Session-Cabinet mounted items with explicitly flipped precipitated entries (NEVER reads Global Cabinet!). */
 function collectTakenOutAndFlipped(runtime, rootId, cabinetId = '') {
   if (!rootId) return []
-  const targetOpt = archiveTarget(runtime, rootId, cabinetId)
-  const working = getTakenOutArchivesForSession(rootId, targetOpt)
+  const targetOpt = archiveTarget(runtime, rootId, { cabinetId, vaultScope: 'session' })
+  const working = getTakenOutArchivesForSession(rootId, targetOpt).map(e => ({
+    ...e,
+    _deskScope: 'session',
+    folderLabel: `本局桌面/${e.folder || '档案'}`,
+    title: `[桌面强调·本局] ${e.title}`,
+  }))
+  const globalTargetOpt = archiveTarget(runtime, rootId, { cabinetId: '', vaultScope: 'global' })
+  const takenGlobal = getTakenOutGlobalForSession(rootId, globalTargetOpt).map(e => ({
+    ...e,
+    _deskScope: 'global',
+    folderLabel: `全局桌面/${e.folder || '经验'}`,
+    title: `[桌面强调·全局] ${e.title}`,
+  }))
   const state = loadChiefState()
   const ws = state && state.workspaces && state.workspaces[rootId]
   const flippedIds = ws && Array.isArray(ws.flippedPrecipitatedIds) ? ws.flippedPrecipitatedIds : []
-  if (!flippedIds.length) return working
-  const projectKey = resolveProjectKey(targetOpt.cwd)
-  const flippedEntries = getFlippedOutPrecipitatedForSession(projectKey, rootId, true, targetOpt)
-  const mapped = flippedEntries.map(e => ({
-    ...e,
-    folder: e.category || 'contracts',
-    folderLabel: `沉淀冷库/${e.category || '经验'}`,
-    title: `[已翻出沉淀] ${e.title}`,
-  }))
-  return [...working, ...mapped]
+  let mappedFlipped = []
+  if (flippedIds.length) {
+    const projectKey = resolveProjectKey(targetOpt.cwd)
+    const flippedEntries = getFlippedOutPrecipitatedForSession(projectKey, rootId, true, targetOpt)
+    mappedFlipped = flippedEntries.map(e => ({
+      ...e,
+      _deskScope: 'precipitated',
+      folder: e.category || 'contracts',
+      folderLabel: `沉淀桌面/${e.category || '经验'}`,
+      title: `[桌面强调·沉淀] ${e.title}`,
+    }))
+  }
+  return [...working, ...takenGlobal, ...mappedFlipped]
+}
+
+function collectDeskItemsForUi(runtime, rootId, cabinetId = '') {
+  if (!rootId) return []
+  const targetOpt = archiveTarget(runtime, rootId, { cabinetId, vaultScope: 'session' })
+  const out = []
+  try {
+    for (const it of getTakenOutArchivesForSession(rootId, targetOpt)) {
+      out.push({ id: it.id, scope: 'session', title: it.title, summary: it.summary || '', folder: it.folder || 'inbox', paperclip: it.paperclip || 'silver' })
+    }
+  } catch {}
+  try {
+    const gOpt = archiveTarget(runtime, rootId, { cabinetId: '', vaultScope: 'global' })
+    for (const it of getTakenOutGlobalForSession(rootId, gOpt)) {
+      out.push({ id: it.id, scope: 'global', title: it.title, summary: it.summary || '', folder: it.folder || 'coords', paperclip: it.paperclip || 'silver' })
+    }
+  } catch {}
+  try {
+    const st = loadChiefState()
+    const ws = st && st.workspaces && st.workspaces[rootId]
+    const flippedIds = ws && Array.isArray(ws.flippedPrecipitatedIds) ? ws.flippedPrecipitatedIds : []
+    if (flippedIds.length) {
+      const pk = resolveProjectKey(targetOpt.cwd)
+      for (const it of getFlippedOutPrecipitatedForSession(pk, rootId, true, targetOpt)) {
+        out.push({ id: it.id, scope: 'precipitated', title: it.title, summary: it.summary || '', folder: it.category || 'contracts', paperclip: 'gold' })
+      }
+    }
+  } catch {}
+  return out
+}
+
+/** Collect digest-safe archive context for Lead/Subagent prompt: ONLY desk-spotlight items across all 3 vaults (sealed items NEVER leak to Lead), plus Smart Compaction flag & posture. */
+function collectDigestArchiveContext(runtime, rootId, cabinetId = '') {
+  const takenOutArchives = rootId ? collectTakenOutAndFlipped(runtime, rootId, cabinetId) : []
+  const sessionArchiveBriefs = []
+  let smartCompactActive = false
+  let chiefPermissionMode = DEFAULT_CHIEF_PERMISSION_MODE
+  if (rootId) {
+    try {
+      const cfg = resolveWorkspaceConfig(loadChiefState(), rootId)
+      const tm = (cfg && cfg.tacticalModes) || {}
+      smartCompactActive = Boolean(tm.autoCompact && tm.smartCompact)
+      chiefPermissionMode = normalizePermissionMode(cfg && cfg.permissionMode)
+    } catch {}
+  }
+  return { takenOutArchives, sessionArchiveBriefs, smartCompactActive, chiefPermissionMode }
 }
 
 function makeChiefDeps(runtime) {
@@ -2459,33 +2997,10 @@ function makeChiefDeps(runtime) {
       return (ag && ag.status) || 'idle'
     },
     async measureSessionTokens(sid, agentArg) {
-      const agents = rt ? rt.get('agents') : null
-      const ag = agentArg || (agents && typeof agents.get === 'function' ? agents.get(sid) : null)
-      if (!ag || !ag.session) return null
-      try {
-        let totalTokens = 0
-        let seq = 0
-        let contextWindow = 128_000
-        if (typeof ag.session.ownEvents === 'function') {
-          const events = ag.session.ownEvents() || []
-          seq = events.length
-          for (let i = events.length - 1; i >= 0; i -= 1) {
-            const ev = events[i]
-            const usage = ev && (ev.usage || (ev.message && ev.message.usage) || (ev.data && ev.data.usage))
-            if (usage && typeof usage === 'object') {
-              const calc = (Number(usage.inputTokens) || 0)
-                + (Number(usage.cacheReadTokens) || 0)
-                + (Number(usage.outputTokens) || 0)
-              totalTokens = Number(usage.totalTokens) || calc
-              if (Number(usage.contextWindow) > 0) contextWindow = Number(usage.contextWindow)
-              if (totalTokens > 0) break
-            }
-          }
-        }
-        return totalTokens > 0 ? { totalTokens, contextWindow, seq } : null
-      } catch {
-        return null
-      }
+      return getSessionContextBreakdown(rt, sid, agentArg)
+    },
+    composeHandoffFromNarrative(opts) {
+      return composeHandoffFromNarrative(opts)
     },
     async compactSessionNow(sid, cmdId) {
       const agents = rt ? rt.get('agents') : null
@@ -2517,6 +3032,15 @@ function makeChiefDeps(runtime) {
         pushLog(board, text, by || 'chief', rootSessionId)
         saveBoard(board, file)
       })
+    },
+    executeSubagentAction: (input, callerAgent, signal) => executeSubagentAction(rt, input, callerAgent, signal),
+    cancelAutoContinue(sid, reason) {
+      return Boolean(
+        activeAutoContinue
+        && typeof activeAutoContinue.cancelSession === 'function'
+        && sid
+        && activeAutoContinue.cancelSession(sid, reason || 'chief-halt'),
+      )
     },
   }
 }
@@ -2598,7 +3122,7 @@ async function executeSubagentAction(runtime, input, callerAgent, signal) {
         dispatchMode = 'session-inject'
       }
     } else if (subagents && liveCaller) {
-      // Case 2: Use DSH native subagent service (requires post-rc.2 named subagent API)
+      // Case 2: Use DSH native subagent service (continue existing subagent or spawn/fork a new one)
       if (typeof subagents.resolveName !== 'function' || typeof subagents.startActivation !== 'function') {
         return {
           ok: false,
@@ -2856,6 +3380,13 @@ function routeTable(runtime) {
           }
           const rootWs = secState.workspaces && secState.workspaces[rootSid]
           const tacticalModes = effCfg.tacticalModes || {}
+          const flippedIds = (rootWs && Array.isArray(rootWs.flippedPrecipitatedIds)) ? rootWs.flippedPrecipitatedIds.slice() : []
+          const boundRootSid = resolveBoundRootSid(sessionId)
+          const sessionArchOpt = archiveTarget(runtime, boundRootSid, { cabinetId: board.activeCabinetId, vaultScope: 'session' })
+          const archiveMeta = {
+            ...getArchiveMeta(boundRootSid, sessionArchOpt),
+            counts: getThreeTierArchiveCounts(boundRootSid, flippedIds, sessionArchOpt),
+          }
           const hostCompat = probeSubagentSupport(runtime)
           sendJson(res, 200, {
             ok: true,
@@ -2866,11 +3397,15 @@ function routeTable(runtime) {
             boundaries: boundaries(runtime, sessionId),
             hostCompat,
             chiefMeta: {
+              backendBuild: BACKEND_BUILD,
+              hostCompat,
               paceMode: effCfg.paceMode || 'manual',
+              stopped: Boolean(effCfg.stopped || effCfg.paceMode === 'stopped'),
+              permissionMode: effCfg.permissionMode || 'danger-full-access',
               autoPilot: Boolean(effCfg.autoPilot),
               tacticalModes,
               runtimeGuard: (rootWs && rootWs.runtimeGuard) || {},
-              flippedCount: (rootWs && Array.isArray(rootWs.flippedPrecipitatedIds)) ? rootWs.flippedPrecipitatedIds.length : 0,
+              flippedCount: flippedIds.length,
               modelRef: pinnedModelRef,
               followModelRef,
               resolvedModelRef: pinnedModelRef || followModelRef || '',
@@ -2878,9 +3413,9 @@ function routeTable(runtime) {
               factsCount,
               mailboxCount,
               linkedPeersCount: Math.max(0, cluster.length - 1),
-              hostCompat,
+              contextUsage: sessionId ? getSessionContextBreakdown(runtime, sessionId) : null,
             },
-            archiveMeta: getArchiveMeta(rootSid, archiveTarget(runtime, rootSid, board.activeCabinetId)),
+            archiveMeta,
           })
         } catch (error) {
           sendJson(res, 500, { ok: false, error: String(error && error.message ? error.message : error) })
@@ -2901,13 +3436,20 @@ function routeTable(runtime) {
           const subagents = sessionId ? await refreshSubagentTree(runtime, sessionId, fullBoard) : []
           const agentIdentity = sessionId ? resolveAgentIdentity(runtime, sessionId) : null
           const rootSid = resolveRootSessionId(sessionId) || sessionId
+          const linked = linkedPeersForSession(runtime, rootSid)
+          const archCtx = collectDigestArchiveContext(runtime, rootSid, fullBoard.activeCabinetId)
           sendJson(res, 200, {
             ok: true,
             digest: renderDigest(fullBoard, {
               subagents,
               agentIdentity,
               teamTasks: sessionId ? fetchTeamTasks(runtime, { id: sessionId }) : undefined,
-              takenOutArchives: rootSid ? collectTakenOutAndFlipped(runtime, rootSid, fullBoard.activeCabinetId) : [],
+              takenOutArchives: archCtx.takenOutArchives,
+              sessionArchiveBriefs: archCtx.sessionArchiveBriefs,
+              smartCompactActive: archCtx.smartCompactActive,
+              chiefPermissionMode: archCtx.chiefPermissionMode,
+              linkedPeersCount: linked.linkedPeersCount,
+              linkedPeersProgress: linked.linkedPeersProgress,
             }),
             sessions: board.sessions || {},
             updatedAt: board.updatedAt,
@@ -3007,14 +3549,22 @@ function routeTable(runtime) {
         } catch {}
         const board = sessionId ? boardForSession(boardFileFor(sessionId)) : emptyBoard()
         const pending = readPending()
-        const rootSid = resolveRootSessionId(sessionId) || sessionId
+        const hInfo = resolveEffectiveHandoff(runtime, sessionId, board)
         sendJson(res, 200, {
           ok: true,
-          text: renderHandoff(board, boundaries(runtime, sessionId), 5200, sessionId, {
-            teamTasks: fetchTeamTasks(runtime, sessionId ? { id: sessionId } : null),
-            takenOutArchives: rootSid ? collectTakenOutAndFlipped(runtime, rootSid, board.activeCabinetId) : [],
-          }),
-          handoffAt: board.handoff ? board.handoff.at : 0,
+          text: hInfo.text,
+          autoText: hInfo.autoText,
+          source: hInfo.source,
+          isCustom: hInfo.isCustom,
+          pinned: hInfo.pinned,
+          pinnedAt: hInfo.pinnedAt,
+          pinnedBy: hInfo.pinnedBy,
+          updatedAt: hInfo.updatedAt,
+          handoffAt: hInfo.handoffAt,
+          syncOnDigest: hInfo.syncOnDigest,
+          isIncomplete: hInfo.isIncomplete,
+          isStale: hInfo.isStale,
+          hasNarrativeUpdate: hInfo.hasNarrativeUpdate,
           autoInject: !((board.settings || {}).autoInject === false),
           guardIdle: !((board.settings || {}).guardIdle === false),
           pending: pending ? { at: pending.at, by: pending.by, failedTarget: pending.failedTarget || '' } : null,
@@ -3033,7 +3583,7 @@ function routeTable(runtime) {
             const propRes = proposeBoundToChief(makeChiefDeps(runtime), {
               sessionId,
               by: typeof body.by === 'string' ? body.by : 'operator',
-              field: typeof body.field === 'string' ? body.field : 'forbidden',
+              field: normalizeBoundFieldName(body.field) || 'forbidden',
               item: typeof body.item === 'string' ? body.item : (typeof body.text === 'string' ? body.text : ''),
               items: Array.isArray(body.items) ? body.items : undefined,
               reason: typeof body.reason === 'string' ? body.reason : '',
@@ -3080,12 +3630,19 @@ function routeTable(runtime) {
           const url = new URL(req.url || '/', 'http://127.0.0.1')
           let sessionId = url.searchParams.get('session') || ''
           let regenerate = url.searchParams.get('regenerate') === '1'
+          const qSync = url.searchParams.get('syncHandoff')
+          let syncHandoff = qSync === '1' || qSync === 'true' ? true : (qSync === '0' || qSync === 'false' ? false : undefined)
           if (req.method === 'POST') {
             const body = await readBody(req).catch(() => ({}))
             if (typeof body.session === 'string' && body.session) sessionId = body.session
             if (body.regenerate === true) regenerate = true
+            if (typeof body.syncHandoff === 'boolean') syncHandoff = body.syncHandoff
           }
-          const view = await getChiefView(makeChiefDeps(runtime), sessionId, { regenerate, autoSummarize: !regenerate })
+          const view = await getChiefView(makeChiefDeps(runtime), sessionId, { regenerate, autoSummarize: !regenerate, syncHandoff })
+          if (view && view.handoffSyncResult && view.handoffSyncResult.synced && sessionId) {
+            sendJson(res, 200, { ...view, board: boardForSession(boardFileFor(sessionId)) })
+            return
+          }
           sendJson(res, 200, view)
         } catch (error) {
           sendJson(res, 500, { ok: false, error: String(error && error.message ? error.message : error) })
@@ -3108,6 +3665,28 @@ function routeTable(runtime) {
           })
           const board = out.ok && sessionId ? boardForSession(boardFileFor(sessionId)) : undefined
           sendJson(res, out.ok ? 200 : 400, board ? { ...out, board } : out)
+        } catch (error) {
+          sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
+        }
+      },
+    },
+    {
+      path: API + '/chief/relay-archives',
+      handler: async (req, res) => {
+        if (!guard(req, res)) return
+        try {
+          const body = await readBody(req)
+          const sessionId = typeof body?.session === 'string' ? body.session : ''
+          const rootSid = resolveRootSessionId(sessionId) || sessionId || 'global'
+          const out = await relayArchivesWithChief(makeChiefDeps(runtime), {
+            sessionId: rootSid,
+            items: Array.isArray(body?.items) ? body.items : [],
+            instruction: typeof body?.instruction === 'string' ? body.instruction : '',
+            target: typeof body?.target === 'string' ? body.target : 'lead',
+            mode: typeof body?.mode === 'string' ? body.mode : 'steer',
+            cabinetId: typeof body?.cabinetId === 'string' ? body.cabinetId : '',
+          })
+          sendJson(res, out && out.ok === false ? 400 : 200, out)
         } catch (error) {
           sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
         }
@@ -3158,10 +3737,66 @@ function routeTable(runtime) {
         try {
           const body = await readBody(req)
           const sessionId = typeof body?.session === 'string' ? body.session : ''
-          const rootSid = resolveRootSessionId(sessionId) || sessionId
-          const updated = updateChiefConfig({ ...(body || {}), ...(rootSid ? { sessionId: rootSid } : {}) })
+          const rootSid = resolveRootSessionId(sessionId) || sessionId || 'global'
+          const updated = updateChiefConfig({ ...(body || {}), sessionId: rootSid })
+          const wantsInterventionOn = Boolean(body && body.tacticalModes && body.tacticalModes.intervention === true)
+          const coreObjDraft = typeof body?.coreObjective === 'string' ? body.coreObjective.trim() : ''
+          const targetSessionForBoard = sessionId || (rootSid !== 'global' ? rootSid : '')
+          if (updated && updated.ok !== false && wantsInterventionOn && coreObjDraft && targetSessionForBoard) {
+            runAction({
+              action: 'objective.set',
+              objective: coreObjDraft,
+              session: targetSessionForBoard,
+              by: 'operator',
+              _fromInterventionSetup: true,
+            })
+          }
+          if (updated && (updated.emergencyStopped || (updated.config && (updated.config.stopped || updated.config.paceMode === 'stopped')))) {
+            if (activeAutoContinue && typeof activeAutoContinue.cancelSession === 'function') {
+              activeAutoContinue.cancelSession(sessionId, 'chief stopped')
+              if (rootSid && rootSid !== sessionId) activeAutoContinue.cancelSession(rootSid, 'chief stopped')
+            }
+          }
           const view = await getChiefView(makeChiefDeps(runtime), sessionId, { autoSummarize: false })
-          sendJson(res, updated && updated.ok === false ? 400 : 200, { ...updated, view })
+          const latestBoard = targetSessionForBoard ? boardForSession(boardFileFor(targetSessionForBoard)) : null
+          sendJson(res, updated && updated.ok === false ? 400 : 200, {
+            ...updated,
+            ...(latestBoard ? { board: latestBoard } : {}),
+            view,
+          })
+        } catch (error) {
+          sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
+        }
+      },
+    },
+    {
+      path: API + '/chief/suggest-objective',
+      handler: async (req, res) => {
+        if (!guard(req, res)) return
+        try {
+          const body = await readBody(req).catch(() => ({}))
+          const sessionId = typeof body?.session === 'string' ? body.session : ''
+          const out = await suggestCoreObjectiveWithChief(makeChiefDeps(runtime), {
+            sessionId,
+            draft: typeof body?.draft === 'string' ? body.draft : '',
+            mode: typeof body?.mode === 'string' ? body.mode : 'auto',
+            previousSuggestions: Array.isArray(body?.previousSuggestions) ? body.previousSuggestions : [],
+          })
+          sendJson(res, out && out.ok === false ? 400 : 200, out)
+        } catch (error) {
+          sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
+        }
+      },
+    },
+    {
+      path: API + '/chief/recommend-compact',
+      handler: async (req, res) => {
+        if (!guard(req, res)) return
+        try {
+          const body = await readBody(req).catch(() => ({}))
+          const sessionId = typeof body?.session === 'string' ? body.session : ''
+          const out = await recommendAndSetCompactThreshold(makeChiefDeps(runtime), { sessionId })
+          sendJson(res, out && out.ok === false ? 400 : 200, out)
         } catch (error) {
           sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
         }
@@ -3266,18 +3901,31 @@ function routeTable(runtime) {
           const url = new URL(req.url || '/', 'http://127.0.0.1')
           if (req.method === 'GET' || !req.method) {
             const sessionId = url.searchParams.get('session') || ''
-            const rootSid = resolveRootSessionId(sessionId) || sessionId
+            const rootSid = resolveBoundRootSid(sessionId)
             const query = url.searchParams.get('q') || ''
             const folder = url.searchParams.get('folder') || ''
             const paperclip = url.searchParams.get('paperclip') || ''
-            const cabinetId = url.searchParams.get('cabinetId') || ''
-            const targetOpt = archiveTarget(runtime, rootSid || sessionId, cabinetId)
-            const out = listArchiveHeaders(rootSid, { query, folder, paperclip, includePrecipitated: true }, targetOpt)
+            const reqScope = resolveArchiveHttpScope(url.searchParams.get('scope') || url.searchParams.get('vaultScope') || '')
+            const workingScope = reqScope === 'global' ? 'global' : 'session'
+            const cabinetId = workingScope === 'global' ? '' : (url.searchParams.get('cabinetId') || '')
+            const targetOpt = archiveTarget(runtime, rootSid, { cabinetId, vaultScope: workingScope })
             const st = loadChiefState()
             const ws = rootSid && st.workspaces ? st.workspaces[rootSid] : null
+            const flippedIds = (ws && Array.isArray(ws.flippedPrecipitatedIds)) ? ws.flippedPrecipitatedIds.slice() : []
+            const out = listArchiveHeaders(rootSid, {
+              query,
+              folder,
+              paperclip,
+              vaultScope: workingScope,
+              includePrecipitated: true,
+              flippedIds,
+            }, targetOpt)
             sendJson(res, 200, {
               ...out,
-              flippedPrecipitatedIds: (ws && Array.isArray(ws.flippedPrecipitatedIds)) ? ws.flippedPrecipitatedIds.slice() : [],
+              requestedScope: reqScope,
+              flippedPrecipitatedIds: flippedIds,
+              deskItems: collectDeskItemsForUi(runtime, rootSid, cabinetId),
+              counts: out.counts || getThreeTierArchiveCounts(rootSid, flippedIds, targetOpt),
               archiveMeta: getArchiveMeta(rootSid, targetOpt),
             })
             return
@@ -3285,10 +3933,12 @@ function routeTable(runtime) {
 
           const body = await readBody(req)
           const sessionId = typeof body.session === 'string' ? body.session : ''
-          const rootSid = resolveRootSessionId(sessionId) || sessionId
+          const rootSid = resolveBoundRootSid(sessionId)
           const op = typeof body.op === 'string' ? body.op : 'save'
-          const cabinetId = typeof body.cabinetId === 'string' ? body.cabinetId : ''
-          const targetOpt = archiveTarget(runtime, rootSid || sessionId, cabinetId)
+          const reqScope = resolveArchiveHttpScope(body.vaultScope || body.scope || '')
+          const workingScope = reqScope === 'global' ? 'global' : 'session'
+          const cabinetId = workingScope === 'global' ? '' : (typeof body.cabinetId === 'string' ? body.cabinetId : '')
+          const targetOpt = archiveTarget(runtime, rootSid, { cabinetId, vaultScope: workingScope })
           const projectKey = resolveProjectKey(targetOpt.cwd)
 
           if (['flipOut', 'sealBack', 'deletePrecipitated', 'updatePrecipitated'].includes(op)) {
@@ -3310,18 +3960,50 @@ function routeTable(runtime) {
             }
             const stAfter = loadChiefState()
             const wsAfter = rootSid && stAfter.workspaces ? stAfter.workspaces[rootSid] : null
-            const archives = listArchiveHeaders(rootSid, { includePrecipitated: true }, targetOpt)
+            const flippedAfter = (wsAfter && Array.isArray(wsAfter.flippedPrecipitatedIds)) ? wsAfter.flippedPrecipitatedIds.slice() : []
+            const archives = listArchiveHeaders(rootSid, { vaultScope: workingScope, includePrecipitated: true, flippedIds: flippedAfter }, targetOpt)
             sendJson(res, 200, {
               ...pRes,
               archives,
-              flippedPrecipitatedIds: (wsAfter && Array.isArray(wsAfter.flippedPrecipitatedIds)) ? wsAfter.flippedPrecipitatedIds.slice() : [],
+              deskItems: collectDeskItemsForUi(runtime, rootSid, cabinetId),
+              counts: archives.counts || getThreeTierArchiveCounts(rootSid, flippedAfter, targetOpt),
+              flippedPrecipitatedIds: flippedAfter,
+              archiveMeta: getArchiveMeta(rootSid, targetOpt),
+            })
+            return
+          }
+
+          if (op === 'pullPrecipitated') {
+            const pid = typeof body.id === 'string' ? body.id : (typeof body.precipitatedId === 'string' ? body.precipitatedId : '')
+            const targetScope = resolveArchiveHttpScope(body.targetScope || body.toScope || 'session') === 'global' ? 'global' : 'session'
+            const copyRes = copyPrecipitatedToVault(projectKey, {
+              ...body,
+              id: pid,
+              precipitatedId: pid,
+              targetScope,
+              rootSessionId: rootSid,
+            }, targetOpt)
+            if (!copyRes.ok) {
+              sendJson(res, 400, copyRes)
+              return
+            }
+            const stAfter = loadChiefState()
+            const wsAfter = rootSid && stAfter.workspaces ? stAfter.workspaces[rootSid] : null
+            const flippedAfter = (wsAfter && Array.isArray(wsAfter.flippedPrecipitatedIds)) ? wsAfter.flippedPrecipitatedIds.slice() : []
+            const archives = listArchiveHeaders(rootSid, { vaultScope: workingScope, includePrecipitated: true, flippedIds: flippedAfter }, targetOpt)
+            sendJson(res, 200, {
+              ...copyRes,
+              archives,
+              deskItems: collectDeskItemsForUi(runtime, rootSid, cabinetId),
+              counts: archives.counts || getThreeTierArchiveCounts(rootSid, flippedAfter, targetOpt),
+              flippedPrecipitatedIds: flippedAfter,
               archiveMeta: getArchiveMeta(rootSid, targetOpt),
             })
             return
           }
 
           if (op === 'precipitateNotes') {
-            // Sweep active board.notes (session and/or shared) into active working cabinet
+            // Sweep active board.notes (session and/or shared) into active working cabinet (defaults to current session cabinet if bound)
             const noteIds = Array.isArray(body.noteIds) ? new Set(body.noteIds.map(String)) : null
             let sweptCount = 0
             const sweepFromFile = (targetFile) => {
@@ -3337,6 +4019,7 @@ function routeTable(runtime) {
                   }
                   const saved = mutateArchive({
                     op: 'save',
+                    vaultScope: workingScope,
                     sourceNoteId: note.id,
                     title: note.title,
                     body: note.body,
@@ -3350,20 +4033,24 @@ function routeTable(runtime) {
                 }
                 if (keep.length !== b.notes.length) {
                   b.notes = keep
-                  pushLog(b, `🗄️ 已将 ${sweptCount} 篇便签收纳进「档案」工作柜`, 'operator', sessionId)
+                  pushLog(b, `🗄️ 已将 ${sweptCount} 篇便签收纳进「${workingScope === 'global' ? '全局' : '本会话'}档案柜」`, 'operator', sessionId)
                   saveBoard(b, targetFile)
                 }
               })
             }
             if (sessionId) sweepFromFile(boardFileFor(sessionId))
-            sweepFromFile(boardFile())
+            else sweepFromFile(boardFile())
+            const stNow = loadChiefState()
+            const wsNow = rootSid && stNow.workspaces ? stNow.workspaces[rootSid] : null
+            const flippedNow = (wsNow && Array.isArray(wsNow.flippedPrecipitatedIds)) ? wsNow.flippedPrecipitatedIds.slice() : []
             const board = sessionId ? boardForSession(boardFileFor(sessionId)) : emptyBoard()
-            const archives = listArchiveHeaders(rootSid, { includePrecipitated: true }, targetOpt)
+            const archives = listArchiveHeaders(rootSid, { vaultScope: workingScope, includePrecipitated: true, flippedIds: flippedNow }, targetOpt)
             sendJson(res, 200, {
               ok: true,
               sweptCount,
               board,
               archives,
+              counts: archives.counts || getThreeTierArchiveCounts(rootSid, flippedNow, targetOpt),
               archiveMeta: getArchiveMeta(rootSid, targetOpt),
             })
             return
@@ -3371,6 +4058,7 @@ function routeTable(runtime) {
 
           const out = mutateArchive({
             ...body,
+            vaultScope: workingScope,
             op,
             rootSessionId: rootSid,
           }, targetOpt)
@@ -3378,8 +4066,9 @@ function routeTable(runtime) {
             sendJson(res, 400, out)
             return
           }
+          const isCrossCopy = op === 'copyToGlobal' || op === 'copyToSession'
           const usedCabId = out.activeCabinetId || out.cabinetId || ''
-          if (rootSid && usedCabId && op !== 'listCabinets') {
+          if (rootSid && workingScope !== 'global' && !isCrossCopy && usedCabId && op !== 'listCabinets') {
             const bFile = boardFileFor(rootSid)
             withBoardLock(bFile, () => {
               const b = loadBoard(bFile)
@@ -3389,12 +4078,20 @@ function routeTable(runtime) {
               }
             })
           }
-          const finalOpt = archiveTarget(runtime, rootSid || sessionId, out.activeCabinetId || cabinetId || out.cabinetId)
-          const archives = listArchiveHeaders(rootSid, { includePrecipitated: true }, finalOpt)
+          const stNow = loadChiefState()
+          const wsNow = rootSid && stNow.workspaces ? stNow.workspaces[rootSid] : null
+          const flippedNow = (wsNow && Array.isArray(wsNow.flippedPrecipitatedIds)) ? wsNow.flippedPrecipitatedIds.slice() : []
+          const finalOpt = isCrossCopy
+            ? targetOpt
+            : archiveTarget(runtime, rootSid || sessionId, { cabinetId: out.activeCabinetId || cabinetId || out.cabinetId, vaultScope: workingScope })
+          const archives = listArchiveHeaders(rootSid, { vaultScope: workingScope, includePrecipitated: true, flippedIds: flippedNow }, finalOpt)
           const board = sessionId ? boardForSession(boardFileFor(sessionId)) : undefined
           sendJson(res, 200, {
             ...out,
             archives,
+            deskItems: collectDeskItemsForUi(runtime, rootSid, out.activeCabinetId || cabinetId || out.cabinetId || ''),
+            diffSummary: out.diffSummary || archives.diffSummary,
+            counts: out.counts || archives.counts || getThreeTierArchiveCounts(rootSid, flippedNow, finalOpt),
             ...(board ? { board } : {}),
             archiveMeta: getArchiveMeta(rootSid, finalOpt),
           })
@@ -3411,10 +4108,11 @@ function routeTable(runtime) {
           const url = new URL(req.url || '/', 'http://127.0.0.1')
           const id = url.searchParams.get('id') || ''
           const sessionId = url.searchParams.get('session') || ''
-          const cabinetId = url.searchParams.get('cabinetId') || ''
-          const isPrecip = url.searchParams.get('precipitated') === '1' || url.searchParams.get('precipitated') === 'true'
-          const rootSid = resolveRootSessionId(sessionId) || sessionId
-          const targetOpt = archiveTarget(runtime, rootSid || sessionId, cabinetId)
+          const reqScope = resolveArchiveHttpScope(url.searchParams.get('scope') || url.searchParams.get('vaultScope') || '')
+          const cabinetId = reqScope === 'global' ? '' : (url.searchParams.get('cabinetId') || '')
+          const isPrecip = url.searchParams.get('precipitated') === '1' || url.searchParams.get('precipitated') === 'true' || reqScope === 'precipitated'
+          const rootSid = resolveBoundRootSid(sessionId)
+          const targetOpt = archiveTarget(runtime, rootSid, { cabinetId, vaultScope: reqScope === 'global' ? 'global' : 'session' })
           const out = isPrecip
             ? getPrecipitatedDetail(resolveProjectKey(targetOpt.cwd), id, rootSid, targetOpt)
             : getArchiveDetail(id, rootSid, targetOpt)
@@ -3431,19 +4129,61 @@ function routeTable(runtime) {
         try {
           const body = await readBody(req)
           const sessionId = typeof body.session === 'string' ? body.session : ''
-          const rootSid = resolveRootSessionId(sessionId) || sessionId
-          const cabinetId = typeof body.cabinetId === 'string' ? body.cabinetId : ''
-          const targetOpt = archiveTarget(runtime, rootSid || sessionId, cabinetId)
+          const rootSid = resolveBoundRootSid(sessionId)
+          const vaultScope = resolveArchiveHttpScope(body.vaultScope || body.scope) === 'global' ? 'global' : 'session'
+          const cabinetId = vaultScope === 'global' ? '' : (typeof body.cabinetId === 'string' ? body.cabinetId : '')
+          const targetOpt = archiveTarget(runtime, rootSid, { cabinetId, vaultScope })
           const out = await organizeArchivesWithChief(makeChiefDeps(runtime), {
-            sessionId: rootSid,
+            sessionId: rootSid || 'global',
+            vaultScope,
             cabinetId,
             ids: Array.isArray(body.ids) ? body.ids : [],
             folder: typeof body.folder === 'string' ? body.folder : '',
             scope: typeof body.scope === 'string' ? body.scope : 'unorganized',
             instruction: typeof body.instruction === 'string' ? body.instruction : '',
           })
+          const stNow = loadChiefState()
+          const wsNow = rootSid && stNow.workspaces ? stNow.workspaces[rootSid] : null
+          const flippedNow = (wsNow && Array.isArray(wsNow.flippedPrecipitatedIds)) ? wsNow.flippedPrecipitatedIds.slice() : []
           sendJson(res, out.ok ? 200 : 400, {
             ...out,
+            counts: getThreeTierArchiveCounts(rootSid, flippedNow, targetOpt),
+            archiveMeta: getArchiveMeta(rootSid, targetOpt),
+          })
+        } catch (error) {
+          sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
+        }
+      },
+    },
+    {
+      path: API + '/archives/distill-to-global',
+      handler: async (req, res) => {
+        if (!guard(req, res)) return
+        try {
+          const body = await readBody(req)
+          const sessionId = typeof body.session === 'string' ? body.session : ''
+          const rootSid = resolveBoundRootSid(sessionId)
+          if (!rootSid) {
+            sendJson(res, 400, { ok: false, error: '当前未绑定具体会话，无法从本会话档案柜提炼' })
+            return
+          }
+          const cabinetId = typeof body.cabinetId === 'string' ? body.cabinetId : ''
+          const targetOpt = archiveTarget(runtime, rootSid, { cabinetId, vaultScope: 'session' })
+          const out = await distillSessionArchivesToGlobal(makeChiefDeps(runtime), {
+            sessionId: rootSid,
+            cabinetId,
+            ids: Array.isArray(body.ids) ? body.ids : null,
+            folder: typeof body.folder === 'string' ? body.folder : '',
+            clearSource: Boolean(body.clearSource),
+            instruction: typeof body.instruction === 'string' ? body.instruction : '',
+          })
+          const stNow = loadChiefState()
+          const wsNow = stNow.workspaces ? stNow.workspaces[rootSid] : null
+          const flippedNow = (wsNow && Array.isArray(wsNow.flippedPrecipitatedIds)) ? wsNow.flippedPrecipitatedIds.slice() : []
+          sendJson(res, out.ok ? 200 : 400, {
+            ...out,
+            deskItems: collectDeskItemsForUi(runtime, rootSid, cabinetId),
+            counts: getThreeTierArchiveCounts(rootSid, flippedNow, targetOpt),
             archiveMeta: getArchiveMeta(rootSid, targetOpt),
           })
         } catch (error) {
@@ -3458,17 +4198,23 @@ function routeTable(runtime) {
         try {
           const body = await readBody(req)
           const sessionId = typeof body.session === 'string' ? body.session : ''
-          const rootSid = resolveRootSessionId(sessionId) || sessionId
+          const rootSid = resolveBoundRootSid(sessionId)
           const cabinetId = typeof body.cabinetId === 'string' ? body.cabinetId : ''
-          const targetOpt = archiveTarget(runtime, rootSid || sessionId, cabinetId)
+          const vaultScope = 'session'
+          const targetOpt = archiveTarget(runtime, rootSid, { cabinetId, vaultScope })
           const out = await harvestTurnDetailsToArchive(makeChiefDeps(runtime), {
             sessionId: rootSid,
+            vaultScope,
             cabinetId,
             trigger: 'manual',
             focusHint: typeof body.focusHint === 'string' ? body.focusHint : '',
           })
+          const stNow = loadChiefState()
+          const wsNow = rootSid && stNow.workspaces ? stNow.workspaces[rootSid] : null
+          const flippedNow = (wsNow && Array.isArray(wsNow.flippedPrecipitatedIds)) ? wsNow.flippedPrecipitatedIds.slice() : []
           sendJson(res, out.ok ? 200 : 400, {
             ...out,
+            counts: getThreeTierArchiveCounts(rootSid, flippedNow, targetOpt),
             archiveMeta: getArchiveMeta(rootSid, targetOpt),
           })
         } catch (error) {
@@ -3485,16 +4231,27 @@ function routeTable(runtime) {
           const sessionId = typeof body.session === 'string' ? body.session : ''
           const rootSid = resolveRootSessionId(sessionId) || sessionId
           const cabinetId = typeof body.cabinetId === 'string' ? body.cabinetId : ''
-          const targetOpt = archiveTarget(runtime, rootSid || sessionId, cabinetId)
+          const vaultScope = resolveArchiveHttpScope(body.vaultScope || body.scope) === 'global' ? 'global' : 'session'
+          if (vaultScope !== 'global') {
+            sendJson(res, 400, { ok: false, error: '实行三级梯度制度：本会话档案请先升级入「🌐 全局档案柜」，再从全局档案柜沉淀为冷档案' })
+            return
+          }
+          const targetOpt = archiveTarget(runtime, rootSid || sessionId, { cabinetId, vaultScope })
           const out = await precipitateExperienceWithChief(makeChiefDeps(runtime), {
             sessionId: rootSid,
+            vaultScope,
             op: typeof body.op === 'string' ? body.op : 'cabinet',
             cabinetId,
             folder: typeof body.folder === 'string' ? body.folder : '',
+            ids: Array.isArray(body.ids) ? body.ids : [],
             clearSource: Boolean(body.clearSource),
           })
+          const stNow = loadChiefState()
+          const wsNow = rootSid && stNow.workspaces ? stNow.workspaces[rootSid] : null
+          const flippedNow = (wsNow && Array.isArray(wsNow.flippedPrecipitatedIds)) ? wsNow.flippedPrecipitatedIds.slice() : []
           sendJson(res, out.ok ? 200 : 400, {
             ...out,
+            counts: getThreeTierArchiveCounts(rootSid, flippedNow, targetOpt),
             archiveMeta: getArchiveMeta(rootSid, targetOpt),
           })
         } catch (error) {
@@ -3522,6 +4279,7 @@ function syncPlanFromTodos(args, sessionId) {
 
 /** create_goal / update_goal → objective. */
 function syncObjective(name, args, sessionId) {
+  if (isObjectiveLockedByIntervention(sessionId)) return
   const objective = objectiveFromGoal(name, args)
   if (!objective) return
   const file = boardFileFor(sessionId)
@@ -3696,6 +4454,7 @@ const BOARD_PARAMETERS = {
         'archive.search',
         'archive.read',
         'archive.save',
+        'context.compact',
         'memory.add',
         'memory.remove',
         'memory.ask',
@@ -3704,8 +4463,9 @@ const BOARD_PARAMETERS = {
         'Board operation (MUST be called whenever recording tasks/status/conclusions or relaying messages; plain text alone does NOT update the board or notify peers). '
         + 'Use "graph.plan" (or "task.batch") to plan a hierarchical/DAG task graph in one call (supports parentId, blockedBy, owner/subagent, intent, evidence). '
         + 'Use "task.dispatch" to spawn or message a subagent, "team.steer" to steer a subagent, and "mail.send" to relay messages across lead/subagents/sessions. '
-        + 'Use "bounds.propose" (field: "forbidden"|"allowed"|"notes", item, reason) when hitting a permission/sandbox/environment wall or summarizing boundaries so DSH Chief can request user approval. '
-        + 'Cold Engineering Archives ("archive.search", "archive.read", "archive.save") store precipitated long-term engineering memories lazily and are NEVER auto-injected: call archive.search / archive.read ONLY when the user explicitly requests historical archive lookup, or archive.save when asked to precipitate a durable engineering lesson.',
+        + 'Use "bounds.propose" (field: "forbidden"|"allowed"|"notes", item, reason) when hitting a permission/sandbox/environment wall or summarizing boundaries ("allowed" = 必做事项, "forbidden" = 禁止红线, "notes" = 注意事项) so DSH Chief can request user approval. '
+        + 'Session Engineering Archives ("archive.search", "archive.read", "archive.save") access ONLY the current conversation\'s Session Cabinet (never Global Cabinet or unflipped Precipitated cold vault). '
+        + 'When Smart Co-Managed Compaction ("✦ 智选") is enabled, call "context.compact" with a concise phase-summary in "text" at clean phase boundaries to ask DSH Chief to harvest details into this session\'s cabinet and compact.',
     },
     tasks: {
       type: 'array',
@@ -3821,15 +4581,15 @@ const BOARD_PARAMETERS = {
     priority: { type: 'string', enum: PRIORITIES, description: 'Task priority.' },
     field: {
       type: 'string',
-      enum: ['allowed', 'forbidden', 'notes'],
-      description: 'bounds.propose / bounds.set: target boundary column ("forbidden", "allowed", or "notes").',
+      enum: ['allowed', 'must', 'forbidden', 'notes'],
+      description: 'bounds.propose / bounds.set: target boundary column ("forbidden" = 禁止红线, "allowed"/"must" = 必做事项, or "notes" = 注意事项).',
     },
     item: { type: 'string', description: 'bounds.propose / bounds.add / bounds.pin / bounds.remove / bounds.edit / bounds.consolidate: boundary rule text.' },
     oldItem: { type: 'string', description: 'bounds.edit: existing boundary rule text to replace.' },
     removeItems: { type: 'array', items: { type: 'string' }, description: 'bounds.consolidate: scattered boundary rules to remove and replace with item.' },
     reason: { type: 'string', description: 'bounds.propose: brief context on why this boundary is needed (e.g. wall hit, permission block, or user request).' },
     items: { type: 'array', items: { type: 'string' }, description: 'bounds.propose (multiple rules) or bounds.set (new contents of column named by field).' },
-    allowed: { type: 'array', items: { type: 'string' }, description: 'bounds.set: the whole 允许 column.' },
+    allowed: { type: 'array', items: { type: 'string' }, description: 'bounds.set: the whole 必做 (allowed) column.' },
     forbidden: { type: 'array', items: { type: 'string' }, description: 'bounds.set: the whole 禁止 column.' },
     notes: { type: 'array', items: { type: 'string' }, description: 'bounds.set: the whole 注意 column.' },
     autoInject: { type: 'boolean', description: 'settings.set: hand the digest to every turn of this machine.' },
@@ -3934,7 +4694,7 @@ function boardTool(runtime) {
       'Shared task graph, subagent team controller, cross-session communication bus, plan, and anchor chief (参谋看板, coordinated by DSH 参谋长). '
       + 'MANDATORY DISCIPLINE: (1) Always call this tool to record objectives, task status changes (doing/blocked/done + evidence), or pinned conclusions — oral text alone counts as NOT recorded. '
       + '(2) Always call "mail.send", "task.dispatch", or "team.steer" when relaying information or delegating across lead/subagents/sessions — oral @mentions do NOT reach peers. '
-      + '(3) When you hit a permission/sandbox/environment wall or are asked to summarize boundaries, call action="bounds.propose" (field="forbidden"|"allowed"|"notes", item, reason) to submit to DSH Chief (宰相), who requests user approval before injecting into global bounds.',
+      + '(3) When you hit a permission/sandbox/environment wall or are asked to summarize boundaries, call action="bounds.propose" (field="forbidden"|"allowed"|"notes", item, reason; note "allowed" represents 必做事项) to submit to DSH Chief (宰相), who requests user approval before injecting into global bounds.',
     parameters: BOARD_PARAMETERS,
     output: {
       schema: { type: 'object', description: 'The board summary after the operation.' },
@@ -4075,7 +4835,7 @@ function boardTool(runtime) {
           sessionId: rawSession,
           callerAgent,
           by: byDefault,
-          field: str(passed.field, 'forbidden'),
+          field: normalizeBoundFieldName(passed.field) || 'forbidden',
           item: str(passed.item || passed.text || passed.note || passed.body, ''),
           items: Array.isArray(passed.items) ? passed.items : undefined,
           reason: str(passed.reason || passed.intent || passed.subject, ''),
@@ -4128,6 +4888,24 @@ function boardTool(runtime) {
           ok: true,
           inbox,
           peers: dir.targets,
+          ...summary(board, roster),
+        }
+      }
+
+      if (passed.action === 'context.compact') {
+        const scRes = await requestSmartCompactFromLead(makeChiefDeps(runtime), {
+          sessionId: rawSession || session,
+          reason: str(passed.text || passed.summary || passed.body || passed.note, ''),
+          by: byDefault,
+        })
+        if (!scRes || scRes.ok === false) {
+          return { ok: false, error: (scRes && scRes.error) || '智选压缩请求未能执行' }
+        }
+        const board = session ? boardForSession(boardFileFor(session)) : emptyBoard()
+        const roster = session ? await refreshSubagentTree(runtime, session, board) : []
+        return {
+          ok: true,
+          smartCompact: scRes,
           ...summary(board, roster),
         }
       }
@@ -4340,7 +5118,7 @@ function handoffTool(runtime) {
         // dropped by whichever rename finished second.
         withBoardLock(selfFile, () => {
           const marked = loadBoard(selfFile)
-          marked.handoff = { at: nowMs(), by: 'agent', session }
+          marked.handoff = { ...(marked.handoff || {}), at: nowMs(), by: 'agent', session }
           pushLog(marked, '交接单已生成并交出', 'agent', session)
           saveBoard(marked, selfFile)
         })
@@ -4349,14 +5127,17 @@ function handoffTool(runtime) {
       // wrote bounds/objective must still tell the successor what the operator
       // forbade and what the machine is working on.
       const board = boardForSession(selfFile)
-      const limits = boundaries(runtime, session)
-      const rootSid = resolveRootSessionId(session) || session
+      const hInfo = resolveEffectiveHandoff(
+        runtime,
+        session,
+        board,
+        fetchTeamTasks(runtime, exec && exec.agent ? exec.agent : null),
+      )
       return {
         ok: true,
-        text: renderHandoff(board, limits, 5200, session, {
-          teamTasks: fetchTeamTasks(runtime, exec && exec.agent ? exec.agent : null),
-          takenOutArchives: rootSid ? getTakenOutArchivesForSession(rootSid, boardFile()) : [],
-        }),
+        text: hInfo.text,
+        pinned: hInfo.pinned,
+        source: hInfo.source,
         counts: {
           plan: (board.plan || []).length,
           openSteps: (board.plan || []).filter(step => !step.done).length,
@@ -4496,7 +5277,18 @@ export function deployStateToTargetChief(runtime, {
     dest.bounds = destBounds
 
     // Carry non-anchor handoff context notes selectively if target has room
-    dest.handoff = { at: nowMs(), by: 'deploy', session: fromRoot }
+    dest.handoff = {
+      at: nowMs(),
+      by: 'deploy',
+      session: fromRoot,
+      customText: '',
+      pinned: false,
+      pinnedAt: 0,
+      pinnedBy: '',
+      updatedAt: 0,
+      source: 'auto',
+      syncOnDigest: false,
+    }
     pushLog(
       dest,
       `🚀 已系统级移交部署自会话 ${fromRoot.slice(0, 12)}：计划 ${copiedStepCount} 步、未完任务 ${copiedTaskCount} 项`,
@@ -4556,10 +5348,7 @@ export async function transferChief(runtime, args, sessionId) {
 
   const board = boardForSession(boardFileFor(sessionId))
   const rootSid = resolveRootSessionId(sessionId) || sessionId
-  const packet = renderHandoff(board, boundaries(runtime, sessionId), 5200, sessionId, {
-    teamTasks: fetchTeamTasks(runtime, sessionId ? { id: sessionId } : null),
-    takenOutArchives: rootSid ? collectTakenOutAndFlipped(runtime, rootSid, board.activeCabinetId) : [],
-  })
+  const packet = resolveEffectiveHandoff(runtime, sessionId, board).text
   const by = typeof passed.by === 'string' && passed.by ? passed.by : 'user'
 
   if (!target || target === 'new' || target === 'latest') {
@@ -4784,6 +5573,55 @@ export function apply(ctx) {
     pushLog,
   })
 
+  const isRootStopped = (rootKey, sid) => {
+    try {
+      const st = loadChiefState()
+      const rk = resolveRootSessionId(rootKey || sid) || rootKey || sid
+      const cfg = resolveWorkspaceConfig(st, rk)
+      return Boolean(cfg.stopped || cfg.paceMode === 'stopped')
+    } catch {
+      return false
+    }
+  }
+
+  const autoContinue = createAutoContinueEngine({
+    createMessage: (text, sourceKind) => buildMessageEnvelope(text, sourceKind),
+    getAgent: async (sid) => {
+      try {
+        const agents = runtime && runtime.get ? runtime.get('agents') : null
+        const direct = agents && typeof agents.get === 'function' ? agents.get(sid) : null
+        if (direct) return direct
+        const ctrl = runtime && runtime.get ? runtime.get('sessionController') : null
+        if (ctrl && typeof ctrl.resolveAgent === 'function') {
+          const resolved = await ctrl.resolveAgent(sid)
+          if (resolved && resolved.agent) return resolved.agent
+        }
+        return null
+      } catch {
+        return null
+      }
+    },
+    isChiefStopped: (rootId, sid) => isRootStopped(rootId, sid),
+    resolveRootSessionId: (sid) => resolveRootSessionId(sid) || sid,
+    onLog: (sid, msg) => {
+      try {
+        const rootId = resolveRootSessionId(sid) || sid
+        if (!rootId) return
+        const file = boardFileFor(rootId)
+        withBoardLock(file, () => {
+          const board = loadBoard(file)
+          pushLog(board, `🔄 断线续跑：${msg}`, 'chief', sid)
+          saveBoard(board, file)
+        })
+      } catch {}
+    },
+  })
+  activeAutoContinue = autoContinue
+  ctx.effect(() => () => {
+    if (activeAutoContinue === autoContinue) activeAutoContinue = null
+    autoContinue.dispose()
+  }, 'dsh-chief: auto-continue cleanup')
+
   ctx.inject(['llm'], llmCtx => {
     const ownLlm = (llmCtx && llmCtx.llm) || (llmCtx && llmCtx.get ? llmCtx.get('llm') : null)
     if (ownLlm) activeLlm = ownLlm
@@ -4837,11 +5675,20 @@ export function apply(ctx) {
         const board = boardForSession(boardFileFor(rootId))
         const agentIdentity = resolveAgentIdentity(runtime, curId, liveAgent)
         const subagents = getSubagentRoster(runtime, rootId, board)
-        const secState = loadChiefState()
-        const linkedPeersCount = Math.max(0, getLinkedCluster(secState, rootId || 'global').length - 1)
-        const takenOutArchives = rootId ? collectTakenOutAndFlipped(runtime, rootId, board.activeCabinetId) : []
+        const linked = linkedPeersForSession(runtime, rootId || 'global')
+        const archCtx = collectDigestArchiveContext(runtime, rootId, board.activeCabinetId)
         if (rootId) refreshSubagentTree(runtime, rootId, board).catch(() => {})
-        return renderDigest(board, { teamTasks, agentIdentity, subagents, linkedPeersCount, takenOutArchives })
+        return renderDigest(board, {
+          teamTasks,
+          agentIdentity,
+          subagents,
+          linkedPeersCount: linked.linkedPeersCount,
+          linkedPeersProgress: linked.linkedPeersProgress,
+          takenOutArchives: archCtx.takenOutArchives,
+          sessionArchiveBriefs: archCtx.sessionArchiveBriefs,
+          smartCompactActive: archCtx.smartCompactActive,
+          chiefPermissionMode: archCtx.chiefPermissionMode,
+        })
       },
     }), 'dsh-chief: prompt digest')
   })
@@ -4917,24 +5764,42 @@ export function apply(ctx) {
     } catch {}
   }), 'dsh-chief: deliver pending transfer')
 
-  // 2c) Incremental record of what each turn actually did: which turns called a
-  // tool at all, and which of them moved the plan. The idle guard reads both
-  // first and falls back to the Session log, so a dropped event cannot make it
-  // cry wolf about work that did happen — and, more importantly, a turn that ran
-  // commands without touching the plan is recorded as exactly that.
+  // 2c) Incremental record of what each turn actually did + Auto-Continue detection
+  // on interruptions / transient failures / empty outputs (unless Chief is stopped).
   ctx.effect(() => ctx.on('session/event', (session, event) => {
     try {
-      if (!event || event.type !== 'tool/call') return
-      if (!event.data || !session || !session.id) return
+      if (!event || !session || !session.id) return
       const id = String(session.id)
-      const turn = event.data.turn
-      noteToolCall(id, turn)
-      if (isPlanWrite(event.data.name, event.data.arguments)) notePlanWrite(id, turn)
-      // The loop shape needs the call itself, not just the turn: same tool with
-      // the same arguments N times is the tell that nothing is moving.
-      noteCallTrail(id, event.data.name, event.data.arguments)
+      if (event.type === 'tool/call' && event.data) {
+        const turn = event.data.turn
+        noteToolCall(id, turn)
+        if (isPlanWrite(event.data.name, event.data.arguments)) notePlanWrite(id, turn)
+        noteCallTrail(id, event.data.name, event.data.arguments)
+      }
+      autoContinue.onSessionEvent(session, event)
+
+      if (event.type === 'turn/end') {
+        const rawReason = event.data && event.data.reason
+        const reason = String(rawReason && typeof rawReason === 'object' ? (rawReason.kind || '') : (rawReason || '')).toLowerCase()
+        const nestedReason = String(rawReason && typeof rawReason === 'object' && rawReason.reason && typeof rawReason.reason === 'object' ? (rawReason.reason.kind || '') : '').toLowerCase()
+        const isStoppedByUserOrPolicy = reason === 'aborted' || reason === 'blocked' || nestedReason === 'aborted' || nestedReason === 'blocked'
+        const turnNum = Number(event.data && event.data.turn)
+        const steerKey = `${id}:${turnNum}`
+        const steeredAt = autoSteeredTurns.get(steerKey) || 0
+        if (steeredAt) autoSteeredTurns.delete(steerKey)
+        if (!isStoppedByUserOrPolicy && !(steeredAt && Date.now() - steeredAt < 30_000)) {
+          const rootId = resolveRootSessionId(id) || id
+          if (!isRootStopped(rootId, id)) {
+            const agents = runtime && runtime.get ? runtime.get('agents') : null
+            const liveAgent = agents && typeof agents.get === 'function' ? agents.get(id) : null
+            if (liveAgent) {
+              scheduleChiefTurnReview(makeChiefDeps(runtime), { agent: liveAgent, sessionId: id, turn: event.data && event.data.turn })
+            }
+          }
+        }
+      }
     } catch {}
-  }), 'dsh-chief: tool call ledger')
+  }), 'dsh-chief: tool call ledger & auto-continue')
 
   // 3) One heartbeat per finished turn: which Sessions are still warm — and the
   // idle guard: a turn that closes with a short answer, no tool call, and open
@@ -5012,7 +5877,16 @@ export function apply(ctx) {
             reconcileTaskDependencies(board, identity.self, id)
           }
           saveBoard(board, file)
-          scheduleChiefTurnReview(makeChiefDeps(runtime), { agent, sessionId: id, turn })
+          const childRoot = resolveRootSessionId(id, agent) || id
+          if (!isRootStopped(childRoot, id)) {
+            scheduleChiefTurnReview(makeChiefDeps(runtime), { agent, sessionId: id, turn })
+          }
+          return
+        }
+
+        const rootId = resolveRootSessionId(id, agent) || id
+        if (isRootStopped(rootId, id)) {
+          saveBoard(board, file)
           return
         }
 
@@ -5028,8 +5902,9 @@ export function apply(ctx) {
         }
 
         if (typeof agent.steer !== 'function') {
-          pushLog(board, '空转拦截：这个 agent 没有 steer 方法，无法补一步', 'guard', id)
+          pushLog(board, '空转拦截：这个 agent 没有 steer 方法，转由断线续跑模块跟进', 'guard', id)
           saveBoard(board, file)
+          autoContinue.notifyIdleOrInterrupt(id, { kind: 'idle-stall', reason: verdict.reason || '' })
           return
         }
 
@@ -5037,6 +5912,11 @@ export function apply(ctx) {
         // observe a board that claims an intervention that never happened.
         const notice = buildNotice({ ...verdict, board })
         agent.steer(notice)
+        autoSteeredTurns.set(`${id}:${turn}`, Date.now())
+        if (autoSteeredTurns.size > 120) {
+          const oldest = autoSteeredTurns.keys().next().value
+          if (oldest) autoSteeredTurns.delete(oldest)
+        }
         noteIntervention(id, turn)
         // Clear the trail only once the steer landed: a loop that survived a
         // failed steer deserves the next nudge, not a silent reset.
@@ -5051,10 +5931,7 @@ export function apply(ctx) {
         // tells the model to wrap up; this packet is what the next one reads.
         if (remainingInterventions(id, settings) === 0) {
           try {
-            const rootForHandoff = resolveRootSessionId(id) || id
-            const packet = renderHandoff(board, boundaries(runtime, id), 5200, id, {
-              takenOutArchives: rootForHandoff ? getTakenOutArchivesForSession(rootForHandoff, boardFile()) : [],
-            })
+            const packet = resolveEffectiveHandoff(runtime, id, board).text
             const pendingFile_ = pendingFile()
             fs.writeFileSync(pendingFile_, JSON.stringify({ text: packet, at: nowMs(), from: id }))
             pushLog(board, '上下文压力：干预计数耗尽，交接单已自动生成并放入待领取', 'handoff', id)

@@ -31,8 +31,12 @@ DeepSeek's official **[`dsh-superagent-prototype`](https://github.com/deepseek-a
 1. **Visual Router–Worker Orchestration**: Supervise your Root Coordinator, spawned Subagents, and linked independent DSH Worker windows from one **Full-Spread Pyramid DAG** and unified **Collaboration Directory**.
 2. **Native DSH Split-Pane Subagent Stream (`subagentchat`)**: Click `分屏对话` on any pyramid node or directory row to invoke DSH's native `sidebarRight.openResource('dsh-resource://subagentchat/...')` split-pane live viewer.
 3. **Panel-Native Goal Supervision & Human Approval Gate**: Click **`🎯 设为目标`** right inside the `规划` (Plan) tab to enable long-horizon goal supervision without slash-command friction. When objectives change, stale checklists are flagged for clean reset; once the Chief determines the goal is achieved, it remains in `goal` supervision mode until you explicitly click **Approve & Close (`✅ 批准结项`)** or **Reject & Continue (`↩ 驳回继续`)**.
-4. **Composer `+` Tactical Cockpit & Anti-Loop Circuit Breaker**: Open the **`+`** button inside the Chief composer bar to configure **Active Strong Intervention** (requires pre-flight goal/redline & risk modal acknowledgment, provides a red **`⏹ 急停`** emergency stop button, and auto-trips on turn cap or 3 stagnant turns), **Pre-Compaction Detail Harvest + Auto-Compact %**, **Strict Verification**, **Redline Sentinel**, and **Concise Brief Mode**.
-5. **1-Click Cross-Session Chief Deployment & Workspace Image Persistence**: Spawn clean handoff windows from `规划` Zone 3 with 4 configurable working-archive transfer policies (project precipitated cold vaults never leak across handoffs), automatically carrying over your Chief model, disciplines, and tactical preferences with `intervention` safely defaulted off. Attached images are persisted directly to `<cwd>/.dsh-chief/uploads/` and gracefully fall back for text-only Chief models.
+4. **Composer `+` Tactical Cockpit & `✦ 智选` Co-Managed Compaction**: Open the centered **`+`** trigger to configure Active Intervention (circuit breaker + `⏹ 急停`), Pre-Compaction Harvest (hard threshold floor locked at **50%–95%**), Strict Verification, Redline Sentinel, and Concise Briefs—or toggle **`✦ 智选`** so hard percentage thresholds are bypassed and the Chief + Lead collaboratively choose clean phase boundaries to harvest and compact.
+5. **Three-Tier Archive Isolation, 0-Token System Global Cold Vault, Local ↔ Global Bidirectional Diff, Color-Coded Drawer Mailbox & Pinnable Handoff**:
+   - **Three-Tier Archive Isolation**: **💬 Session Cabinet** (1:1 per `rootSessionId`; visible to User, Session & Chief; blank chats never leak history), **🌐 System Global Cold Vault** (system-level 0-Token cold storage that **never follows conversation context or auto-migrates legacy session cabinets**; invisible to Lead until copied via `⤵️ 引入本会话`, and readable by Chief only via per-session `👁️ 供本会话参谋参阅` or explicit Q&A search; tracks live **Local ↔ Global bidirectional diff**), and **🏛️ Precipitated Cold Vault** (cross-session **0-Token double-blind** until explicitly unsealed with `📤 取出`);
+   - **Peer Linking Warning & Clean Detach**: Joining a peer cluster shows a mutual context-pollution warning, automatically shares progress while linked, and purges cached Chief narratives, external team facts, and pre-step injections upon detach;
+   - **Color-Coded Collapsible Drawer Mailbox**: Deduplicates `@all` broadcasts and organizes mails into color-coded collapsible drawers (`Broadcast`, `Cross-Session Pair/Multi`, `Internal`);
+   - **Editable & Pinnable Handoff**: Edit handoff packets manually, freeze auto-rendered previews cleanly with **`📌 定住防改`** (disabling Chief digest auto-sync while pinned), and receive a pre-deploy warning modal if handoff notes lag behind recent progress.
 
 ---
 
@@ -75,11 +79,11 @@ No cramped mini-viewports: the Root Coordinator sits at the top while subagent s
 
 ---
 
-### 03 · Multi-Cabinet Archives, Detail Harvest & 0-Token Precipitated Cold Vault (`档案` Tab)
-Scoped cleanly per workspace directory (`resolveProjectKey`), allowing multiple working cabinets per project plus lossless detail preservation:
-- **4-Tier Hierarchy**: **Multi-Cabinet Switcher → Filing Drawers** → **Color-Coded Paperclipped Dossiers** (**Luminous Gold `#ffe033`**, **Brushed Silver `#cbd5e1`**, **Dark Antique Copper `#7c4329`**) → **Structured Memory Points** → **Unfoldable Sub-point Details**.
-- **Pre-Compaction Harvest (`📥 抢救细节`) & Precipitated Cold Vault (`⏬ 沉淀`)**: Extracts exact file paths, shell commands, and decisions either manually or automatically when hitting the configured context threshold before compacting. Generalizable lessons precipitated into the Cold Vault stay **physically unread (0 disk reads, 0 prompt tokens)** across all sessions until explicitly **Flipped Out (`📂 翻出`)** and return to 0 immediately when **Sealed Back (`🔒 封回`)**.
-- **Lossless Chief Curation**: One-click curation refines points and summaries while preserving 100% of raw markdown text.
+### 03 · Three-Tier Archive Vaults, Detail Harvest & 0-Token Precipitated Cold Vault (`档案` Tab)
+Enforces strict visibility isolation across **💬 Session Cabinet**, **🌐 System Global Cold Vault**, and **🏛️ Precipitated Cold Vault**:
+- **4-Tier Dossier Structure**: **Cabinets → Filing Drawers** → **Color-Coded Paperclipped Dossiers** (**Luminous Gold `#ffe033`**, **Brushed Silver `#cbd5e1`**, **Dark Antique Copper `#7c4329`**) → **Structured Memory Points** → **Unfoldable Sub-point Details**.
+- **Pre-Compaction Harvest (`📥 抢救细节`) & Double-Blind Cold Vault (`🏛️ 沉淀档案柜`)**: Extracts exact file paths, shell commands, and decisions into the Session Cabinet manually, at `50%–95%` hard thresholds, or via **`✦ 智选`** phase-boundary co-management. Generalizable lessons in the **0-Token Precipitated Vault** remain **double-blind to both Chief and Lead** until explicitly unsealed via **「📤 取出」 (`flipOut`)** and re-hidden immediately via **「📥 封回」 (`sealBack`)**.
+- **0-Token System Global Cold Vault & Local ↔ Global Diff**: Stored in `global-vault/vault-chief-global.json` outside conversation context (**0 Token by default**; never auto-migrates legacy session cabinets). Displays live bidirectional diffs (`仅本地` / `已同步` / `本地已改` / `全局独有`), lets you push/update session dossiers (`🌐 存入全局` / `↻ 更新至全局`), import into a session (`⤵️ 引入本会话`), or toggle Chief visibility per session (`👁️ 供本会话参谋参阅` / `📥 收回冷存`).
 
 <div align="center">
   <img src="assets/screenshots/03-cold-archive-cabinet.png" alt="03 - Multi-Cabinet Archives and 0-Token Precipitated Cold Vault" width="68%" />
@@ -138,7 +142,7 @@ When context usage reaches your configured threshold while idle, `dsh-chief` har
 ## ⚡ Quick Installation (Zero External Dependencies)
 
 ```bash
-# Fast install from prebuilt GitHub Release tarball (~240 KB, zero build scripts)
+# Fast install from prebuilt GitHub Release tarball (~300 KB, zero build scripts)
 dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.1.0/dsh-chief-1.1.0.tgz
 
 # Or install directly via GitHub shorthand (replace `desktop` with `web` if using web profile)
@@ -147,7 +151,7 @@ dsh plugin --profile desktop add github:gluztm/dsh-chief
 
 Refresh the DSH Web UI and click the **✦ `DSH 参谋长`** icon in the right-hand sidebar header.
 
-### Host Compatibility Matrix
+### Host Version Compatibility Matrix
 
 | DeepSeek Harness (DSH) Version | Sidebar Panel / Board / Vaults / Bounds | Named Subagent Tree (`task.dispatch` / `team.steer` / `team.interrupt`) | Notes |
 | :--- | :---: | :---: | :--- |

@@ -43,7 +43,7 @@ function boundsLines(board) {
   if (!forbidden.length && !allowed.length && !notes.length) return []
   const lines = ['⚖️ 当前生效边界（📌=全局定住跨任务铁律，其余为本任务边界；全体主子代理必须严守）：']
   if (forbidden.length) lines.push('  🚫 禁止红线: ' + forbidden.slice(0, 6).map(s => fmtItem('forbidden', s)).join(' ； '))
-  if (allowed.length) lines.push('  ✅ 允许范围: ' + allowed.slice(0, 5).map(s => fmtItem('allowed', s)).join(' ； '))
+  if (allowed.length) lines.push('  ✅ 必做事项: ' + allowed.slice(0, 5).map(s => fmtItem('allowed', s)).join(' ； '))
   if (notes.length) lines.push('  💡 边界注意: ' + notes.slice(0, 4).map(s => fmtItem('notes', s)).join(' ； '))
   return lines
 }
@@ -305,28 +305,55 @@ function cursorLines(board) {
   return lines
 }
 
-function takenOutArchiveLines(extras, limit, budget) {
-  const taken = extras && Array.isArray(extras.takenOutArchives) ? extras.takenOutArchives : []
-  // Strictly ZERO auto-injection when cold/sealed: only items explicitly taken out onto this session desk appear.
-  if (!taken.length) return []
-  const shown = taken.slice(0, limit || 4)
-  const header = '📎 当前主动取出的工程档案 ' + taken.length + ' 份（用户从档案柜取出备查）:'
-  const total = Number.isFinite(budget) ? Math.max(200, budget) : ANCHOR_BUDGET
-  const build = perItem =>
-    [header].concat(
-      shown.map(item => {
-        const pts = (Array.isArray(item.points) ? item.points : []).slice(0, 3).map(p => clamp(p.title, 26)).join(' / ')
-        const bodyBit = clamp(item.summary || item.body || '', perItem)
-        return '  · 《' + clamp(item.title || '未命名', 36) + '》: ' + bodyBit + (pts ? ' [要点: ' + pts + ']' : '')
-      }),
-    )
-  let perItem = 180
-  let lines = build(perItem)
-  while (lines.join('\n').length > total && perItem > 60) {
-    perItem = Math.max(60, Math.floor(perItem * 0.72))
-    lines = build(perItem)
+function linkedPeersLines(extras, limit = 4) {
+  const peers = extras && Array.isArray(extras.linkedPeersProgress) ? extras.linkedPeersProgress : []
+  if (!peers.length) return []
+  const shown = peers.slice(0, limit)
+  const lines = ['🌐 协同网络共享进度（当前联动 ' + peers.length + ' 个主对话 · 退出协同后自动清零）：']
+  for (const p of shown) {
+    const label = clamp(p.name || ownerName(p.rootId), 26)
+    const obj = p.objective ? '目标=' + clamp(p.objective, 52) : '暂无总目标'
+    const counts = '任务 ' + (Number(p.doneCount) || 0) + '完/' + (Number(p.doingCount) || 0) + '做/' + (Number(p.blockedCount) || 0) + '阻'
+    const cur = p.cursorStep ? ' · 断点=' + clamp(p.cursorStep, 36) : ''
+    lines.push('  · [' + label + '] ' + obj + ' | ' + counts + cur)
+  }
+  if (peers.length > shown.length) {
+    lines.push('  …另有 ' + (peers.length - shown.length) + ' 个联动对话')
   }
   return lines
+}
+
+function takenOutArchiveLines(extras, limit, budget) {
+  const taken = extras && Array.isArray(extras.takenOutArchives) ? extras.takenOutArchives : []
+  const briefs = extras && Array.isArray(extras.sessionArchiveBriefs) ? extras.sessionArchiveBriefs : []
+  if (!taken.length && !briefs.length) return []
+  const linesOut = []
+  if (taken.length) {
+    const shown = taken.slice(0, limit || 4)
+    const header = '📌 当前摆上桌面备选（重点强调，主模型与参谋长共同关注） ' + taken.length + ' 份:'
+    const total = Number.isFinite(budget) ? Math.max(200, budget) : ANCHOR_BUDGET
+    const build = perItem =>
+      [header].concat(
+        shown.map(item => {
+          const pts = (Array.isArray(item.points) ? item.points : []).slice(0, 3).map(p => clamp(p.title, 26)).join(' / ')
+          const bodyBit = clamp(item.summary || item.body || '', perItem)
+          return '  · 《' + clamp(item.title || '未命名', 36) + '》: ' + bodyBit + (pts ? ' [要点: ' + pts + ']' : '')
+        }),
+      )
+    let perItem = 180
+    let lines = build(perItem)
+    while (lines.join('\n').length > total && perItem > 60) {
+      perItem = Math.max(60, Math.floor(perItem * 0.72))
+      lines = build(perItem)
+    }
+    linesOut.push(...lines)
+  }
+  if (briefs.length) {
+    const idxText = briefs.slice(0, 6).map(b => `《${clamp(b.title || '未命名', 28)}》`).join('、')
+    const more = briefs.length > 6 ? ` 等共 ${briefs.length} 份` : ''
+    linesOut.push(`🗂️ 本会话档案柜封存索引：${idxText}${more}（按需调用 chief_board({ action: "archive.search" }) 检索）`)
+  }
+  return linesOut
 }
 
 function anchorLines(board, limit, budget) {
@@ -382,12 +409,27 @@ function teamTaskLines(tasks, max) {
   return lines
 }
 
+function chiefPostureLine(permissionMode) {
+  const mode = String(permissionMode || 'danger-full-access').trim()
+  if (mode === 'read-only') {
+    return '🛡️ 权限 posture=仅可查看 (read-only)：参谋长只读核验与建言；主模型/子代理严守禁止红线，禁止未经授权直接改盘。'
+  }
+  if (mode === 'workspace-write') {
+    return '🛡️ 权限 posture=工作区内修改 (workspace-write)：参谋长与主模型/子代理限当前工作区内安全读写并严格守红线，禁止越界写盘或高危命令。'
+  }
+  if (mode === 'auto-review') {
+    return '🛡️ 权限 posture=自动审查 (auto-review EXP)：常规工作区内推进；高风险终端命令与越界改动须经参谋长双人复核。'
+  }
+  return '🛡️ 权限 posture=完全权限 (danger-full-access)：参谋长拥有最高实权（全盘读写、测试核验、调度子代理、强介入与压缩）；主模型/子代理在能力边界与禁止红线内协作。'
+}
+
 /** The injected section. Never throws: a broken digest must not break a prompt. */
 export function renderDigest(board, extras) {
   try {
     const head = ['## 参谋看板（DSH 参谋长指挥看板 · 父子代理与跨对话互通）']
     const mode = modeLine(board)
     if (mode) head.push(mode)
+    head.push(chiefPostureLine(extras && extras.chiefPermissionMode))
     if (board.objective) {
       const owner = board.objectiveBy ? '（' + ownerName(board.objectiveBy) + ' 设定）' : ''
       head.push('目标' + owner + ': ' + clamp(board.objective, 200))
@@ -418,6 +460,7 @@ export function renderDigest(board, extras) {
       { key: '规划', build: () => planLines(board, 6), hold: ANCHOR_RESERVE },
       { key: '断点', build: () => cursorLines(board), hold: ANCHOR_RESERVE },
       { key: '待办', build: () => taskLines(board, 10), hold: ANCHOR_RESERVE },
+      { key: '协同进度', build: () => linkedPeersLines(extras, 4), hold: ANCHOR_RESERVE },
       { key: '团队任务', build: () => teamTaskLines(extras && extras.teamTasks, 8), hold: ANCHOR_RESERVE },
       {
         key: '取出档案',
@@ -460,7 +503,10 @@ export function renderDigest(board, extras) {
       '【强制执行铁律 · 严禁只说不调工具】\n'
       + '  1. 逢变必记：定目标、拆任务、切换推进(doing)/受阻(blocked)/完成(done)、产出结论或断点时，必须当轮调用 chief_board（graph.plan / task.update / cursor.set / note.write）或 chief_memory 落盘，纯文字口头宣告无效。\n'
       + '  2. 逢协必传：派发子代理、给子代理/主代理/联动窗口传话同步关键发现时，必须调用 chief_board 的 task.dispatch / team.steer / mail.send（务必写明目标代理名）。\n'
-      + '  3. 撞墙必奏（宰相边界机制）：执行中若撞墙（权限被拒、沙箱受限、目录禁改、路线死胡同）或用户要求总结工作边界，必须调用 chief_board({ action: "bounds.propose", field: "forbidden"|"allowed"|"notes", item: "简明边界条文", reason: "撞墙原因" }) 呈交 DSH 参谋长，由参谋长请示用户批准后注入全局边界。',
+      + '  3. 撞墙必奏（宰相边界机制）：执行中若撞墙（权限被拒、沙箱受限、目录禁改、路线死胡同）或用户要求总结工作边界（禁止红线/必做事项/注意事项），必须调用 chief_board({ action: "bounds.propose", field: "forbidden"|"allowed"|"notes", item: "简明边界条文", reason: "撞墙原因" }) 呈交 DSH 参谋长（注：allowed 列即「必做事项」，notes 列即「注意事项」），由参谋长请示用户批准后注入全局边界。'
+      + (extras && extras.smartCompactActive
+        ? '\n  4. 智选压缩协同：当前已启用「✦ 智选」无阈值共管（硬阈值不触发）；当完成阶段大步、切换任务阶段或上下文已明显臃肿时，调用 chief_board({ action: "context.compact", text: "本阶段关键事实与断点摘要" })，由参谋长归档入本会话档案柜并执行高质量压缩。'
+        : ''),
     )
     if (dropped.length) {
       head.push('预算不够，这些段没进：' + dropped.join('、') + '。需要就用 chief_board snapshot 取全量。')
