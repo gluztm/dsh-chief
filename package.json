@@ -3,7 +3,7 @@
   "version": "1.2.0",
   "icon": "icon.svg",
   "type": "module",
-  "description": "DSH 参谋长 (Chief of Staff for DeepSeek Harness) — SuperAgent-inspired multi-agent command cockpit, full-spread subagent pyramid DAG, cross-session relay, /goal step Q&A, 4-tier cold archive vault, and pinned boundary governance.",
+  "description": "DSH 参谋长 (Chief of Staff for DeepSeek Harness) — SuperAgent-inspired multi-agent cockpit with wishing-box agentic executor (4-tier permission gates), 3-tier 0-token cold archive vaults, smart co-managed compaction, pyramid subagent DAG, and cross-session relay.",
   "author": "gluztm",
   "license": "AGPL-3.0-only",
   "repository": {
@@ -23,12 +23,14 @@
     "chief-of-staff",
     "multi-agent",
     "agent-orchestration",
+    "agentic-executor",
     "subagent",
     "dag",
     "workflow",
     "archive-vault",
     "agent-memory",
     "context-engineering",
+    "compaction",
     "guardrails",
     "handoff"
   ],

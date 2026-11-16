@@ -8,13 +8,16 @@
 ### Multi-Agent Command Cockpit · SuperAgent Cross-Session Synergy · 4-Tier Cold Archive Vault for DeepSeek Harness
 
 [![DSH Compatibility](https://img.shields.io/badge/DSH-%3E%3D%200.2.2--rc.2-38bdf8?style=flat-square)](https://dsh.deepseek.com)
+[![npm version](https://img.shields.io/npm/v/dsh-chief?color=cb3837&style=flat-square)](https://www.npmjs.com/package/dsh-chief)
+[![DSH Market](https://img.shields.io/badge/DSH%20Market-Listed-f59e0b?style=flat-square)](https://awesome-dsh-plugin.com/p/gluztm/dsh-chief/)
+[![Bilibili Demo](https://img.shields.io/badge/Bilibili-Video%20Demo-fb7299?style=flat-square)](https://www.bilibili.com/video/BV1DqsV6QEGi)
 [![SuperAgent Ready](https://img.shields.io/badge/SuperAgent-Router--Worker%20Synergy-a855f7?style=flat-square)](https://github.com/deepseek-ai/dsh-superagent-prototype)
 [![Node.js](https://img.shields.io/badge/Node.js-%3E%3D%2022.13-30d158?style=flat-square)](https://nodejs.org)
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
-[![Cold Vault](https://img.shields.io/badge/Cold%20Archive-0%20Token%20Idle-34d399?style=flat-square)](#03--4-tier-cold-engineering-archive-cabinet-档案-tab)
+[![Cold Vault](https://img.shields.io/badge/Cold%20Archive-0%20Token%20Idle-34d399?style=flat-square)](#03--three-tier-archive-vaults-desk-spotlight--0-token-precipitated-cold-vault-档案-tab)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-> **Turn scattered chat tabs into a unified Chief of Staff command center**: inspired by DeepSeek's official **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** *Router + Isolated Workers* architecture to eliminate the human attention bottleneck and context pollution—natively integrated with **DeepSeek Harness (DSH)** split-pane subagent streams, panel-native **Goal Supervision + Human Approval Gate**, live `steer` injection, pre-compaction detail harvesting, multi-cabinet precipitated cold vaults, and one-click cross-session Chief deployment.
+> **Stop babysitting your AI agents — state your intent in the Wishing Box for Wish-Driven One-Stop Execution (`v1.2.0`)**: inspired by DeepSeek's official **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** *Router + Isolated Workers* architecture, `dsh-chief` turns scattered chats into a full right-docked Chief of Staff cockpit—executing workspace tools even from a blank new session, locking Core Objectives, spreading Pyramid Subagent lanes, holding pinned redlines, co-managing cross-isolation **`✦ 智选压缩`**, isolating 0-token cold vaults, and gating goal closure behind human approval.
 
 [简体中文 (`README.md`)](README.md) · **English** · [Changelog (`CHANGELOG.md`)](CHANGELOG.md)
 
@@ -30,34 +33,30 @@ DeepSeek's official **[`dsh-superagent-prototype`](https://github.com/deepseek-a
 
 1. **Visual Router–Worker Orchestration**: Supervise your Root Coordinator, spawned Subagents, and linked independent DSH Worker windows from one **Full-Spread Pyramid DAG** and unified **Collaboration Directory**.
 2. **Native DSH Split-Pane Subagent Stream (`subagentchat`)**: Click `分屏对话` on any pyramid node or directory row to invoke DSH's native `sidebarRight.openResource('dsh-resource://subagentchat/...')` split-pane live viewer.
-3. **Panel-Native Goal Supervision & Human Approval Gate**: Click **`🎯 设为目标`** right inside the `规划` (Plan) tab to enable long-horizon goal supervision without slash-command friction. When objectives change, stale checklists are flagged for clean reset; once the Chief determines the goal is achieved, it remains in `goal` supervision mode until you explicitly click **Approve & Close (`✅ 批准结项`)** or **Reject & Continue (`↩ 驳回继续`)**.
-4. **Composer `+` Tactical Cockpit & `✦ 智选` Co-Managed Compaction**: Open the centered **`+`** trigger to configure Active Intervention (circuit breaker + `⏹ 急停`), Pre-Compaction Harvest (hard threshold floor locked at **50%–95%**), Strict Verification, Redline Sentinel, and Concise Briefs—or toggle **`✦ 智选`** so hard percentage thresholds are bypassed and the Chief + Lead collaboratively choose clean phase boundaries to harvest and compact.
-5. **Three-Tier Archive Isolation, 0-Token System Global Cold Vault, Local ↔ Global Bidirectional Diff, Color-Coded Drawer Mailbox & Pinnable Handoff**:
-   - **Three-Tier Archive Isolation**: **💬 Session Cabinet** (1:1 per `rootSessionId`; visible to User, Session & Chief; blank chats never leak history), **🌐 System Global Cold Vault** (system-level 0-Token cold storage that **never follows conversation context or auto-migrates legacy session cabinets**; invisible to Lead until copied via `⤵️ 引入本会话`, and readable by Chief only via per-session `👁️ 供本会话参谋参阅` or explicit Q&A search; tracks live **Local ↔ Global bidirectional diff**), and **🏛️ Precipitated Cold Vault** (cross-session **0-Token double-blind** until explicitly unsealed with `📤 取出`);
+3. **Panel-Native Goal Supervision, Must-Do Gate & Human Approval Gate**: Click **`🎯 设为目标`** right inside the `规划` (Plan) tab to lock the Core Objective as Chief's top-level command destination. When objectives change, stale checklists are flagged for clean reset; once achieved, `allowed` must-do items are verified and the session remains in `goal` mode until you explicitly click **Approve & Close (`✅ 批准结项`)** or **Reject & Continue (`↩ 驳回继续`)**.
+4. **Wishing Box 4-Tier Executor & Cross-Isolation `✦ 智选压缩` Co-Managed Compaction**:
+   - **4-Tier Permission-Gated Executor (`chief-executor.js`)**: Ask the Wishing Box directly to inspect files, run safe workspace commands, update boards/archives, or orchestrate subagents under **`read-only` / `workspace-write` / `auto-review` / `danger-full-access`**, backed by DSML/XML tool-call sanitization, `workspaceRegistry` blank-session resolution, and `pending-transfer.json` staging.
+   - **Composer `+` Tactical Cockpit**: Toggle Active Intervention (supporting unlimited turns `0 = ∞` and high-risk **`⏹ 急停`** confirmation), Auto-Compact Harvest (configurable **`10%–95%`** with `<25%` amber guard or **`>= 8,000`** token thresholds), Strict Verify, Redline Sentinel, Concise Briefs, or **`✦ 智选压缩`**—which settles to idle at clean phase boundaries, harvests details into the Session Cabinet, executes host `/compact` across Cordis isolation, and posts visible receipts in Chief chat.
+5. **Three-Tier Archive Isolation, Desk Spotlight, 0-Token System Global Cold Vault, Bidirectional Diff & Pinnable Handoff**:
+   - **Three-Tier Archive Isolation**: **💬 Session Cabinet** (1:1 per `rootSessionId`; visible to User, Session & Chief; blank chats never leak history), **🌐 System Global Cold Vault** (system-level 0-Token cold storage that **never follows conversation context or auto-migrates legacy session cabinets**; supports **Desk Spotlight** («置上桌面»), 1-click **Distill to Global**, lossless download via `⤵️ 引入本会话`, per-session `👁️ 供本会话参谋参阅`, and live **Local ↔ Global bidirectional diff**), and **🏛️ Precipitated Cold Vault** (cross-session **0-Token double-blind** until explicitly unsealed with `📤 取出`, with batch multi-archive combinatorial relay);
    - **Peer Linking Warning & Clean Detach**: Joining a peer cluster shows a mutual context-pollution warning, automatically shares progress while linked, and purges cached Chief narratives, external team facts, and pre-step injections upon detach;
    - **Color-Coded Collapsible Drawer Mailbox**: Deduplicates `@all` broadcasts and organizes mails into color-coded collapsible drawers (`Broadcast`, `Cross-Session Pair/Multi`, `Internal`);
    - **Editable & Pinnable Handoff**: Edit handoff packets manually, freeze auto-rendered previews cleanly with **`📌 定住防改`** (disabling Chief digest auto-sync while pinned), and receive a pre-deploy warning modal if handoff notes lag behind recent progress.
 
 ---
 
-## 💡 Why `dsh-chief` Is Fundamentally Different
+## 💡 Why `dsh-chief` Is Fundamentally Different (6 Real Pain Points Solved)
 
-Ordinary Todo lists and always-injected memory plugins break down on complex, multi-subagent engineering sessions:
-1. **Silent Background Token Drain & Wrong Provider Routing**: Auto-summarizing after every turn burns quota in the background and often matches bare model names onto expensive metered channels instead of your active subscription provider.
-2. **Context Bloat & Sudden Compaction Amnesia**: Stuffing debugging notes into system prompts wastes thousands of tokens; meanwhile, automatic context compaction wipes out recently discovered paths, commands, and decisions.
-3. **Cramped Drag-Scroll Canvas**: Subagent graphs trapped inside tiny scroll boxes force constant panning just to see what is blocked.
-4. **Forgotten Guardrails & Lost Chief State Across Windows**: Safety rules vanish when switching chats, forcing manual copy-paste and reconfiguration.
+Ordinary Todo lists only give you another manual scratchpad, while always-on memory plugins silently stuff thousands of stale tokens into every prompt. **`dsh-chief` flips "human babysitting AI" into Wish-Driven One-Stop Execution (`许愿式一站式跑通`)**—directly targeting the six daily pain points of multi-agent engineering:
 
-**`dsh-chief` («DSH 参谋长») replaces ad-hoc scratchpads with a full right-docked Chief of Staff cockpit:**
-
-| Capability | Typical Todo / Always-On Memory Plugins | ✦ DSH Chief (`dsh-chief`) |
+| Daily Pain Point | Typical Todo / Always-On Memory Plugins | ✦ How `dsh-chief` Solves It |
 | :--- | :--- | :--- |
-| **Pace & `+` Tactical Cockpit** | Blind per-turn background calls; no tactical safety brakes | **3-Gear Human Pace** (`⏸ On-Demand` **0 background calls**, `👁 Smart`, `🤖 Auto`) + composer **`+` Tactical Cockpit** (`Intervention + Emergency Stop + Circuit Breaker`, `Auto-Compact Harvest`, `Strict Verify`, `Redline Sentinel`) |
-| **Subagent Task Topology** | Flat lists or cramped drag-scroll viewports | **Full-Spread Pyramid DAG**: Root Coordinator at the apex, subagent lanes laid out cleanly with inline status, explain, dispatch & split-stream buttons |
-| **Multi-Cabinet & Cold Vault** | Stuffed into system prompts or lost on compaction | **Per-Project Multi-Cabinets + 4-Tier Dossiers + 0-Token Precipitated Cold Vault**: one-click **Harvest (`📥 抢救细节`)** before compaction and **Precipitate (`⏬ 沉淀`)** into cross-session cold storage (**0 file reads / 0 prompt tokens** unless explicitly **Flipped Out (`📂 翻出`)**) |
-| **Goal Supervision & Step Q&A** | Static checklists; models self-declare completion | **Core Objective + Human Approval Gate + Interactive Step Board**: click any step to ask *"Why is this needed?"*; goal completion requires explicit human sign-off |
-| **Cross-Session Relay & Images** | Isolated single window; image uploads fail on text-only Chiefs | **Cross-Window Peer Linking + 1-Click Chief Deployment (4 archive policies)** + **Workspace `.dsh-chief/uploads/` persistence** with text-only fallback |
-| **Redline Governance & Idle Guard** | Verbal rules lost; no handoff verification | **`📌` Global Thumbtack Redlines** + boundary proposals + **self-contained handoff** + `idle-guard` |
+| **1. Half-Finished "You Test It" Hand-Offs**<br>Models stop halfway and declare done while humans hover to nag | Static text checklists; agents self-declare completion | **🎯 Core Objective Lock + `⚡ Strong Intervention (0 = ∞ turns)` + Must-Do Verification + Human Approval Gate**: blocks closure until `allowed` items are verified and you click **`✅ 批准结项`**, with high-risk prompts & one-click **`⏹ 急停`** |
+| **2. "Lobotomy" Amnesia After Compaction**<br>Context compacts mid-task and newly found paths, commands, and errors vanish | No verified pre-compact disk snapshot; history wipes cleanly | **🗜️ Harvest-Verify + `✦ 智选压缩` Cross-Isolation `/compact`**: triggers at clean phase boundaries after settling idle (`smartCompact`), custom **`10%–95%` / `>= 8k`** thresholds, or direct `"压缩吧"` command—verifying Session Cabinet disk writes before silent compaction & chat receipt |
+| **3. Prompt Bloat Mudding the Model's Brain**<br>Always-injected memory floods system prompts with old noise and burns quota | Blindly injects stale notes on every single turn | **🏛️ 3-Tier 0-Token Cold Vaults (Session / System Global / Double-Blind Precipitated)**: **0 bytes / 0 tokens while sealed**; flip out via `📤 取出` or spotlight via `置上桌面`, seal back to zero anytime, with live Local ↔ Global diff |
+| **4. Chat-Only "Mascot Copilot"**<br>Checking a file or running a quick check interrupts the main coding flow | Pure chat replies or blind background summaries with no real workspace tools | **✦ Wishing Box 4-Tier Agentic Executor (`chief-executor`)**: respects `read-only` / `workspace-write` / `auto-review` / `danger-full-access` right in the sidebar; works even on **blank new sessions** via `workspaceRegistry` resolution & `pending-transfer.json` staging |
+| **5. Cramped Subagent Maze & Forgotten Rules**<br>Subagent graphs scroll blindly and verbal guardrails fade within ten turns | Narrow list views and chat-only constraints | **📐 Full-Spread Pyramid DAG + Native `subagentchat` Split-Pane + `📌` Global Thumbtack Redlines**: inspect/steer/split-stream in place while pinned rules stay active across tasks |
+| **6. Context-Cap Window Loss & Silent Token Drain**<br>New tabs wipe setup and background loops hit wrong metered API channels | Single-window silos; unaligned model routing burns quota | **🚀 Cross-Window Linking + Editable/`📌`-Frozen Handoff + Channel Alignment + `⏸ On-Demand` Default (0 background calls)**: clones Chief config + scoped archives cleanly and purges peer leaks immediately upon detach |
 
 ---
 
@@ -79,11 +78,11 @@ No cramped mini-viewports: the Root Coordinator sits at the top while subagent s
 
 ---
 
-### 03 · Three-Tier Archive Vaults, Detail Harvest & 0-Token Precipitated Cold Vault (`档案` Tab)
+### 03 · Three-Tier Archive Vaults, Desk Spotlight & 0-Token Precipitated Cold Vault (`档案` Tab)
 Enforces strict visibility isolation across **💬 Session Cabinet**, **🌐 System Global Cold Vault**, and **🏛️ Precipitated Cold Vault**:
 - **4-Tier Dossier Structure**: **Cabinets → Filing Drawers** → **Color-Coded Paperclipped Dossiers** (**Luminous Gold `#ffe033`**, **Brushed Silver `#cbd5e1`**, **Dark Antique Copper `#7c4329`**) → **Structured Memory Points** → **Unfoldable Sub-point Details**.
-- **Pre-Compaction Harvest (`📥 抢救细节`) & Double-Blind Cold Vault (`🏛️ 沉淀档案柜`)**: Extracts exact file paths, shell commands, and decisions into the Session Cabinet manually, at `50%–95%` hard thresholds, or via **`✦ 智选`** phase-boundary co-management. Generalizable lessons in the **0-Token Precipitated Vault** remain **double-blind to both Chief and Lead** until explicitly unsealed via **「📤 取出」 (`flipOut`)** and re-hidden immediately via **「📥 封回」 (`sealBack`)**.
-- **0-Token System Global Cold Vault & Local ↔ Global Diff**: Stored in `global-vault/vault-chief-global.json` outside conversation context (**0 Token by default**; never auto-migrates legacy session cabinets). Displays live bidirectional diffs (`仅本地` / `已同步` / `本地已改` / `全局独有`), lets you push/update session dossiers (`🌐 存入全局` / `↻ 更新至全局`), import into a session (`⤵️ 引入本会话`), or toggle Chief visibility per session (`👁️ 供本会话参谋参阅` / `📥 收回冷存`).
+- **Pre-Compaction Harvest (`📥 抢救细节`) & Double-Blind Cold Vault (`🏛️ 沉淀档案柜`)**: Extracts exact file paths, shell commands, and decisions into the Session Cabinet manually (`压缩吧` / `/compact`), at `10%–95%` / `>= 8,000`-token thresholds, or via **`✦ 智选压缩`** across Cordis service isolation. Generalizable lessons in the **0-Token Precipitated Vault** remain **double-blind to both Chief and Lead** until explicitly unsealed via **「📤 取出」 (`flipOut`)** and re-hidden immediately via **「📥 封回」 (`sealBack`)**, with batch **combinatorial relay** across vaults.
+- **Desk Spotlight, 0-Token System Global Cold Vault & Local ↔ Global Diff**: Stored in `global-vault/vault-chief-global.json` outside conversation context (**0 Token by default**; never auto-migrates legacy session cabinets). Displays live bidirectional diffs (`仅本地` / `已同步` / `本地已改` / `全局独有`), lets you spotlight dossiers on the Desk («置上桌面»), distill/push session dossiers (`🌐 存入全局` / `↻ 更新至全局`), import into a session (`⤵️ 引入本会话`), or toggle Chief visibility per session (`👁️ 供本会话参谋参阅` / `📥 收回冷存`).
 
 <div align="center">
   <img src="assets/screenshots/03-cold-archive-cabinet.png" alt="03 - Multi-Cabinet Archives and 0-Token Precipitated Cold Vault" width="68%" />
@@ -127,25 +126,33 @@ When context usage reaches your configured threshold while idle, `dsh-chief` har
 
 ---
 
-## ⚠️ Usage Notes & Disclaimers
+## ⚠️ Usage Notes & Two Critical Disclaimers
 
 > [!IMPORTANT]
-> Before enabling **`+` Tactical Cockpit** features such as **Active Strong Intervention (`⚡ 主动强介入`)**, **Pre-Compaction Auto-Harvest**, or **Redline Sentinel**, please review the following two disclaimers:
+> Before enabling Wishing Box execution, **`⚡ Strong Intervention`**, or **`✦ 智选压缩`**, keep these two engineering realities in mind:
 >
-> 1. **Underlying Model Capability Dependency**: All Chief auto-review, active strong intervention steering, pre-compaction detail harvesting, and redline interception capabilities depend heavily on the reasoning strength and context quality of the underlying LLM configured for DSH Chief; models differ objectively in planning rigor and instruction adherence.
-> 2. **Host System Prompt & Rules Conflict Risk**: Mounting excessive System Prompts, global Rules, or rigid custom instructions in the main session or current project may conflict with this plugin's autonomous intervention logic—potentially causing abnormal intervention loops, premature circuit-breaker trips, or unexpected deviations.
+> 1. **Floor Guaranteed by Plugin Guardrails — Ceiling Decided by Your Underlying LLM**: `dsh-chief` enforces your safety floor (0-token vault isolation, 4-tier permission gates, disk-verified pre-compaction harvesting, turn circuit breakers, and high-risk emergency halts). However, **the ceiling of planning rigor, multi-step tool accuracy, and supervision intelligence depends entirely on the LLM you assign to the Chief**. Heavy multi-agent orchestration calls for a strong reasoning model—never expect frontier judgment from an ultra-tiny lightweight model.
+> 2. **Avoid Flooding the Model's Brain With Heavy External Prompt Injections**: Do **not** stack bloated System Prompts, hundreds of conflicting project Rules, or always-injected memory plugins alongside `dsh-chief`. **Excessive prompt injections muddy the model's working memory and fracture attention**, frequently clashing with Chief supervision and causing loops or early trips. Keep global prompts lean and store low-frequency knowledge inside `dsh-chief`'s **0-Token Cold Vaults** for on-demand retrieval.
 >
-> Always specify a clear Core Objective and at least one Forbidden Redline before confirming Active Strong Intervention, and use the red **`⏹ 急停`** button above the composer anytime you want immediate manual takeover.
+> Always define a clear Core Objective and at least one Forbidden Redline before enabling Strong Intervention, and click the red **`⏹ 急停`** button above the composer anytime for instant manual takeover.
 
 ---
 
 ## ⚡ Quick Installation (Zero External Dependencies)
 
-```bash
-# Fast install from prebuilt GitHub Release tarball (~300 KB, zero build scripts)
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.1.0/dsh-chief-1.1.0.tgz
+Search for **`dsh-chief`** inside [dshmarket](https://github.com/dsh-market/dsh-market) / DSH Plugin Market, or install via CLI (replace `desktop` with `web` if using the web profile):
 
-# Or install directly via GitHub shorthand (replace `desktop` with `web` if using web profile)
+```bash
+# Install via npm registry (fastest with China npm mirrors & auto-update notifications)
+dsh plugin --profile desktop add dsh-chief
+
+# Or install the latest prebuilt GitHub Release tarball (zero build scripts)
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/latest/download/dsh-chief.tgz
+
+# Or pin the exact v1.2.0 Release tarball
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.2.0/dsh-chief-1.2.0.tgz
+
+# Or install directly via GitHub shorthand
 dsh plugin --profile desktop add github:gluztm/dsh-chief
 ```
 
