@@ -8,21 +8,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.2.0] - 2026-11-16
 
 ### Added
-- **Executive Chief Agentic Executor & Wishing Box (`chief-executor.js`)**:
-  - Added multi-step tool-use loop inside Chief Q&A («✦ 许愿框一站式办理») governed by **4 workspace permission modes**: `read-only` (`👁 仅可查看`), `workspace-write` (`工作区内修改`), `auto-review` (`自动审查 EXP`), and `danger-full-access` (`完全权限`), supporting file reads/edits/listing/search, guarded command execution, subagent control, board/archive updates, and active compaction.
-  - Added resilient fallback parsing & UI sanitization across all DSML / XML tool-call tag variants (including double fullwidth bars `<｜｜DSML｜｜ calls>`, single/mixed vertical bars, and unclosed tails), `workspaceRegistry` workspace root resolution on blank new sessions, and automatic `pending-transfer.json` staging when relaying to an unstarted `@lead`.
-- **Three-Tier Archive Vaults, Desk Spotlight & System-Level 0-Token Global Cold Vault (`session` / `global` / `precipitated`)**:
-  - **💬 本会话档案柜 (`session`)**: Isolated per `rootSessionId` (`registry.sessions[sess:<rootSessionId>]`), visible only to the **User, Current Session (Lead/Subagents), and Chief of Staff**. Unbound blank new chats (including the `'global'` sentinel) render an empty guidance state and never fall back to legacy global cabinets.
-  - **🌐 系统全局档案柜 (`global`)**: System-level **0-Token Global Cold Vault** (`global-vault/vault-chief-global.json`)—does **not** follow conversation context (`chiefMountedSessions: []` by default) and never auto-migrates legacy `cab-main.json` cabinets. Supports **Desk Spotlight** («置上桌面»), 1-click **Distill to Global** (`/api/dsh-chief/archives/distill-to-global`), lossless download (`⤵️ 引入本会话`), Chief on-demand mounting (`👁️ 供本会话参谋参阅` / `📥 收回冷存`), and strict `session → global → precipitated` promotion gradient.
-  - **🔄 Local ↔ Global Bidirectional Diff & Anti-Bleed Guards**: Live per-session diff (`computeSessionGlobalDiff`) tracks `local_only`, `synced`, `local_modified`, `global_only`, `differs`, and `unbound`, paired with isolated frontend `globalVaultItems` storage and strict stale-host version detection (`BACKEND_BUILD`).
-  - **🏛️ 沉淀档案柜 (`precipitated`)**: Unified machine-wide **0-Token Precipitated Experience Vault** (`precipitated/vault-global.json`). Double-blind by default (**neither Chief nor Lead reads any entry**) until the User explicitly clicks **「📤 取出」 (`flipOut`)** for the active session, and immediately re-hidden upon **「📥 封回」 (`sealBack`)**. Supports batch checkboxes and multi-archive combinatorial relay («组合递话»).
-- **Cross-Isolation Smart Compaction (`✦ 智选压缩`), `10%–95%` / Token Thresholds & `auto-continue.js`**:
-  - Replaced `✦ 智设` with **`✦ 智选压缩` (`tacticalModes.smartCompact`)**: works standalone or alongside `autoCompact` to bypass hard percentage thresholds and trigger harvest-then-compact cleanly at phase boundaries after waiting for the agent to settle idle, posting visible **`✦ 智选压缩`** receipts directly in Chief chat.
-  - Added deterministic execution for explicit manual compaction commands («压缩吧», `/compact`, etc.) and resolved Cordis `compaction` service isolation via `commands.execute(ag, '/compact', ...)` fallback + `sessionController.resolveAgent` wake-up, with atomic `runtimeGuard` counters that never inflate on error or no-op.
-  - Unlocked configurable auto-compaction thresholds down to **`10%–95%`** (with amber `<25%` confirmation guard) or exact **token thresholds (`>= 8,000`)**, and added **`auto-continue.js`** for guarded long-horizon auto-continuation.
-- **Strong Intervention Core Objective Destination & Lock, Unlimited Turns, Emergency Halt & Must-Do Gates**:
-  - Dedicated **Core Objective Destination & Lock** in Strong Intervention, preserved unlimited turn limit (`0 = ∞`), **Emergency Hazard Halt** modal + kill switch, and **`allowed` Must-Do Completion Verification Gate** before goal sign-off.
-  - Added natural Peer Cluster Progress sharing with zero-pollution detach cleanup, color-coded collapsible drawer mailbox with `@all` deduplication, editable & pinnable handoff (`📌 定住防改` + `frozenFromAuto` + `同步交接单` toggle), and packaged `chief-executor.js` & `auto-continue.js` inside `package.json` `files`.
+
+#### ✦ 许愿框一站式执行器与四档权限门禁 (`chief-executor.js`)
+- **内置多步实权工具循环**：用户可在右侧「✦ 许愿框」一句话直达查改工作区文件、目录搜索、运行安全命令、维护看板、整理档案与主动触发压缩。
+- **四档精细权限控制**：支持 `read-only`（仅可查看）、`workspace-write`（工作区内修改）、`auto-review`（自动审查 EXP）与 `danger-full-access`（完全权限）。
+- **空白新对话开场即战力**：无历史对话时也能主动定位工作区并下场勘察，无需等主对话先发送消息。
+- **空白新对话待领交接暂存**：在空白上下文中拆发指令给尚未创建的 `@lead` 时，自动调用 `stagePendingTransfer` 写入 `pending-transfer.json`，主对话首轮发送即自动衔接。
+
+#### 🏛️ 三层 0-Token 档案金库与双向差分
+- **💬 本会话档案柜 (`session`)**：按 `rootSessionId` 实现 1:1 严格会话隔离，仅用户、当前会话代理与参谋长可见。
+- **🌐 系统全局档案柜 (`global`)**：系统级 0-Token 冷库（`global-vault/vault-chief-global.json`），默认不随会话自动挂载，绝不自动迁移旧版遗留档案。
+- **⇄ 本地 ↔ 全局实时双向差分**：自动标记「仅本地 / 已同步 / 本地已改 / 全局独有」差异，支持一键 `⤵️ 引入本会话`、`提炼入全局` 与增量覆盖更新。
+- **🏛️ 沉淀档案柜 (`precipitated`)**：跨对话通用经验冷库（`precipitated/vault-global.json`），默认对主对话与参谋长**双盲 0 字节读取**。
+- **📌 摆上桌面聚光灯与组合递话**：支持将任意三库卷宗点亮为「📌 摆上桌面（主+参谋可见）」并支持跨库复选卷宗、附带用户具体指令一键「组合递话」。
+- **参谋专属按需检索**：支持逐会话切换 `👁️ 供本会话参谋参阅` / `📥 收回冷存`，或在参谋问答中按需检索全局冷库，用后即走。
+
+#### 🗜️ `✦ 智选压缩` 与长任务自动续推
+- **✦ 智选压缩 (`smartCompact`)**：可独立生效或协同 `autoCompact` 跳过固定百分比阈值，待阶段收口且主代理收敛空闲后自动抢救并静默压缩。
+- **可见压缩回执卡片**：每次 `✦ 智选压缩` 真实执行后，自动向参谋对话流写入带 `✦ 智选压缩` 徽章的回执卡片（记录档案编号与压前 Token 占比）。
+- **手动指令确定性压缩**：用户直说「压缩吧 / 压缩一下 / `/compact`」时绕过纯状态查询通道，确定性执行「先落盘抢救校验 → 再宿主静默压缩」。
+- **长任务自动续推模块 (`auto-continue.js`)**：接入宿主 `autoContinue` 协同与参谋急停联动清理机制。
+
+#### 🎯 强介入目标锁定、无限轮数与双安全门禁
+- **核心目标目的地锁定**：开启 `⚡ 主动强介入` 后直接锁定核心目标作为唯一终局，防止后台督导跑偏。
+- **无限轮次与防卡死熔断**：`maxInterventionTurns` 支持设为 `0 = ∞`（无限轮），同时保留连续无进展兜底熔断与风险弹窗确认。
+- **高危操作急停弹窗**：检测高危干预时先弹窗提示风险，搭配输入栏红色 `⏹ 急停` 随时一键切断后台自驱。
+- **必做事项结项核验门禁 (`allowed`)**：强介入或 `/goal` 收口前强制逐项核查 `allowed` 必做清单，未验证并获人工点击 `✅ 批准结项` 绝不退出督导模式。
+
+#### 🌐 跨窗协同网、彩色信箱与可定住交接单
+- **跨窗互连污染提醒与彻底脱离净化**：接入邻居会话前先弹窗提醒互享进展风险；断开协同立即校验 `clusterSig` 并清除摘要缓存、外部团队记忆与离线信箱残留。
+- **彩色可折叠抽屉信箱与广播去重**：按会话固定配色，`@all` 广播自动去重归并，支持按全网广播 / 多方 / 双边 / 内部渠道折叠检索。
+- **可手改与 `📌 定住防改` 交接单**：规划页支持手工编辑、一键定住冻结 `[自动渲染]` 快照（并同步锁定 `同步交接单` 开关防覆写）与发车前过期提醒弹窗。
+
+### Changed
+- **压缩触发区间全面放宽**：百分比自动压缩阈值由 `50%–95%` 调整为 `10%–95%`（低于 `25%` 弹出琥珀低阈值提示），并新增 `>= 8,000` 精确 Token 阈值模式。
+- **交互入口与工作区布局重排**：战术驾驶舱 `+` 按钮收拢至输入栏居左，状态胶囊与权限档位直显于输入栏上方，跨会话接力区与 `📌 定住防改` 统一收口至「规划」页底部。
+- **三层冷库晋升梯度规范化**：严格确立 `💬 本会话 → 🌐 系统全局 → 🏛️ 沉淀冷库` 单向逐级晋升规则（禁止本会话越级直接沉淀），并支持无损向下引入。
+- **后端接口与打包边界扩展**：后端 `/api/dsh-chief/*` 同源环回保护接口扩展至 25 条；`package.json` `files` 清单补入 `chief-executor.js` 与 `auto-continue.js`。
+
+### Fixed
+- **修复手动与自动压缩报 `dsh-compaction service unavailable`**：绕过 Cordis 子分组对 `compaction` 服务的隔离限制，找不到直连服务时自动通过宿主官方 `commands.execute(ag, '/compact', ...)` 执行真压缩。
+- **修复休眠会话无法触发压缩**：当 `agents.get(sid)` 未唤醒时，通过 `sessionController.resolveAgent(sid)` 自动恢复空闲会话句柄后再压缩；运行中会话继续安全拦截。
+- **修复 `✦ 智选压缩` 静默失效与次数虚增**：重构 `executeHarvestAndCompact` 为严格原子提交——仅在真实压缩成功且非免压时递增 `autoCompactCount`、`lastCompactedSeq` 与 `lastCompactedAt`，报错或无历史免压绝不虚增，并将异常明细写入看板日志。
+- **修复 `✦ 智选压缩` 因主代理未收敛空闲而错过触发**：在 `runTurnReview` 判断需要压缩时先等待最多 8 秒直到代理空闲后再执行，减少无谓滞后队列堆积。
+- **修复空白新对话发送消息吐出 `<｜｜DSML｜｜ calls>` 源码**：扩展 `chief-executor.js` 解析与剥离正则覆盖双全角竖线、混合空格、单双引号及未闭合残缺标签，并在 `getChiefView` 返回历史记录前再次清洗净化。
+- **修复空白新对话工作区路径丢失**：升级 `getSessionCwd` 在无活会话与空板卡时通过 `workspaceRegistry.list()`（优先匹配 `sessionIds`，否则按最新活跃时间兜底）与近期非内部配置文件板卡定位真实项目目录。
+- **修复权限模式切换持久化与旧版宿主内存告警**：持久化保存 4 档 `permissionMode`，同步对齐前后端构建标（`1.2.0-r7`），在宿主仍运行旧内存模块或未挂载新版全局变量时友好提示重启客户端。
+- **修复本地↔全局冷库前后端防串味问题**：前端独立拆分 `globalVaultItems` 存储状态，并拦截旧版后端误将本地档案当作全局冷库返回的非合规响应。
 
 ## [1.1.0] - 2026-11-15
 
