@@ -21,7 +21,6 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '24'
-          registry-url: 'https://registry.npmjs.org'
 
       - name: Verify syntax and package manifest
         run: |
@@ -31,4 +30,7 @@ jobs:
           npm pack --dry-run
 
       - name: Publish to npm via OIDC Trusted Publishing
-        run: npm publish --provenance --access public
+        run: |
+          unset NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG
+          rm -f ~/.npmrc
+          npm publish --provenance --access public
