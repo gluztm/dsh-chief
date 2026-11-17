@@ -1,5 +1,12 @@
 <div align="center">
 
+<a href="#-安装"><img src="assets/chief-10s-compare.gif" alt="10 秒看懂 dsh-chief：左原生长会话——循环重读、压缩丢参数、跨窗失忆；右参谋长——一键熔断、参数先入柜、归档随取、极简战报。默认只读 · 零接管风险" width="800" /></a>
+
+**同一个窗口，同一份上下文 —— 左边在跑飞烧钱，右边在收口。**  
+<sub>默认只读 · 零接管风险 · `dsh plugin --profile web add dsh-chief`</sub>
+
+<br />
+
 <img src="assets/hero-banner.png" alt="DSH 参谋长 (dsh-chief) v1.2.0 — 许愿式一站式多代理指挥与三层冷库中枢" width="100%" />
 
 <br />
@@ -29,7 +36,7 @@
 
 - **常驻指挥中枢**：把主对话、子代理和跨窗独立会话收拢到同一张**全铺开金字塔拓扑图**，不再在十几个黑盒标签页间来回切换。
 - **原生分屏盯流 (`subagentchat`)**：任意子代理卡片点击「`分屏`」，直连 `sidebarRight.openResource` 拉开实时推理流。
-- **✦ 许愿框 4 档实权执行器 (`chief-executor`)**：右侧许愿框不再只嘴上聊天，按 4 档权限门禁直接读写查代码、跑安全命令、改看板与压上下文。
+- **✦ 许愿框四级权限模型与 6 级安全架构 (`chief-executor`)**：默认 `L0 · 顾问模式` 只读起手，按需升档到 `L1 · 助手` / `L2 · 参谋（逐项弹窗授权）` / `L3 · 参谋长（风险声明勾选 + 后端二次校验）`，全程经由安全卫兵硬性规则并留存审计日志。
 - **空白新对话即开即用**：主对话尚未发送第一条消息时，自动定位当前工作区开工，或预埋待领包给即将开启的 `@lead`。
 - **目标锁死 + 人类拍板结项**：强介入锁定核心目标（支持 `0 = ♾️` 无限轮），达标后核验 `allowed` 必做清单并等待人类点击「`✅ 批准结项`」。
 - **✦ 智选压缩 + 灵活安全阈值**：支持 `✦ 智选压缩` 在阶段收口等主代理空闲后触发，也支持 `10%–95%` / `>= 8k` Token 阈值或直说「压缩吧」。
@@ -58,9 +65,14 @@
 - **`dsh-chief` 解法**：三层冷库平时 **0 字节 / 0 Token 物理隔离**，沉淀库默认双盲不可见。
 - **精准按需**：只有你点击「`📌 摆上桌面`」或「`📤 取出`」时才临时注入，点回封存即刻归零。
 
-### 4. 只敢嘴上聊天的“吉祥物副驾”
-- **普通插件**：想查个配置文件或跑个检查命令，只能打断主对话重新排队。
-- **`dsh-chief` 解法**：内置 4 档权限门禁（`仅可查看` / `工作区内修改` / `自动审查 EXP` / `完全权限`），右侧许愿框一句话直接办妥。
+### 4. 只敢嘴上聊天的“吉祥物副驾” & 放权没底线
+- **普通插件**：要么只读干瞪眼，要么一放权就直接全盘裸奔、误改项目文件却毫不知情。
+- **`dsh-chief` 解法**：建立 **L0–L3 四级权限模型 × 6 级统一安全架构**（`用户模式 → 操作请求 → 安全卫兵硬性规则 → 权限判定 → 执行器 → 审计日志`）：
+  - **L0 · 顾问模式 (`READ ONLY` · 默认模式)**：新对话严格默认落入此档——只观察、只分析、只建议，绝不碰工作区与主/子工作流。
+  - **L1 · 助手模式 (`ASSISTANT`)**：允许维护参谋记忆、档案柜与看板，仍禁止直接修改项目代码与接管主代理工作流。
+  - **L2 · 参谋模式 (`ADVISOR WITH APPROVAL` · 逐项授权)**：可申请改动工作区与协调工作流，每项受控操作执行前均弹出 **「🛡️ 操作授权请求」**（含操作 / 目标 / 原因 / 影响），点击「允许本次操作」才执行。
+  - **L3 · 参谋长模式 (`CHIEF OF STAFF` · 主动风险知悉)**：获得高自主督导权（切换主代理、调度子代理、强介入自驱闭环），启用前必须阅读 **「⚠️ 高权限模式风险告知」** 并打勾确认，且由 `DSH Chief` 后端强制校验后生效。
+  - **模型申请提权 & 强介入联动**：模型可发起 `permission.request` 申请提权由人类拍板；`⚡ 主动强介入` 在 4 个档位下自动呈现「只读诊断 / 仅护档案 / 逐项授权推演 / 全权闭环督导」差异化动作。
 
 ### 5. 多子代理黑盒迷宫 & 口头红线聊十轮就忘
 - **普通插件**：窄视口列表反复拖拽，聊天里交代的红线随上下文滚出窗口。
@@ -204,7 +216,7 @@ flowchart TB
 # 方式 1：通过 npm 官方源安装（国内自动走镜像加速，支持后续检测升级）
 dsh plugin --profile desktop add dsh-chief
 
-# 方式 2：直接安装 v1.2.0 GitHub Release 预构建包
+# 方式 2：直接安装最新已发布 GitHub Release 预构建包（v1.2.0）
 dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.2.0/dsh-chief-1.2.0.tgz
 
 # 方式 3：通过 GitHub 仓库源码直接安装
@@ -228,7 +240,7 @@ dsh plugin --profile desktop add github:gluztm/dsh-chief
 
 | 工具名 | 核心职责 | 典型高频动作 (`action`) |
 | :--- | :--- | :--- |
-| **`chief_board`** | 驱动任务图、小任务板、冷档案检索、跨代理信箱与协同压缩 | `graph.plan`、`task.add`、`task.update`、`plan.set`、`cursor.set`、`mail.send`、`archive.save`、`archive.search`、`bounds.propose`、`context.compact` |
+| **`chief_board`** | 驱动任务图、小任务板、冷档案检索、跨代理信箱、提权请示与协同压缩 | `graph.plan`、`task.add`、`task.update`、`plan.set`、`cursor.set`、`mail.send`、`archive.save`、`archive.search`、`bounds.propose`、`permission.request`、`context.compact` |
 | **`chief_memory`** | 读写会话级高密度热记忆（决策 / 进展 / 验证 / 风险） | `list`、`get`、`add`、`update`、`remove` |
 | **`chief_boundaries`** | 维护图钉全局红线（`📌`）、必做事项（`allowed`）与注意事项 | `get`、`set`、`add`、`pin`、`remove` |
 | **`chief_handoff`** | 预览与生成自包含跨会话 Markdown 交接单 | `preview` / 新会话接力包 |

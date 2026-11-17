@@ -1,5 +1,12 @@
 <div align="center">
 
+<a href="#-install"><img src="assets/chief-10s-compare.gif" alt="dsh-chief in 10 seconds: left is a plain long session — re-reading the same files, losing parameters to compaction, forgetting when you switch windows; right is Chief — one-click loop breaker, parameters vaulted before compaction, archive carried across windows, minimal report. Read-only by default, zero takeover risk." width="800" /></a>
+
+**Same window, same context — the left one burns budget drifting, the right one closes out.**  
+<sub>Read-only by default · zero takeover risk · `dsh plugin --profile web add dsh-chief`</sub>
+
+<br />
+
 <img src="assets/hero-banner.png" alt="DSH Chief (dsh-chief) v1.2.0 — Wish-Driven Multi-Agent Cockpit & 3-Tier Cold Vaults" width="100%" />
 
 <br />
@@ -29,7 +36,7 @@
 
 - **Persistent Router Cockpit**: Unifies the root coordinator, subagents, and linked DSH windows inside one **Full-Spread Pyramid DAG**—zero blind tab switching.
 - **Native Split-Pane Streams (`subagentchat`)**: Click `分屏` on any subagent node to open DSH's native `sidebarRight.openResource` live stream.
-- **4-Tier Permission-Gated Wishing Box (`chief-executor.js`)**: Inspect files, search workspaces, run safe commands, manage vaults/boards, and trigger compaction directly from the sidebar (`read-only` / `workspace-write` / `auto-review` / `danger-full-access`).
+- **4-Tier Permission Model & 6-Stage Security Pipeline (`chief-executor.js`)**: Every new session starts safely in `L0 Advisor (READ ONLY)` and steps up cleanly through `L1 Assistant`, `L2 Strategist (Per-Action Approval Popup)`, and `L3 Chief of Staff (Mandatory Risk Checkbox + Backend Enforcement)`, backed by Safety Guard hard rules and a live audit log.
 - **Ready on Blank New Sessions**: Resolves workspace root via `workspaceRegistry` even before turn 1 in the main chat, and stages `@lead` relays cleanly in `pending-transfer.json`.
 - **Objective Lock & Human Sign-Off**: Strong Intervention locks your Core Objective (`0 = ∞` turns supported), verifies `allowed` must-do items, and waits for your explicit **`✅ 批准结项`** click.
 - **Cross-Isolation `✦ 智选压缩` & Flexible Thresholds**: Compacts via DSH `/compact` across Cordis service isolation (and wakes dormant agents via `sessionController.resolveAgent`), supporting `10%–95%`, `>= 8,000` tokens, or direct `"压缩吧"` commands.
@@ -57,9 +64,14 @@ Ordinary Todo plugins give you another scratchpad; always-on memory plugins floo
 - **`dsh-chief`**: All three cold vaults remain **0 bytes / 0 tokens while sealed** (Precipitated Vault is double-blind to both Lead and Chief).
 - **On-Demand Precision**: Injects only items explicitly spotlighted via **`📌 摆上桌面`** or flipped out via **`📤 取出`**.
 
-### 4. Chat-Only "Mascot Copilots" Without Real Execution Tools
-- **Typical Plugins**: Checking one config or running a quick check interrupts your main coding flow.
-- **`dsh-chief`**: The right-sidebar Wishing Box executes real workspace tools across **4 permission modes**—even on unstarted blank tabs.
+### 4. Chat-Only "Mascot Copilots" or Unbounded Auto-Execution
+- **Typical Plugins**: Either powerless chat sidebars or all-or-nothing yolo modes without an audit trail.
+- **`dsh-chief`**: Enforces a **4-Tier Permission Model × 6-Stage Unified Security Pipeline** (`User Mode → Action Request → Safety Guard Hard Rules → Permission Gate → Executor → Audit Log`):
+  - **L0 · Advisor (`READ ONLY` · Default)**: Strict default on every new or handed-off session—inspects boards/files and advises only.
+  - **L1 · Assistant (`ASSISTANT`)**: Maintains Chief memory, vaults, and board config; still blocks direct workspace edits and lead/subagent takeover.
+  - **L2 · Strategist (`ADVISOR WITH APPROVAL`)**: Can propose workspace edits, commands, and lead/subagent steering—pops an **Operation Approval Modal** (`Operation / Target / Reason / Impact`) before each controlled action runs once.
+  - **L3 · Chief of Staff (`CHIEF OF STAFF`)**: Full autonomous coordination across lead and subagents; requires acknowledging the **High-Privilege Risk Notice checkbox** plus backend `confirmedChiefRisk` enforcement.
+  - **Model Elevation & Differentiated Strong Intervention**: Models can formally request privilege elevation (`request_permission_elevation` / `permission.request`), and Strong Intervention adapts its autonomy cleanly across L0–L3.
 
 ### 5. Cramped Subagent Views & Verbal Rules Forgotten in 10 Turns
 - **Typical Plugins**: Tiny scroll boxes hide blocked workers, and safety instructions scroll out of context.
@@ -169,7 +181,7 @@ Search **`dsh-chief`** inside [dshmarket](https://github.com/dsh-market/dsh-mark
 # Option 1: Install from npm registry (recommended — fastest mirrors + auto-update notices)
 dsh plugin --profile desktop add dsh-chief
 
-# Option 2: Install prebuilt v1.2.0 GitHub Release tarball
+# Option 2: Install the latest published GitHub Release tarball (v1.2.0)
 dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.2.0/dsh-chief-1.2.0.tgz
 
 # Option 3: Install directly from GitHub repository
@@ -189,7 +201,7 @@ dsh plugin --profile desktop add github:gluztm/dsh-chief
 
 | Tool Name | Purpose | Key Actions |
 | :--- | :--- | :--- |
-| **`chief_board`** | Task DAG orchestration, step lists, archive search, inter-agent mail, smart compaction | `graph.plan`, `task.add`, `task.update`, `plan.set`, `cursor.set`, `mail.send`, `archive.save`, `archive.search`, `bounds.propose`, `context.compact` |
+| **`chief_board`** | Task DAG orchestration, step lists, archive search, inter-agent mail, elevation request, smart compaction | `graph.plan`, `task.add`, `task.update`, `plan.set`, `cursor.set`, `mail.send`, `archive.save`, `archive.search`, `bounds.propose`, `permission.request`, `context.compact` |
 | **`chief_memory`** | Session-scoped hot digest items (`decisions`, `progress`, `verify`, `risks`) | `list`, `get`, `add`, `update`, `remove` |
 | **`chief_boundaries`** | Global thumbtack redlines (`📌`), must-do checks (`allowed`), and notes | `get`, `set`, `add`, `pin`, `remove` |
 | **`chief_handoff`** | Generate self-contained cross-session Markdown handoff packets | `preview` / session relay |
