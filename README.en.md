@@ -1,6 +1,6 @@
 <div align="center">
 
-<a href="#-install"><img src="assets/chief-10s-compare.gif" alt="dsh-chief in 10 seconds: left is a plain long session — re-reading the same files, losing parameters to compaction, forgetting when you switch windows; right is Chief — one-click loop breaker, parameters vaulted before compaction, archive carried across windows, minimal report. Read-only by default, zero takeover risk." width="800" /></a>
+<img src="assets/chief-10s-compare.gif" alt="dsh-chief in 10 seconds: left is a plain long session — re-reading the same files, losing parameters to compaction, forgetting when you switch windows; right is Chief — one-click loop breaker, parameters vaulted before compaction, archive carried across windows, minimal report. Read-only by default, zero takeover risk." width="800" /></a>
 
 **Same window, same context — the left one burns budget drifting, the right one closes out.**  
 <sub>Read-only by default · zero takeover risk · `dsh plugin --profile web add dsh-chief`</sub>

@@ -1,6 +1,6 @@
 <div align="center">
 
-<a href="#-安装"><img src="assets/chief-10s-compare.gif" alt="10 秒看懂 dsh-chief：左原生长会话——循环重读、压缩丢参数、跨窗失忆；右参谋长——一键熔断、参数先入柜、归档随取、极简战报。默认只读 · 零接管风险" width="800" /></a>
+<img src="assets/chief-10s-compare.gif" alt="10 秒看懂 dsh-chief：左原生长会话——循环重读、压缩丢参数、跨窗失忆；右参谋长——一键熔断、参数先入柜、归档随取、极简战报。默认只读 · 零接管风险" width="800" /></a>
 
 **同一个窗口，同一份上下文 —— 左边在跑飞烧钱，右边在收口。**  
 <sub>默认只读 · 零接管风险 · `dsh plugin --profile web add dsh-chief`</sub>
