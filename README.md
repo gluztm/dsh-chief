@@ -1,11 +1,11 @@
 <div align="center">
 
-<img src="assets/chief-10s-compare.gif" alt="10 秒看懂 dsh-chief：左原生长会话——循环重读、压缩丢参数、跨窗失忆；右参谋长——一键熔断、参数先入柜、归档随取、极简战报。默认只读 · 零接管风险" width="800" />
-
 **AI 管 AI，你当甩手掌柜 —— 你不在的时候，它也替你盯着。**  
-<sub>它自己派活、自己盯子代理、自己收口；跑偏了先熔断，不用你守着屏幕。默认只读起手。</sub>
+<sub>它自己派活、自己盯子代理、自己收口；跑偏了先熔断，不用你守着屏幕。</sub>
 
-<sub>`dsh plugin --profile web add dsh-chief`</sub>
+<img src="assets/chief-10s-compare.gif" alt="10 秒看懂 dsh-chief：左边是原生长会话——循环重读、压缩丢参数、跨窗失忆；右边是参谋长——一键熔断、参数先入柜、归档随取。默认只读起手" width="800" />
+
+<sub>默认只读起手 · 越权改工作区会先问你 · `dsh plugin --profile web add dsh-chief`</sub>
 
 <br />
 
