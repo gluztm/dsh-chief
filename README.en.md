@@ -1,11 +1,11 @@
 <div align="center">
 
-<img src="assets/chief-10s-compare.gif" alt="dsh-chief in 10 seconds: left is a plain long session — re-reading the same files, losing parameters to compaction, forgetting when you switch windows; right is Chief — one-click loop breaker, parameters vaulted before compaction, archive carried across windows, minimal report. Read-only by default, zero takeover risk." width="800" />
-
 **AI manages AI, you take the day off — even when you're not there, it's watching.**  
-<sub>It dispatches the work, keeps the subagents on track, and closes out on its own; if it starts to drift it stops first. Read-only by default.</sub>
+<sub>It dispatches the work, keeps the subagents on track, and closes out on its own; if it starts to drift, it stops first.</sub>
 
-<sub>`dsh plugin --profile web add dsh-chief`</sub>
+<img src="assets/chief-10s-compare.gif" alt="dsh-chief in 10 seconds: left is a plain long session — re-reading the same files, losing parameters to compaction, forgetting when you switch windows; right is Chief — loop breaker, parameters vaulted before compaction, archive carried across windows. Read-only by default." width="800" />
+
+<sub>Read-only by default · asks before touching your workspace · `dsh plugin --profile web add dsh-chief`</sub>
 
 <br />
 
