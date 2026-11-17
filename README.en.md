@@ -25,7 +25,7 @@
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-> **Nobody watching, nothing breaking: state your intent in the Wishing Box and it runs the whole flow, stopping first if it starts to drift (`v1.2.0`)**  
+> **Nobody watching, nothing breaking: state your intent in the Wishing Box and it runs the whole flow, stopping first if it starts to drift (`v1.2.1`)**  
 > Follows the same shape as DeepSeek's official **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** *Router + Isolated Workers* architecture to keep focus sharp and context clean.
 
 [简体中文 (`README.md`)](README.md) · **English** · [Changelog (`CHANGELOG.md`)](CHANGELOG.md)
@@ -182,8 +182,8 @@ Search **`dsh-chief`** inside [dshmarket](https://github.com/dsh-market/dsh-mark
 # Option 1: Install from npm registry (recommended — fastest mirrors + auto-update notices)
 dsh plugin --profile desktop add dsh-chief
 
-# Option 2: Install the latest published GitHub Release tarball (v1.2.0)
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.2.0/dsh-chief-1.2.0.tgz
+# Option 2: Install the latest published GitHub Release tarball (v1.2.1)
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.2.1/dsh-chief-1.2.1.tgz
 
 # Option 3: Install directly from GitHub repository
 dsh plugin --profile desktop add github:gluztm/dsh-chief

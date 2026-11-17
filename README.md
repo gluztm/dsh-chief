@@ -25,7 +25,7 @@
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-> **不盯着也不出事：向右侧「✦ 许愿框」许下意图，它自己把流程跑完，跑歪了先拦住（`v1.2.0`）**  
+> **不盯着也不出事：向右侧「✦ 许愿框」许下意图，它自己把流程跑完，跑歪了先拦住（`v1.2.1`）**  
 > 做法对齐 DeepSeek 官方 **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** 的「Router 统筹 + Workers 隔离执行」：把散装聊天窗收成一张常驻指挥台。
 
 **简体中文** · [English (`README.en.md`)](README.en.md) · [更新日志 (`CHANGELOG.md`)](CHANGELOG.md)
@@ -217,8 +217,8 @@ flowchart TB
 # 方式 1：通过 npm 官方源安装（国内自动走镜像加速，支持后续检测升级）
 dsh plugin --profile desktop add dsh-chief
 
-# 方式 2：直接安装最新已发布 GitHub Release 预构建包（v1.2.0）
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.2.0/dsh-chief-1.2.0.tgz
+# 方式 2：直接安装最新已发布 GitHub Release 预构建包（v1.2.1）
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.2.1/dsh-chief-1.2.1.tgz
 
 # 方式 3：通过 GitHub 仓库源码直接安装
 dsh plugin --profile desktop add github:gluztm/dsh-chief

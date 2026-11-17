@@ -65,6 +65,13 @@ import {
   relayArchivesWithChief,
   mutateChiefFact,
   readMailboxForAgent,
+  hasValidChiefRiskAck,
+  queueChiefApproval,
+  requestChiefElevation,
+  handleApprovalDecision,
+  handleElevationDecision,
+  appendChiefAuditLog,
+  CHIEF_PERMISSION_META,
 } from './chief.js'
 import { createAutoContinueEngine } from './auto-continue.js'
 import {
@@ -92,7 +99,7 @@ import {
 } from './chief-executor.js'
 
 const API = '/api/dsh-chief'
-const BACKEND_BUILD = '1.2.0-r7'
+const BACKEND_BUILD = '1.2.1'
 const BOARD_VERSION = 1
 const LOG_CAP = 60
 const BODY_LIMIT = 24 * 1024 * 1024
@@ -2603,6 +2610,48 @@ function isInternalProfileCwd(dirPath) {
   return /[\\/]\.dsh[\\/]+profiles(?:$|[\\/])/i.test(String(dirPath || '').trim())
 }
 
+function listWorkspaceRows(runtime) {
+  const rt = runtime || activeRuntime
+  if (!rt) return []
+  try {
+    const reg = rt.get('workspaceRegistry')
+    const rawList = reg && typeof reg.list === 'function' ? reg.list() : []
+    return Array.isArray(rawList)
+      ? rawList
+      : (Array.isArray(rawList && rawList.workspaces) ? rawList.workspaces : (Array.isArray(rawList && rawList.items) ? rawList.items : []))
+  } catch {
+    return []
+  }
+}
+
+export function resolveWorkspaceIdForSession(runtime, sessionId) {
+  const sid = String(sessionId || '').trim()
+  const rootId = sid ? (resolveRootSessionId(sid) || sid) : ''
+  const rows = listWorkspaceRows(runtime)
+  if (!rows.length) return ''
+  const bySid = rows.find((w) => {
+    if (!w) return false
+    const sids = Array.isArray(w.sessionIds) ? w.sessionIds : []
+    return (sid && sids.includes(sid)) || (rootId && sids.includes(rootId))
+  })
+  if (bySid && (bySid.workspaceId || bySid.id)) {
+    return String(bySid.workspaceId || bySid.id).trim()
+  }
+  const cwd = getSessionCwd(runtime, sid || rootId)
+  if (cwd && !isInternalProfileCwd(cwd)) {
+    const normCwd = process.platform === 'win32' ? path.resolve(cwd).toLowerCase() : path.resolve(cwd)
+    const byPath = rows.find((w) => {
+      if (!w || typeof w.path !== 'string' || !w.path.trim()) return false
+      const wNorm = process.platform === 'win32' ? path.resolve(w.path).toLowerCase() : path.resolve(w.path)
+      return wNorm === normCwd
+    })
+    if (byPath && (byPath.workspaceId || byPath.id)) {
+      return String(byPath.workspaceId || byPath.id).trim()
+    }
+  }
+  return ''
+}
+
 export function getSessionCwd(runtime, sessionId) {
   const sid = String(sessionId || '').trim()
   const rootId = sid ? (resolveRootSessionId(sid) || sid) : ''
@@ -2630,13 +2679,9 @@ export function getSessionCwd(runtime, sessionId) {
       }
     } catch {}
   }
-  if (rt) {
-    try {
-      const reg = rt.get('workspaceRegistry')
-      const rawList = reg && typeof reg.list === 'function' ? reg.list() : []
-      const rows = Array.isArray(rawList)
-        ? rawList
-        : (Array.isArray(rawList && rawList.workspaces) ? rawList.workspaces : (Array.isArray(rawList && rawList.items) ? rawList.items : []))
+  {
+    const rows = listWorkspaceRows(rt)
+    if (rows.length) {
       const matched = rows.find((w) => {
         if (!w || typeof w.path !== 'string' || !w.path.trim()) return false
         const sids = Array.isArray(w.sessionIds) ? w.sessionIds : []
@@ -2648,7 +2693,7 @@ export function getSessionCwd(runtime, sessionId) {
         .slice()
         .sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
       if (sorted[0]) return sorted[0].path.trim()
-    } catch {}
+    }
   }
   try {
     const boardsDir = path.join(path.dirname(boardFile()), 'boards')
@@ -3023,10 +3068,15 @@ function collectDigestArchiveContext(runtime, rootId, cabinetId = '') {
   let chiefPermissionMode = DEFAULT_CHIEF_PERMISSION_MODE
   if (rootId) {
     try {
-      const cfg = resolveWorkspaceConfig(loadChiefState(), rootId)
+      const st = loadChiefState()
+      const cfg = resolveWorkspaceConfig(st, rootId)
+      const ws = st && st.workspaces && st.workspaces[rootId]
       const tm = (cfg && cfg.tacticalModes) || {}
       smartCompactActive = Boolean(tm.smartCompact)
-      chiefPermissionMode = normalizePermissionMode(cfg && cfg.permissionMode)
+      chiefPermissionMode = normalizePermissionMode(cfg && cfg.permissionMode, {
+        requireAck: true,
+        hasChiefRiskAck: hasValidChiefRiskAck(ws),
+      })
     } catch {}
   }
   return { takenOutArchives, sessionArchiveBriefs, smartCompactActive, chiefPermissionMode }
@@ -3148,6 +3198,80 @@ function makeChiefDeps(runtime) {
       })
     },
     executeSubagentAction: (input, callerAgent, signal) => executeSubagentAction(rt, input, callerAgent, signal),
+    async controlMainAgent({ rootId = '', sessionId = '', op = 'steer', modelRef = '', reasoningEffort = '', message = '', reason = '' } = {}) {
+      const targetSid = String(sessionId || rootId || '').trim()
+      if (!targetSid || targetSid === 'global') {
+        return { ok: false, error: '当前为空白未绑定会话，无法直接控制主对话代理' }
+      }
+      const ctrl = rt ? rt.get('sessionController') : null
+      if (op === 'switch_model') {
+        const rawRef = String(modelRef || '').trim()
+        if (!rawRef) return { ok: false, error: 'switch_model 需要 modelRef 参数（如 provider/model）' }
+        if (!ctrl || typeof ctrl.selectModel !== 'function') {
+          return { ok: false, error: '当前宿主未挂载 sessionController.selectModel 接口' }
+        }
+        const slash = rawRef.indexOf('/')
+        let provider = slash > 0 ? rawRef.slice(0, slash).trim() : ''
+        const model = slash > 0 ? rawRef.slice(slash + 1).trim() : rawRef
+        if (!provider) {
+          const curInfo = getSessionContextBreakdown(rt, targetSid)
+          const curRef = String((curInfo && curInfo.modelRef) || '')
+          if (curRef.includes('/')) provider = curRef.split('/')[0]
+        }
+        try {
+          const selRes = await ctrl.selectModel({
+            sessionId: targetSid,
+            ...(provider ? { provider } : {}),
+            model,
+            ...(reasoningEffort ? { reasoningEffort } : {}),
+          })
+          return {
+            ok: true,
+            selected: selRes && selRes.selected ? selRes.selected : { provider, model },
+            badge: `🔄 主模型 → ${model}`,
+          }
+        } catch (err) {
+          return { ok: false, error: (err && err.message) || String(err || '切换主模型失败') }
+        }
+      }
+      if (op === 'interrupt') {
+        try {
+          if (ctrl && typeof ctrl.cancel === 'function') {
+            await ctrl.cancel({ sessionId: targetSid })
+            return { ok: true, interrupted: true, badge: '⏹ 已中断主对话' }
+          }
+          const agents = rt ? rt.get('agents') : null
+          const ag = agents && typeof agents.get === 'function' ? agents.get(targetSid) : null
+          if (ag && typeof ag.interrupt === 'function') {
+            await ag.interrupt()
+            return { ok: true, interrupted: true, badge: '⏹ 已中断主对话' }
+          }
+          return { ok: false, error: '当前宿主未提供主对话中断接口' }
+        } catch (err) {
+          return { ok: false, error: (err && err.message) || String(err || '中断主对话失败') }
+        }
+      }
+      const textBody = String(message || reason || '').trim()
+      if (!textBody) return { ok: false, error: '引导主对话需要 message 指令内容' }
+      const deliv = await deliverCrossMessage(makeChiefDeps(rt), {
+        fromSession: rootId || targetSid,
+        fromLabel: 'DSH 参谋长 (控制主代理)',
+        target: 'lead',
+        subject: reason || '参谋长主对话工作流调控',
+        text: textBody,
+        mode: op === 'followup' ? 'followup' : 'steer',
+      })
+      return {
+        ...deliv,
+        badge: deliv.ok ? `🎯 已${op === 'followup' ? '递话' : '插话'}主代理` : '⚠️ 调控主代理失败',
+      }
+    },
+    async triggerAutoContinueNow(sid, trigger, opts = {}) {
+      if (!activeAutoContinue || typeof activeAutoContinue.fireNow !== 'function') {
+        return { ok: false, error: '断线续跑引擎未挂载' }
+      }
+      return activeAutoContinue.fireNow(sid, trigger, { ...(opts || {}), bypassGate: true })
+    },
     cancelAutoContinue(sid, reason) {
       return Boolean(
         activeAutoContinue
@@ -3515,7 +3639,10 @@ function routeTable(runtime) {
               hostCompat,
               paceMode: effCfg.paceMode || 'manual',
               stopped: Boolean(effCfg.stopped || effCfg.paceMode === 'stopped'),
-              permissionMode: effCfg.permissionMode || 'danger-full-access',
+              permissionMode: effCfg.permissionMode || DEFAULT_CHIEF_PERMISSION_MODE,
+              chiefRiskAcknowledged: Boolean(effCfg.chiefRiskVerified),
+              pendingApprovalsCount: ((rootWs && Array.isArray(rootWs.pendingApprovals)) ? rootWs.pendingApprovals : []).filter(a => a && a.status === 'pending').length,
+              hasPendingElevation: Boolean(rootWs && rootWs.pendingElevation && rootWs.pendingElevation.status === 'pending'),
               autoPilot: Boolean(effCfg.autoPilot),
               tacticalModes,
               runtimeGuard: (rootWs && rootWs.runtimeGuard) || {},
@@ -3878,6 +4005,46 @@ function routeTable(runtime) {
             ...(latestBoard ? { board: latestBoard } : {}),
             view,
           })
+        } catch (error) {
+          sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
+        }
+      },
+    },
+    {
+      path: API + '/chief/approval',
+      handler: async (req, res) => {
+        if (!guard(req, res)) return
+        try {
+          const body = await readBody(req)
+          const sessionId = typeof body?.session === 'string' ? body.session : ''
+          const out = await handleApprovalDecision(makeChiefDeps(runtime), {
+            sessionId,
+            approvalId: typeof body?.id === 'string' ? body.id : '',
+            decision: body?.decision === 'approve' ? 'approve' : 'reject',
+          })
+          const board = out.ok && sessionId ? boardForSession(boardFileFor(sessionId)) : undefined
+          sendJson(res, out.ok ? 200 : 400, board ? { ...out, board } : out)
+        } catch (error) {
+          sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
+        }
+      },
+    },
+    {
+      path: API + '/chief/elevation',
+      handler: async (req, res) => {
+        if (!guard(req, res)) return
+        try {
+          const body = await readBody(req)
+          const sessionId = typeof body?.session === 'string' ? body.session : ''
+          const out = await handleElevationDecision(makeChiefDeps(runtime), {
+            sessionId,
+            elevationId: typeof body?.id === 'string' ? body.id : '',
+            decision: body?.decision === 'approve' ? 'approve' : 'reject',
+            targetMode: typeof body?.targetMode === 'string' ? body.targetMode : '',
+            confirmedChiefRisk: Boolean(body?.confirmedChiefRisk),
+          })
+          const board = sessionId ? boardForSession(boardFileFor(sessionId)) : undefined
+          sendJson(res, out.ok ? 200 : 400, board ? { ...out, board } : out)
         } catch (error) {
           sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })
         }
@@ -4569,6 +4736,7 @@ const BOARD_PARAMETERS = {
         'archive.read',
         'archive.save',
         'context.compact',
+        'permission.request',
         'memory.add',
         'memory.remove',
         'memory.ask',
@@ -4578,6 +4746,7 @@ const BOARD_PARAMETERS = {
         + 'Use "graph.plan" (or "task.batch") to plan a hierarchical/DAG task graph in one call (supports parentId, blockedBy, owner/subagent, intent, evidence). '
         + 'Use "task.dispatch" to spawn or message a subagent, "team.steer" to steer a subagent, and "mail.send" to relay messages across lead/subagents/sessions. '
         + 'Use "bounds.propose" (field: "forbidden"|"allowed"|"notes", item, reason) when hitting a permission/sandbox/environment wall or summarizing boundaries ("allowed" = 必做事项, "forbidden" = 禁止红线, "notes" = 注意事项) so DSH Chief can request user approval. '
+        + 'Use "permission.request" (targetMode: "assistant"|"strategist"|"chief", reason) when requesting higher DSH Chief permission tier from the user. '
         + 'Session Engineering Archives ("archive.search", "archive.read", "archive.save") access ONLY the current conversation\'s Session Cabinet (never Global Cabinet or unflipped Precipitated cold vault). '
         + 'When Smart Co-Managed Compaction ("✦ 智选") is enabled, call "context.compact" with a concise phase-summary in "text" at clean phase boundaries to ask DSH Chief to harvest details into this session\'s cabinet and compact.',
     },
@@ -4701,7 +4870,8 @@ const BOARD_PARAMETERS = {
     item: { type: 'string', description: 'bounds.propose / bounds.add / bounds.pin / bounds.remove / bounds.edit / bounds.consolidate: boundary rule text.' },
     oldItem: { type: 'string', description: 'bounds.edit: existing boundary rule text to replace.' },
     removeItems: { type: 'array', items: { type: 'string' }, description: 'bounds.consolidate: scattered boundary rules to remove and replace with item.' },
-    reason: { type: 'string', description: 'bounds.propose: brief context on why this boundary is needed (e.g. wall hit, permission block, or user request).' },
+    reason: { type: 'string', description: 'bounds.propose / permission.request: justification for why this boundary or permission tier is needed.' },
+    targetMode: { type: 'string', enum: ['assistant', 'strategist', 'chief'], description: 'permission.request: requested DSH Chief permission tier.' },
     items: { type: 'array', items: { type: 'string' }, description: 'bounds.propose (multiple rules) or bounds.set (new contents of column named by field).' },
     allowed: { type: 'array', items: { type: 'string' }, description: 'bounds.set: the whole 必做 (allowed) column.' },
     forbidden: { type: 'array', items: { type: 'string' }, description: 'bounds.set: the whole 禁止 column.' },
@@ -4847,6 +5017,13 @@ function boardTool(runtime) {
           for (const p of view.boundProposed.proposed || []) {
             lines.push('  [' + p.field + '] ' + p.item + ' (by ' + p.from + ')')
           }
+        }
+        if (view.elevationRequested) {
+          const elv = view.elevationRequested
+          const tgt = CHIEF_PERMISSION_META[elv.targetMode] || {}
+          lines.push(`🔐 elevation requested → ${tgt.level || ''} ${tgt.title || elv.targetMode}: ${elv.reason || ''}`)
+        } else if (view.elevationMessage) {
+          lines.push('🔐 ' + view.elevationMessage)
         }
         if (Array.isArray(view.inbox)) {
           lines.push('📬 mailbox (' + view.inbox.length + ' messages):')
@@ -5020,6 +5197,27 @@ function boardTool(runtime) {
         return {
           ok: true,
           smartCompact: scRes,
+          ...summary(board, roster),
+        }
+      }
+
+      if (passed.action === 'permission.request') {
+        const reqTarget = normalizePermissionMode(passed.targetMode || 'strategist')
+        const reasonTxt = str(passed.reason || passed.text || passed.note || passed.intent, '主对话/子代理申请提升 DSH 参谋系统权限以继续任务')
+        const elv = requestChiefElevation(session || rawSession || 'global', {
+          targetMode: reqTarget,
+          reason: reasonTxt,
+          requestedActionSummary: str(passed.item || passed.title || passed.text, ''),
+          by: byDefault,
+        })
+        const board = session ? boardForSession(boardFileFor(session)) : emptyBoard()
+        const roster = session ? await refreshSubagentTree(runtime, session, board) : []
+        return {
+          ok: true,
+          elevationRequested: elv,
+          elevationMessage: elv
+            ? `已向用户弹出提权申请（请求升至 ${CHIEF_PERMISSION_META[reqTarget]?.level || reqTarget} · ${CHIEF_PERMISSION_META[reqTarget]?.title || reqTarget}），等待用户点击确认。`
+            : '当前权限已满足或高于目标档位，无需重复提权。',
           ...summary(board, roster),
         }
       }
@@ -5507,15 +5705,33 @@ export async function transferChief(runtime, args, sessionId) {
     if (!controller || typeof controller.create !== 'function') {
       return { ok: false, error: '这个部署没有 sessionController，交接单已放进待领取', mode: 'pending', text: packet }
     }
+    const matchedWorkspaceId = resolveWorkspaceIdForSession(runtime, rootSid || sessionId)
+    const srcCwd = getSessionCwd(runtime, rootSid || sessionId)
+    const fallbackCwdReq = srcCwd && !isInternalProfileCwd(srcCwd) ? { cwd: srcCwd } : {}
+    const createReq = matchedWorkspaceId ? { workspaceId: matchedWorkspaceId } : fallbackCwdReq
+
     let created
     try {
-      created = await controller.create({})
+      created = await controller.create(createReq)
     } catch (error) {
-      return {
-        ok: false,
-        error: '唤起新会话失败：' + String((error && error.message) || error),
-        mode: 'pending',
-        text: packet,
+      if (createReq.workspaceId) {
+        try {
+          created = await controller.create(fallbackCwdReq)
+        } catch (fallbackErr) {
+          return {
+            ok: false,
+            error: '唤起新会话失败：' + String((fallbackErr && fallbackErr.message) || fallbackErr),
+            mode: 'pending',
+            text: packet,
+          }
+        }
+      } else {
+        return {
+          ok: false,
+          error: '唤起新会话失败：' + String((error && error.message) || error),
+          mode: 'pending',
+          text: packet,
+        }
       }
     }
     const createdId = str(created && created.sessionId, '')
@@ -5716,6 +5932,58 @@ export function apply(ctx) {
       }
     },
     isChiefStopped: (rootId, sid) => isRootStopped(rootId, sid),
+    canAutoContinue: ({ sessionId, rootId, trigger, detail }) => {
+      try {
+        const key = rootId || sessionId || 'global'
+        const state = loadChiefState()
+        const ws = state && state.workspaces && state.workspaces[key] ? state.workspaces[key] : null
+        const effCfg = resolveWorkspaceConfig(state, key)
+        const hasAck = hasValidChiefRiskAck(ws)
+        const mode = normalizePermissionMode(effCfg && effCfg.permissionMode, {
+          requireAck: true,
+          hasChiefRiskAck: hasAck,
+        })
+        if (mode === 'advisor') {
+          return { allowed: false, skipped: 'advisor-readonly', logMessage: 'L0 顾问模式（只读）：禁止自动向主对话续跑' }
+        }
+        if (mode === 'assistant') {
+          return { allowed: false, skipped: 'assistant-no-workflow', logMessage: 'L1 助手模式：仅维护参谋系统，跳过主对话断线自动续跑' }
+        }
+        if (mode === 'strategist') {
+          const apr = queueChiefApproval(key, {
+            category: 'main_workflow',
+            operationLabel: '断线自动续跑主对话',
+            targetLabel: '主对话 (@lead)',
+            reason: `检测到会话中断或未收口（${trigger}），L2 参谋模式需您允许后再发送续跑指令`,
+            impact: '点击「允许本次操作」后将立即唤醒主对话继续推进当前任务',
+            preview: detail ? String(detail).slice(0, 220) : `触发原因：${trigger}`,
+            dedupeKey: `autocont:${sessionId}:${trigger}:${Math.floor(Date.now() / 15_000)}`,
+            kind: 'auto_continue',
+            payload: { sessionId, trigger, detail: detail || '' },
+            by: 'auto-continue',
+          })
+          appendChiefAuditLog(key, {
+            mode,
+            stage: 'permission_gate',
+            decision: 'pending_approval',
+            operation: '断线自动续跑主对话',
+            target: sessionId,
+            reason: `触发源：${trigger}`,
+            outcome: 'pending',
+            by: 'auto-continue',
+          })
+          return {
+            allowed: false,
+            skipped: 'pending-approval',
+            approvalId: apr && apr.id,
+            logMessage: `L2 参谋模式：已提交断线续跑逐项授权弹窗（${trigger}）`,
+          }
+        }
+        return { allowed: true }
+      } catch {
+        return { allowed: false, skipped: 'permission-error' }
+      }
+    },
     resolveRootSessionId: (sid) => resolveRootSessionId(sid) || sid,
     onLog: (sid, msg) => {
       try {

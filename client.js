@@ -1,5 +1,5 @@
 /**
- * Client half of dsh-chief — 「DSH 参谋长」 (DSH Chief v1.0.0)
+ * Client half of dsh-chief — 「DSH 参谋长」 (DSH Chief v1.2.1)
  * iOS Micro-Flat Minimalist Edition + DS-Bot Narrative Memory + Cross-Session SuperAgent Relay.
  *
  * Surfaces:
@@ -19,7 +19,20 @@ window.__ModuleLoader__.load({
     const API = 'api/dsh-chief'
     const SIDE_ID = 'dsh-chief'
     const BRAND_NAME = 'DSH 参谋长'
-    const EXPECTED_BACKEND_BUILD = '1.2.0-r7'
+    const EXPECTED_BACKEND_BUILD = '1.2.1'
+
+    const CHIEF_PERMISSION_LABELS = {
+      advisor: 'L0 · 顾问模式',
+      assistant: 'L1 · 助手模式',
+      strategist: 'L2 · 参谋模式',
+      chief: 'L3 · 参谋长模式',
+    }
+    const INTERVENTION_TIER_DESC = {
+      advisor: 'L0 顾问档：只读巡检诊断并在面板输出建议，不修改工作区或向主对话/子代理注入强推指令',
+      assistant: 'L1 助手档：仅自主维护记忆/档案/看板与建议卡片，不改工作区文件且不直接插话主对话',
+      strategist: 'L2 参谋档：自动分析并生成关键动作（工作区改动/递话/压缩），逐项弹窗授权后才执行',
+      chief: 'L3 参谋长档：高自主闭环督导（直控主对话/子代理、纠偏、压缩与续跑），含防死循环熔断',
+    }
 
     function normalizeMaxTurnsVal(raw) {
       if (raw === 0 || raw === '0') return 0
@@ -176,7 +189,12 @@ window.__ModuleLoader__.load({
       chiefMeta: {
         paceMode: 'manual',
         stopped: false,
-        permissionMode: 'danger-full-access',
+        permissionMode: 'advisor',
+        chiefRiskVerified: false,
+        chiefRiskAck: null,
+        pendingApprovals: [],
+        pendingElevation: null,
+        auditLog: [],
         autoPilot: false,
         tacticalModes: {
           intervention: false,
@@ -248,6 +266,17 @@ window.__ModuleLoader__.load({
       interventionAgreed: false,
       unlimitedTurnsModalOpen: false,
       autoPilotConfirmOpen: false,
+      chiefRiskModalOpen: false,
+      chiefRiskAgreed: false,
+      chiefRiskBusy: false,
+      dismissedApprovalIds: {},
+      openApprovalModalId: '',
+      approvalBusyId: '',
+      dismissedElevationIds: {},
+      elevationChosenMode: '',
+      elevationAgreed: false,
+      elevationBusy: false,
+      auditLogModalOpen: false,
       archiveRelayModal: null,
       relayArchivesBusy: false,
       distillGlobalModal: null,
@@ -928,7 +957,12 @@ window.__ModuleLoader__.load({
           ...prevMeta,
           paceMode: cfg.paceMode || 'manual',
           stopped: Boolean(cfg.stopped || cfg.paceMode === 'stopped'),
-          permissionMode: cfg.permissionMode || prevMeta.permissionMode || 'danger-full-access',
+          permissionMode: cfg.permissionMode || prevMeta.permissionMode || 'advisor',
+          chiefRiskVerified: Boolean(cfg.chiefRiskVerified || (viewData.chiefRiskAck && viewData.chiefRiskAck.acknowledged)),
+          chiefRiskAck: viewData.chiefRiskAck !== undefined ? viewData.chiefRiskAck : (prevMeta.chiefRiskAck || null),
+          pendingApprovals: Array.isArray(viewData.pendingApprovals) ? viewData.pendingApprovals : [],
+          pendingElevation: viewData.pendingElevation !== undefined ? viewData.pendingElevation : null,
+          auditLog: Array.isArray(viewData.auditLog) ? viewData.auditLog : [],
           autoPilot: Boolean(cfg.autoPilot),
           tacticalModes: mergedTactical,
           runtimeGuard: viewData.runtimeGuard && typeof viewData.runtimeGuard === 'object'
@@ -1013,7 +1047,10 @@ window.__ModuleLoader__.load({
       if (value && value.archives && Array.isArray(value.archives.items)) applyArchiveHeaders(value.archives)
       if (value && value.view) applySecView(value.view)
       if (!response.ok || (value && value.ok === false)) {
-        throw new Error((value && value.error) || ('HTTP ' + response.status))
+        const err = new Error((value && value.error) || ('HTTP ' + response.status))
+        err.status = response.status
+        err.payload = value
+        throw err
       }
       return value
     }
@@ -1122,10 +1159,10 @@ window.__ModuleLoader__.load({
             return null
           }
           const permMap = {
-            'read-only': '已切换参谋长权限：👁 仅可查看（参谋/主模型/子代理只读分析）',
-            'workspace-write': '已切换参谋长权限：📝 工作区内修改（严格守红线）',
-            'danger-full-access': '已切换参谋长权限：🛡️ 完全权限（默认最高实权）',
-            'auto-review': '已切换参谋长权限：🔍 自动审查 EXP（优先实证核验纠偏）',
+            advisor: '已切换为 L0 · 顾问模式（只读观察/分析/建议，不改工作区与工作流）',
+            assistant: '已切换为 L1 · 助手模式（仅可维护参谋记忆、档案与看板配置）',
+            strategist: '已切换为 L2 · 参谋模式（修改工作区或主/子工作流前将弹窗逐项授权）',
+            chief: '已通过风险确认并进入 L3 · 参谋长模式（高自主执行，受安全卫兵与审计日志约束）',
           }
           patch({ notice: permMap[nextCfg.permissionMode] || '已更新参谋长执行权限' })
         } else if (nextCfg.tacticalModes && typeof nextCfg.tacticalModes === 'object') {
@@ -1162,7 +1199,78 @@ window.__ModuleLoader__.load({
         }
         return value
       } catch (error) {
+        const payload = error && error.payload
+        if (payload && payload.requireChiefRiskConfirm) {
+          patch({ chiefRiskModalOpen: true, chiefRiskAgreed: false, secPermMenuOpen: false })
+          return null
+        }
+        if (payload && payload.requireAutoPilotConfirm) {
+          patch({ autoPilotConfirmOpen: true, secPaceMenuOpen: false })
+          return null
+        }
         patch({ error: String((error && error.message) || error) })
+        return null
+      }
+    }
+
+    async function decideApproval(approvalId, decision) {
+      if (!approvalId) return null
+      patch({ approvalBusyId: approvalId, error: '' })
+      try {
+        const value = await call('chief/approval', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId,
+            id: approvalId,
+            decision,
+          }),
+        })
+        patch({
+          approvalBusyId: '',
+          openApprovalModalId: '',
+          notice: decision === 'approve'
+            ? ((value && value.executed) ? '✓ 已授权并执行本次操作' : '✓ 已批准操作')
+            : '已拒绝本次受控操作申请',
+        })
+        return value
+      } catch (error) {
+        patch({ approvalBusyId: '', error: String((error && error.message) || error) })
+        return null
+      }
+    }
+
+    async function decideElevation(elevationId, decision, targetMode, confirmedChiefRisk = false) {
+      if (!elevationId) return null
+      patch({ elevationBusy: true, error: '' })
+      try {
+        const value = await call('chief/elevation', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId,
+            id: elevationId,
+            decision,
+            ...(targetMode ? { targetMode } : {}),
+            confirmedChiefRisk: Boolean(confirmedChiefRisk),
+          }),
+        })
+        patch({
+          elevationBusy: false,
+          elevationAgreed: false,
+          elevationChosenMode: '',
+          notice: decision === 'approve'
+            ? ('已批准提权至 ' + (CHIEF_PERMISSION_LABELS[value.permissionMode || targetMode] || targetMode))
+            : '已拒绝模型的权限提升申请',
+        })
+        return value
+      } catch (error) {
+        const payload = error && error.payload
+        if (payload && payload.requireChiefRiskConfirm) {
+          patch({ elevationBusy: false, error: '进入 L3 参谋长模式必须勾选风险知悉确认' })
+          return null
+        }
+        patch({ elevationBusy: false, error: String((error && error.message) || error) })
         return null
       }
     }
@@ -2273,7 +2381,12 @@ window.__ModuleLoader__.load({
           patch({ transferred: true })
           setTimeout(() => patch({ transferred: false }), 2000)
           note = '已创建新会话 ' + shortSession(created) + ' 并部署参谋'
-          if (navigation && typeof navigation.openSession === 'function') {
+          const sessionsSvc = service('sessions') || (navigation && navigation.sessions) || null
+          if (sessionsSvc && typeof sessionsSvc.open === 'function') {
+            try {
+              sessionsSvc.open(created)
+            } catch {}
+          } else if (navigation && typeof navigation.openSession === 'function') {
             try {
               navigation.openSession(created)
             } catch {}
@@ -2643,7 +2756,10 @@ window.__ModuleLoader__.load({
         --dnb-text: var(--dsw-alias-label-primary, #f2f2f7);
         --dnb-text-2: var(--dsw-alias-label-secondary, rgba(235,235,245,0.64));
         --dnb-text-3: var(--dsw-alias-label-tertiary, rgba(235,235,245,0.38));
-        --dnb-accent: var(--dsw-alias-brand-primary, #0a84ff);
+        --dnb-accent: var(--dsw-alias-state-business-primary, #2563eb);
+        --dnb-primary-bg: #2563eb;
+        --dnb-primary-bg-hover: #1d4ed8;
+        --dnb-primary-fg: #ffffff;
 
         position: fixed;
         top: 76px;
@@ -2733,14 +2849,14 @@ window.__ModuleLoader__.load({
         color: var(--dsw-alias-label-primary);
       }
       .dnb-btn:active { transform: scale(0.94); }
-      .dnb-btn[data-active="1"] { color: var(--dsw-alias-brand-primary); }
+      .dnb-btn[data-active="1"] { color: var(--dnb-accent, #2563eb); }
       .dnb-count {
         min-width: 15px;
         height: 15px;
         padding: 0 4px;
         border-radius: 99px;
-        background: var(--dsw-alias-brand-primary, #0a84ff);
-        color: #fff;
+        background: var(--dnb-primary-bg, #2563eb);
+        color: var(--dnb-primary-fg, #fff);
         font-size: 10px;
         font-weight: 600;
         display: inline-flex;
@@ -2931,6 +3047,13 @@ window.__ModuleLoader__.load({
       .dnb-input:focus, .dnb-area:focus {
         border-color: var(--dnb-accent);
       }
+      .dnb-input option,
+      .dnb-area option,
+      select.dnb-input option,
+      .dnb-panel select option {
+        background-color: var(--dnb-popover, #252528);
+        color: var(--dnb-text, #f2f2f7);
+      }
       .dnb-bare-area {
         width: 100%;
         box-sizing: border-box;
@@ -2953,8 +3076,8 @@ window.__ModuleLoader__.load({
         padding: 0 12px;
         border-radius: 99px;
         border: none;
-        background: var(--dnb-accent);
-        color: #fff;
+        background: var(--dnb-primary-bg, #2563eb);
+        color: var(--dnb-primary-fg, #ffffff);
         font: inherit;
         font-size: 12px;
         font-weight: 500;
@@ -2964,9 +3087,12 @@ window.__ModuleLoader__.load({
         justify-content: center;
         gap: 5px;
         white-space: nowrap;
-        transition: opacity 0.16s ease, transform 0.14s ease;
+        transition: background 0.16s ease, opacity 0.16s ease, transform 0.14s ease;
       }
-      .dnb-primary-btn:hover:not(:disabled) { opacity: 0.9; }
+      .dnb-primary-btn:hover:not(:disabled) {
+        background: var(--dnb-primary-bg-hover, #1d4ed8);
+        opacity: 0.96;
+      }
       .dnb-primary-btn:active:not(:disabled) { transform: scale(0.96); }
       .dnb-primary-btn:disabled { opacity: 0.4; cursor: default; }
 
@@ -3652,9 +3778,9 @@ window.__ModuleLoader__.load({
         border-color: var(--dnb-accent);
       }
       .dnb-bound-check[data-checked="1"] {
-        border-color: var(--dnb-accent);
-        background: var(--dnb-accent);
-        color: #fff;
+        border-color: var(--dnb-primary-bg, #2563eb);
+        background: var(--dnb-primary-bg, #2563eb);
+        color: var(--dnb-primary-fg, #fff);
       }
 
       /* Bottom Sheet Inspector */
@@ -3968,8 +4094,8 @@ window.__ModuleLoader__.load({
         height: 13px;
         padding: 0 3px;
         border-radius: 99px;
-        background: var(--dnb-accent);
-        color: #fff;
+        background: var(--dnb-primary-bg, #2563eb);
+        color: var(--dnb-primary-fg, #fff);
         font-size: 9px;
         font-weight: 700;
         line-height: 13px;
@@ -3995,8 +4121,8 @@ window.__ModuleLoader__.load({
         height: 28px;
         border-radius: 50%;
         border: none;
-        background: var(--dnb-accent);
-        color: #fff;
+        background: var(--dnb-primary-bg, #2563eb);
+        color: var(--dnb-primary-fg, #fff);
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -4659,6 +4785,182 @@ window.__ModuleLoader__.load({
       }
       .dnb-drawer-head:hover {
         background: var(--dnb-hover);
+      }
+      /* v1.2.1 4-Tier Permission Cards, Operation Approval & Chief Risk Modals */
+      .dnb-perm-pop {
+        position: absolute;
+        left: 12px;
+        right: calc(12px + var(--dnb-safe-right, 0px));
+        bottom: calc(100% + 6px);
+        max-height: min(68vh, 520px);
+        overflow-y: auto;
+        z-index: 70;
+        padding: 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .dnb-perm-card {
+        border-radius: 12px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-card);
+        padding: 10px 11px;
+        cursor: pointer;
+        transition: border-color 0.16s ease, background 0.16s ease, box-shadow 0.16s ease;
+      }
+      .dnb-perm-card:hover {
+        border-color: var(--dnb-border-strong);
+        background: var(--dnb-card-hover);
+      }
+      .dnb-perm-card[data-active="1"] {
+        border-color: var(--dnb-primary-bg, #2563eb);
+        box-shadow: 0 0 0 1px rgba(37, 99, 235, 0.25);
+        background: rgba(37, 99, 235, 0.08);
+      }
+      .dnb-perm-card[data-tier="chief"][data-active="1"] {
+        border-color: #d97706;
+        box-shadow: 0 0 0 1px rgba(217, 119, 6, 0.28);
+        background: rgba(217, 119, 6, 0.1);
+      }
+      .dnb-perm-badge {
+        display: inline-flex;
+        align-items: center;
+        padding: 2px 8px;
+        border-radius: 99px;
+        font-size: 10px;
+        font-weight: 700;
+        line-height: 1.3;
+        flex-shrink: 0;
+      }
+      .dnb-perm-badge[data-tone="green"] {
+        background: rgba(48, 209, 88, 0.16);
+        color: #34d399;
+      }
+      .dnb-perm-badge[data-tone="blue"] {
+        background: rgba(37, 99, 235, 0.18);
+        color: #60a5fa;
+      }
+      .dnb-perm-badge[data-tone="amber"] {
+        background: rgba(245, 158, 11, 0.18);
+        color: #fbbf24;
+      }
+      .dnb-perm-subcode {
+        font-size: 13px;
+        font-weight: 800;
+        letter-spacing: 0.03em;
+        margin-top: 2px;
+        color: var(--dnb-text);
+      }
+      .dnb-perm-bullets {
+        margin: 5px 0 4px 15px;
+        padding: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+        font-size: 11px;
+        line-height: 1.45;
+        color: var(--dnb-text-2);
+      }
+      .dnb-perm-foot {
+        font-size: 10.5px;
+        color: var(--dnb-text-3);
+        line-height: 1.4;
+      }
+      .dnb-pipe-bar {
+        display: flex;
+        align-items: center;
+        flex-wrap: wrap;
+        gap: 4px;
+        padding: 6px 8px;
+        border-radius: 8px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-card);
+        font-size: 10.5px;
+        color: var(--dnb-text-2);
+      }
+      .dnb-pipe-node {
+        padding: 1px 6px;
+        border-radius: 5px;
+        background: var(--dnb-fill);
+        color: var(--dnb-text);
+        font-weight: 600;
+      }
+      .dnb-op-box {
+        border-radius: 10px;
+        border: 1px solid var(--dnb-border-strong);
+        background: var(--dnb-card);
+        padding: 10px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+      .dnb-op-kv {
+        display: flex;
+        align-items: flex-start;
+        gap: 6px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--dnb-text);
+      }
+      .dnb-op-k {
+        color: var(--dnb-text-2);
+        font-weight: 600;
+        flex-shrink: 0;
+      }
+      .dnb-op-code {
+        display: inline-block;
+        padding: 1px 6px;
+        border-radius: 5px;
+        background: var(--dnb-fill);
+        border: 1px solid var(--dnb-border);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11.5px;
+        word-break: break-all;
+      }
+      .dnb-risk-box {
+        border-radius: 10px;
+        border: 1px solid rgba(245, 158, 11, 0.38);
+        background: rgba(245, 158, 11, 0.08);
+        padding: 11px 12px;
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+        font-size: 12px;
+        line-height: 1.5;
+        color: var(--dnb-text);
+      }
+      .dnb-risk-check {
+        display: flex;
+        align-items: flex-start;
+        gap: 8px;
+        font-size: 12px;
+        line-height: 1.45;
+        color: var(--dnb-text);
+        cursor: pointer;
+        user-select: none;
+      }
+      .dnb-pending-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 10px;
+        margin-bottom: 6px;
+        border-radius: 9px;
+        font-size: 11.5px;
+        font-weight: 600;
+        cursor: pointer;
+      }
+      .dnb-audit-row {
+        padding: 7px 9px;
+        border-radius: 8px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-card);
+        font-size: 11px;
+        line-height: 1.45;
+        display: flex;
+        flex-direction: column;
+        gap: 3px;
       }
     `
 
@@ -11663,9 +11965,9 @@ window.__ModuleLoader__.load({
                     height: 21,
                     padding: '0 7px',
                     fontSize: 10.5,
-                    color: selected.length >= 2 ? '#fff' : 'var(--dnb-accent)',
-                    background: selected.length >= 2 ? 'var(--dnb-accent)' : 'rgba(10, 132, 255, 0.1)',
-                    borderColor: 'rgba(10, 132, 255, 0.24)',
+                    color: selected.length >= 2 ? 'var(--dnb-primary-fg, #fff)' : 'var(--dnb-accent)',
+                    background: selected.length >= 2 ? 'var(--dnb-primary-bg, #2563eb)' : 'rgba(37, 99, 235, 0.12)',
+                    borderColor: 'rgba(37, 99, 235, 0.28)',
                   },
                   disabled: Boolean(store.secBusy),
                   title: selected.length >= 2
@@ -13832,59 +14134,89 @@ window.__ModuleLoader__.load({
       const meta = view.chiefMeta || {}
       const tm = meta.tacticalModes || {}
       const guard = meta.runtimeGuard || {}
-      const permMode = meta.permissionMode || 'danger-full-access'
+      const permMode = ['advisor', 'assistant', 'strategist', 'chief'].includes(meta.permissionMode)
+        ? meta.permissionMode
+        : 'advisor'
       const PERM_OPTIONS = [
         {
-          key: 'read-only',
+          key: 'advisor',
+          tier: 'L0',
           icon: '👁',
-          shortLabel: '仅可查看',
-          title: '仅可查看',
-          desc: '仅可查看与检索态势，严禁修改文件、执行命令或触发压缩。',
-          bounds: [
-            { who: '参谋长', text: '只读巡检、总结与回答，禁改任务/边界、禁自动递话或压缩' },
-            { who: '主模型', text: '保持只读分析，参谋长不向其下发写文件或改代码要求' },
-            { who: '子代理', text: '禁新建或调度写操作子代理，仅允许读取态势' },
+          shortLabel: 'L0 顾问',
+          title: 'L0 · 顾问模式',
+          code: 'READ ONLY',
+          badgeText: '默认模式',
+          badgeTone: 'green',
+          bullets: [
+            '读取看板和允许访问的项目状态',
+            '分析任务、提供建议',
+            '不修改工作区',
+            '不修改主代理和子代理工作流',
           ],
+          footer: '只观察、只分析、只建议。',
         },
         {
-          key: 'workspace-write',
-          icon: '📝',
-          shortLabel: '工作区内修改',
-          title: '工作区内修改',
-          desc: '可在项目工作区内读写改文件与运行验证命令（遵守禁止红线）。',
-          bounds: [
-            { who: '参谋长', text: '可打理本局任务/边界/档案、向主对话递话及触发压缩' },
-            { who: '主模型', text: '可在项目工作区内读写代码与跑常规测试，禁越界目录' },
-            { who: '子代理', text: '仅限在当前工作区内并行读写与测试，严守禁止红线' },
+          key: 'assistant',
+          tier: 'L1',
+          icon: '🧰',
+          shortLabel: 'L1 助手',
+          title: 'L1 · 助手模式',
+          code: 'ASSISTANT',
+          badgeText: '',
+          badgeTone: '',
+          bullets: [
+            '顾问模式全部能力',
+            '管理自己的参谋系统',
+            '修改自己的记忆、档案和看板配置',
+            '不直接修改项目工作区',
+            '不接管主代理工作流',
           ],
+          footer: '允许自主维护参谋系统。',
         },
         {
-          key: 'danger-full-access',
+          key: 'strategist',
+          tier: 'L2',
           icon: '🛡️',
-          shortLabel: '完全权限',
-          title: '完全权限',
-          desc: '最高实权默认档：全权限查改文件、执行命令、直接调度/中断子代理（仍守红线）。',
-          bounds: [
-            { who: '参谋长', text: '默认最高实权，可全权打理本局/档案/网络、强介入与抢救压缩' },
-            { who: '主模型', text: '跨目录读写、环境配置、脚本执行与排障全权限（须守红线）' },
-            { who: '子代理', text: '可全权限并行执行研发、构建、验证与跨模块协同任务' },
+          shortLabel: 'L2 参谋',
+          title: 'L2 · 参谋模式',
+          code: 'ADVISOR WITH APPROVAL',
+          badgeText: '逐项授权',
+          badgeTone: 'blue',
+          bullets: [
+            '助手模式全部能力',
+            '可以申请修改工作区文件',
+            '可以申请修改主对话和子代理工作流',
+            '每项受控操作执行前弹窗',
+            '用户确认后才能执行',
           ],
+          footer: 'Agent 提出操作，用户决定是否执行。',
         },
         {
-          key: 'auto-review',
-          icon: '🔍',
-          shortLabel: '自动审查',
-          title: '自动审查',
-          exp: true,
-          desc: '自动审查闭环：聚焦核验、审查风险并按需修复或呈报。',
-          bounds: [
-            { who: '参谋长', text: '实权督导 + 独立实证复核，未见命令/文件实证严禁放行结项' },
-            { who: '主模型', text: '正常实现，但结论须附可核验实证并接受参谋长质询纠偏' },
-            { who: '子代理', text: '优先承担独立复核、测试验证与回归检查任务' },
+          key: 'chief',
+          tier: 'L3',
+          icon: '⚡',
+          shortLabel: 'L3 参谋长',
+          title: 'L3 · 参谋长模式',
+          code: 'CHIEF OF STAFF',
+          badgeText: '主动风险知悉',
+          badgeTone: 'amber',
+          bullets: [
+            '参谋模式全部能力',
+            '获得更高的自主执行权限',
+            '可以切换主代理',
+            '可以协调子代理及其工作流',
+            '启用前必须阅读风险声明并主动勾选确认',
           ],
+          footer: '用户明确接受更高自主权带来的操作风险。',
         },
       ]
-      const activePermObj = PERM_OPTIONS.find(p => p.key === permMode) || PERM_OPTIONS[2]
+      const activePermObj = PERM_OPTIONS.find(p => p.key === permMode) || PERM_OPTIONS[0]
+      const pendingApprovalsList = (Array.isArray(meta.pendingApprovals) ? meta.pendingApprovals : [])
+        .filter(item => item && item.status === 'pending')
+      const pendingElevationObj = (meta.pendingElevation && meta.pendingElevation.status === 'pending')
+        ? meta.pendingElevation
+        : null
+      const auditCount = Array.isArray(meta.auditLog) ? meta.auditLog.length : 0
       const maxTurns = normalizeMaxTurnsVal(tm.maxInterventionTurns)
       const isUnlimitedTurns = maxTurns === 0
       const pct = Math.min(95, Math.max(10, Math.round(Number(tm.compactThresholdPct) || 80)))
@@ -14006,8 +14338,9 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { style: { flex: 1, minWidth: 0 } },
-                  h('div', { style: { fontSize: 12, fontWeight: 600, color: tm.intervention ? '#f59e0b' : 'var(--dnb-text)' } }, '⚡ 主动强介入（需风险确认）'),
-                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '每轮停止时自动核验、自驱纠偏与续跑，含防死循环熔断'),
+                  h('div', { style: { fontSize: 12, fontWeight: 600, color: tm.intervention ? '#f59e0b' : 'var(--dnb-text)' } }, '⚡ 主动强介入（随四档权限联动）'),
+                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } },
+                    INTERVENTION_TIER_DESC[permMode] || INTERVENTION_TIER_DESC.advisor),
                 ),
                 h(
                   'div',
@@ -14088,8 +14421,8 @@ window.__ModuleLoader__.load({
                             fontWeight: 500,
                             border: 'none',
                             cursor: 'pointer',
-                            background: thresholdMode === 'pct' ? 'var(--dnb-accent)' : 'transparent',
-                            color: thresholdMode === 'pct' ? '#fff' : 'var(--dnb-text-2)',
+                            background: thresholdMode === 'pct' ? 'var(--dnb-primary-bg, #2563eb)' : 'transparent',
+                            color: thresholdMode === 'pct' ? 'var(--dnb-primary-fg, #fff)' : 'var(--dnb-text-2)',
                           },
                           onClick: () => toggleTacticalField('compactThresholdMode', 'pct'),
                         }, '按比例'),
@@ -14101,8 +14434,8 @@ window.__ModuleLoader__.load({
                             fontWeight: 500,
                             border: 'none',
                             cursor: 'pointer',
-                            background: thresholdMode === 'tokens' ? 'var(--dnb-accent)' : 'transparent',
-                            color: thresholdMode === 'tokens' ? '#fff' : 'var(--dnb-text-2)',
+                            background: thresholdMode === 'tokens' ? 'var(--dnb-primary-bg, #2563eb)' : 'transparent',
+                            color: thresholdMode === 'tokens' ? 'var(--dnb-primary-fg, #fff)' : 'var(--dnb-text-2)',
                           },
                           onClick: () => toggleTacticalField('compactThresholdMode', 'tokens'),
                         }, '自填上下文'),
@@ -14317,7 +14650,7 @@ window.__ModuleLoader__.load({
             )
           : null,
 
-        // Permission Picker Popover (Anchored above permission pill with 3-party boundaries)
+        // Permission Picker Popover (Fig 1: L0-L3 4-Tier Permission Cards + 6-Stage Pipeline & Audit)
         view.secPermMenuOpen
           ? h(
               React.Fragment,
@@ -14328,67 +14661,126 @@ window.__ModuleLoader__.load({
               }),
               h(
                 'div',
-                {
-                  className: 'dnb-menu',
-                  style: {
-                    position: 'absolute',
-                    left: 12,
-                    bottom: 'calc(100% + 6px)',
-                    width: 332,
-                    maxWidth: 'calc(100% - 24px)',
-                    maxHeight: 380,
-                    overflowY: 'auto',
-                    zIndex: 70,
-                  },
-                },
-                h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } }, '参谋长权限等级与三方能力边界'),
+                { className: 'dnb-menu dnb-perm-pop' },
+                h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '2px 2px 2px' } },
+                  h('span', { style: { fontSize: 12.5, fontWeight: 700, color: 'var(--dnb-text)' } }, 'DSH Chief 四级权限模型（严格会话隔离）'),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    title: '查看 6 级安全流水线实时判定与审计日志',
+                    onClick: () => patch({ secPermMenuOpen: false, auditLogModalOpen: true }),
+                  }, `📜 审计 (${auditCount})`),
+                ),
                 PERM_OPTIONS.map(opt => {
                   const active = permMode === opt.key
                   return h(
                     'div',
                     {
                       key: opt.key,
-                      className: 'dnb-menu-item',
-                      title: opt.desc,
-                      style: {
-                        alignItems: 'flex-start',
-                        justifyContent: 'space-between',
-                        gap: 8,
-                        padding: '8px 10px',
-                        color: active ? 'var(--dnb-accent)' : undefined,
-                      },
+                      className: 'dnb-perm-card',
+                      'data-active': active ? '1' : '0',
+                      'data-tier': opt.key,
                       onClick: () => {
+                        if (opt.key === 'chief') {
+                          if (permMode === 'chief') {
+                            patch({ secPermMenuOpen: false })
+                            return
+                          }
+                          patch({
+                            secPermMenuOpen: false,
+                            chiefRiskModalOpen: true,
+                            chiefRiskAgreed: false,
+                          })
+                          return
+                        }
                         patch({ secPermMenuOpen: false })
                         void updateSecConfig({ permissionMode: opt.key })
                       },
                     },
                     h(
                       'div',
-                      { style: { minWidth: 0, flex: 1 } },
-                      h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: active ? 700 : 600 } },
-                        h('span', null, opt.icon),
-                        h('span', null, opt.title),
-                        opt.exp
-                          ? h('span', { style: { fontSize: 9.5, opacity: 0.72, letterSpacing: '0.03em' } }, 'EXP')
-                          : null,
-                      ),
+                      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+                      h('span', { style: { fontSize: 12.5, fontWeight: 700, color: opt.key === 'chief' ? '#f59e0b' : 'var(--dnb-text)' } }, opt.title),
                       h(
                         'div',
-                        { className: 'dnb-perm-grid' },
-                        (opt.bounds || []).map(b =>
-                          h(
-                            'div',
-                            { key: b.who, className: 'dnb-perm-row' },
-                            h('span', { className: 'dnb-perm-who' }, b.who),
-                            h('span', null, b.text),
-                          ),
-                        ),
+                        { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
+                        opt.badgeText
+                          ? h('span', { className: 'dnb-perm-badge', 'data-tone': opt.badgeTone }, opt.badgeText)
+                          : null,
+                        active ? h(Icon, { name: 'check', size: 13, style: { color: opt.key === 'chief' ? '#f59e0b' : 'var(--dnb-accent)' } }) : null,
                       ),
                     ),
-                    active ? h(Icon, { name: 'check', size: 13, style: { marginTop: 2, flexShrink: 0 } }) : null,
+                    h('div', { className: 'dnb-perm-subcode', style: opt.key === 'chief' ? { color: '#d97706' } : undefined }, opt.code),
+                    h(
+                      'ul',
+                      { className: 'dnb-perm-bullets' },
+                      opt.bullets.map((line, i) => h('li', { key: i }, line)),
+                    ),
+                    h('div', { className: 'dnb-perm-foot' }, opt.footer),
                   )
                 }),
+                h(
+                  'div',
+                  { className: 'dnb-pipe-bar', title: '统一 6 级安全架构流水线' },
+                  h('span', { style: { fontWeight: 700, color: 'var(--dnb-text-2)', marginRight: 2 } }, '流水线:'),
+                  ['用户模式', '操作请求', '安全卫兵硬性规则', '权限判定', '执行器', '审计日志'].map((step, idx, arr) =>
+                    h(
+                      React.Fragment,
+                      { key: step },
+                      h('span', { className: 'dnb-pipe-node' }, step),
+                      idx < arr.length - 1 ? h('span', null, '→') : null,
+                    ),
+                  ),
+                ),
               ),
+            )
+          : null,
+
+        // Pending Model Elevation & Pending L2 Operation Approval Banners
+        pendingElevationObj
+          ? h(
+              'div',
+              {
+                className: 'dnb-pending-banner',
+                style: {
+                  background: 'rgba(37, 99, 235, 0.14)',
+                  border: '1px solid rgba(37, 99, 235, 0.42)',
+                  color: '#60a5fa',
+                },
+                onClick: () => {
+                  const nextDismissed = { ...(view.dismissedElevationIds || {}) }
+                  delete nextDismissed[pendingElevationObj.id]
+                  patch({ dismissedElevationIds: nextDismissed, elevationAgreed: false, elevationChosenMode: pendingElevationObj.targetMode || 'strategist' })
+                },
+              },
+              h('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                `⬆️ 模型申请提权：${CHIEF_PERMISSION_LABELS[pendingElevationObj.fromMode] || pendingElevationObj.fromMode} → ${CHIEF_PERMISSION_LABELS[pendingElevationObj.targetMode] || pendingElevationObj.targetMode}`),
+              h('span', { style: { flexShrink: 0, textDecoration: 'underline' } }, '去审批 →'),
+            )
+          : null,
+
+        pendingApprovalsList.length > 0
+          ? h(
+              'div',
+              {
+                className: 'dnb-pending-banner',
+                style: {
+                  background: 'rgba(245, 158, 11, 0.14)',
+                  border: '1px solid rgba(245, 158, 11, 0.45)',
+                  color: '#fbbf24',
+                },
+                onClick: () => {
+                  const first = pendingApprovalsList[0]
+                  const nextDismissed = { ...(view.dismissedApprovalIds || {}) }
+                  if (first && first.id) delete nextDismissed[first.id]
+                  patch({ dismissedApprovalIds: nextDismissed, openApprovalModalId: (first && first.id) || '' })
+                },
+              },
+              h('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                `🛡️ ${pendingApprovalsList[0].operationLabel || '受控操作'}（等待逐项授权 ${pendingApprovalsList.length} 项）`),
+              h('span', { style: { flexShrink: 0, textDecoration: 'underline' } }, '弹窗确认 →'),
             )
           : null,
 
@@ -14400,10 +14792,14 @@ window.__ModuleLoader__.load({
             type: 'button',
             className: 'dnb-sec-chip',
             'data-active': view.secPermMenuOpen ? '1' : '0',
-            style: permMode === 'danger-full-access'
-              ? { borderColor: 'rgba(245, 158, 11, 0.42)', color: '#f59e0b' }
-              : (permMode === 'read-only' ? { borderColor: 'rgba(148, 163, 184, 0.45)', color: 'var(--dnb-text-2)' } : undefined),
-            title: activePermObj.desc + '（点击切换参谋长权限等级与查看三方能力边界）',
+            style: permMode === 'chief'
+              ? { borderColor: 'rgba(245, 158, 11, 0.48)', color: '#f59e0b' }
+              : (permMode === 'strategist'
+                  ? { borderColor: 'rgba(37, 99, 235, 0.48)', color: '#60a5fa' }
+                  : (permMode === 'advisor'
+                      ? { borderColor: 'rgba(48, 209, 88, 0.42)', color: '#34d399' }
+                      : { borderColor: 'rgba(148, 163, 184, 0.45)', color: 'var(--dnb-text-2)' })),
+            title: `${activePermObj.title}（${activePermObj.code}）— ${activePermObj.footer}（点击切换四级权限模型）`,
             onClick: () => patch({ secPermMenuOpen: !view.secPermMenuOpen, tacticalMenuOpen: false, secModelMenuOpen: false, secPaceMenuOpen: false }),
           }, `${activePermObj.icon} ${activePermObj.shortLabel}`),
           h('button', {
@@ -14603,6 +14999,7 @@ window.__ModuleLoader__.load({
       }, [view.interventionModalOpen])
 
       if (!view.interventionModalOpen) return null
+      const permMode = ['advisor', 'assistant', 'strategist', 'chief'].includes(meta.permissionMode) ? meta.permissionMode : 'advisor'
       const trimmedDraft = String(objDraft || '').trim()
       const missingPrerequisite = !trimmedDraft || forbiddenList.length === 0
 
@@ -14805,11 +15202,13 @@ window.__ModuleLoader__.load({
                 )
               : null,
           ),
-          // 3 Concrete Operational Risks
+          // 3 Concrete Operational Risks + 4-Tier Permission Behavior
           h(
             'div',
             { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.55 } },
             h('div', { style: { fontWeight: 600, color: 'var(--dnb-text)', marginBottom: 3 } }, '开启后的行为与实操风险：'),
+            h('div', { style: { color: '#60a5fa', marginBottom: 4, fontWeight: 600 } },
+              `• 当前权限档位联动表现：${INTERVENTION_TIER_DESC[permMode] || INTERVENTION_TIER_DESC.advisor}`),
             h('div', null, '• Token 额外消耗：主对话每轮停顿都将唤醒参谋长核验并可能继续发指令。'),
             h('div', null, '• 对话节奏接管：参谋长会主动插话纠偏与派发下步，点击红色「⏹ 急停」可随时中断。'),
             h('div', null, `• 防死循环熔断：达到 ${normalizeMaxTurnsVal(tm.maxInterventionTurns) === 0 ? '♾️ 无限轮次' : (normalizeMaxTurnsVal(tm.maxInterventionTurns) + ' 轮上限')} 或连续无实际进展将触发熔断保护。`),
@@ -15652,6 +16051,421 @@ window.__ModuleLoader__.load({
       )
     }
 
+    function ChiefRiskConfirmModal({ view }) {
+      if (!view.chiefRiskModalOpen) return null
+      const agreed = Boolean(view.chiefRiskAgreed)
+      const busy = Boolean(view.chiefRiskBusy)
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget && !busy) patch({ chiefRiskModalOpen: false, chiefRiskAgreed: false })
+          },
+        },
+        h(
+          'div',
+          { className: 'dnb-modal-card' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, 'L3 · 参谋长模式（进入前确认风险）'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 22, height: 22 },
+              disabled: busy,
+              onClick: () => patch({ chiefRiskModalOpen: false, chiefRiskAgreed: false }),
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          h(
+            'div',
+            { className: 'dnb-risk-box' },
+            h('div', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 6 } },
+              '⚠️ 高权限模式风险告知'),
+            h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } }, '启用后，Agent 可能自主：'),
+            h(
+              'ul',
+              { style: { margin: '0 0 0 18px', padding: 0, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--dnb-text)' } },
+              h('li', null, '修改工作区文件'),
+              h('li', null, '执行系统命令'),
+              h('li', null, '调整主代理及子代理工作流'),
+              h('li', null, '执行可能造成不可逆影响的操作'),
+            ),
+            h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text-2)' } },
+              '即使有安全卫兵，仍然不能保证完全消除风险。'),
+          ),
+          h(
+            'label',
+            { className: 'dnb-risk-check' },
+            h('input', {
+              type: 'checkbox',
+              checked: agreed,
+              disabled: busy,
+              style: { marginTop: 3 },
+              onChange: e => patch({ chiefRiskAgreed: Boolean(e.target.checked) }),
+            }),
+            h('span', null, '我已阅读并知悉上述风险，理解高权限模式可能造成的后果。'),
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 32, padding: '0 14px', fontSize: 12.5 },
+              disabled: busy,
+              onClick: () => patch({ chiefRiskModalOpen: false, chiefRiskAgreed: false }),
+            }, '取消'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: {
+                height: 32,
+                padding: '0 16px',
+                fontSize: 12.5,
+                background: agreed ? '#d97706' : 'var(--dnb-fill)',
+                color: agreed ? '#fff' : 'var(--dnb-text-3)',
+                fontWeight: 700,
+              },
+              disabled: !agreed || busy,
+              onClick: async () => {
+                patch({ chiefRiskBusy: true })
+                try {
+                  const ok = await updateSecConfig({
+                    permissionMode: 'chief',
+                    confirmedChiefRisk: true,
+                  })
+                  if (ok) patch({ chiefRiskModalOpen: false, chiefRiskAgreed: false })
+                } finally {
+                  patch({ chiefRiskBusy: false })
+                }
+              },
+            }, busy ? 'DSH Chief 校验启用中…' : '确认并启用'),
+          ),
+          h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', lineHeight: 1.4 } },
+            '真正启用必须由 DSH Chief 后端执行风险授权校验，切换回低权限或新会话后将自动重置该高权限授权。'),
+        ),
+      )
+    }
+
+    function OperationApprovalModal({ view }) {
+      const meta = view.chiefMeta || {}
+      const list = (Array.isArray(meta.pendingApprovals) ? meta.pendingApprovals : [])
+        .filter(item => item && item.status === 'pending')
+      if (!list.length) return null
+      const dismissedMap = view.dismissedApprovalIds || {}
+      const active = (view.openApprovalModalId && list.find(item => item.id === view.openApprovalModalId))
+        || list.find(item => !dismissedMap[item.id])
+        || null
+      if (!active) return null
+      const busy = view.approvalBusyId === active.id
+      const idx = list.findIndex(item => item.id === active.id)
+      const dismissCurrent = () => {
+        if (busy) return
+        patch({
+          dismissedApprovalIds: { ...dismissedMap, [active.id]: true },
+          openApprovalModalId: '',
+        })
+      }
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget && !busy) dismissCurrent()
+          },
+        },
+        h(
+          'div',
+          { className: 'dnb-modal-card' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } },
+              `L2 · 参谋模式：逐项确认${list.length > 1 ? ` (${idx + 1}/${list.length})` : ''}`),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 22, height: 22 },
+              title: '稍后处理（保留底部授权提醒横幅）',
+              disabled: busy,
+              onClick: dismissCurrent,
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          h(
+            'div',
+            { className: 'dnb-op-box' },
+            h('div', { style: { fontSize: 13, fontWeight: 700, color: '#d97706', display: 'flex', alignItems: 'center', gap: 6 } },
+              '🛡️ 操作授权请求'),
+            h('div', { className: 'dnb-op-kv' },
+              h('span', { className: 'dnb-op-k' }, '操作：'),
+              h('span', null, active.operationLabel || '受控工作区或工作流操作'),
+            ),
+            h('div', { className: 'dnb-op-kv' },
+              h('span', { className: 'dnb-op-k' }, '目标：'),
+              h('span', { className: 'dnb-op-code' }, active.targetLabel || '当前工作区'),
+            ),
+            h('div', { className: 'dnb-op-kv' },
+              h('span', { className: 'dnb-op-k' }, '原因：'),
+              h('span', null, active.reason || '完成当前参谋推进步骤'),
+            ),
+            h('div', { className: 'dnb-op-kv' },
+              h('span', { className: 'dnb-op-k' }, '影响：'),
+              h('span', null, active.impact || '仅在允许本次后执行一次该受控操作'),
+            ),
+            active.preview
+              ? h('pre', {
+                  style: {
+                    margin: '2px 0 0',
+                    padding: '6px 8px',
+                    borderRadius: 7,
+                    background: 'var(--dnb-elevated)',
+                    border: '1px solid var(--dnb-border)',
+                    fontSize: 10.5,
+                    maxHeight: 90,
+                    overflow: 'auto',
+                    whiteSpace: 'pre-wrap',
+                    wordBreak: 'break-all',
+                    color: 'var(--dnb-text-2)',
+                  },
+                }, String(active.preview).slice(0, 420))
+              : null,
+          ),
+          h(
+            'div',
+            { style: { display: 'grid', gridTemplateColumns: '1fr 1fr', gap: 8, marginTop: 2 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 34, justifyContent: 'center', fontSize: 12.5, fontWeight: 600 },
+              disabled: busy,
+              onClick: () => void decideApproval(active.id, 'reject'),
+            }, '拒绝'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: {
+                height: 34,
+                justifyContent: 'center',
+                fontSize: 12.5,
+                fontWeight: 700,
+                borderColor: 'rgba(16, 185, 129, 0.52)',
+                background: 'rgba(16, 185, 129, 0.14)',
+                color: '#10b981',
+              },
+              disabled: busy,
+              onClick: () => void decideApproval(active.id, 'approve'),
+            }, busy ? '执行中…' : '允许本次操作'),
+          ),
+        ),
+      )
+    }
+
+    function ElevationRequestModal({ view }) {
+      const meta = view.chiefMeta || {}
+      const req = meta.pendingElevation
+      if (!req || req.status !== 'pending') return null
+      const dismissedMap = view.dismissedElevationIds || {}
+      if (dismissedMap[req.id]) return null
+      const busy = Boolean(view.elevationBusy)
+      const chosenMode = ['assistant', 'strategist', 'chief'].includes(view.elevationChosenMode)
+        ? view.elevationChosenMode
+        : (req.targetMode || 'strategist')
+      const needsRiskCheck = chosenMode === 'chief'
+      const agreed = Boolean(view.elevationAgreed)
+      const dismissSelf = () => {
+        if (busy) return
+        patch({ dismissedElevationIds: { ...dismissedMap, [req.id]: true } })
+      }
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget && !busy) dismissSelf()
+          },
+        },
+        h(
+          'div',
+          { className: 'dnb-modal-card' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#60a5fa' } }, '⬆️ 模型申请提升权限'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 22, height: 22 },
+              disabled: busy,
+              onClick: dismissSelf,
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          h(
+            'div',
+            { className: 'dnb-op-box' },
+            h('div', { className: 'dnb-op-kv' },
+              h('span', { className: 'dnb-op-k' }, '当前档位：'),
+              h('span', null, `${CHIEF_PERMISSION_LABELS[req.fromMode] || req.fromMode} → 申请 ${CHIEF_PERMISSION_LABELS[req.targetMode] || req.targetMode}`),
+            ),
+            h('div', { className: 'dnb-op-kv' },
+              h('span', { className: 'dnb-op-k' }, '发起方：'),
+              h('span', { className: 'dnb-op-code' }, req.by || 'chief'),
+            ),
+            h('div', { className: 'dnb-op-kv' },
+              h('span', { className: 'dnb-op-k' }, '申请原因：'),
+              h('span', null, req.reason || '当前任务需要更高操作权限'),
+            ),
+            req.requestedActionSummary
+              ? h('div', { className: 'dnb-op-kv' },
+                  h('span', { className: 'dnb-op-k' }, '拟执行：'),
+                  h('span', null, req.requestedActionSummary),
+                )
+              : null,
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+            (req.targetMode === 'chief'
+              ? ['strategist', 'chief']
+              : ['assistant', 'strategist']
+            ).map(modeKey => {
+              const selected = chosenMode === modeKey
+              return h('button', {
+                key: modeKey,
+                type: 'button',
+                className: 'dnb-mini-btn',
+                'data-tone': selected ? (modeKey === 'chief' ? 'amber' : 'accent') : undefined,
+                disabled: busy,
+                onClick: () => patch({ elevationChosenMode: modeKey, elevationAgreed: false }),
+              }, modeKey === 'strategist' ? '🛡️ 稳妥方案：仅提权至 L2 参谋模式（逐项授权）' : (CHIEF_PERMISSION_LABELS[modeKey] || modeKey))
+            }),
+          ),
+          needsRiskCheck
+            ? h(
+                React.Fragment,
+                null,
+                h(
+                  'div',
+                  { className: 'dnb-risk-box' },
+                  h('div', { style: { fontSize: 13, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 高权限模式风险告知（提权至 L3）'),
+                  h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } },
+                    '批准进入 L3 · 参谋长模式后，Agent 将可自主修改工作区文件、执行系统命令、切换/协调主与子代理工作流。即使有安全卫兵，仍然不能保证完全消除风险。'),
+                ),
+                h(
+                  'label',
+                  { className: 'dnb-risk-check' },
+                  h('input', {
+                    type: 'checkbox',
+                    checked: agreed,
+                    disabled: busy,
+                    style: { marginTop: 3 },
+                    onChange: e => patch({ elevationAgreed: Boolean(e.target.checked) }),
+                  }),
+                  h('span', null, '我已阅读并知悉上述风险，理解高权限模式可能造成的后果。'),
+                ),
+              )
+            : null,
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: 8, marginTop: 2 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 32, padding: '0 14px', fontSize: 12.5 },
+              disabled: busy,
+              onClick: () => void decideElevation(req.id, 'reject'),
+            }, '拒绝提权'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: {
+                height: 32,
+                padding: '0 15px',
+                fontSize: 12.5,
+                fontWeight: 700,
+                background: needsRiskCheck ? (agreed ? '#d97706' : 'var(--dnb-fill)') : 'var(--dnb-primary-bg, #2563eb)',
+                color: needsRiskCheck ? (agreed ? '#fff' : 'var(--dnb-text-3)') : 'var(--dnb-primary-fg, #fff)',
+              },
+              disabled: busy || (needsRiskCheck && !agreed),
+              onClick: () => void decideElevation(req.id, 'approve', chosenMode, needsRiskCheck ? agreed : false),
+            }, busy ? '校验提交中…' : `批准进入 ${CHIEF_PERMISSION_LABELS[chosenMode] || chosenMode}`),
+          ),
+        ),
+      )
+    }
+
+    function AuditLogModal({ view }) {
+      if (!view.auditLogModalOpen) return null
+      const meta = view.chiefMeta || {}
+      const logs = Array.isArray(meta.auditLog) ? meta.auditLog : []
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget) patch({ auditLogModalOpen: false })
+          },
+        },
+        h(
+          'div',
+          { className: 'dnb-modal-card' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-text)' } }, '📜 6 级安全架构与审计日志'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 22, height: 22 },
+              onClick: () => patch({ auditLogModalOpen: false }),
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          h(
+            'div',
+            { className: 'dnb-pipe-bar' },
+            ['用户模式', '操作请求', '安全卫兵硬性规则', '权限判定', '执行器', '审计日志'].map((step, idx, arr) =>
+              h(
+                React.Fragment,
+                { key: step },
+                h('span', { className: 'dnb-pipe-node' }, step),
+                idx < arr.length - 1 ? h('span', null, '→') : null,
+              ),
+            ),
+          ),
+          logs.length === 0
+            ? h('div', { style: { padding: '18px 8px', textAlign: 'center', fontSize: 12, color: 'var(--dnb-text-3)' } },
+                '当前会话暂无审计记录；权限切换、安全卫兵拦截、逐项授权与执行操作都将实时落盘于此。')
+            : h(
+                'div',
+                { style: { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflowY: 'auto' } },
+                logs.map(entry => {
+                  const decisionColor = entry.decision === 'allow' || entry.decision === 'approved'
+                    ? '#34d399'
+                    : (entry.decision === 'prompt' ? '#60a5fa' : '#ff6961')
+                  return h(
+                    'div',
+                    { key: entry.id, className: 'dnb-audit-row' },
+                    h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
+                      h('span', { style: { fontWeight: 700, color: decisionColor } },
+                        `${entry.stage || 'gate'} · ${entry.decision || ''} (${CHIEF_PERMISSION_LABELS[entry.mode] || entry.mode || 'advisor'})`),
+                      h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } },
+                        entry.at ? new Date(entry.at).toLocaleTimeString() : ''),
+                    ),
+                    h('div', { style: { color: 'var(--dnb-text)' } },
+                      `${entry.operation || ''}${entry.target ? ' · ' + entry.target : ''}`),
+                    entry.outcome || entry.reason
+                      ? h('div', { style: { color: 'var(--dnb-text-2)', wordBreak: 'break-word' } }, entry.outcome || entry.reason)
+                      : null,
+                  )
+                }),
+              ),
+        ),
+      )
+    }
+
     function PanelInner(props) {
       const view = useStore()
       const isPage = !!(props && props.variant === 'main')
@@ -15933,7 +16747,7 @@ window.__ModuleLoader__.load({
                     gap: 8,
                   },
                 },
-                h('span', null, '⚠ 检测到宿主进程仍在运行旧版内存模块（非 1.2.0-r7），跨隔离上下文压缩与空白新对话防 DSML 泄漏修复需重启 DeepSeek Harness 客户端或重载插件后完全生效。'),
+                h('span', null, '⚠ 检测到宿主进程仍在运行旧版内存模块（非 1.2.1），四级权限门禁、跨隔离上下文压缩与新会话修复需重启 DeepSeek Harness 客户端或重载插件后完全生效。'),
                 h('span', { style: { cursor: 'pointer', paddingLeft: 6, flexShrink: 0 }, onClick: () => patch({ staleBackendDismissed: true }) }, '×'),
               )
             : null,
@@ -15995,6 +16809,10 @@ window.__ModuleLoader__.load({
           h(ChiefComposerBar, { view, barRef: secBarRef }),
 
           // Scoped Modal Overlays (Strictly bounded inside .dnb-panel)
+          h(ChiefRiskConfirmModal, { view }),
+          h(OperationApprovalModal, { view }),
+          h(ElevationRequestModal, { view }),
+          h(AuditLogModal, { view }),
           h(InterventionConfirmModal, { view, board }),
           h(HazardHaltModal, { view }),
           h(UnlimitedTurnsConfirmModal, { view }),
@@ -16067,6 +16885,17 @@ window.__ModuleLoader__.load({
         tacticalMenuOpen: false,
         interventionModalOpen: false,
         interventionAgreed: false,
+        chiefRiskModalOpen: false,
+        chiefRiskAgreed: false,
+        chiefRiskBusy: false,
+        dismissedApprovalIds: {},
+        openApprovalModalId: '',
+        approvalBusyId: '',
+        dismissedElevationIds: {},
+        elevationChosenMode: '',
+        elevationAgreed: false,
+        elevationBusy: false,
+        auditLogModalOpen: false,
         precipitateModal: null,
         autoPilotConfirmOpen: false,
         archiveRelayModal: null,
@@ -16163,6 +16992,17 @@ window.__ModuleLoader__.load({
               tacticalMenuOpen: false,
               interventionModalOpen: false,
               interventionAgreed: false,
+              chiefRiskModalOpen: false,
+              chiefRiskAgreed: false,
+              chiefRiskBusy: false,
+              dismissedApprovalIds: {},
+              openApprovalModalId: '',
+              approvalBusyId: '',
+              dismissedElevationIds: {},
+              elevationChosenMode: '',
+              elevationAgreed: false,
+              elevationBusy: false,
+              auditLogModalOpen: false,
               precipitateModal: null,
               autoPilotConfirmOpen: false,
               archiveRelayModal: null,

@@ -1,6 +1,6 @@
 {
   "name": "dsh-chief",
-  "version": "1.2.0",
+  "version": "1.2.1",
   "icon": "icon.svg",
   "type": "module",
   "description": "AI manager for your agent crews. Let AI manage AI — it watches the flow, stops a runaway loop before it burns budget, and asks before touching your workspace. Less babysitting, fewer blow-ups.",

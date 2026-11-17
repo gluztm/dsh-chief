@@ -410,17 +410,17 @@ function teamTaskLines(tasks, max) {
 }
 
 function chiefPostureLine(permissionMode) {
-  const mode = String(permissionMode || 'danger-full-access').trim()
-  if (mode === 'read-only') {
-    return '🛡️ 权限 posture=仅可查看 (read-only)：参谋长只读核验与建言；主模型/子代理严守禁止红线，禁止未经授权直接改盘。'
+  const mode = String(permissionMode || 'advisor').trim()
+  if (mode === 'advisor' || mode === 'read-only') {
+    return '🛡️ 权限 posture=L0 顾问模式 (advisor · 只读默认)：只观察、只分析、只建议；禁改工作区与工作流；需要更高参谋协同请调 chief_board({ action: "permission.request", targetMode: "assistant|strategist|chief", reason })。'
   }
-  if (mode === 'workspace-write') {
-    return '🛡️ 权限 posture=工作区内修改 (workspace-write)：参谋长与主模型/子代理限当前工作区内安全读写并严格守红线，禁止越界写盘或高危命令。'
+  if (mode === 'assistant') {
+    return '🛡️ 权限 posture=L1 助手模式 (assistant)：允许维护参谋看板/记忆/档案；不改项目工作区、不接管主子代理工作流；如需授权请调 chief_board({ action: "permission.request" })。'
   }
-  if (mode === 'auto-review') {
-    return '🛡️ 权限 posture=自动审查 (auto-review EXP)：常规工作区内推进；高风险终端命令与越界改动须经参谋长双人复核。'
+  if (mode === 'strategist' || mode === 'workspace-write' || mode === 'auto-review') {
+    return '🛡️ 权限 posture=L2 参谋模式 (strategist · 逐项授权)：可申请改工作区与调主/子代理工作流，每项受控操作需用户弹窗「允许本次操作」后执行，严守禁止红线。'
   }
-  return '🛡️ 权限 posture=完全权限 (danger-full-access)：参谋长拥有最高实权（全盘读写、测试核验、调度子代理、强介入与压缩）；主模型/子代理在能力边界与禁止红线内协作。'
+  return '🛡️ 权限 posture=L3 参谋长模式 (chief · 已主动确认风险)：参谋拥有最高自主实权（全盘读写、测试命令、切换/协调主子代理与压缩）；主模型/子代理严守安全卫兵硬规则与禁止红线。'
 }
 
 /** The injected section. Never throws: a broken digest must not break a prompt. */

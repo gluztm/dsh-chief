@@ -5,6 +5,26 @@ All notable changes to **`dsh-chief`** (**DSH 参谋长**) will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.2.1] - 2026-11-17
+
+### Changed
+- **四级权限模型与默认 L0 会话隔离 (`advisor` / `assistant` / `strategist` / `chief`)**：
+  - **L0 · 顾问模式 (`advisor` · `READ ONLY` · 默认模式)**：所有新开会话及跨窗投递会话默认落入此最高安全档；只观察、只分析、只建议，禁止修改工作区、参谋系统与主/子代理工作流。
+  - **L1 · 助手模式 (`assistant` · `ASSISTANT`)**：具备 L0 全部能力，可自主维护参谋系统记忆、档案与看板配置，禁止直接改写项目工作区或接管主代理工作流。
+  - **L2 · 参谋模式 (`strategist` · `ADVISOR WITH APPROVAL` · `逐项授权`)**：具备 L1 全部能力，可申请修改工作区文件、系统命令与主/子代理工作流；每项受控操作执行前强制弹出「🛡️ 操作授权请求」（操作 / 目标 / 原因 / 影响 + 拒绝 / 允许本次操作），经用户单次授权后才执行。
+  - **L3 · 参谋长模式 (`chief` · `CHIEF OF STAFF` · `主动风险知悉`)**：拥有更高自主执行权（切换主代理、协调子代理工作流、自动纠偏与续跑）；进入前强制弹出「⚠️ 高权限模式风险告知」并勾选「我已阅读并知悉上述风险，理解高权限模式可能造成的后果。」，且由后端 `DSH Chief` 强制校验 `confirmedChiefRisk === true`（未校验的旧版/异常配置自动降级回 L0）。
+- **6 级统一安全架构流水线**：`用户模式 → 操作请求 → 安全卫兵硬性规则 → 权限判定 → 执行器 → 审计日志`，安全卫兵红线对 L0–L3 全档位硬性兜底，所有权限判定与执行结果均写入会话审计日志并支持前端弹窗检索。
+- **模型主动申请提权闭环**：新增 `request_permission_elevation` 执行工具与 `chief_board permission.request` 工具动作；UI 弹窗展示申请方、原因与目标档位（支持在 L3 申请时提供「仅提权至 L2 参谋模式」稳妥选项），若批准升至 L3 同样强制走风险告知与打勾校验。
+- **`⚡ 主动强介入` 随 4 档位联动差异化表现**：
+  - **L0 顾问**：仅只读巡检诊断与建议输出，不改写工作区且不注入 `@lead` 强推指令。
+  - **L1 助手**：仅自动维护参谋记忆、档案与建议卡，不干预主对话执行流。
+  - **L2 参谋**：每轮强介入生成的关键受控动作/递话/压缩均队列化并弹出逐项授权请求，允许后单次执行。
+  - **L3 参谋长**：高自主闭环督导（直控主对话/子代理、纠偏、压缩前抢救与 `auto-continue.js` 续跑），配合死循环熔断与人类结项门禁。
+
+### Fixed
+- **修复「🚀 新建窗口并部署参谋长」在部分机器深色/标准主题下按钮发白看不清文字**：原 `--dnb-accent` 绑定了宿主 `--dsw-alias-brand-primary`（在标准 DSH 深色主题中为近白色 `#f9fafb`），导致白字按钮对比度崩溃；现已切换至 `--dsw-alias-state-business-primary` 并引入独立的 `--dnb-primary-bg` / `--dnb-primary-fg` 高对比主按钮令牌，同时补齐暗色 `<select option>` 下拉配色。
+- **修复「🚀 新建窗口并部署参谋长」创建新会话未绑定当前 `workspaceId` 及不会自动跳转新窗**：`transferChief('create')` 现会继承当前会话工作区，前端同时兼容 `sessions.open(created)` 切换视图。
+
 ## [1.2.0] - 2026-11-16
 
 ### Added

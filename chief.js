@@ -41,13 +41,22 @@ import {
 import {
   CHIEF_PERMISSION_MODES,
   DEFAULT_CHIEF_PERMISSION_MODE,
+  CHIEF_PERMISSION_META,
   normalizePermissionMode,
+  permissionRank,
+  evaluateSafetyGuardHardRules,
+  evaluateChiefPermissionGate,
+  describeControlledOperationMeta,
+  executeChiefToolCall,
   CHIEF_TOOLS_PROMPT_GUIDE,
   runChiefAgenticLoop,
   stripToolCallMarkup,
 } from './chief-executor.js'
 
-export { CHIEF_PERMISSION_MODES, DEFAULT_CHIEF_PERMISSION_MODE, normalizePermissionMode }
+export { CHIEF_PERMISSION_MODES, DEFAULT_CHIEF_PERMISSION_MODE, CHIEF_PERMISSION_META, normalizePermissionMode }
+
+const APPROVALS_CAP = 30
+const AUDIT_LOG_CAP = 80
 
 const STATE_VERSION = 1
 const FACTS_CAP = 120
@@ -316,9 +325,104 @@ function stateFilePath() {
   return path.join(chiefDir(), 'chief-state.json')
 }
 
+function normalizeChiefRiskAck(raw) {
+  if (!raw || typeof raw !== 'object' || raw.acknowledged !== true) return null
+  const at = Number(raw.at) || 0
+  if (at <= 0) return null
+  return {
+    acknowledged: true,
+    at,
+    by: clamp(raw.by || 'operator', 40),
+    version: clamp(raw.version || '1.2.1', 20),
+  }
+}
+
+export function hasValidChiefRiskAck(ws) {
+  return Boolean(ws && ws.chiefRiskAck && ws.chiefRiskAck.acknowledged === true && Number(ws.chiefRiskAck.at) > 0)
+}
+
+function normalizePendingApproval(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const opLabel = clamp(raw.operationLabel || raw.operation || '', 80)
+  if (!opLabel) return null
+  const validStatuses = ['pending', 'approved', 'rejected', 'executed', 'failed']
+  const status = validStatuses.includes(raw.status) ? raw.status : 'pending'
+  const validKinds = ['tool', 'relay', 'compact', 'auto_continue']
+  const kind = validKinds.includes(raw.kind) ? raw.kind : 'tool'
+  const validCategories = ['workspace_file', 'system_command', 'main_workflow', 'subagent_workflow']
+  const category = validCategories.includes(raw.category) ? raw.category : 'workspace_file'
+  return {
+    id: typeof raw.id === 'string' && raw.id ? raw.id : nextId('apr'),
+    status,
+    category,
+    operationLabel: opLabel,
+    targetLabel: clamp(raw.targetLabel || raw.target || '', 120),
+    reason: clamp(raw.reason || '', 240),
+    impact: clamp(raw.impact || '', 220),
+    preview: cleanMultiline(raw.preview || '', 420),
+    kind,
+    payload: raw.payload && typeof raw.payload === 'object' ? raw.payload : {},
+    dedupeKey: clamp(raw.dedupeKey || '', 120),
+    by: clamp(raw.by || 'chief', 40),
+    createdAt: Number(raw.createdAt) || Date.now(),
+    resolvedAt: Number(raw.resolvedAt) || 0,
+    resolvedBy: clamp(raw.resolvedBy || '', 40),
+    resultMessage: clamp(raw.resultMessage || '', 260),
+  }
+}
+
+function normalizePendingElevation(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  if (raw.status && raw.status !== 'pending') return null
+  const targetMode = normalizePermissionMode(raw.targetMode)
+  if (targetMode === 'advisor') return null
+  return {
+    id: typeof raw.id === 'string' && raw.id ? raw.id : nextId('elv'),
+    status: 'pending',
+    fromMode: normalizePermissionMode(raw.fromMode || 'advisor'),
+    targetMode,
+    reason: clamp(raw.reason || '当前任务需要更高参谋权限才能继续执行', 260),
+    requestedActionSummary: clamp(raw.requestedActionSummary || '', 220),
+    by: clamp(raw.by || 'chief', 40),
+    createdAt: Number(raw.createdAt) || Date.now(),
+  }
+}
+
+function normalizeAuditEntry(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const op = clamp(raw.operation || raw.tool || '', 80)
+  if (!op) return null
+  return {
+    id: typeof raw.id === 'string' && raw.id ? raw.id : nextId('aud'),
+    at: Number(raw.at) || Date.now(),
+    mode: normalizePermissionMode(raw.mode || DEFAULT_CHIEF_PERMISSION_MODE),
+    stage: clamp(raw.stage || 'executor', 40),
+    decision: clamp(raw.decision || 'executed', 40),
+    operation: op,
+    target: clamp(raw.target || '', 140),
+    reason: clamp(raw.reason || '', 220),
+    outcome: clamp(raw.outcome || 'ok', 40),
+    by: clamp(raw.by || 'chief', 40),
+  }
+}
+
+function pushAuditToWs(ws, entry = {}) {
+  if (!ws || typeof ws !== 'object') return null
+  if (!Array.isArray(ws.auditLog)) ws.auditLog = []
+  const norm = normalizeAuditEntry(entry)
+  if (!norm) return null
+  ws.auditLog.push(norm)
+  if (ws.auditLog.length > AUDIT_LOG_CAP) ws.auditLog = ws.auditLog.slice(-AUDIT_LOG_CAP)
+  return norm
+}
+
 function emptyWorkspace() {
   return {
     config: null,
+    chiefRiskAck: null,
+    pendingApprovals: [],
+    pendingElevation: null,
+    auditLog: [],
     facts: [],
     narrative: { hash: '', text: '', at: 0, byModel: '', clusterSig: '' },
     suggestions: [],
@@ -501,14 +605,27 @@ function normalizeWorkspace(raw) {
     autoPilotHadTurn: Boolean(rg.autoPilotHadTurn),
     lastAutoArchiveOrgAt: Math.max(0, Number(rg.lastAutoArchiveOrgAt) || 0),
   }
+  base.chiefRiskAck = normalizeChiefRiskAck(src.chiefRiskAck)
+  base.pendingApprovals = (Array.isArray(src.pendingApprovals) ? src.pendingApprovals : [])
+    .map(normalizePendingApproval)
+    .filter(Boolean)
+    .slice(-APPROVALS_CAP)
+  base.pendingElevation = normalizePendingElevation(src.pendingElevation)
+  base.auditLog = (Array.isArray(src.auditLog) ? src.auditLog : [])
+    .map(normalizeAuditEntry)
+    .filter(Boolean)
+    .slice(-AUDIT_LOG_CAP)
+  const ackOk = hasValidChiefRiskAck(base)
   if (src.config && typeof src.config === 'object') {
     const validPaces = ['manual', 'smart', 'auto', 'stopped']
     const pm = validPaces.includes(src.config.paceMode) ? src.config.paceMode : undefined
     const rawStopped = typeof src.config.stopped === 'boolean' ? src.config.stopped : (pm === 'stopped')
-    const rawPerm = typeof src.config.permissionMode === 'string' ? normalizePermissionMode(src.config.permissionMode) : undefined
+    const rawPerm = typeof src.config.permissionMode === 'string'
+      ? normalizePermissionMode(src.config.permissionMode, { requireAck: true, hasChiefRiskAck: ackOk })
+      : DEFAULT_CHIEF_PERMISSION_MODE
     base.config = {
       ...(typeof src.config.modelRef === 'string' ? { modelRef: src.config.modelRef.trim() } : {}),
-      ...(rawPerm ? { permissionMode: rawPerm } : {}),
+      permissionMode: rawPerm,
       ...(typeof src.config.stopped === 'boolean' || pm === 'stopped' ? { stopped: rawStopped } : {}),
       ...(pm ? { paceMode: pm, autoPilot: !rawStopped && pm === 'auto', autoReview: !rawStopped && pm !== 'manual' } : {}),
       ...(src.config.tacticalModes && typeof src.config.tacticalModes === 'object'
@@ -573,7 +690,7 @@ export function parseCompactTokensInput(rawInput) {
   }
 }
 
-/** Resolve effective Chief config for a specific root session (isolates `intervention` per session). */
+/** Resolve effective Chief config for a specific root session (isolates `intervention` and `permissionMode` per session). */
 export function resolveWorkspaceConfig(state, sessionId = '') {
   const safeState = state && typeof state === 'object' ? state : {}
   const base = safeState.config && typeof safeState.config === 'object' ? safeState.config : {}
@@ -599,14 +716,21 @@ export function resolveWorkspaceConfig(state, sessionId = '') {
   const mergedTactical = wsCfg && wsCfg.tacticalModes
     ? normalizeTacticalModes({ ...baseTactical, ...wsCfg.tacticalModes })
     : { ...baseTactical, ...(sid ? { intervention: false } : {}) }
-  const permissionMode = normalizePermissionMode(
-    (wsCfg && wsCfg.permissionMode) || base.permissionMode || DEFAULT_CHIEF_PERMISSION_MODE
-  )
+  const ackOk = hasValidChiefRiskAck(ws)
+  const rawPerm = (wsCfg && typeof wsCfg.permissionMode === 'string')
+    ? wsCfg.permissionMode
+    : DEFAULT_CHIEF_PERMISSION_MODE
+  const permissionMode = normalizePermissionMode(rawPerm, {
+    requireAck: true,
+    hasChiefRiskAck: ackOk,
+  })
+  const chiefRiskVerified = permissionMode === 'chief' ? ackOk : false
   return {
     modelRef,
     paceMode,
     stopped,
     permissionMode,
+    chiefRiskVerified,
     autoPilot: !stopped && paceMode === 'auto',
     autoReview: !stopped && paceMode !== 'manual',
     tacticalModes: mergedTactical,
@@ -685,7 +809,7 @@ function normalizeState(raw) {
       modelRef: typeof cfg.modelRef === 'string' ? cfg.modelRef.trim() : '',
       paceMode,
       stopped,
-      permissionMode: normalizePermissionMode(cfg.permissionMode || DEFAULT_CHIEF_PERMISSION_MODE),
+      permissionMode: DEFAULT_CHIEF_PERMISSION_MODE,
       autoPilot: !stopped && paceMode === 'auto',
       autoReview: !stopped && paceMode !== 'manual',
       tacticalModes: normalizeTacticalModes(cfg.tacticalModes),
@@ -693,6 +817,77 @@ function normalizeState(raw) {
     links,
     workspaces,
   }
+}
+
+export function appendChiefAuditLog(sessionId = 'global', entry = {}) {
+  const rootId = String(sessionId || 'global').trim() || 'global'
+  return mutateChiefState((state) => {
+    const ws = ensureWorkspace(state, rootId)
+    return pushAuditToWs(ws, entry)
+  })
+}
+
+export function enqueueApprovalToWs(ws, item = {}) {
+  if (!ws || typeof ws !== 'object') return null
+  if (!Array.isArray(ws.pendingApprovals)) ws.pendingApprovals = []
+  const dKey = clamp(item.dedupeKey || '', 120)
+  if (dKey) {
+    const existing = ws.pendingApprovals.find(a => a && a.status === 'pending' && a.dedupeKey === dKey)
+    if (existing) return existing
+  }
+  const norm = normalizePendingApproval({ ...item, status: 'pending', dedupeKey: dKey })
+  if (!norm) return null
+  ws.pendingApprovals.push(norm)
+  if (ws.pendingApprovals.length > APPROVALS_CAP) {
+    ws.pendingApprovals = ws.pendingApprovals.slice(-APPROVALS_CAP)
+  }
+  return norm
+}
+
+export function queueChiefApproval(sessionId = 'global', item = {}) {
+  const rootId = String(sessionId || 'global').trim() || 'global'
+  return mutateChiefState((state) => {
+    const ws = ensureWorkspace(state, rootId)
+    return enqueueApprovalToWs(ws, item)
+  })
+}
+
+export function enqueueElevationToWs(ws, req = {}) {
+  if (!ws || typeof ws !== 'object') return null
+  const currentMode = normalizePermissionMode(
+    ws.config && ws.config.permissionMode ? ws.config.permissionMode : DEFAULT_CHIEF_PERMISSION_MODE,
+    { requireAck: true, hasChiefRiskAck: hasValidChiefRiskAck(ws) },
+  )
+  const targetMode = normalizePermissionMode(req.targetMode || 'strategist')
+  if (permissionRank(targetMode) <= permissionRank(currentMode)) return null
+  const norm = normalizePendingElevation({
+    fromMode: currentMode,
+    targetMode,
+    reason: req.reason || 'Agent 申请提升权限以继续当前任务',
+    requestedActionSummary: req.requestedActionSummary || '',
+    by: req.by || 'chief',
+  })
+  if (!norm) return null
+  ws.pendingElevation = norm
+  pushAuditToWs(ws, {
+    mode: currentMode,
+    stage: 'permission_gate',
+    decision: 'elevation_requested',
+    operation: '申请提权',
+    target: `${CHIEF_PERMISSION_META[currentMode].level} -> ${CHIEF_PERMISSION_META[targetMode].level}`,
+    reason: norm.reason,
+    outcome: 'pending',
+    by: norm.by,
+  })
+  return norm
+}
+
+export function requestChiefElevation(sessionId = 'global', req = {}) {
+  const rootId = String(sessionId || 'global').trim() || 'global'
+  return mutateChiefState((state) => {
+    const ws = ensureWorkspace(state, rootId)
+    return enqueueElevationToWs(ws, req)
+  })
 }
 
 let cachedState = null
@@ -2635,6 +2830,10 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
     peerProgress,
     flippedPrecipitatedIds: (ownWs.flippedPrecipitatedIds || []).slice(),
     runtimeGuard: { ...ownWs.runtimeGuard },
+    chiefRiskAck: ownWs.chiefRiskAck ? { ...ownWs.chiefRiskAck } : null,
+    pendingApprovals: (Array.isArray(ownWs.pendingApprovals) ? ownWs.pendingApprovals : []).slice(-15).reverse(),
+    pendingElevation: ownWs.pendingElevation ? { ...ownWs.pendingElevation } : null,
+    auditLog: (Array.isArray(ownWs.auditLog) ? ownWs.auditLog : []).slice(-50).reverse(),
   }
 }
 
@@ -2704,7 +2903,7 @@ export function deployChiefWorkspaceState(deps, {
     }
 
     const briefLines = [
-      `- 【跨会话接力部署】本会话参谋状态已自 **${fromTitle || fromKey}** 系统级一键移交部署完成。`,
+      `- 【跨会话接力部署】本会话参谋状态已自 **${fromTitle || fromKey}** 系统级一键移交部署完成（新对话默认以 **L0 · 顾问模式** 安全启动）。`,
       objective ? `- 【继承总目标】${clamp(objective, 180)}` : '',
       copiedFacts > 0 ? `- 【继承纪律与事实】共继承 **${copiedFacts} 条**核心记忆与纪律。` : '',
       customText ? `- 【附带交接叮嘱】${clamp(customText, 240)}` : '',
@@ -2731,16 +2930,17 @@ export function deployChiefWorkspaceState(deps, {
       id: nextId('chat'),
       role: 'chief',
       text: briefLines,
-      actions: ['系统接力部署', ...(copiedFacts > 0 ? [`继承记忆 ×${copiedFacts}`] : [])],
+      actions: ['系统接力部署', '默认 L0 顾问', ...(copiedFacts > 0 ? [`继承记忆 ×${copiedFacts}`] : [])],
       at: Date.now(),
     })
     if (toWs.chat.length > CHAT_CAP) toWs.chat = toWs.chat.slice(-CHAT_CAP)
 
-    // Clone safe workspace chief config (model, pace, tactical preferences), ALWAYS forcing intervention=false!
+    // Clone safe workspace chief config (model, pace, tactical preferences), ALWAYS forcing intervention=false & L0 advisor!
     const fromCfg = resolveWorkspaceConfig(state, fromKey)
     toWs.config = {
       modelRef: fromCfg.modelRef || '',
       paceMode: fromCfg.paceMode || 'manual',
+      permissionMode: DEFAULT_CHIEF_PERMISSION_MODE,
       autoPilot: Boolean(fromCfg.autoPilot),
       autoReview: Boolean(fromCfg.autoReview),
       tacticalModes: {
@@ -2748,6 +2948,19 @@ export function deployChiefWorkspaceState(deps, {
         intervention: false,
       },
     }
+    toWs.chiefRiskAck = null
+    toWs.pendingApprovals = []
+    toWs.pendingElevation = null
+    pushAuditToWs(toWs, {
+      mode: DEFAULT_CHIEF_PERMISSION_MODE,
+      stage: 'deploy',
+      decision: 'reset_to_l0',
+      operation: '跨会话接力部署',
+      target: toKey,
+      reason: '新对话强制从最低档 L0 顾问模式安全启动并清空高权限状态',
+      outcome: 'ok',
+      by: 'deploy',
+    })
     toWs.runtimeGuard.interventionTurns = 0
     toWs.runtimeGuard.unchangedCount = 0
     toWs.runtimeGuard.circuitBroken = false
@@ -2771,18 +2984,23 @@ export function deployChiefWorkspaceState(deps, {
 /* -------------------------------------------------------------------------- */
 
 const ASK_CHIEF_SYSTEM = [
-  '你是「DSH 参谋长」（DSH Chief）——统揽主对话、子代理团队与跨窗口协同的全能参谋宰相，默认拥有最高「完全权限（danger-full-access）」。',
-  '你**绝不只是**被动的记忆检索器或传话筒！你既可以动用实权工具直接读写核验，也实时掌握：',
+  '你是「DSH 参谋长」（DSH Chief）——遵循四级权限安全架构（`L0 顾问 advisor` / `L1 助手 assistant` / `L2 参谋 strategist` / `L3 参谋长 chief`）的协同参谋中枢，新对话默认位于最低只读档 `L0 顾问模式`。',
+  '你**绝不只是**被动的记忆检索器或传话筒！在当前所处权限允许范围内，你既可以动用实权工具直接核验/执行（或申请提权），也实时掌握：',
   '1) 主代理（@lead）与各子代理的**实时对话流快照**（刚刚说了什么、正在调什么工具、卡在哪里）；',
   '2) 参谋看板总目标、实时断点游标（cursor）、计划（plan）与任务拓扑（推进中 / 受阻 / 待办 / 已完成证据）；',
   '3) 双层工作边界（📌 定住全局跨任务共享边界 vs 仅当前任务边界）与持久记忆、便签、协同信箱。',
   '',
-  '请精准洞悉用户意图——你的输入框就是用户的【全能许愿框】（亲自查证修复/跑命令、派发调度子代理、态势汇报、卡点诊断、拆话传话、代维护或重设任务计划、设定/重设/浓缩边界、整理/提炼入全局/上下桌面档案、连接或断开跨窗口协同网络），并**只输出一个合法 JSON 对象**：',
+  '请精准洞悉用户意图——你的输入框就是用户的【全能许愿框】（态势汇报、只读核查、整理/维护看板与档案、修改工作区文件、调整主代理与子代理工作流、连接/断开协同网络或申请提权），并**只输出一个合法 JSON 对象**：',
   '{',
-  '  "reply": "必须【简明、结构化、分点作答】！用换行 `- 【标签】结论` 列出（优先使用语义清晰标签：如【总目标】【实测执行】【推进中】【已完】【已验证】【结论】【待办】【受阻】【禁止红线】【下一步建议】），直给干货，绝不说『记忆里没有这条』，绝不堆砌废话或暴露内部 sessionId",',
+  '  "reply": "必须【简明、结构化、分点作答】！用换行 `- 【标签】结论` 列出（优先使用语义清晰标签：如【总目标】【实测执行】【推进中】【已完】【已验证】【结论】【待办】【受阻】【禁止红线】【权限提示】【下一步建议】），直给干货，绝不说『记忆里没有这条』，绝不堆砌废话或暴露内部 sessionId",',
   '  "toolCalls": [',
-  '    { "tool": "read_file|list_dir|search_files|write_file|edit_file|run_command|subagent_dispatch|subagent_steer|subagent_interrupt|archive_write|session_compact", "args": {} }',
+  '    { "tool": "read_file|list_dir|search_files|write_file|edit_file|run_command|main_agent_control|subagent_dispatch|subagent_steer|subagent_interrupt|archive_write|session_compact|request_permission_elevation", "args": {} }',
   '  ],',
+  '  "elevationRequest": {',
+  '    "targetMode": "assistant|strategist|chief",',
+  '    "reason": "说明为何需要用户批准提权",',
+  '    "requestedActionSummary": "拟执行的核心动作简述"',
+  '  },',
   '  "relays": [',
   '    { "target": "成员 key 或名字（如 lead / 子代理名 / session-xxx / all）", "mode": "steer|followup|silent", "subject": "简短事由", "text": "替用户转化好的清晰可执行指令" }',
   '  ],',
@@ -4525,6 +4743,55 @@ export async function distillSessionArchivesToGlobal(deps, {
   }
 }
 
+function buildChiefArchiveUpsertFn(deps, rootId) {
+  return async (arc) => {
+    const sc = arc && arc.vaultScope === 'global' ? 'global' : 'session'
+    const opt = archiveTargetForRoot(deps, rootId, { vaultScope: sc })
+    return mutateArchive({
+      op: 'save',
+      session: rootId,
+      folder: (arc && arc.folder) || 'inbox',
+      paperclip: 'silver',
+      title: (arc && arc.title) || '参谋长工作归档',
+      summary: (arc && arc.summary) || '',
+      body: (arc && arc.body) || '',
+      tags: Array.isArray(arc && arc.tags) ? arc.tags : [],
+      by: 'chief',
+    }, opt)
+  }
+}
+
+function buildChiefCompactFn(deps, rootId) {
+  return async (reason) => {
+    if (!rootId || rootId === 'global') {
+      return { ok: false, noop: true, skipped: 'blank-context', error: '当前为空白新对话（未绑定活跃主会话），暂无可压缩的历史上下文' }
+    }
+    if (!deps || typeof deps.compactSessionNow !== 'function') {
+      return { ok: false, skipped: 'no-compaction-service', error: '宿主压缩服务未挂载' }
+    }
+    let usage = null
+    try {
+      usage = typeof deps.measureSessionTokens === 'function'
+        ? await deps.measureSessionTokens(rootId)
+        : null
+    } catch {}
+    const contextWindow = Math.max(1000, Number(usage && usage.contextWindow) || 128_000)
+    const totalTokens = Number(usage && usage.totalTokens) || 0
+    const seq = Math.max(0, Math.round(Number(usage && usage.seq) || 0))
+    const ratioPct = totalTokens > 0 ? (totalTokens / contextWindow) * 100 : 0
+    return executeHarvestAndCompact(deps, {
+      sid: rootId,
+      rootId,
+      reason: reason || '参谋长实权工具主动发起抢救与上下文压缩',
+      seq,
+      ratioPct,
+      totalTokens,
+      contextWindow,
+      logLabel: '参谋长主动压缩',
+    })
+  }
+}
+
 export async function askOrCommandChief(deps, {
   sessionId = '',
   text = '',
@@ -4561,14 +4828,59 @@ export async function askOrCommandChief(deps, {
   const board = deps.boardForSession(deps.boardFileFor(rootId))
   const state = loadChiefState()
   const effCfg = resolveWorkspaceConfig(state, rootId)
-  const permissionMode = normalizePermissionMode(effCfg.permissionMode || DEFAULT_CHIEF_PERMISSION_MODE)
+  const ownWs = ensureWorkspace(state, rootId)
+  const hasChiefRiskAck = hasValidChiefRiskAck(ownWs)
+  const permissionMode = normalizePermissionMode(effCfg.permissionMode || DEFAULT_CHIEF_PERMISSION_MODE, {
+    requireAck: true,
+    hasChiefRiskAck,
+  })
+  const permRank = permissionRank(permissionMode)
   const isConciseBrief = Boolean(effCfg.tacticalModes && effCfg.tacticalModes.conciseBrief)
   const view = clusterView(state, rootId)
-  const ownWs = ensureWorkspace(state, rootId)
   const targetOpt = archiveTargetForRoot(deps, rootId)
   const peerProgress = Array.isArray(directory.cluster) && directory.cluster.length > 1
     ? collectClusterPeerProgress(deps, directory.cluster, rootId)
     : []
+
+  const denyChiefSystemInAdvisor = async (opName, reasonText) => {
+    const elev = requestChiefElevation(rootId, {
+      fromMode: permissionMode,
+      targetMode: 'assistant',
+      reason: reasonText,
+      requestedActionSummary: clamp(input, 160),
+      by: 'chief',
+    })
+    appendChiefAuditLog(rootId, {
+      mode: permissionMode,
+      stage: 'permission_gate',
+      decision: 'deny_mode',
+      operation: opName,
+      target: 'chief_system',
+      reason: reasonText,
+      outcome: 'denied',
+      by: 'chief',
+    })
+    const denyReply = `- 【🔒 权限受限（当前 L0 顾问只读）】${reasonText}\n- 【🔐 已发起提权请示】请点击顶部「🔐 同意提权至 L1 · 助手模式」弹窗后再执行参谋系统维护。`
+    mutateChiefState((s) => {
+      const ws = ensureWorkspace(s, rootId)
+      ws.chat.push(
+        { id: nextId('chat'), role: 'user', text: userDisplayText, ...imgMeta, actions: [], at: Date.now() },
+        { id: nextId('chat'), role: 'chief', text: denyReply, actions: ['🔒 L0 顾问只读', ...(elev ? ['🔐 请示提权 L1'] : [])], at: Date.now() },
+      )
+      if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+    })
+    return {
+      ok: true,
+      deniedByMode: true,
+      elevationRequested: elev,
+      reply: denyReply,
+      relays: [],
+      memoryChanges: [],
+      boardOps: [],
+      actionBadges: ['🔒 L0 顾问只读', ...(elev ? ['🔐 请示提权 L1'] : [])],
+      view: await getChiefView(deps, rootId, { autoSummarize: false }),
+    }
+  }
 
   // Fast path: if user explicitly picked a concrete target pill AND used direct relay mode without asking chief to decompose
   if (forcedTarget && forcedTarget !== 'auto') {
@@ -4608,6 +4920,9 @@ export async function askOrCommandChief(deps, {
   // Direct natural-language command to organize/curate the Engineering Archive Cabinet (`整理档案` / `收纳档案`)
   if (!forcedTarget || forcedTarget === 'auto') {
     if (/(?:档案|卷宗|老笔记)/.test(input) && /(?:整理|收纳|归类|分拣|拆解)/.test(input)) {
+      if (permRank < 1) {
+        return denyChiefSystemInAdvisor('整理参谋档案', '整理与归类档案库属于「参谋系统维护」操作，需「L1 · 助手模式」及以上权限。')
+      }
       const orgScope = /全局/.test(input) ? 'global' : 'session'
       const orgRes = await organizeArchivesWithChief(deps, {
         sessionId: rootId,
@@ -4616,6 +4931,16 @@ export async function askOrCommandChief(deps, {
         instruction: input,
       })
       if (orgRes.ok) {
+        appendChiefAuditLog(rootId, {
+          mode: permissionMode,
+          stage: 'executor',
+          decision: 'executed',
+          operation: '整理参谋档案',
+          target: orgScope,
+          reason: clamp(input, 120),
+          outcome: 'ok',
+          by: 'chief',
+        })
         return {
           ok: true,
           reply: orgRes.reply,
@@ -4817,50 +5142,8 @@ export async function askOrCommandChief(deps, {
     CHIEF_TOOLS_PROMPT_GUIDE,
   ].join('\n')
 
-  const upsertArchiveFn = async (arc) => {
-    const sc = arc && arc.vaultScope === 'global' ? 'global' : 'session'
-    const opt = archiveTargetForRoot(deps, rootId, { vaultScope: sc })
-    return mutateArchive({
-      op: 'save',
-      session: rootId,
-      folder: (arc && arc.folder) || 'inbox',
-      paperclip: 'silver',
-      title: (arc && arc.title) || '参谋长工作归档',
-      summary: (arc && arc.summary) || '',
-      body: (arc && arc.body) || '',
-      tags: Array.isArray(arc && arc.tags) ? arc.tags : [],
-      by: 'chief',
-    }, opt)
-  }
-
-  const compactNowFn = async (reason) => {
-    if (!rootId || rootId === 'global') {
-      return { ok: false, noop: true, skipped: 'blank-context', error: '当前为空白新对话（未绑定活跃主会话），暂无可压缩的历史上下文' }
-    }
-    if (!deps || typeof deps.compactSessionNow !== 'function') {
-      return { ok: false, skipped: 'no-compaction-service', error: '宿主压缩服务未挂载' }
-    }
-    let usage = null
-    try {
-      usage = typeof deps.measureSessionTokens === 'function'
-        ? await deps.measureSessionTokens(rootId)
-        : null
-    } catch {}
-    const contextWindow = Math.max(1000, Number(usage && usage.contextWindow) || 128_000)
-    const totalTokens = Number(usage && usage.totalTokens) || 0
-    const seq = Math.max(0, Math.round(Number(usage && usage.seq) || 0))
-    const ratioPct = totalTokens > 0 ? (totalTokens / contextWindow) * 100 : 0
-    return executeHarvestAndCompact(deps, {
-      sid: rootId,
-      rootId,
-      reason: reason || '参谋长实权工具主动发起抢救与上下文压缩',
-      seq,
-      ratioPct,
-      totalTokens,
-      contextWindow,
-      logLabel: '参谋长主动压缩',
-    })
-  }
+  const upsertArchiveFn = buildChiefArchiveUpsertFn(deps, rootId)
+  const compactNowFn = buildChiefCompactFn(deps, rootId)
 
   const loopRes = await runChiefAgenticLoop(deps, {
     rootId,
@@ -4870,6 +5153,7 @@ export async function askOrCommandChief(deps, {
     imageBlocks,
     allowTextFallbackOnVisionMiss: savedImagePaths.length > 0,
     permissionMode,
+    hasChiefRiskAck,
     board,
     maxSteps: statusOnlyInquiry ? 1 : 4,
     readOnlyToolsOnly: false,
@@ -4878,6 +5162,9 @@ export async function askOrCommandChief(deps, {
     extractJsonFn: extractJsonObject,
     upsertArchiveFn,
     compactNowFn,
+    queueApprovalFn: (item) => queueChiefApproval(rootId, item),
+    requestElevationFn: (req) => requestChiefElevation(rootId, req),
+    recordAuditFn: (entry) => appendChiefAuditLog(rootId, entry),
   })
 
   const llmRes = (loopRes && loopRes.llmRes) || { ok: false, error: 'agentic loop no response' }
@@ -4891,17 +5178,62 @@ export async function askOrCommandChief(deps, {
   let parsed = (loopRes && loopRes.parsed) || (llmRes.ok ? extractJsonObject(llmRes.text) : null)
   const loopBadges = Array.isArray(loopRes && loopRes.toolBadges) ? [...loopRes.toolBadges] : []
   const loopToolRecords = Array.isArray(loopRes && loopRes.toolRecords) ? loopRes.toolRecords : []
+  const queuedApprovals = Array.isArray(loopRes && loopRes.pendingApprovals) ? [...loopRes.pendingApprovals] : []
+  const queuedElevations = Array.isArray(loopRes && loopRes.elevationRequests) ? [...loopRes.elevationRequests] : []
   const compactToolRec = loopToolRecords.find(r => r && r.tool === 'session_compact') || null
   let forcedCompactOut = null
+  let workflowBlockedNeedsElevation = false
+  let chiefSystemBlockedNeedsElevation = false
+
   if (explicitCompactReq && !compactToolRec) {
-    forcedCompactOut = await compactNowFn(`用户指令触发：${input}`).catch(err => ({
-      ok: false,
-      error: (err && err.message) || String(err || '压缩执行失败'),
-    }))
-    if (forcedCompactOut && forcedCompactOut.ok) {
-      loopBadges.push(forcedCompactOut.noop ? '🗄️ 已归档(免压)' : '🗜 完成抢救压缩')
+    const compactGuard = evaluateSafetyGuardHardRules({ tool: 'session_compact', opClass: 'workflow', board })
+    if (compactGuard.blocked) {
+      forcedCompactOut = { ok: false, blockedBySafetyGuard: true, error: compactGuard.reason }
+      loopBadges.push(compactGuard.badge || '🛡️ 卫兵拦截压缩')
+      appendChiefAuditLog(rootId, { mode: permissionMode, stage: 'safety_guard', decision: 'blocked', operation: '压缩主对话', target: 'current', reason: compactGuard.reason, outcome: 'blocked', by: 'chief' })
     } else {
-      loopBadges.push('⚠️ 压缩未完成')
+      const compactGate = evaluateChiefPermissionGate({ permissionMode, hasChiefRiskAck, opClass: 'workflow', tool: 'session_compact' })
+      if (compactGate.decision === 'deny_mode' || compactGate.decision === 'deny_unacknowledged_l3') {
+        workflowBlockedNeedsElevation = true
+        forcedCompactOut = { ok: false, deniedByMode: true, error: compactGate.error }
+        loopBadges.push(compactGate.badge || '🔒 权限禁压')
+        appendChiefAuditLog(rootId, { mode: permissionMode, stage: 'permission_gate', decision: compactGate.decision, operation: '压缩主对话', target: 'current', reason: compactGate.error, outcome: 'denied', by: 'chief' })
+      } else if (compactGate.decision === 'require_approval') {
+        const apr = queueChiefApproval(rootId, {
+          category: 'main_workflow',
+          operationLabel: '压缩主对话上下文 (/compact)',
+          targetLabel: '当前主会话',
+          reason: clamp(input, 140),
+          impact: '会触发主会话历史压缩，先抢救细节入本会话档案柜再压缩裁剪历史上下文',
+          kind: 'compact',
+          payload: { reason: `用户指令触发：${input}` },
+          by: 'chief',
+        })
+        if (apr) queuedApprovals.push(apr)
+        forcedCompactOut = { ok: false, pendingApproval: true, error: '当前处于「L2 · 参谋模式」，压缩主对话请求已提交操作授权弹窗，请点击「允许本次操作」后执行。' }
+        loopBadges.push('🛡️ 待确认 /compact')
+        appendChiefAuditLog(rootId, { mode: permissionMode, stage: 'permission_gate', decision: 'pending_approval', operation: '压缩主对话', target: 'current', reason: clamp(input, 120), outcome: 'pending', by: 'chief' })
+      } else {
+        forcedCompactOut = await compactNowFn(`用户指令触发：${input}`).catch(err => ({
+          ok: false,
+          error: (err && err.message) || String(err || '压缩执行失败'),
+        }))
+        appendChiefAuditLog(rootId, {
+          mode: permissionMode,
+          stage: 'executor',
+          decision: 'executed',
+          operation: '压缩主对话',
+          target: 'current',
+          reason: clamp(input, 120),
+          outcome: forcedCompactOut && forcedCompactOut.ok ? 'ok' : 'error',
+          by: 'chief',
+        })
+        if (forcedCompactOut && forcedCompactOut.ok) {
+          loopBadges.push(forcedCompactOut.noop ? '🗄️ 已归档(免压)' : '🗜 完成抢救压缩')
+        } else {
+          loopBadges.push('⚠️ 压缩未完成')
+        }
+      }
     }
   }
 
@@ -4945,6 +5277,9 @@ export async function askOrCommandChief(deps, {
 
     // 2) Natural-language request to consolidate scattered boundaries into one
     if (!imageBlocks.length && /边界|红线/.test(input) && /总结成一条|合并成一条|浓缩|合一|整合/.test(input)) {
+      if (permRank < 1) {
+        return denyChiefSystemInAdvisor('浓缩呈批工作边界', '总结与呈批工作边界需要「L1 · 助手模式」及以上权限。')
+      }
       const targetCol = /允许|必做/.test(input) ? 'allowed' : /注意/.test(input) ? 'notes' : ''
       const consRes = await consolidateBoundsWithChief(deps, {
         sessionId: rootId,
@@ -4974,6 +5309,9 @@ export async function askOrCommandChief(deps, {
 
     // 2.5) Wishing Box offline shortcuts: distill to global / reset tasks / unlink peer sessions
     if (!imageBlocks.length && /(?:提炼|摘取|抽取|总结)/.test(input) && /全局/.test(input)) {
+      if (permRank < 1) {
+        return denyChiefSystemInAdvisor('提炼入全局档案', '提炼经验写入全局冷库需要「L1 · 助手模式」及以上权限。')
+      }
       const distRes = await distillSessionArchivesToGlobal(deps, {
         sessionId: rootId,
         instruction: input,
@@ -5001,6 +5339,9 @@ export async function askOrCommandChief(deps, {
     }
 
     if (!imageBlocks.length && /(?:清空|重设|重置)/.test(input) && /(?:任务|看板)/.test(input)) {
+      if (permRank < 1) {
+        return denyChiefSystemInAdvisor('重设任务看板', '修改或重设参谋看板任务需要「L1 · 助手模式」及以上权限。')
+      }
       const resetRes = deps.runAction
         ? deps.runAction({ action: 'task.reset', status: 'all', resetPlan: /计划|全部/.test(input), session: rootId, by: 'chief' })
         : { ok: false }
@@ -5027,6 +5368,9 @@ export async function askOrCommandChief(deps, {
     }
 
     if (!imageBlocks.length && /(?:断开|取消|解除)/.test(input) && /(?:协同|网络|连接|关联)/.test(input)) {
+      if (permRank < 1) {
+        return denyChiefSystemInAdvisor('调整协同网络', '连接或断开跨窗口协同网络需要「L1 · 助手模式」及以上权限。')
+      }
       const linkedPeers = ((directory && directory.otherSessions) || []).filter(p => p.linked)
       const qLower = input.toLowerCase()
       const targetsToUnlink = /全部|所有/.test(input)
@@ -5062,13 +5406,27 @@ export async function askOrCommandChief(deps, {
       }
     }
 
-    // 2.5) Deterministic reply when user explicitly requested compaction and LLM failed to emit JSON
+    // 2.5) Deterministic reply when user explicitly requested compaction
     if (forcedCompactOut) {
       const compactMsg = forcedCompactOut.ok
         ? (forcedCompactOut.noop
             ? `- 【已归档(免压)】已抢救当前现场记录入本会话档案柜${forcedCompactOut.harvestId ? `（#${forcedCompactOut.harvestId}）` : ''}；当前主对话历史暂无需压缩。`
             : `- 【已完成抢救与上下文压缩】已将关键细节抢救入本会话档案柜${forcedCompactOut.harvestId ? `（#${forcedCompactOut.harvestId}）` : ''}，并完成主对话上下文静默压缩。`)
-        : `- 【压缩未完成】${forcedCompactOut.error || '当前暂无可压缩历史或宿主压缩服务暂未就绪。'}`
+        : (forcedCompactOut.pendingApproval
+            ? `- 【🛡️ 待逐项确认】${forcedCompactOut.error}`
+            : forcedCompactOut.deniedByMode
+              ? `- 【🔒 权限受限】${forcedCompactOut.error}`
+              : `- 【压缩未完成】${forcedCompactOut.error || '当前暂无可压缩历史或宿主压缩服务暂未就绪。'}`)
+      let autoElevOut = null
+      if (workflowBlockedNeedsElevation && !queuedElevations.length) {
+        autoElevOut = requestChiefElevation(rootId, {
+          fromMode: permissionMode,
+          targetMode: 'strategist',
+          reason: '执行主对话上下文压缩 (/compact) 需要「L2 · 参谋模式（逐项确认）」或以上权限',
+          requestedActionSummary: clamp(input, 140),
+          by: 'chief',
+        })
+      }
       mutateChiefState((s) => {
         const ws = ensureWorkspace(s, rootId)
         ws.chat.push(
@@ -5085,11 +5443,24 @@ export async function askOrCommandChief(deps, {
         boardOps: [],
         actionBadges: loopBadges,
         toolRecords: loopToolRecords,
+        pendingApprovals: queuedApprovals,
+        ...(autoElevOut ? { elevationRequested: autoElevOut } : {}),
         view: await getChiefView(deps, rootId, { autoSummarize: false }),
       }
     }
 
-    // 3) If LLM actually returned readable prose (just not wrapped in JSON), strip tool markup first; if empty or JSON fragment, synthesize smart live briefing
+    // 3) Fallback summary + auto-elevation if a read-only/assistant tool wall occurred
+    const deniedToolRec = loopToolRecords.find(r => r && r.result && r.result.deniedByMode)
+    let fallbackElev = queuedElevations[0] || null
+    if (deniedToolRec && !fallbackElev) {
+      fallbackElev = requestChiefElevation(rootId, {
+        fromMode: permissionMode,
+        targetMode: deniedToolRec.result.requiredMode || 'strategist',
+        reason: deniedToolRec.result.error || '执行请求的操作需要更高权限',
+        requestedActionSummary: clamp(input, 160),
+        by: 'chief',
+      })
+    }
     const strippedPlain = llmRes.ok && llmRes.text ? stripToolCallMarkup(llmRes.text).trim() : ''
     const usablePlainLlm = strippedPlain && !strippedPlain.startsWith('{') && strippedPlain.length >= 6
       ? cleanMultiline(strippedPlain, 900)
@@ -5124,27 +5495,84 @@ export async function askOrCommandChief(deps, {
       boardOps: [],
       actionBadges: loopBadges,
       toolRecords: loopToolRecords,
+      pendingApprovals: queuedApprovals,
+      ...(fallbackElev ? { elevationRequested: fallbackElev } : {}),
       view: await getChiefView(deps, rootId, { autoSummarize: false }),
     }
   }
 
-  // Execute decomposed relays (with blank-context staging into pending-transfer when Lead is not yet alive)
+  // Execute decomposed relays with strict 4-tier workflow permission gating
   const relayResults = []
   const actionBadges = [...loopBadges]
+  const relayGate = evaluateChiefPermissionGate({
+    permissionMode,
+    hasChiefRiskAck,
+    opClass: 'workflow',
+    tool: 'relay',
+  })
+
   for (const r of (Array.isArray(parsed.relays) ? parsed.relays : []).slice(0, 8)) {
     if (!r || !r.text) continue
     const targetName = r.target || 'lead'
+    const isLeadTarget = /^(?:lead|main|主对话)$/i.test(String(targetName).trim())
+    const relayMode = ['steer', 'followup', 'silent'].includes(r.mode) ? r.mode : 'steer'
+
+    const relayGuard = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: r.text, board })
+    if (relayGuard.blocked) {
+      actionBadges.push(relayGuard.badge || '🛡️ 卫兵拦递话')
+      relayResults.push({ ok: false, target: targetName, blockedBySafetyGuard: true, error: relayGuard.reason })
+      appendChiefAuditLog(rootId, { mode: permissionMode, stage: 'safety_guard', decision: 'blocked', operation: '工作流递话', target: String(targetName), reason: relayGuard.reason, outcome: 'blocked', by: 'chief' })
+      continue
+    }
+
+    if (relayGate.decision === 'deny_mode' || relayGate.decision === 'deny_unacknowledged_l3') {
+      workflowBlockedNeedsElevation = true
+      actionBadges.push(relayGate.badge || '🔒 权限禁调工作流')
+      relayResults.push({ ok: false, target: targetName, deniedByMode: true, error: relayGate.error })
+      appendChiefAuditLog(rootId, { mode: permissionMode, stage: 'permission_gate', decision: relayGate.decision, operation: isLeadTarget ? '调整主对话工作流' : '调整子代理工作流', target: String(targetName), reason: relayGate.error, outcome: 'denied', by: 'chief' })
+      continue
+    }
+
+    if (relayGate.decision === 'require_approval') {
+      const apr = queueChiefApproval(rootId, {
+        category: isLeadTarget ? 'main_workflow' : 'subagent_workflow',
+        operationLabel: isLeadTarget ? '调整主对话工作流（投递指令）' : '调整子代理工作流（投递指令）',
+        targetLabel: isLeadTarget ? '主对话 (@lead)' : `@${targetName}`,
+        reason: clamp(r.subject || '参谋建议向代理投递工作流指令', 140),
+        impact: isLeadTarget ? '将向主对话注入工作流指令并触发继续推进' : '将唤醒或引导子代理执行新任务指令',
+        preview: clamp(r.text, 240),
+        kind: 'relay',
+        payload: {
+          fromSession: rootId,
+          fromLabel: 'DSH 参谋 (逐项授权)',
+          target: targetName,
+          subject: r.subject || '',
+          text: r.text,
+          mode: relayMode,
+          imageBlocks,
+          savedImagePaths,
+          isBlankContext,
+        },
+        by: 'chief',
+      })
+      if (apr) queuedApprovals.push(apr)
+      actionBadges.push(`🛡️ 待确认递话 → ${isLeadTarget ? '主对话' : targetName}`)
+      relayResults.push({ ok: false, pendingApproval: true, approvalId: apr && apr.id, target: targetName })
+      appendChiefAuditLog(rootId, { mode: permissionMode, stage: 'permission_gate', decision: 'pending_approval', operation: isLeadTarget ? '主对话工作流递话' : '子代理工作流递话', target: String(targetName), reason: clamp(r.subject || r.text, 120), outcome: 'pending', by: 'chief' })
+      continue
+    }
+
+    // L3 Chief mode: execute directly
     const deliv = await deliverCrossMessage(deps, {
       fromSession: rootId,
       fromLabel: 'DSH 参谋长 (代用户传达)',
       target: targetName,
       subject: r.subject || '',
       text: r.text,
-      mode: ['steer', 'followup', 'silent'].includes(r.mode) ? r.mode : 'steer',
+      mode: relayMode,
       imageBlocks,
       savedImagePaths,
     })
-    const isLeadTarget = /^(?:lead|main|主对话)$/i.test(String(targetName).trim())
     if (isLeadTarget && (!deliv.ok || (isBlankContext && !deliv.deliveredPhysical)) && typeof deps.stagePendingTransfer === 'function') {
       const staged = deps.stagePendingTransfer(
         `[DSH 参谋长预派发指令${r.subject ? ' · ' + r.subject : ''}]\n${r.text}`,
@@ -5154,103 +5582,200 @@ export async function askOrCommandChief(deps, {
       if (staged) {
         relayResults.push({ ...deliv, ok: true, target: '主对话(待领)', mode: 'pending-transfer', stagedPending: true })
         actionBadges.push('暂存待领 → 主对话')
+        appendChiefAuditLog(rootId, { mode: permissionMode, stage: 'executor', decision: 'executed', operation: '主对话待领递话', target: '主对话', reason: clamp(r.subject || r.text, 120), outcome: 'ok', by: 'chief' })
         continue
       }
     }
     relayResults.push(deliv)
-    if (deliv.ok) actionBadges.push(`${r.mode === 'steer' ? '插话' : '递话'} → ${deliv.target}`)
+    appendChiefAuditLog(rootId, { mode: permissionMode, stage: 'executor', decision: 'executed', operation: isLeadTarget ? '主对话递话' : '子代理递话', target: String(deliv.target || targetName), reason: clamp(r.subject || r.text, 120), outcome: deliv.ok ? 'ok' : 'error', by: 'chief' })
+    if (deliv.ok) actionBadges.push(`${relayMode === 'steer' ? '插话' : '递话'} → ${deliv.target}`)
   }
 
-  // Execute board ops, wishing-box archive ops & network ops
-  const executedBoardOps = applyBoardOps(deps, rootId, parsed.boardOps)
-  for (const b of executedBoardOps) actionBadges.push(b)
+  // Execute Chief-system ops (L1 Assistant+ required; strictly denied in L0 Advisor)
+  const hasSystemOps = Boolean(
+    (Array.isArray(parsed.boardOps) && parsed.boardOps.length > 0)
+    || (Array.isArray(parsed.archiveOps) && parsed.archiveOps.length > 0)
+    || (Array.isArray(parsed.networkOps) && parsed.networkOps.length > 0)
+    || (Array.isArray(parsed.memoryChanges) && parsed.memoryChanges.length > 0)
+    || (Array.isArray(parsed.boundProposals) && parsed.boundProposals.length > 0),
+  )
+  const systemGate = evaluateChiefPermissionGate({
+    permissionMode,
+    hasChiefRiskAck,
+    opClass: 'chief_system',
+    tool: 'chief_system',
+  })
 
-  const archiveExec = await applyArchiveOps(deps, rootId, parsed.archiveOps, { input })
-  const executedArchiveOps = archiveExec.executed || []
-  for (const a of executedArchiveOps) actionBadges.push(a)
-
-  const executedNetworkOps = applyNetworkOps(rootId, parsed.networkOps, directory)
-  for (const n of executedNetworkOps) actionBadges.push(n)
-
-  // Execute durable memory changes & Prime Minister bound proposals (including N-in-1 consolidation)
+  let executedBoardOps = []
+  let executedArchiveOps = []
+  let executedNetworkOps = []
   let appliedFacts = []
   const proposedBounds = []
   const existingBounds = (board && board.bounds) || { allowed: [], forbidden: [], notes: [] }
   const rawBoundProposals = Array.isArray(parsed.boundProposals) ? parsed.boundProposals.slice(0, 4) : []
+
+  if (hasSystemOps && systemGate.decision === 'deny_mode') {
+    chiefSystemBlockedNeedsElevation = true
+    actionBadges.push(systemGate.badge || '🔒 L0禁改参谋系统')
+    appendChiefAuditLog(rootId, {
+      mode: permissionMode,
+      stage: 'permission_gate',
+      decision: 'deny_mode',
+      operation: '修改参谋系统(看板/记忆/档案)',
+      target: 'chief_system',
+      reason: systemGate.error,
+      outcome: 'denied',
+      by: 'chief',
+    })
+  } else if (hasSystemOps) {
+    executedBoardOps = applyBoardOps(deps, rootId, parsed.boardOps)
+    for (const b of executedBoardOps) actionBadges.push(b)
+
+    const archiveExec = await applyArchiveOps(deps, rootId, parsed.archiveOps, { input })
+    executedArchiveOps = archiveExec.executed || []
+    for (const a of executedArchiveOps) actionBadges.push(a)
+
+    executedNetworkOps = applyNetworkOps(rootId, parsed.networkOps, directory)
+    for (const n of executedNetworkOps) actionBadges.push(n)
+
+    if (executedBoardOps.length || executedArchiveOps.length || executedNetworkOps.length) {
+      appendChiefAuditLog(rootId, {
+        mode: permissionMode,
+        stage: 'executor',
+        decision: 'executed',
+        operation: '维护参谋系统',
+        target: [...executedBoardOps, ...executedArchiveOps, ...executedNetworkOps].slice(0, 3).join('；'),
+        reason: clamp(input, 120),
+        outcome: 'ok',
+        by: 'chief',
+      })
+    }
+  }
+
+  // Handle explicit model elevationRequest OR auto-generate when an action hit mode wall
+  let finalElevation = queuedElevations[0] || null
+  if (parsed.elevationRequest && typeof parsed.elevationRequest === 'object' && parsed.elevationRequest.targetMode) {
+    const reqTarget = normalizePermissionMode(parsed.elevationRequest.targetMode)
+    if (permissionRank(reqTarget) > permRank) {
+      const elv = requestChiefElevation(rootId, {
+        fromMode: permissionMode,
+        targetMode: reqTarget,
+        reason: clamp(parsed.elevationRequest.reason || '完成用户当前任务需要提升参谋权限', 240),
+        requestedActionSummary: clamp(parsed.elevationRequest.requestedActionSummary || input, 180),
+        by: 'chief',
+      })
+      if (elv) {
+        finalElevation = elv
+        actionBadges.push(`🔐 请示提权 ${CHIEF_PERMISSION_META[reqTarget].level}`)
+      }
+    }
+  } else if (!finalElevation) {
+    const deniedToolRec = loopToolRecords.find(r => r && r.result && r.result.deniedByMode)
+    const neededMode = (deniedToolRec && deniedToolRec.result && deniedToolRec.result.requiredMode)
+      || (workflowBlockedNeedsElevation ? 'strategist' : (chiefSystemBlockedNeedsElevation ? 'assistant' : ''))
+    if (neededMode && permissionRank(neededMode) > permRank) {
+      const elv = requestChiefElevation(rootId, {
+        fromMode: permissionMode,
+        targetMode: neededMode,
+        reason: neededMode === 'assistant'
+          ? '该操作需要维护参谋看板、记忆或档案（需「L1 · 助手模式」及以上）'
+          : '该操作需要修改工作区或调度主对话/子代理工作流（需「L2 · 参谋模式」或以上）',
+        requestedActionSummary: clamp(input, 180),
+        by: 'chief',
+      })
+      if (elv) {
+        finalElevation = elv
+        actionBadges.push(`🔐 请示提权 ${CHIEF_PERMISSION_META[neededMode].level}`)
+      }
+    }
+  }
+
   const cleanedParsedReply = stripToolCallMarkup(parsed.reply || '').trim()
   const compactOutcomeNote = forcedCompactOut
     ? (forcedCompactOut.ok
         ? (forcedCompactOut.noop
             ? `【已归档(免压)】已将本轮现场记录存入本会话档案柜${forcedCompactOut.harvestId ? `（#${forcedCompactOut.harvestId}）` : ''}，宿主历史暂无需进一步压缩。`
             : `【已完成抢救与上下文压缩】已将关键细节存入本会话档案柜${forcedCompactOut.harvestId ? `（#${forcedCompactOut.harvestId}）` : ''}，并完成主对话静默压缩。`)
-        : `【压缩未完成】${forcedCompactOut.error || '宿主压缩服务未就绪'}`)
-    : (compactToolRec && compactToolRec.ok === false
+        : (forcedCompactOut.pendingApproval
+            ? `【🛡️ 待逐项确认】${forcedCompactOut.error}`
+            : `【压缩未完成】${forcedCompactOut.error || '宿主压缩服务未就绪'}`))
+    : (compactToolRec && compactToolRec.ok === false && !compactToolRec.pendingApproval
         ? `（⚠️ 实测压缩提示：${compactToolRec.error || '压缩未完成'}）`
         : '')
+  const permissionStatusNotes = []
+  if (queuedApprovals.length > 0 && !/操作授权|允许本次操作/.test(cleanedParsedReply)) {
+    permissionStatusNotes.push(`- 【🛡️ 待逐项确认】已为您弹出「操作授权请求」弹窗（共 ${queuedApprovals.length} 项受控操作），点击「允许本次操作」后才会实际执行。`)
+  }
+  if (finalElevation && !/提权/.test(cleanedParsedReply)) {
+    const tgtMeta = CHIEF_PERMISSION_META[finalElevation.targetMode] || {}
+    permissionStatusNotes.push(`- 【🔐 已申请提权】当前为「${CHIEF_PERMISSION_META[permissionMode].level} · ${CHIEF_PERMISSION_META[permissionMode].title}」，已向您发起提权至「${tgtMeta.level || ''} · ${tgtMeta.title || finalElevation.targetMode}」的申请弹窗。`)
+  }
   const baseParsedReply = cleanedParsedReply || buildSmartFallbackReply({ input, board, liveDigest, directory, facts: numberedFacts, mailbox: view.mailbox, conciseBrief: isConciseBrief }) || '- 【已执行】已按你的吩咐安排妥当。'
-  const combinedParsedReply = compactOutcomeNote
-    ? (forcedCompactOut && !forcedCompactOut.ok
-        ? `${compactOutcomeNote}\n${baseParsedReply}`
-        : (baseParsedReply.includes('压缩') && baseParsedReply.includes('档案') ? baseParsedReply : `${compactOutcomeNote}\n${baseParsedReply}`))
-    : baseParsedReply
-  const rawReplyText = cleanMultiline(combinedParsedReply, 1000)
+  const combinedParsedReply = [
+    compactOutcomeNote,
+    baseParsedReply,
+    ...permissionStatusNotes,
+  ].filter(Boolean).join('\n')
+  const rawReplyText = cleanMultiline(combinedParsedReply, 1100)
   const replyText = isConciseBrief ? sanitizeConciseBriefText(rawReplyText) : rawReplyText
 
   const BOUND_COL_LABEL = { forbidden: '禁止红线', allowed: '必做事项', notes: '注意事项' }
 
   mutateChiefState((s) => {
     const ws = ensureWorkspace(s, rootId)
-    const activeCluster = getLinkedCluster(s, rootId)
-    appliedFacts = applyFactChanges(ws, numberedFacts, parsed.memoryChanges, 'user', {
-      originRootId: rootId,
-      peerRootIds: activeCluster.filter(id => id !== rootId),
-    })
-    for (const f of appliedFacts) {
-      actionBadges.push((f.op === 'add' ? '记入：' : f.op === 'edit' ? '修订：' : '移除：') + clamp(f.text, 24))
-    }
-
-    for (const bp of rawBoundProposals) {
-      if (!bp || typeof bp !== 'object') continue
-      const rawBpField = String(bp.field || '').trim().toLowerCase()
-      const normBpField = rawBpField === 'must' ? 'allowed' : rawBpField
-      const col = ['forbidden', 'allowed', 'notes'].includes(normBpField) ? normBpField : 'forbidden'
-      const itemText = clamp(bp.item || bp.draftText || bp.text || '', 220)
-      if (!itemText || secretLike(itemText)) continue
-      const replaces = Array.isArray(bp.replaces)
-        ? bp.replaces.filter(x => typeof x === 'string' && x.trim()).map(x => x.trim().slice(0, 240)).slice(0, 20)
-        : []
-      const colExisting = Array.isArray(existingBounds[col]) ? existingBounds[col] : []
-      if (!replaces.length && colExisting.some(x => String(x).trim() === itemText)) continue
-      const dupPending = ws.suggestions.some(
-        existing => existing.status === 'pending' && existing.kind === 'bound' && existing.draftText === itemText,
-      )
-      if (dupPending) continue
-      const colLabel = BOUND_COL_LABEL[col] || '禁止红线'
-      const hadPinnedInReplaces = replaces.some(r => ((board.pinnedBounds && board.pinnedBounds[col]) || []).includes(r))
-      const sug = normalizeSuggestion({
-        kind: 'bound',
-        boundField: col,
-        fromAgent: replaces.length ? '✦ 参谋长浓缩' : '✦ 参谋长提炼',
-        title: replaces.length
-          ? `${colLabel} ${replaces.length} 合 1：${clamp(itemText, 26)}`
-          : `拟入${colLabel}：${clamp(itemText, 30)}`,
-        reason: clamp(
-          bp.reason || (replaces.length
-            ? `将 ${replaces.length} 条零散边界浓缩合成为 1 条，请拍板替换。`
-            : '根据会话上下文总结的工作边界，请拍板注入。'),
-          180,
-        ),
-        target: 'bounds',
-        targetLabel: colLabel,
-        mode: 'silent',
-        draftText: itemText,
-        replaces,
-        pinGlobal: Boolean(bp.pinGlobal) || hadPinnedInReplaces,
+    if (systemGate.decision === 'allow') {
+      const activeCluster = getLinkedCluster(s, rootId)
+      appliedFacts = applyFactChanges(ws, numberedFacts, parsed.memoryChanges, 'user', {
+        originRootId: rootId,
+        peerRootIds: activeCluster.filter(id => id !== rootId),
       })
-      if (sug) {
-        ws.suggestions.push(sug)
-        proposedBounds.push(sug)
-        actionBadges.push(`${replaces.length ? '浓缩' : '呈批'}${colLabel}：${clamp(itemText, 18)}`)
+      for (const f of appliedFacts) {
+        actionBadges.push((f.op === 'add' ? '记入：' : f.op === 'edit' ? '修订：' : '移除：') + clamp(f.text, 24))
+      }
+
+      for (const bp of rawBoundProposals) {
+        if (!bp || typeof bp !== 'object') continue
+        const rawBpField = String(bp.field || '').trim().toLowerCase()
+        const normBpField = rawBpField === 'must' ? 'allowed' : rawBpField
+        const col = ['forbidden', 'allowed', 'notes'].includes(normBpField) ? normBpField : 'forbidden'
+        const itemText = clamp(bp.item || bp.draftText || bp.text || '', 220)
+        if (!itemText || secretLike(itemText)) continue
+        const replaces = Array.isArray(bp.replaces)
+          ? bp.replaces.filter(x => typeof x === 'string' && x.trim()).map(x => x.trim().slice(0, 240)).slice(0, 20)
+          : []
+        const colExisting = Array.isArray(existingBounds[col]) ? existingBounds[col] : []
+        if (!replaces.length && colExisting.some(x => String(x).trim() === itemText)) continue
+        const dupPending = ws.suggestions.some(
+          existing => existing.status === 'pending' && existing.kind === 'bound' && existing.draftText === itemText,
+        )
+        if (dupPending) continue
+        const colLabel = BOUND_COL_LABEL[col] || '禁止红线'
+        const hadPinnedInReplaces = replaces.some(r => ((board.pinnedBounds && board.pinnedBounds[col]) || []).includes(r))
+        const sug = normalizeSuggestion({
+          kind: 'bound',
+          boundField: col,
+          fromAgent: replaces.length ? '✦ 参谋长浓缩' : '✦ 参谋长提炼',
+          title: replaces.length
+            ? `${colLabel} ${replaces.length} 合 1：${clamp(itemText, 26)}`
+            : `拟入${colLabel}：${clamp(itemText, 30)}`,
+          reason: clamp(
+            bp.reason || (replaces.length
+              ? `将 ${replaces.length} 条零散边界浓缩合成为 1 条，请拍板替换。`
+              : '根据会话上下文总结的工作边界，请拍板注入。'),
+            180,
+          ),
+          target: 'bounds',
+          targetLabel: colLabel,
+          mode: 'silent',
+          draftText: itemText,
+          replaces,
+          pinGlobal: Boolean(bp.pinGlobal) || hadPinnedInReplaces,
+        })
+        if (sug) {
+          ws.suggestions.push(sug)
+          proposedBounds.push(sug)
+          actionBadges.push(`${replaces.length ? '浓缩' : '呈批'}${colLabel}：${clamp(itemText, 18)}`)
+        }
       }
     }
 
@@ -5291,6 +5816,8 @@ export async function askOrCommandChief(deps, {
     networkOps: executedNetworkOps,
     boundProposals: proposedBounds,
     toolRecords: loopToolRecords,
+    pendingApprovals: queuedApprovals,
+    ...(finalElevation ? { elevationRequested: finalElevation } : {}),
     permissionMode,
     ...(freshBoard ? { board: freshBoard } : {}),
     ...(freshArchives ? { archives: freshArchives } : {}),
@@ -5300,16 +5827,16 @@ export async function askOrCommandChief(deps, {
 
 function describeThreePartyBoundariesForPrompt(permissionMode) {
   const mode = normalizePermissionMode(permissionMode)
-  if (mode === 'read-only') {
-    return '- 三方能力边界 [仅可查看 read-only]：参谋长=仅只读核查/建言/传递档案（禁改文件/跑写命令）；主模型(@lead)=按自身会话授权推进；子代理=限于委派只读查证/分析（严守禁止红线）。'
+  if (mode === 'advisor') {
+    return '- 四级权限当前档 [L0 · 顾问模式 READ ONLY · 默认模式]：仅允许读取看板与允许访问的项目状态、分析与建言；严禁修改工作区文件、运行系统命令、修改参谋系统或调整主对话/子代理工作流（需要时可调用 request_permission_elevation 申请提权）。'
   }
-  if (mode === 'workspace-write') {
-    return '- 三方能力边界 [工作区内修改 workspace-write]：参谋长=可读写当前工作区内文件、跑区内安全命令、调度子代理（禁越出工作区写盘或破坏性命令）；主模型(@lead)=工作区内正常编码与测试（严守红线）；子代理=限分配分支/工作区内读写。'
+  if (mode === 'assistant') {
+    return '- 四级权限当前档 [L1 · 助手模式 ASSISTANT]：允许只读查证项目，并自主维护参谋系统（记忆、档案柜、看板配置、边界呈批）；严禁直接修改项目工作区或接管主对话/子代理工作流（需要时可申请提权至 L2/L3）。'
   }
-  if (mode === 'auto-review') {
-    return '- 三方能力边界 [自动审查 auto-review EXP]：参谋长=工作区内推进+高危终端/越界动作自动拦截进入双人审查；主模型(@lead)=常规读写与构建直行，高危操作需经审查放行；子代理=受同级安全规则约束。'
+  if (mode === 'strategist') {
+    return '- 四级权限当前档 [L2 · 参谋模式 ADVISOR WITH APPROVAL · 逐项授权]：可自主维护参谋系统；涉及修改工作区文件、执行系统命令或调整主对话/子代理工作流时，每项受控操作均会弹窗等待用户逐项点击「允许本次操作」后方可执行。'
   }
-  return '- 三方能力边界 [完全权限 danger-full-access]：参谋长=最高实权（全盘读写、跑测试构建、直接派发/纠偏/中断子代理、维护看板与主动压缩）；主模型(@lead)=拥有自身完整工具权限；子代理=在各自沙箱/委派边界内执行并严守禁止红线。'
+  return '- 四级权限当前档 [L3 · 参谋长模式 CHIEF OF STAFF · 主动风险知悉]：已获用户勾选确认风险，允许在安全卫兵硬性规则与禁止红线护栏内直接读写工作区、执行命令、切换或协调主对话及子代理工作流并完成维护与压缩。'
 }
 
 /**
@@ -5871,12 +6398,18 @@ export async function maybeRunPreCompaction(deps, {
   }
   const tactical = normalizeTacticalModes(effCfg.tacticalModes)
   const wsSnapshot = ensureWorkspace(state, rootId)
+  const hasAck = hasValidChiefRiskAck(wsSnapshot)
+  const permMode = normalizePermissionMode(effCfg.permissionMode, { requireAck: true, hasChiefRiskAck: hasAck })
   const pendingSmart = wsSnapshot.runtimeGuard && wsSnapshot.runtimeGuard.pendingSmartCompact
 
   if (!pendingSmart && !tactical.autoCompact && !tactical.smartCompact) {
     return { ok: false, skipped: 'disabled' }
   }
   if (!deps || typeof deps.compactSessionNow !== 'function') return { ok: false, skipped: 'no-compaction-service' }
+
+  if (permMode === 'advisor' || permMode === 'assistant') {
+    return { ok: false, skipped: 'permission-mode', permissionMode: permMode }
+  }
 
   // When `✦ 智选` is enabled and no pending smart request exists, hard threshold does NOT trigger!
   if (!pendingSmart && tactical.smartCompact) {
@@ -5905,6 +6438,21 @@ export async function maybeRunPreCompaction(deps, {
     const totalTokens = Number(usage && usage.totalTokens) || 0
     const seq = Math.max(0, Math.round(Number(usage && usage.seq) || 0))
     const ratioPct = totalTokens > 0 ? (totalTokens / contextWindow) * 100 : 0
+    if (permMode === 'strategist') {
+      const dedupeKey = `auto_compact:smart:${sid}:${pendingSmart.at || seq}`
+      const apr = queueChiefApproval(rootId, {
+        category: 'main_workflow',
+        operationLabel: '✦ 智选压缩主对话上下文 (/compact)',
+        targetLabel: '当前主会话',
+        reason: pendingSmart.reason || '主会话/参谋评估阶段收口，请求压缩历史上下文',
+        impact: '将先抢救现场细节入本会话档案柜，再静默压缩主对话历史',
+        dedupeKey,
+        kind: 'compact',
+        payload: { reason: pendingSmart.reason || '✦ 智选协同触发压缩' },
+        by: pendingSmart.by || 'chief',
+      })
+      return { ok: false, pendingApproval: true, approvalId: apr && apr.id, skipped: 'pending-approval' }
+    }
     const out = await executeHarvestAndCompact(deps, {
       sid,
       rootId,
@@ -5970,6 +6518,22 @@ export async function maybeRunPreCompaction(deps, {
 
   if (seq > 0 && seq <= lastSeq) {
     return { ok: false, skipped: 'already-compacted-seq', seq, lastSeq }
+  }
+
+  if (permMode === 'strategist') {
+    const dedupeKey = `auto_compact:thresh:${sid}:${seq || Math.round(ratioPct)}`
+    const apr = queueChiefApproval(rootId, {
+      category: 'main_workflow',
+      operationLabel: '自动抢救并压缩主对话上下文 (/compact)',
+      targetLabel: '当前主会话',
+      reason: `${limitHint}，L2 参谋模式需您逐项授权后执行压缩。`,
+      impact: '将先抢救细节入本会话档案柜，随后压缩裁剪主对话历史上下文',
+      dedupeKey,
+      kind: 'compact',
+      payload: { reason: `${limitHint}，压缩前抢救现场细节。` },
+      by: 'chief',
+    })
+    return { ok: false, pendingApproval: true, approvalId: apr && apr.id, skipped: 'pending-approval' }
   }
 
   return executeHarvestAndCompact(deps, {
@@ -6233,19 +6797,23 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   if (!parsed) return { ok: false, error: 'non-json-review' }
 
   const cfgNow = resolveWorkspaceConfig(loadChiefState(), rootId)
+  const wsNowPerm = ensureWorkspace(loadChiefState(), rootId)
+  const hasAckNow = hasValidChiefRiskAck(wsNowPerm)
+  const permNow = normalizePermissionMode(cfgNow.permissionMode, { requireAck: true, hasChiefRiskAck: hasAckNow })
+  const permRankNow = permissionRank(permNow)
   const autoPilot = Boolean(cfgNow.paceMode === 'auto' && cfgNow.autoPilot && !cfgNow.stopped)
   const rawSuggestions = (Array.isArray(parsed.suggestions) ? parsed.suggestions : [])
     .map(raw => normalizeSuggestion({ ...raw, fromAgent: raw?.fromAgent || speaker }))
     .filter(Boolean)
     .slice(0, 1)
 
-  // Stale plan check & auto-reconcile
+  // Stale plan check & auto-reconcile (L1+ only; L0 Advisor is strictly read-only)
   const isStalePlan = Boolean(parsed.planAssessment && parsed.planAssessment.stale)
   const parsedBoardOps = Array.isArray(parsed.boardOps) ? parsed.boardOps.slice() : []
-  if (isStalePlan && !parsedBoardOps.some(op => op && (op.op === 'plan.resetForGoal' || op.op === 'plan.set'))) {
+  if (permRankNow >= 1 && isStalePlan && !parsedBoardOps.some(op => op && (op.op === 'plan.resetForGoal' || op.op === 'plan.set'))) {
     parsedBoardOps.unshift({ op: 'plan.resetForGoal' })
   }
-  const executedOps = parsedBoardOps.length > 0 && deps.runAction
+  const executedOps = permRankNow >= 1 && parsedBoardOps.length > 0 && deps.runAction
     ? applyBoardOps(deps, rootId, parsedBoardOps, { forceSessionOnly: autoPilot })
     : []
 
@@ -6265,7 +6833,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     && String(parsed.goalStatus || '') === 'achieved'
     && unmetMustDo.length === 0
   let goalProposalCreated = false
-  if (isGoalAchieved && deps.runAction && hasObjectiveTarget) {
+  if (permRankNow >= 1 && isGoalAchieved && deps.runAction && hasObjectiveTarget) {
     const existingApproval = board && board.goalApproval
     const alreadyPendingSame = existingApproval
       && existingApproval.status === 'pending'
@@ -6288,7 +6856,10 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   let hazardStopped = false
   let hazardAlertCreated = null
   let interventionMessage = ''
+  let interventionForApproval = ''
+  let interventionDedupeKey = ''
   const autoRelays = []
+  const relaysForApproval = []
   const autoBoundUpdates = []
   let shouldAutoOrganizeSession = false
 
@@ -6310,65 +6881,72 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     if (autoPilot) {
       ws.runtimeGuard.autoPilotHadTurn = true
     }
-    const activeCluster = getLinkedCluster(s, rootId)
-    applyFactChanges(ws, numberedFacts, parsed.memoryChanges, speaker, {
-      originRootId: rootId,
-      peerRootIds: activeCluster.filter(id => id !== rootId),
-    })
+    if (permRankNow >= 1) {
+      const activeCluster = getLinkedCluster(s, rootId)
+      applyFactChanges(ws, numberedFacts, parsed.memoryChanges, speaker, {
+        originRootId: rootId,
+        peerRootIds: activeCluster.filter(id => id !== rootId),
+      })
 
-    // Goal achieved: create user approval suggestion pill (NEVER exit goal mode automatically!)
-    if (isGoalAchieved) {
-      const goalSig = crypto
-        .createHash('sha1')
-        .update(String((board && board.objective) || '') + '|' + String(parsed.goalEvidence || parsed.goalSummary || ''))
-        .digest('hex')
-        .slice(0, 12)
-      const hasPendingGoalSug = ws.suggestions.some(
-        sug => sug.status === 'pending' && sug.kind === 'goal_approval',
-      )
-      if (!hasPendingGoalSug) {
-        const goalSug = normalizeSuggestion({
-          kind: 'goal_approval',
-          fromAgent: '🎯 目标督导参谋',
-          title: '🎯 核心目标与必做事项已达成，请示批准结项',
-          reason: cleanMultiline(parsed.goalSummary || '主对话已完成当前设定核心目标及全部必做事项，请批示是否结束督导。', 220),
-          evidence: cleanMultiline(parsed.goalEvidence || '', 480),
-          target: 'board',
-          targetLabel: '目标结项',
-          mode: 'silent',
-          draftText: cleanMultiline(parsed.goalSummary || '批准结项并退出督导模式', 400),
-        })
-        if (goalSug) ws.suggestions.push(goalSug)
-      }
-      if (ws.runtimeGuard.lastGoalAchievedSig !== goalSig) {
-        ws.runtimeGuard.lastGoalAchievedSig = goalSig
-        ws.chat.push({
-          id: nextId('chat'),
-          role: 'chief',
-          text: `- 【🎯 核心目标已达成 · 停止继续推送】${cleanMultiline(parsed.goalSummary || '核心目标与必做事项均已完成并核验通过。', 260)}`,
-          actions: ['目标达成收口'],
-          at: Date.now(),
-        })
-        if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
-      }
-    }
-
-    for (const sug of rawSuggestions) {
-      if (sug.kind === 'bound') {
-        const colList = Array.isArray(bounds[sug.boundField]) ? bounds[sug.boundField] : []
-        if (colList.some(x => String(x).trim() === sug.draftText)) continue
-        if (autoPilot && sug.draftText) {
-          // Auto-pilot mode: strictly apply bounds into THIS session only (pinned: false), NEVER touch global!
-          sug.pinGlobal = false
-          sug.status = 'applied'
-          autoBoundUpdates.push({ field: sug.boundField, item: sug.draftText })
-          continue
+      // Goal achieved: create user approval suggestion pill (NEVER exit goal mode automatically!)
+      if (isGoalAchieved) {
+        const goalSig = crypto
+          .createHash('sha1')
+          .update(String((board && board.objective) || '') + '|' + String(parsed.goalEvidence || parsed.goalSummary || ''))
+          .digest('hex')
+          .slice(0, 12)
+        const hasPendingGoalSug = ws.suggestions.some(
+          sug => sug.status === 'pending' && sug.kind === 'goal_approval',
+        )
+        if (!hasPendingGoalSug) {
+          const goalSug = normalizeSuggestion({
+            kind: 'goal_approval',
+            fromAgent: '🎯 目标督导参谋',
+            title: '🎯 核心目标与必做事项已达成，请示批准结项',
+            reason: cleanMultiline(parsed.goalSummary || '主对话已完成当前设定核心目标及全部必做事项，请批示是否结束督导。', 220),
+            evidence: cleanMultiline(parsed.goalEvidence || '', 480),
+            target: 'board',
+            targetLabel: '目标结项',
+            mode: 'silent',
+            draftText: cleanMultiline(parsed.goalSummary || '批准结项并退出督导模式', 400),
+          })
+          if (goalSug) ws.suggestions.push(goalSug)
+        }
+        if (ws.runtimeGuard.lastGoalAchievedSig !== goalSig) {
+          ws.runtimeGuard.lastGoalAchievedSig = goalSig
+          ws.chat.push({
+            id: nextId('chat'),
+            role: 'chief',
+            text: `- 【🎯 核心目标已达成 · 停止继续推送】${cleanMultiline(parsed.goalSummary || '核心目标与必做事项均已完成并核验通过。', 260)}`,
+            actions: ['目标达成收口'],
+            at: Date.now(),
+          })
+          if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
         }
       }
-      if (autoPilot && sug.kind === 'relay' && sug.draftText && isInternalRelayTarget(sug.target)) {
-        sug.status = 'applied'
-        autoRelays.push(sug)
-      } else {
+
+      for (const sug of rawSuggestions) {
+        if (sug.kind === 'bound') {
+          const colList = Array.isArray(bounds[sug.boundField]) ? bounds[sug.boundField] : []
+          if (colList.some(x => String(x).trim() === sug.draftText)) continue
+          if (autoPilot && sug.draftText) {
+            sug.pinGlobal = false
+            sug.status = 'applied'
+            autoBoundUpdates.push({ field: sug.boundField, item: sug.draftText })
+            continue
+          }
+        }
+        if (autoPilot && sug.kind === 'relay' && sug.draftText && isInternalRelayTarget(sug.target)) {
+          if (permNow === 'chief' && hasAckNow) {
+            sug.status = 'applied'
+            autoRelays.push(sug)
+            continue
+          } else if (permNow === 'strategist') {
+            sug.status = 'applied'
+            relaysForApproval.push(sug)
+            continue
+          }
+        }
         const dup = ws.suggestions.some(
           existing => existing.status === 'pending'
             && existing.kind === sug.kind
@@ -6387,12 +6965,12 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
           ws.suggestions.push(sug)
         }
       }
-    }
 
-    if (autoPilot && rootId && rootId !== 'global') {
-      const lastOrgAt = Number(ws.runtimeGuard.lastAutoArchiveOrgAt || 0)
-      if (!lastOrgAt || Date.now() - lastOrgAt > 180_000) {
-        shouldAutoOrganizeSession = true
+      if (autoPilot && rootId && rootId !== 'global') {
+        const lastOrgAt = Number(ws.runtimeGuard.lastAutoArchiveOrgAt || 0)
+        if (!lastOrgAt || Date.now() - lastOrgAt > 180_000) {
+          shouldAutoOrganizeSession = true
+        }
       }
     }
 
@@ -6432,8 +7010,9 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
         at: Date.now(),
       })
       if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+      pushAuditToWs(ws, { mode: permNow, stage: 'safety_guard', decision: 'hazard_stop', operation: '强介入紧急煞车', target: 'lead', reason: hazardAlertCreated.reason, outcome: 'blocked', by: 'chief' })
     } else {
-      // Intervention Supervisor follow-up + Circuit Breaker
+      // Intervention Supervisor follow-up + Circuit Breaker (differentiated across L0 / L1 / L2 / L3)
       const unmetMustDoFallback = unmetMustDo.length > 0
         ? '当前尚有以下【必做事项】未确认交付或缺少验证证据，请逐项补齐并交卷：\n' + unmetMustDo.map((u, idx) => `${idx + 1}. ${u}`).join('\n')
         : ''
@@ -6441,63 +7020,109 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
         || unmetMustDoFallback
         || (parsed.nextActionForLead && (parsed.shouldIntervene || parsed.goalStatus === 'in_progress') ? parsed.nextActionForLead : '')
       if (!isGoalAchieved && tactical.intervention && (parsed.shouldIntervene || parsed.goalStatus === 'in_progress' || unmetMustDo.length > 0) && candidateIntervention) {
-      const assistantTail = (digest.text.split('Assistant:').pop() || digest.text)
-      const sig = crypto
-        .createHash('sha1')
-        .update(JSON.stringify({
-          objective: (board && board.objective) || '',
-          goalStatus: parsed.goalStatus || '',
-          donePlanCount: planSteps.filter(p => p.done).length,
-          doneTaskCount: tasks.filter(t => t.status === 'done').length,
-          blockedTaskCount: tasks.filter(t => t.status === 'blocked').length,
-          assistantTail: clamp(assistantTail, 140),
-        }))
-        .digest('hex')
-        .slice(0, 12)
+        const assistantTail = (digest.text.split('Assistant:').pop() || digest.text)
+        const sig = crypto
+          .createHash('sha1')
+          .update(JSON.stringify({
+            objective: (board && board.objective) || '',
+            goalStatus: parsed.goalStatus || '',
+            donePlanCount: planSteps.filter(p => p.done).length,
+            doneTaskCount: tasks.filter(t => t.status === 'done').length,
+            blockedTaskCount: tasks.filter(t => t.status === 'blocked').length,
+            assistantTail: clamp(assistantTail, 140),
+          }))
+          .digest('hex')
+          .slice(0, 12)
 
-      const nextUnchanged = ws.runtimeGuard.lastDigestHash === sig
-        ? (ws.runtimeGuard.unchangedCount + 1)
-        : 1
-      const nextTurns = ws.runtimeGuard.interventionTurns + 1
-      const isUnlimitedTurns = tactical.maxInterventionTurns === 0
-      const maxTurns = isUnlimitedTurns ? Infinity : Math.max(1, Number(tactical.maxInterventionTurns) || 10)
-      const unchangedLimit = isUnlimitedTurns ? 8 : 3
+        const prevSig = ws.runtimeGuard.lastDigestHash
+        const nextUnchanged = prevSig === sig ? (ws.runtimeGuard.unchangedCount + 1) : 1
+        const nextTurns = ws.runtimeGuard.interventionTurns + 1
+        const isUnlimitedTurns = tactical.maxInterventionTurns === 0
+        const maxTurns = isUnlimitedTurns ? Infinity : Math.max(1, Number(tactical.maxInterventionTurns) || 10)
+        const unchangedLimit = isUnlimitedTurns ? 8 : 3
 
-      if ((!isUnlimitedTurns && nextTurns > maxTurns) || nextUnchanged >= unchangedLimit) {
-        circuitTripped = true
-        circuitReason = !isUnlimitedTurns && nextTurns > maxTurns
-          ? `接管督导连续介入已达上限 (${maxTurns} 轮)，触发安全熔断，已自动退回人工监督。`
-          : `连续 ${unchangedLimit} 轮检测进展无实质变化，触发死循环熔断，已自动关闭接管督导并交还用户控制。`
-        if (!ws.config || typeof ws.config !== 'object') ws.config = resolveWorkspaceConfig(s, rootId)
-        ws.config.tacticalModes = {
-          ...normalizeTacticalModes(ws.config.tacticalModes),
-          intervention: false,
+        if ((!isUnlimitedTurns && nextTurns > maxTurns) || nextUnchanged >= unchangedLimit) {
+          circuitTripped = true
+          circuitReason = !isUnlimitedTurns && nextTurns > maxTurns
+            ? `接管督导连续介入已达上限 (${maxTurns} 轮)，触发安全熔断，已自动退回人工监督。`
+            : `连续 ${unchangedLimit} 轮检测进展无实质变化，触发死循环熔断，已自动关闭接管督导并交还用户控制。`
+          if (!ws.config || typeof ws.config !== 'object') ws.config = resolveWorkspaceConfig(s, rootId)
+          ws.config.tacticalModes = {
+            ...normalizeTacticalModes(ws.config.tacticalModes),
+            intervention: false,
+          }
+          s.config.tacticalModes = {
+            ...normalizeTacticalModes(s.config.tacticalModes),
+            intervention: false,
+          }
+          ws.runtimeGuard.circuitBroken = true
+          ws.runtimeGuard.circuitReason = circuitReason
+          ws.runtimeGuard.interventionTurns = 0
+          ws.runtimeGuard.unchangedCount = 0
+          ws.chat.push({
+            id: nextId('chat'),
+            role: 'chief',
+            text: `- 【⚠️ 安全熔断】${circuitReason}`,
+            actions: ['熔断停机'],
+            at: Date.now(),
+          })
+          if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+        } else {
+          ws.runtimeGuard.lastDigestHash = sig
+          ws.runtimeGuard.unchangedCount = nextUnchanged
+          ws.runtimeGuard.interventionTurns = nextTurns
+          ws.runtimeGuard.circuitBroken = false
+          ws.runtimeGuard.circuitReason = ''
+          const cleanBody = cleanMultiline(candidateIntervention, tactical.conciseBrief ? 420 : 1200)
+
+          if (permRankNow === 0) {
+            // L0 Advisor: strict read-only inspection brief in panel chat only (never touches board or @lead)
+            if (prevSig !== sig || nextTurns === 1) {
+              ws.chat.push({
+                id: nextId('chat'),
+                role: 'chief',
+                text: `- 【👁 L0 顾问只读督导巡检】目标核验状态：\`${parsed.goalStatus || 'in_progress'}\`\n- 【诊断与建议】${clamp(cleanBody, 280)}`,
+                actions: ['L0 只读巡检', '建议不下发'],
+                at: Date.now(),
+              })
+              if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+            }
+            pushAuditToWs(ws, { mode: permNow, stage: 'permission_gate', decision: 'readonly_inspection', operation: '强介入只读巡检', target: 'chief_panel', reason: clamp(cleanBody, 120), outcome: 'ok', by: 'chief' })
+          } else if (permRankNow === 1) {
+            // L1 Assistant: manages internal Chief board/facts/suggestions only; does NOT inject into @lead
+            const sug = normalizeSuggestion({
+              kind: 'advice',
+              fromAgent: '🗂 L1 助手督导建议',
+              title: 'L1 强介入建议（等待拍板，未自动递给主对话）',
+              reason: clamp(parsed.goalMissing || 'L1 助手模式不接管主代理工作流，您可一键采纳递交主对话。', 200),
+              target: 'lead',
+              targetLabel: '主对话',
+              mode: 'followup',
+              draftText: cleanBody,
+              popup: false,
+            })
+            if (sug) ws.suggestions.push(sug)
+            ws.chat.push({
+              id: nextId('chat'),
+              role: 'chief',
+              text: `- 【🗂 L1 助手督导建议】已整理本轮看板进展，并生成待采纳推进建议（L1 不自动插话主对话）：\n${clamp(cleanBody, 260)}`,
+              actions: ['L1 内务自治', '转人工采纳'],
+              at: Date.now(),
+            })
+            if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+            pushAuditToWs(ws, { mode: permNow, stage: 'permission_gate', decision: 'suggested_only', operation: '强介入转建议卡', target: 'lead', reason: clamp(cleanBody, 120), outcome: 'ok', by: 'chief' })
+          } else if (permRankNow === 2) {
+            // L2 Strategist: requires explicit user approval popup before sending followup into @lead!
+            interventionForApproval = cleanBody
+            interventionDedupeKey = `intv:${rootId}:${digest.stamp}:${sig}`
+            pushAuditToWs(ws, { mode: permNow, stage: 'permission_gate', decision: 'pending_approval', operation: '强介入督导主对话', target: 'lead', reason: clamp(cleanBody, 120), outcome: 'pending', by: 'chief' })
+          } else {
+            // L3 Chief of Staff (ack verified): full autonomous intervention
+            interventionMessage = cleanBody
+            pushAuditToWs(ws, { mode: permNow, stage: 'executor', decision: 'executed', operation: '强介入自动督导推进', target: 'lead', reason: clamp(cleanBody, 120), outcome: 'ok', by: 'chief' })
+          }
         }
-        s.config.tacticalModes = {
-          ...normalizeTacticalModes(s.config.tacticalModes),
-          intervention: false,
-        }
-        ws.runtimeGuard.circuitBroken = true
-        ws.runtimeGuard.circuitReason = circuitReason
-        ws.runtimeGuard.interventionTurns = 0
-        ws.runtimeGuard.unchangedCount = 0
-        ws.chat.push({
-          id: nextId('chat'),
-          role: 'chief',
-          text: `- 【⚠️ 安全熔断】${circuitReason}`,
-          actions: ['熔断停机'],
-          at: Date.now(),
-        })
-        if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
-      } else {
-        ws.runtimeGuard.lastDigestHash = sig
-        ws.runtimeGuard.unchangedCount = nextUnchanged
-        ws.runtimeGuard.interventionTurns = nextTurns
-        ws.runtimeGuard.circuitBroken = false
-        ws.runtimeGuard.circuitReason = ''
-        interventionMessage = cleanMultiline(candidateIntervention, tactical.conciseBrief ? 420 : 1200)
       }
-    }
     }
   })
 
@@ -6508,60 +7133,96 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     }
   }
 
-  // When both Smart Compact & Intervention trigger on the same turn, harvest + compact FIRST,
-  // then deliver intervention followup into the freshly compacted context!
+  // When both Smart Compact & Intervention trigger on the same turn:
+  // L3 runs harvest + compact silently first; L2 queues approval popup; L0/L1 never auto-compact.
   let smartCompacted = false
-  if (smartCoManaged && parsed.shouldCompactNow === true && typeof deps.compactSessionNow === 'function') {
+  if (permRankNow >= 2 && smartCoManaged && parsed.shouldCompactNow === true && typeof deps.compactSessionNow === 'function') {
     const wsNow = ensureWorkspace(loadChiefState(), rootId)
     const lastCompactedAt = (wsNow.runtimeGuard && wsNow.runtimeGuard.lastCompactedAt) || 0
     const sinceLast = Date.now() - lastCompactedAt
     if (force || !lastCompactedAt || sinceLast >= 20_000) {
       const compactReason = clamp(parsed.compactReason || '参谋长评估当前阶段已收口，执行智选归档压缩', 220)
-      let st = 'idle'
-      try { if (typeof deps.getAgentStatus === 'function') st = deps.getAgentStatus(sid) || 'idle' } catch {}
-      if (st === 'running' && !force && typeof deps.getAgentStatus === 'function') {
-        await waitUntilAgentIdle(() => deps.getAgentStatus(sid), 8_000, 200)
-        try { st = deps.getAgentStatus(sid) || 'idle' } catch {}
-      }
-      if (st === 'running' && !force) {
-        mutateChiefState((s) => {
-          const ws = ensureWorkspace(s, rootId)
-          ws.runtimeGuard.pendingSmartCompact = { at: Date.now(), reason: compactReason, by: 'chief' }
+      if (permRankNow === 2) {
+        queueChiefApproval(rootId, {
+          category: 'main_workflow',
+          operationLabel: '✦ 智选压缩主对话上下文 (/compact)',
+          targetLabel: '当前主会话',
+          reason: compactReason,
+          impact: '将先抢救摘要入本会话档案柜，随后压缩裁剪主对话历史',
+          dedupeKey: `smart_compact:${rootId}:${wsNow.runtimeGuard.lastCompactedSeq || 0}:${digest.stamp}`,
+          kind: 'compact',
+          payload: { reason: compactReason },
+          by: 'chief',
         })
       } else {
-        const contextWindow = Math.max(1000, Number(liveUsage && liveUsage.contextWindow) || 128_000)
-        const totalTokens = Number(liveUsage && liveUsage.totalTokens) || 0
-        const seq = Math.max(0, Math.round(Number(liveUsage && liveUsage.seq) || digest.stamp || 0))
-        const ratioPct = totalTokens > 0 ? (totalTokens / contextWindow) * 100 : 0
-        const cRes = await executeHarvestAndCompact(deps, {
-          sid,
-          rootId,
-          agent,
-          reason: compactReason,
-          seq,
-          ratioPct,
-          totalTokens,
-          contextWindow,
-          logLabel: '✦ 智选压缩(参谋长判断)',
-        }).catch((err) => {
-          const msg = (err && err.message) || String(err || 'smart-compact-error')
-          if (typeof deps.appendBoardLog === 'function' && rootId !== 'global') {
-            deps.appendBoardLog(rootId, `⚠️ ✦ 智选压缩失败：${msg}`, 'chief')
-          }
-          return { ok: false, error: msg }
-        })
-        if (cRes && cRes.ok && !cRes.noop) {
-          smartCompacted = true
-          recordSmartCompactionChatReceipt(rootId, {
-            cRes,
+        let st = 'idle'
+        try { if (typeof deps.getAgentStatus === 'function') st = deps.getAgentStatus(sid) || 'idle' } catch {}
+        if (st === 'running' && !force && typeof deps.getAgentStatus === 'function') {
+          await waitUntilAgentIdle(() => deps.getAgentStatus(sid), 8_000, 200)
+          try { st = deps.getAgentStatus(sid) || 'idle' } catch {}
+        }
+        if (st === 'running' && !force) {
+          mutateChiefState((s) => {
+            const ws = ensureWorkspace(s, rootId)
+            ws.runtimeGuard.pendingSmartCompact = { at: Date.now(), reason: compactReason, by: 'chief' }
+          })
+        } else {
+          const contextWindow = Math.max(1000, Number(liveUsage && liveUsage.contextWindow) || 128_000)
+          const totalTokens = Number(liveUsage && liveUsage.totalTokens) || 0
+          const seq = Math.max(0, Math.round(Number(liveUsage && liveUsage.seq) || digest.stamp || 0))
+          const ratioPct = totalTokens > 0 ? (totalTokens / contextWindow) * 100 : 0
+          const cRes = await executeHarvestAndCompact(deps, {
+            sid,
+            rootId,
+            agent,
+            reason: compactReason,
+            seq,
             ratioPct,
             totalTokens,
             contextWindow,
-            via: '✦ 智选压缩',
+            logLabel: '✦ 智选压缩(参谋长判断)',
+          }).catch((err) => {
+            const msg = (err && err.message) || String(err || 'smart-compact-error')
+            if (typeof deps.appendBoardLog === 'function' && rootId !== 'global') {
+              deps.appendBoardLog(rootId, `⚠️ ✦ 智选压缩失败：${msg}`, 'chief')
+            }
+            return { ok: false, error: msg }
           })
+          if (cRes && cRes.ok && !cRes.noop) {
+            smartCompacted = true
+            recordSmartCompactionChatReceipt(rootId, {
+              cRes,
+              ratioPct,
+              totalTokens,
+              contextWindow,
+              via: '✦ 智选压缩',
+            })
+          }
         }
       }
     }
+  }
+
+  if (interventionForApproval) {
+    queueChiefApproval(rootId, {
+      category: 'main_workflow',
+      operationLabel: '强介入督导主对话继续推进',
+      targetLabel: '主对话 (@lead)',
+      reason: '当前处于「L2 · 参谋模式」，强介入向主对话发推进指令前需您逐项授权',
+      impact: '点击「允许本次操作」后将立即向主对话唤醒投递以下督导指令',
+      preview: clamp(interventionForApproval, 260),
+      dedupeKey: interventionDedupeKey,
+      kind: 'relay',
+      payload: {
+        fromSession: rootId,
+        fromLabel: 'DSH 参谋 (强介入逐项授权)',
+        target: 'lead',
+        subject: '参谋强介入督导推进',
+        text: interventionForApproval,
+        mode: 'followup',
+      },
+      by: 'chief',
+    })
   }
 
   if (interventionMessage) {
@@ -6580,7 +7241,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     })
   }
 
-  if (autoBoundUpdates.length > 0 && deps.runAction) {
+  if (permRankNow >= 1 && autoBoundUpdates.length > 0 && deps.runAction) {
     for (const b of autoBoundUpdates) {
       deps.runAction({
         action: 'bounds.add',
@@ -6594,7 +7255,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     }
   }
 
-  if (shouldAutoOrganizeSession && rootId && rootId !== 'global') {
+  if (permRankNow >= 1 && shouldAutoOrganizeSession && rootId && rootId !== 'global') {
     try {
       const sessOpt = archiveTargetForRoot(deps, rootId, { vaultScope: 'session' })
       const stSess = loadArchiveStore(sessOpt)
@@ -6614,6 +7275,28 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
         }).catch(() => null)
       }
     } catch {}
+  }
+
+  for (const sug of relaysForApproval) {
+    queueChiefApproval(rootId, {
+      category: 'main_workflow',
+      operationLabel: '向工作流成员投递自动指令',
+      targetLabel: sug.target === 'lead' ? '主对话 (@lead)' : `@${sug.target}`,
+      reason: clamp(sug.title || 'L2 参谋模式逐项授权自动递话', 140),
+      impact: '允许后将把该条工作流指令投递给目标成员',
+      preview: clamp(sug.draftText || '', 240),
+      dedupeKey: `autorelay:${rootId}:${digest.stamp}:${sug.target}`,
+      kind: 'relay',
+      payload: {
+        fromSession: rootId,
+        fromLabel: 'DSH 参谋 (逐项授权)',
+        target: sug.target,
+        subject: sug.title,
+        text: sug.draftText,
+        mode: sug.mode || 'silent',
+      },
+      by: 'chief',
+    })
   }
 
   for (const sug of autoRelays) {
@@ -6638,6 +7321,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
 
   return {
     ok: true,
+    permissionMode: permNow,
     executedOps,
     isStalePlan,
     unmetMustDo,
@@ -6646,6 +7330,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     hazardStopped,
     ...(hazardAlertCreated ? { hazardAlert: hazardAlertCreated } : {}),
     intervened: Boolean(interventionMessage),
+    queuedInterventionApproval: Boolean(interventionForApproval),
     smartCompacted,
     circuitTripped,
     circuitReason,
@@ -6928,9 +7613,9 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
 
 export function updateChiefConfig(patch) {
   const safePatch = patch && typeof patch === 'object' ? patch : {}
-  const sid = String(safePatch.sessionId || safePatch.session || '').trim()
+  const sid = String(safePatch.sessionId || safePatch.session || '').trim() || 'global'
   return mutateChiefState((state) => {
-    const ws = sid ? ensureWorkspace(state, sid) : null
+    const ws = ensureWorkspace(state, sid)
     const effBefore = resolveWorkspaceConfig(state, sid)
     const prevTactical = normalizeTacticalModes(effBefore.tacticalModes)
     if (typeof safePatch.ackHazardAlertId === 'string' && safePatch.ackHazardAlertId.trim()) {
@@ -6969,6 +7654,29 @@ export function updateChiefConfig(patch) {
         emergencyStopped: true,
         config: { ...stoppedCfg, tacticalModes: { ...stoppedCfg.tacticalModes } },
         runtimeGuard: ws ? { ...ws.runtimeGuard } : null,
+      }
+    }
+
+    // Check explicit permission mode transition BEFORE applying any changes
+    let normalizedReqPerm = ''
+    if (typeof safePatch.permissionMode === 'string' && safePatch.permissionMode.trim()) {
+      normalizedReqPerm = normalizePermissionMode(safePatch.permissionMode)
+      if (normalizedReqPerm === 'chief' && safePatch.confirmedChiefRisk !== true && !hasValidChiefRiskAck(ws)) {
+        pushAuditToWs(ws, {
+          mode: effBefore.permissionMode,
+          stage: 'permission_gate',
+          decision: 'deny_unacknowledged_l3',
+          operation: '切换 L3 参谋长模式',
+          target: sid,
+          reason: '未阅读并勾选确认高权限风险告知（confirmedChiefRisk: true）',
+          outcome: 'denied',
+          by: 'operator',
+        })
+        return {
+          ok: false,
+          requireChiefRiskConfirm: true,
+          error: '启用「L3 · 参谋长模式」前必须阅读高权限风险告知并主动勾选确认（confirmedChiefRisk: true）',
+        }
       }
     }
 
@@ -7038,10 +7746,10 @@ export function updateChiefConfig(patch) {
       }
     }
 
-    const applyPatchTo = (targetCfg, allowIntervention, allowAutoPilot = allowIntervention) => {
+    const applyPatchTo = (targetCfg, allowIntervention, allowAutoPilot = allowIntervention, allowPermSync = false) => {
       if (typeof safePatch.modelRef === 'string') targetCfg.modelRef = safePatch.modelRef.trim()
-      if (typeof safePatch.permissionMode === 'string' && CHIEF_PERMISSION_MODES.includes(safePatch.permissionMode)) {
-        targetCfg.permissionMode = normalizePermissionMode(safePatch.permissionMode)
+      if (allowPermSync && normalizedReqPerm) {
+        targetCfg.permissionMode = normalizedReqPerm
       }
       if (typeof safePatch.paceMode === 'string' && ['manual', 'smart', 'auto', 'stopped'].includes(safePatch.paceMode)) {
         const nextPace = (!allowAutoPilot && safePatch.paceMode === 'auto') ? 'manual' : safePatch.paceMode
@@ -7092,13 +7800,38 @@ export function updateChiefConfig(patch) {
       }
     }
 
-    if (ws) {
-      if (!ws.config || typeof ws.config !== 'object') ws.config = { ...effBefore }
-      applyPatchTo(ws.config, true, true)
-      // Keep global non-dangerous defaults aligned while NEVER leaking intervention or autoPilot globally!
-      applyPatchTo(state.config, false, false)
-    } else {
-      applyPatchTo(state.config, true, false)
+    if (!ws.config || typeof ws.config !== 'object') ws.config = { ...effBefore }
+    applyPatchTo(ws.config, true, true, true)
+    // Session permissionMode, intervention, and autoPilot NEVER leak globally across new sessions!
+    state.config.permissionMode = DEFAULT_CHIEF_PERMISSION_MODE
+    applyPatchTo(state.config, false, false, false)
+
+    if (normalizedReqPerm) {
+      if (normalizedReqPerm === 'chief' && safePatch.confirmedChiefRisk === true) {
+        ws.chiefRiskAck = {
+          acknowledged: true,
+          at: Date.now(),
+          by: clamp(safePatch.by || 'operator', 40),
+          version: '1.2.1',
+        }
+      } else if (normalizedReqPerm !== 'chief') {
+        ws.chiefRiskAck = null
+      }
+      if (normalizedReqPerm !== effBefore.permissionMode) {
+        if (ws.pendingElevation && permissionRank(normalizedReqPerm) >= permissionRank(ws.pendingElevation.targetMode)) {
+          ws.pendingElevation = null
+        }
+        pushAuditToWs(ws, {
+          mode: normalizedReqPerm,
+          stage: 'permission_gate',
+          decision: 'mode_changed',
+          operation: '切换权限等级',
+          target: `${CHIEF_PERMISSION_META[effBefore.permissionMode].level} -> ${CHIEF_PERMISSION_META[normalizedReqPerm].level}`,
+          reason: normalizedReqPerm === 'chief' ? '用户勾选风险声明并确认启用 L3 参谋长模式' : `用户主动切换至 ${CHIEF_PERMISSION_META[normalizedReqPerm].title}`,
+          outcome: 'ok',
+          by: clamp(safePatch.by || 'operator', 40),
+        })
+      }
     }
 
     const finalCfg = resolveWorkspaceConfig(state, sid)
@@ -7113,6 +7846,322 @@ export function updateChiefConfig(patch) {
       config: { ...finalCfg, tacticalModes: { ...finalCfg.tacticalModes } },
     }
   })
+}
+
+/** 处理 L2 参谋模式逐项操作授权弹窗（拒绝 / 允许本次操作）。 */
+export async function handleApprovalDecision(deps, {
+  sessionId = '',
+  approvalId = '',
+  decision = 'reject',
+} = {}) {
+  const rootId = (deps && typeof deps.resolveRootSessionId === 'function' ? deps.resolveRootSessionId(sessionId) : '') || String(sessionId || 'global')
+  let found = null
+  let currentMode = DEFAULT_CHIEF_PERMISSION_MODE
+
+  mutateChiefState((state) => {
+    const ws = ensureWorkspace(state, rootId)
+    const ackOk = hasValidChiefRiskAck(ws)
+    const eff = resolveWorkspaceConfig(state, rootId)
+    currentMode = normalizePermissionMode(eff.permissionMode, { requireAck: true, hasChiefRiskAck: ackOk })
+    const item = (ws.pendingApprovals || []).find(a => a && a.id === approvalId && a.status === 'pending')
+    if (!item) return
+    found = { ...item, payload: item.payload ? { ...item.payload } : {} }
+    if (decision !== 'approve') {
+      item.status = 'rejected'
+      item.resolvedAt = Date.now()
+      item.resolvedBy = 'operator'
+      item.resultMessage = '用户拒绝执行本次操作'
+      pushAuditToWs(ws, {
+        mode: currentMode,
+        stage: 'permission_gate',
+        decision: 'rejected_by_user',
+        operation: item.operationLabel,
+        target: item.targetLabel,
+        reason: item.reason,
+        outcome: 'rejected',
+        by: 'operator',
+      })
+      ws.chat.push({
+        id: nextId('chat'),
+        role: 'chief',
+        text: `- 【⛔ 已拒绝本次操作】${item.operationLabel} · \`${item.targetLabel}\``,
+        actions: ['⛔ 用户拒绝操作'],
+        at: Date.now(),
+      })
+      if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+    } else {
+      item.status = 'approved'
+      item.resolvedAt = Date.now()
+      item.resolvedBy = 'operator'
+      pushAuditToWs(ws, {
+        mode: currentMode,
+        stage: 'permission_gate',
+        decision: 'approved_by_user',
+        operation: item.operationLabel,
+        target: item.targetLabel,
+        reason: item.reason,
+        outcome: 'approved',
+        by: 'operator',
+      })
+    }
+  })
+
+  if (!found) return { ok: false, error: '未找到该待确认操作或已处理完毕' }
+  if (decision !== 'approve') {
+    return {
+      ok: true,
+      rejected: true,
+      approval: { ...found, status: 'rejected' },
+      view: await getChiefView(deps, rootId, { autoSummarize: false }),
+    }
+  }
+
+  const board = deps && deps.boardForSession && deps.boardFileFor
+    ? deps.boardForSession(deps.boardFileFor(rootId))
+    : null
+  const payload = found.payload || {}
+  let execOk = false
+  let execRes = null
+  let resultMsg = ''
+
+  try {
+    if (found.kind === 'tool' && payload.tool) {
+      execRes = await executeChiefToolCall(deps, { tool: payload.tool, args: payload.args || {} }, {
+        rootId,
+        sessionId: payload.sessionId || rootId,
+        cwd: payload.cwd || resolveSessionWorkspaceCwd(deps, rootId),
+        permissionMode: currentMode === 'chief' ? 'chief' : 'strategist',
+        hasChiefRiskAck: currentMode === 'chief',
+        approvedOnce: true,
+        board,
+        upsertArchiveFn: buildChiefArchiveUpsertFn(deps, rootId),
+        compactNowFn: buildChiefCompactFn(deps, rootId),
+        recordAuditFn: (entry) => appendChiefAuditLog(rootId, entry),
+        by: 'operator(逐项授权)',
+      })
+      execOk = Boolean(execRes && execRes.ok)
+      resultMsg = execOk
+        ? `已执行 ${found.operationLabel}（${found.targetLabel}）`
+        : (execRes && execRes.error) || '执行未成功'
+    } else if (found.kind === 'relay') {
+      const guardRes = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: payload.text || '', board })
+      if (guardRes.blocked) {
+        execOk = false
+        execRes = { ok: false, blockedBySafetyGuard: true, error: guardRes.reason }
+        resultMsg = guardRes.reason
+        appendChiefAuditLog(rootId, { mode: currentMode, stage: 'safety_guard', decision: 'blocked', operation: found.operationLabel, target: found.targetLabel, reason: guardRes.reason, outcome: 'blocked', by: 'operator' })
+      } else {
+        const deliv = await deliverCrossMessage(deps, {
+          fromSession: rootId,
+          fromLabel: payload.fromLabel || 'DSH 参谋 (逐项授权)',
+          target: payload.target || 'lead',
+          subject: payload.subject || '',
+          text: payload.text || '',
+          mode: payload.mode || 'steer',
+          imageBlocks: Array.isArray(payload.imageBlocks) ? payload.imageBlocks : [],
+          savedImagePaths: Array.isArray(payload.savedImagePaths) ? payload.savedImagePaths : [],
+        })
+        const isLeadTarget = /^(?:lead|main|主对话)$/i.test(String(payload.target || 'lead').trim())
+        if (isLeadTarget && (!deliv.ok || (payload.isBlankContext && !deliv.deliveredPhysical)) && deps && typeof deps.stagePendingTransfer === 'function') {
+          const staged = deps.stagePendingTransfer(
+            `[DSH 参谋预派发指令${payload.subject ? ' · ' + payload.subject : ''}]\n${payload.text || ''}`,
+            rootId,
+            { by: 'chief', subject: payload.subject || '' },
+          )
+          if (staged) {
+            execOk = true
+            execRes = { ...deliv, ok: true, stagedPending: true, target: '主对话(待领)' }
+            resultMsg = '已暂存主对话待领交接指令'
+          } else {
+            execOk = Boolean(deliv && deliv.ok)
+            execRes = deliv
+            resultMsg = execOk ? `已投递给 ${deliv.target || found.targetLabel}` : ((deliv && deliv.error) || '投递失败')
+          }
+        } else {
+          execOk = Boolean(deliv && deliv.ok)
+          execRes = deliv
+          resultMsg = execOk ? `已投递给 ${deliv.target || found.targetLabel}` : ((deliv && deliv.error) || '投递失败')
+        }
+        appendChiefAuditLog(rootId, { mode: currentMode, stage: 'executor', decision: 'executed_approved', operation: found.operationLabel, target: found.targetLabel, reason: clamp(resultMsg, 120), outcome: execOk ? 'ok' : 'error', by: 'operator' })
+      }
+    } else if (found.kind === 'compact') {
+      const guardRes = evaluateSafetyGuardHardRules({ tool: 'session_compact', opClass: 'workflow', board })
+      if (guardRes.blocked) {
+        execOk = false
+        execRes = { ok: false, blockedBySafetyGuard: true, error: guardRes.reason }
+        resultMsg = guardRes.reason
+      } else {
+        execRes = await buildChiefCompactFn(deps, rootId)(payload.reason || found.reason)
+        execOk = Boolean(execRes && execRes.ok)
+        if (execOk && !execRes.noop) {
+          recordSmartCompactionChatReceipt(rootId, {
+            cRes: execRes,
+            ratioPct: Number(execRes.ratioPct) || 0,
+            via: '🛡️ 逐项授权压缩',
+          })
+        }
+        resultMsg = execOk
+          ? (execRes.noop ? '已抢救细节入本会话档案柜（当前历史免压）' : '已抢救细节并完成主对话上下文静默压缩')
+          : ((execRes && execRes.error) || '压缩未完成')
+        appendChiefAuditLog(rootId, { mode: currentMode, stage: 'executor', decision: 'executed_approved', operation: found.operationLabel, target: found.targetLabel, reason: clamp(resultMsg, 120), outcome: execOk ? 'ok' : 'error', by: 'operator' })
+      }
+    } else if (found.kind === 'auto_continue') {
+      if (deps && typeof deps.triggerAutoContinueNow === 'function') {
+        execRes = await deps.triggerAutoContinueNow(payload.sessionId || rootId, payload.trigger || 'turn/end:approved', { detail: payload.detail || '' })
+        execOk = Boolean(execRes && execRes.ok)
+        resultMsg = execOk ? '已触发主对话断线续跑' : ((execRes && execRes.error) || '断线续跑未触发')
+      } else {
+        execOk = false
+        resultMsg = '当前宿主未提供续跑回调接口'
+      }
+      appendChiefAuditLog(rootId, { mode: currentMode, stage: 'executor', decision: 'executed_approved', operation: found.operationLabel, target: found.targetLabel, reason: clamp(resultMsg, 120), outcome: execOk ? 'ok' : 'error', by: 'operator' })
+    }
+  } catch (err) {
+    execOk = false
+    execRes = { ok: false, error: (err && err.message) || String(err || 'execution-failed') }
+    resultMsg = execRes.error
+  }
+
+  let updatedApproval = { ...found, status: execOk ? 'executed' : 'failed', resultMessage: resultMsg }
+  mutateChiefState((state) => {
+    const ws = ensureWorkspace(state, rootId)
+    const item = (ws.pendingApprovals || []).find(a => a && a.id === approvalId)
+    if (item) {
+      item.status = execOk ? 'executed' : 'failed'
+      item.resultMessage = clamp(resultMsg, 260)
+      updatedApproval = { ...item }
+    }
+    ws.chat.push({
+      id: nextId('chat'),
+      role: 'chief',
+      text: execOk
+        ? `- 【✅ 已允许并执行】${found.operationLabel} · \`${found.targetLabel}\`\n  结果：${clamp(resultMsg, 240)}`
+        : `- 【⚠️ 授权操作未完成】${found.operationLabel} · \`${found.targetLabel}\`\n  说明：${clamp(resultMsg, 240)}`,
+      actions: [execOk ? '✅ 逐项授权执行' : '⚠️ 授权执行异常'],
+      at: Date.now(),
+    })
+    if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+  })
+
+  const latestBoard = deps && deps.boardForSession && deps.boardFileFor
+    ? deps.boardForSession(deps.boardFileFor(rootId))
+    : undefined
+  return {
+    ok: true,
+    executed: execOk,
+    executionOk: execOk,
+    approval: updatedApproval,
+    result: execRes,
+    ...(latestBoard ? { board: latestBoard } : {}),
+    view: await getChiefView(deps, rootId, { autoSummarize: false }),
+  }
+}
+
+/** 处理模型/主代理提交的权限升级请求；若批准为最高档 L3 必须由后端校验 confirmedChiefRisk。 */
+export async function handleElevationDecision(deps, {
+  sessionId = '',
+  elevationId = '',
+  decision = 'reject',
+  targetMode = '',
+  confirmedChiefRisk = false,
+} = {}) {
+  const rootId = (deps && typeof deps.resolveRootSessionId === 'function' ? deps.resolveRootSessionId(sessionId) : '') || String(sessionId || 'global')
+  const stateBefore = loadChiefState()
+  const wsBefore = ensureWorkspace(stateBefore, rootId)
+  const elev = wsBefore.pendingElevation
+  if (!elev || (elevationId && elev.id !== elevationId)) {
+    return { ok: false, error: '当前没有待处理的提权申请' }
+  }
+
+  if (decision !== 'approve') {
+    mutateChiefState((s) => {
+      const ws = ensureWorkspace(s, rootId)
+      ws.pendingElevation = null
+      pushAuditToWs(ws, {
+        mode: resolveWorkspaceConfig(s, rootId).permissionMode,
+        stage: 'permission_gate',
+        decision: 'elevation_rejected',
+        operation: '拒绝提权申请',
+        target: `${elev.fromMode} -> ${elev.targetMode}`,
+        reason: elev.reason,
+        outcome: 'rejected',
+        by: 'operator',
+      })
+      ws.chat.push({
+        id: nextId('chat'),
+        role: 'chief',
+        text: `- 【🔒 已拒绝提权申请】维持当前权限，未升级至 ${CHIEF_PERMISSION_META[elev.targetMode]?.level || elev.targetMode}。`,
+        actions: ['🔒 拒绝提权'],
+        at: Date.now(),
+      })
+      if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+    })
+    return { ok: true, rejected: true, view: await getChiefView(deps, rootId, { autoSummarize: false }) }
+  }
+
+  const chosenMode = normalizePermissionMode(targetMode || elev.targetMode)
+  if (permissionRank(chosenMode) <= 0) {
+    return { ok: false, error: '无效的提权目标档位' }
+  }
+  if (chosenMode === 'chief' && confirmedChiefRisk !== true) {
+    appendChiefAuditLog(rootId, {
+      mode: resolveWorkspaceConfig(loadChiefState(), rootId).permissionMode,
+      stage: 'permission_gate',
+      decision: 'deny_unacknowledged_l3',
+      operation: 'L3 提权风险校验',
+      target: 'chief',
+      reason: '批准提权至最高档 L3 前必须勾选风险知悉确认',
+      outcome: 'denied',
+      by: 'operator',
+    })
+    return {
+      ok: false,
+      requireChiefRiskConfirm: true,
+      error: '提权至最高档「L3 · 参谋长模式」必须先阅读风险告知并勾选确认（confirmedChiefRisk: true）！',
+    }
+  }
+
+  const cfgRes = updateChiefConfig({
+    sessionId: rootId,
+    permissionMode: chosenMode,
+    confirmedChiefRisk: chosenMode === 'chief',
+    by: 'operator(提权审批)',
+  })
+  if (!cfgRes || cfgRes.ok === false) {
+    return cfgRes || { ok: false, error: '提权应用失败' }
+  }
+
+  mutateChiefState((s) => {
+    const ws = ensureWorkspace(s, rootId)
+    ws.pendingElevation = null
+    pushAuditToWs(ws, {
+      mode: chosenMode,
+      stage: 'permission_gate',
+      decision: 'elevation_approved',
+      operation: '批准提权',
+      target: `${CHIEF_PERMISSION_META[elev.fromMode]?.level || elev.fromMode} -> ${CHIEF_PERMISSION_META[chosenMode].level}`,
+      reason: elev.reason,
+      outcome: 'approved',
+      by: 'operator',
+    })
+    const meta = CHIEF_PERMISSION_META[chosenMode]
+    ws.chat.push({
+      id: nextId('chat'),
+      role: 'chief',
+      text: `- 【🔐 已批准提权】当前会话权限已升级为「**${meta.level} · ${meta.title}**」${chosenMode === 'chief' ? '（已完成高风险确认）' : ''}。`,
+      actions: [`🔐 升至 ${meta.level}`],
+      at: Date.now(),
+    })
+    if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+  })
+
+  return {
+    ok: true,
+    approvedMode: chosenMode,
+    permissionMode: chosenMode,
+    config: cfgRes.config,
+    view: await getChiefView(deps, rootId, { autoSummarize: false }),
+  }
 }
 
 export function mutateChiefFact(deps, { sessionId, op, id, text, category, pinned }) {

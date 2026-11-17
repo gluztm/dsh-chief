@@ -230,6 +230,7 @@ export function createAutoContinueEngine(options = {}) {
     getAgent,
     createMessage = null,
     isChiefStopped = () => false,
+    canAutoContinue = null,
     resolveRootSessionId = (sid) => sid,
     onLog = () => {},
     baseDelayMs = 1500,
@@ -309,7 +310,7 @@ export function createAutoContinueEngine(options = {}) {
     return Math.round(baseDelayMs * Math.pow(2, exp))
   }
 
-  async function fire(sessionId, trigger, { detail = '' } = {}) {
+  async function fire(sessionId, trigger, { detail = '', bypassGate = false } = {}) {
     const st = getSessionState(sessionId)
     if (!st) return { ok: false, skipped: 'invalid-session' }
     st.timer = null
@@ -319,6 +320,15 @@ export function createAutoContinueEngine(options = {}) {
       st.stats.skippedStopped += 1
       onLog(sessionId, '参谋长处于停止状态（stopped），跳过自动续跑')
       return { ok: false, skipped: 'chief-stopped' }
+    }
+
+    if (!bypassGate && typeof canAutoContinue === 'function') {
+      const verdict = await Promise.resolve(canAutoContinue({ sessionId, rootId, trigger, detail }))
+      if (verdict && verdict.allowed === false) {
+        st.stats.skippedStopped += 1
+        if (verdict.logMessage) onLog(sessionId, verdict.logMessage)
+        return { ok: false, skipped: verdict.skipped || 'permission-mode', approvalId: verdict.approvalId }
+      }
     }
 
     if (st.consecutive >= maxConsecutive) {
