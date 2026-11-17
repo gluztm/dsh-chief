@@ -2,8 +2,10 @@
 
 <img src="assets/chief-10s-compare.gif" alt="dsh-chief in 10 seconds: left is a plain long session — re-reading the same files, losing parameters to compaction, forgetting when you switch windows; right is Chief — one-click loop breaker, parameters vaulted before compaction, archive carried across windows, minimal report. Read-only by default, zero takeover risk." width="800" />
 
-**Same window, same context — the left one burns budget drifting, the right one closes out.**  
-<sub>Read-only by default · zero takeover risk · `dsh plugin --profile web add dsh-chief`</sub>
+**AI manages AI, you take the day off — even when you're not there, it's watching.**  
+<sub>It dispatches the work, keeps the subagents on track, and closes out on its own; if it starts to drift it stops first. Read-only by default.</sub>
+
+<sub>`dsh plugin --profile web add dsh-chief`</sub>
 
 <br />
 
@@ -23,8 +25,8 @@
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-> **Stop babysitting your AI agents — state your intent in the Wishing Box for Wish-Driven One-Stop Execution (`v1.2.0`)**  
-> Inspired by DeepSeek's official **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** *Router + Isolated Workers* architecture to keep focus sharp and context clean.
+> **Nobody watching, nothing breaking: state your intent in the Wishing Box and it runs the whole flow, stopping first if it starts to drift (`v1.2.0`)**  
+> Follows the same shape as DeepSeek's official **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** *Router + Isolated Workers* architecture to keep focus sharp and context clean.
 
 [简体中文 (`README.md`)](README.md) · **English** · [Changelog (`CHANGELOG.md`)](CHANGELOG.md)
 
@@ -36,7 +38,7 @@
 
 - **Persistent Router Cockpit**: Unifies the root coordinator, subagents, and linked DSH windows inside one **Full-Spread Pyramid DAG**—zero blind tab switching.
 - **Native Split-Pane Streams (`subagentchat`)**: Click `分屏` on any subagent node to open DSH's native `sidebarRight.openResource` live stream.
-- **4-Tier Permission Model & 6-Stage Security Pipeline (`chief-executor.js`)**: Every new session starts safely in `L0 Advisor (READ ONLY)` and steps up cleanly through `L1 Assistant`, `L2 Strategist (Per-Action Approval Popup)`, and `L3 Chief of Staff (Mandatory Risk Checkbox + Backend Enforcement)`, backed by Safety Guard hard rules and a live audit log.
+- **Read-only first, asks before acting (`chief-executor.js`)**: New and handed-off sessions start read-only — it observes and proposes first. Editing files, running commands, or steering subagents needs your per-action approval, with a confirmation popup and an audit log behind it.
 - **Ready on Blank New Sessions**: Resolves workspace root via `workspaceRegistry` even before turn 1 in the main chat, and stages `@lead` relays cleanly in `pending-transfer.json`.
 - **Objective Lock & Human Sign-Off**: Strong Intervention locks your Core Objective (`0 = ∞` turns supported), verifies `allowed` must-do items, and waits for your explicit **`✅ 批准结项`** click.
 - **Cross-Isolation `✦ 智选压缩` & Flexible Thresholds**: Compacts via DSH `/compact` across Cordis service isolation (and wakes dormant agents via `sessionController.resolveAgent`), supporting `10%–95%`, `>= 8,000` tokens, or direct `"压缩吧"` commands.
@@ -64,14 +66,13 @@ Ordinary Todo plugins give you another scratchpad; always-on memory plugins floo
 - **`dsh-chief`**: All three cold vaults remain **0 bytes / 0 tokens while sealed** (Precipitated Vault is double-blind to both Lead and Chief).
 - **On-Demand Precision**: Injects only items explicitly spotlighted via **`📌 摆上桌面`** or flipped out via **`📤 取出`**.
 
-### 4. Chat-Only "Mascot Copilots" or Unbounded Auto-Execution
-- **Typical Plugins**: Either powerless chat sidebars or all-or-nothing yolo modes without an audit trail.
-- **`dsh-chief`**: Enforces a **4-Tier Permission Model × 6-Stage Unified Security Pipeline** (`User Mode → Action Request → Safety Guard Hard Rules → Permission Gate → Executor → Audit Log`):
-  - **L0 · Advisor (`READ ONLY` · Default)**: Strict default on every new or handed-off session—inspects boards/files and advises only.
-  - **L1 · Assistant (`ASSISTANT`)**: Maintains Chief memory, vaults, and board config; still blocks direct workspace edits and lead/subagent takeover.
-  - **L2 · Strategist (`ADVISOR WITH APPROVAL`)**: Can propose workspace edits, commands, and lead/subagent steering—pops an **Operation Approval Modal** (`Operation / Target / Reason / Impact`) before each controlled action runs once.
-  - **L3 · Chief of Staff (`CHIEF OF STAFF`)**: Full autonomous coordination across lead and subagents; requires acknowledging the **High-Privilege Risk Notice checkbox** plus backend `confirmedChiefRisk` enforcement.
-  - **Model Elevation & Differentiated Strong Intervention**: Models can formally request privilege elevation (`request_permission_elevation` / `permission.request`), and Strong Intervention adapts its autonomy cleanly across L0–L3.
+### 4. Chat-Only "Mascot Copilots" — Or All-or-Nothing Yolo Modes
+- **Typical Plugins**: Either you can only look, or one switch hands over everything and it quietly edits your files.
+- **`dsh-chief`**: Read-only by default, and it asks before each escalation — it won't act up while you're away:
+  - **Read-only on every new session**: Observes, analyses, and proposes; never touches the workspace or takes over lead/subagent flows.
+  - **Asks before acting**: File edits, commands, and subagent steering pop an **Operation Approval Modal** (`what / on what / why / impact`) and run only after you allow that one action.
+  - **Second check for high autonomy**: Granting higher autonomy requires acknowledging the **High-Privilege Risk Notice** checkbox, then a backend check.
+  - **Take it back anytime**: The red **`⏹ 急停`** button hands control back to you immediately, and everything stays in the audit log.
 
 ### 5. Cramped Subagent Views & Verbal Rules Forgotten in 10 Turns
 - **Typical Plugins**: Tiny scroll boxes hide blocked workers, and safety instructions scroll out of context.
@@ -86,7 +87,7 @@ Ordinary Todo plugins give you another scratchpad; always-on memory plugins floo
 ## 📸 Visual Tour (`v1.2.0` 7 High-DPI Views)
 
 ### 01 · Wish-Driven Chief Cockpit (`参谋` Tab)
-- **4-Tier Permission & Tactical Bar**: Compact `+` trigger on the left with live pills above (`⚡ 强介入 0/♾️`, `✦ 智选压缩`, `🛡 红线哨兵`, `🔵 完全权限`, and `⏹ 急停`).
+- **Guardrails & Tactical Bar**: Compact `+` trigger on the left with live pills above (`⚡ 强介入 0/♾️`, `✦ 智选压缩`, `🛡 红线哨兵`, `🔵 完全权限`, and `⏹ 急停`).
 - **Clear Execution & Compaction Receipts**: Live status narrative, boundary approval cards, and visible `✦ 智选压缩` chat receipts side-by-side.
 - **Handoff Sync Toggle**: `同步交接单` control right in the cockpit header.
 
@@ -104,9 +105,9 @@ Ordinary Todo plugins give you another scratchpad; always-on memory plugins floo
 
 ---
 
-### 03 · Three-Tier 0-Token Cold Vaults & Bidirectional Diff (`档案` Tab)
+### 03 · 0-Token Cold Vaults & Bidirectional Diff (`档案` Tab)
 - **Strict Vault Switcher**: Toggle **💬 Session Cabinet**, **🌐 System Global Vault**, and **🏛️ Precipitated Cold Vault** cleanly from the top bar.
-- **4-Tier Paperclip Organization**: Cabinets → Drawers → Gold / Silver / Copper paperclipped dossiers → Unfoldable points & sub-points.
+- **Paperclip Organization, Four Levels**: Cabinets → Drawers → Gold / Silver / Copper paperclipped dossiers → Unfoldable points & sub-points.
 - **Spotlight & Diff Tracking**: Tracks `Synced` / `Local Modified` / `Local Only` diffs; inject selectively via **`📌 摆上桌面`** or send multi-archive **combinatorial relays**.
 
 <div align="center">
