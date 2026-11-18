@@ -33,4 +33,10 @@ jobs:
         run: |
           unset NODE_AUTH_TOKEN NPM_CONFIG_USERCONFIG
           rm -f ~/.npmrc
+          LOCAL_VER=$(node -p "require('./package.json').version")
+          REMOTE_VER=$(npm view dsh-chief version 2>/dev/null || echo "")
+          if [ "$LOCAL_VER" = "$REMOTE_VER" ]; then
+            echo "dsh-chief@$LOCAL_VER is already published on npm; skipping duplicate publish."
+            exit 0
+          fi
           npm publish --provenance --access public

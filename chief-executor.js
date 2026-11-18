@@ -283,16 +283,139 @@ export function isPathInsideWorkspace(workspaceRoot, targetPath) {
   return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
 }
 
+const SENSITIVE_CREDENTIAL_BASENAMES = /^(?:\.+env(?:\.[a-z0-9_-]+)?|\.credentials(?:\.[a-z0-9_-]+)?|\.(?:git-credentials|npmrc|pypirc|netrc))$/i
+const SENSITIVE_CREDENTIAL_FULLPATH = /(?:id_rsa|id_ed25519|id_ecdsa|id_dsa|\.pem$|\.p12$|\.pfx$|credentials\.json$|secrets?\.(?:json|ya?ml)$)/i
+
+function isSensitiveNameOrStream(candidate) {
+  const s = String(candidate || '').trim()
+  if (!s || s === '$DATA') return false
+  const slashNorm = s.replace(/\\/g, '/').toLowerCase()
+  const base = path.basename(slashNorm)
+  if (SENSITIVE_CREDENTIAL_BASENAMES.test(base)) return true
+  if (SENSITIVE_CREDENTIAL_FULLPATH.test(slashNorm)) return true
+  return false
+}
+
+function resolveWithSymlinkTarget(filePath) {
+  const out = []
+  const raw = String(filePath || '').trim()
+  if (!raw) return out
+  out.push(raw)
+  try {
+    const abs = path.resolve(raw)
+    out.push(abs)
+    try {
+      const lst = fs.lstatSync(abs)
+      if (lst.isSymbolicLink()) {
+        const linkTarget = fs.readlinkSync(abs)
+        out.push(linkTarget)
+        out.push(path.resolve(path.dirname(abs), linkTarget))
+      }
+    } catch {}
+    out.push(safeRealpath(abs))
+    const parent = path.dirname(abs)
+    if (fs.existsSync(parent)) {
+      out.push(path.join(safeRealpath(parent), path.basename(abs)))
+    }
+  } catch {}
+  return out
+}
+
 function isSensitiveCredentialPath(filePath) {
-  const base = path.basename(String(filePath || '')).toLowerCase()
-  const normalized = String(filePath || '').replace(/\\/g, '/').toLowerCase()
-  if (base === '.env' || base.startsWith('.env.') || base === '.credentials.yaml' || base.startsWith('.credentials.')) {
-    return true
-  }
-  if (/(?:id_rsa|id_ed25519|id_dsa|\.pem$|\.p12$|\.pfx$|credentials\.json$|secrets?\.(?:json|ya?ml)$)/.test(normalized)) {
-    return true
+  const candidates = resolveWithSymlinkTarget(filePath)
+  for (const cand of candidates) {
+    if (isSensitiveNameOrStream(cand)) return true
+    // Strip Windows drive letter `C:` then inspect any NTFS Alternate Data Streams (`file.txt:.env:$DATA`)
+    const withoutDrive = String(cand || '').replace(/^[a-zA-Z]:(?=[\\/]|$)/, '')
+    if (withoutDrive.includes(':')) {
+      for (const streamPart of withoutDrive.split(':')) {
+        if (isSensitiveNameOrStream(streamPart)) return true
+      }
+    }
   }
   return false
+}
+
+function decodeEncodedPowerShell(command) {
+  const decodedParts = []
+  const raw = String(command || '')
+  const re = /(?:^|\s)-(?:e|ec|en|enc|enco|encod|encode|encoded|encodedc|encodedco|encodedcom|encodedcomm|encodedcomma|encodedcomman|encodedcommand)\s+([A-Za-z0-9+/=]{8,})/gi
+  let m
+  while ((m = re.exec(raw)) !== null) {
+    try {
+      const buf = Buffer.from(m[1], 'base64')
+      for (const enc of ['utf16le', 'utf8']) {
+        const rawTxt = buf.toString(enc)
+        if (/[\x00-\x08\x0e-\x1f\ufffd]/.test(rawTxt)) continue
+        const txt = rawTxt.trim()
+        if (txt.length >= 3 && /^[ -~\t\r\n\u4e00-\u9fff]+$/.test(txt)) {
+          decodedParts.push(txt)
+        }
+      }
+    } catch {}
+  }
+  return decodedParts.join(' ')
+}
+
+function extractCanonicalToolSubcommands(text) {
+  const extras = []
+  const s = String(text || '')
+  const gitValFlags = new Set(['-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--exec-path', '-p', '--paginate'])
+  const gitRe = /\bgit(?:\.exe)?\s+([^\n;|&`]+)/gi
+  let gm
+  while ((gm = gitRe.exec(s)) !== null) {
+    const tokens = gm[1].trim().split(/\s+/).filter(Boolean)
+    let i = 0
+    while (i < tokens.length) {
+      const tok = tokens[i]
+      if (tok === '-C' || gitValFlags.has(tok)) {
+        i += 2
+        continue
+      }
+      if (tok.startsWith('-')) {
+        i += 1
+        continue
+      }
+      break
+    }
+    if (i < tokens.length) {
+      const rest = tokens.slice(i).join(' ')
+      extras.push(`git ${tokens[i]}`, `git ${rest}`)
+    }
+  }
+  const npmRe = /\bnpm(?:\.cmd|\.exe)?\s+([^\n;|&`]+)/gi
+  let nm
+  while ((nm = npmRe.exec(s)) !== null) {
+    const tokens = nm[1].trim().split(/\s+/).filter(Boolean)
+    let i = 0
+    while (i < tokens.length && tokens[i].startsWith('-')) {
+      i += (tokens[i] === '--registry' || tokens[i] === '--tag' || tokens[i] === '--prefix') ? 2 : 1
+    }
+    if (i < tokens.length) {
+      extras.push(`npm ${tokens.slice(i).join(' ')}`)
+    }
+  }
+  return extras.join(' ')
+}
+
+export function normalizeCommandForSecurity(command) {
+  const nfkc = String(command || '').normalize('NFKC')
+  if (!nfkc) return ''
+  const psDecoded = decodeEncodedPowerShell(nfkc)
+  const base = psDecoded ? `${nfkc} ${psDecoded}` : nfkc
+  const concatCollapsed = base.replace(/(['"`])\s*\+\s*\1/g, '')
+  const escapedQuotesUnwrapped = concatCollapsed.replace(/\\(["'`])/g, '$1').replace(/["'`]/g, '')
+  const caretCollapsed = escapedQuotesUnwrapped.replace(/\^([a-zA-Z0-9_.-])/g, '$1')
+  const quoteStripped = concatCollapsed.replace(/["'`]/g, '')
+  const shellUnescaped = caretCollapsed.replace(/\\([ \t!$&()*,.;<>?@[\]^`{|}~])/g, '$1')
+  const spaceCollapsed = shellUnescaped.replace(/\s+/g, ' ').trim()
+  const canonicalTools = [
+    extractCanonicalToolSubcommands(spaceCollapsed),
+    extractCanonicalToolSubcommands(caretCollapsed.replace(/\s+/g, ' ').trim()),
+  ].filter(Boolean).join(' ')
+  return [nfkc, psDecoded, concatCollapsed, quoteStripped, escapedQuotesUnwrapped, caretCollapsed, spaceCollapsed, canonicalTools]
+    .filter(Boolean)
+    .join(' \n ')
 }
 
 const DESTRUCTIVE_COMMAND_PATTERNS = [
@@ -307,26 +430,45 @@ const DESTRUCTIVE_COMMAND_PATTERNS = [
 ]
 
 function isDestructiveShellCommand(command) {
-  const cmd = String(command || '').trim()
-  if (!cmd) return false
-  return DESTRUCTIVE_COMMAND_PATTERNS.some(re => re.test(cmd))
+  const raw = String(command || '').trim()
+  if (!raw) return false
+  const norm = normalizeCommandForSecurity(raw)
+  return DESTRUCTIVE_COMMAND_PATTERNS.some(re => re.test(raw) || re.test(norm))
 }
 
 function commandTouchesSensitiveCredential(command) {
-  const cmd = String(command || '')
-  return /(?:^|[\s"'=/\\])(?:\.env(?:\.[a-z0-9_-]+)?|\.credentials\.(?:ya?ml|json)|id_rsa|id_ed25519|id_dsa|\.pem|\.p12|\.pfx)(?:$|[\s"';&|])/i.test(cmd)
+  const raw = String(command || '')
+  if (!raw.trim()) return false
+  const norm = normalizeCommandForSecurity(raw)
+  const varExpanded = norm
+    .replace(/%[A-Za-z0-9_]+%/g, '/')
+    .replace(/\$env:[A-Za-z0-9_]+/gi, '/')
+    .replace(/\$\{[A-Za-z0-9_]+\}/g, '/')
+  const re = /(?:^|[\s"'=/\\:;>|&])(?:\.+env(?:\.[a-z0-9_-]+)?|\.credentials(?:\.[a-z0-9_-]+)?|\.(?:git-credentials|npmrc|pypirc|netrc)|id_rsa|id_ed25519|id_ecdsa|id_dsa|[a-z0-9_.-]+\.(?:pem|p12|pfx))(?:$|[\s"';&|><)\r\n])/i
+  return re.test(raw) || re.test(norm) || re.test(varExpanded)
 }
 
 /**
  * 无论当前处于何种权限级别（包括 danger-full-access），都坚决守住用户在看板中设定的禁止红线。
  */
-export function checkForbiddenBounds(board, actionDesc = '', commandOrPath = '') {
+export function checkForbiddenBounds(board, actionDesc = '', commandOrPath = '', extraContent = '') {
   const forbidden = [
     ...((board && board.bounds && Array.isArray(board.bounds.forbidden)) ? board.bounds.forbidden : []),
     ...((board && board.pinnedBounds && Array.isArray(board.pinnedBounds.forbidden)) ? board.pinnedBounds.forbidden : []),
   ]
   if (!forbidden.length) return { blocked: false }
-  const haystack = `${actionDesc} ${commandOrPath}`.replace(/\\/g, '/').toLowerCase()
+  const primary = String(commandOrPath || '')
+  const normCmd = normalizeCommandForSecurity(primary)
+  const contentSample = String(extraContent || '').slice(0, 8192).normalize('NFKC')
+  const haystack = [
+    String(actionDesc || ''),
+    primary,
+    primary.replace(/\\/g, '/'),
+    normCmd,
+    normCmd.replace(/\\/g, '/'),
+    contentSample,
+    contentSample.replace(/\\/g, '/'),
+  ].join(' \n ').toLowerCase()
 
   for (const rule of forbidden) {
     const rText = String(rule || '').trim()
@@ -556,17 +698,32 @@ export function getToolOpClass(tool) {
 }
 
 /** 安全卫兵硬性规则：优先于四级权限判定，L3 与逐项放行均不可绕过。 */
-export function evaluateSafetyGuardHardRules({ tool = '', opClass = '', targetPath = '', command = '', board = null } = {}) {
-  if (targetPath && isSensitiveCredentialPath(targetPath)) {
+export function evaluateSafetyGuardHardRules({
+  tool = '',
+  opClass = '',
+  targetPath = '',
+  command = '',
+  content = '',
+  target = '',
+  replacement = '',
+  extraContent = '',
+  args = null,
+  board = null,
+} = {}) {
+  const argObj = args && typeof args === 'object' ? args : {}
+  const resolvedPath = targetPath || (typeof argObj.path === 'string' ? argObj.path : '')
+  const resolvedCommand = command || (typeof argObj.command === 'string' ? argObj.command : (typeof argObj.cmd === 'string' ? argObj.cmd : ''))
+
+  if (resolvedPath && isSensitiveCredentialPath(resolvedPath)) {
     return {
       blocked: true,
       stage: 'safety_guard',
       rule: 'sensitive_credential',
-      reason: `安全卫兵拦截访问敏感凭据文件：${path.basename(targetPath)}`,
+      reason: `安全卫兵拦截访问敏感凭据文件：${path.basename(resolvedPath)}`,
       badge: '🛡️ 卫兵拦凭据',
     }
   }
-  if (command && commandTouchesSensitiveCredential(command)) {
+  if (resolvedCommand && commandTouchesSensitiveCredential(resolvedCommand)) {
     return {
       blocked: true,
       stage: 'safety_guard',
@@ -575,18 +732,34 @@ export function evaluateSafetyGuardHardRules({ tool = '', opClass = '', targetPa
       badge: '🛡️ 卫兵拦凭据命令',
     }
   }
-  if (command && isDestructiveShellCommand(command)) {
+  if (resolvedCommand && isDestructiveShellCommand(resolvedCommand)) {
     return {
       blocked: true,
       stage: 'safety_guard',
       rule: 'destructive_command',
-      reason: `安全卫兵拦截高危毁灭性系统命令：${clamp(command, 80)}`,
+      reason: `安全卫兵拦截高危毁灭性系统命令：${clamp(resolvedCommand, 80)}`,
       badge: '🛡️ 卫兵拦高危命令',
     }
   }
   if (opClass !== 'read' && opClass !== 'elevation_request') {
-    const checkInput = targetPath || command
-    const boundCheck = checkForbiddenBounds(board, tool, checkInput)
+    const checkInput = resolvedPath || resolvedCommand
+    const payloadParts = [
+      content,
+      target,
+      replacement,
+      extraContent,
+      argObj.content,
+      argObj.target,
+      argObj.replacement,
+      argObj.prompt,
+      argObj.message,
+      argObj.text,
+      argObj.body,
+    ]
+      .filter(v => v !== undefined && v !== null && String(v).trim())
+      .map(v => String(v).slice(0, 8192))
+    const mergedExtra = payloadParts.join('\n').slice(0, 12_288)
+    const boundCheck = checkForbiddenBounds(board, tool, checkInput, mergedExtra)
     if (boundCheck.blocked) {
       return {
         blocked: true,
@@ -847,6 +1020,7 @@ export async function executeChiefToolCall(deps, call, execCtx = {}) {
     opClass,
     targetPath: resolvedAbsTarget,
     command: rawCommand,
+    args,
     cwd,
     board,
   })

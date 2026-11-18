@@ -25,7 +25,7 @@
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-> **Nobody watching, nothing breaking: state your intent in the Wishing Box and it runs the whole flow, stopping first if it starts to drift (`v1.2.1`)**  
+> **Nobody watching, nothing breaking: state your intent in the Wishing Box and it runs the whole flow, stopping first if it starts to drift (`v1.3.0`)**  
 > Follows the same shape as DeepSeek's official **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** *Router + Isolated Workers* architecture to keep focus sharp and context clean.
 
 [简体中文 (`README.md`)](README.md) · **English** · [Changelog (`CHANGELOG.md`)](CHANGELOG.md)
@@ -35,6 +35,8 @@
 ---
 
 ## 🔗 Core Highlights Wired Into DSH Runtime
+
+- **Modular Architecture & Concurrency Robustness (`v1.3.0`)**: Split from monolithic files into 29 backend + 16 frontend ES modules with acyclic DAG boundaries, `O_EXCL` spin-locks with Windows NTFS retry (`board-store`, `chief-state`, `archive-core`), fail-closed `guard()`, SHA-256 `payloadHash` approval verification, and append-only `chief-audit.jsonl`.
 
 - **Persistent Router Cockpit**: Unifies the root coordinator, subagents, and linked DSH windows inside one **Full-Spread Pyramid DAG**—zero blind tab switching.
 - **Native Split-Pane Streams (`subagentchat`)**: Click `分屏` on any subagent node to open DSH's native `sidebarRight.openResource` live stream.
@@ -179,10 +181,10 @@ Ordinary Todo plugins give you another scratchpad; always-on memory plugins floo
 Search **`dsh-chief`** inside [dshmarket](https://github.com/dsh-market/dsh-market) / DSH Plugin Market, or install via CLI (replace `desktop` with `web` for web profile):
 
 ```bash
-# Option 1: Install from npm registry (recommended — fastest mirrors + auto-update notices)
+# Option 1: Install the latest v1.3.0 from npm registry (recommended — fastest mirrors + auto-update notices)
 dsh plugin --profile desktop add dsh-chief
 
-# Option 2: Install the latest published GitHub Release tarball (v1.2.1)
+# Option 2: Install archived historical GitHub Release tarball (v1.2.1)
 dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.2.1/dsh-chief-1.2.1.tgz
 
 # Option 3: Install directly from GitHub repository

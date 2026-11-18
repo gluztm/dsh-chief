@@ -25,7 +25,7 @@
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-> **不盯着也不出事：向右侧「✦ 许愿框」许下意图，它自己把流程跑完，跑歪了先拦住（`v1.2.1`）**  
+> **不盯着也不出事：向右侧「✦ 许愿框」许下意图，它自己把流程跑完，跑歪了先拦住（`v1.3.0`）**  
 > 做法对齐 DeepSeek 官方 **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** 的「Router 统筹 + Workers 隔离执行」：把散装聊天窗收成一张常驻指挥台。
 
 **简体中文** · [English (`README.en.md`)](README.en.md) · [更新日志 (`CHANGELOG.md`)](CHANGELOG.md)
@@ -35,6 +35,8 @@
 ---
 
 ## 🔗 与 SuperAgent 及 DSH 原生能力深度联动
+
+- **模块化低耦合架构（`v1.3.0`）**：29 个后端与 16 个前端单一职责模块协同（无环依赖、零可变导出），搭配跨进程/多线程 `O_EXCL` 自旋锁与 `chief-audit.jsonl` 只追加审计账本，兼顾长期可维护性与高并发鲁棒性。
 
 - **常驻指挥中枢**：把主对话、子代理和跨窗独立会话收拢到同一张**全铺开金字塔拓扑图**，不再在十几个黑盒标签页间来回切换。
 - **原生分屏盯流 (`subagentchat`)**：任意子代理卡片点击「`分屏`」，直连 `sidebarRight.openResource` 拉开实时推理流。
@@ -214,10 +216,10 @@ flowchart TB
 在 DSH 已安装 [dshmarket](https://github.com/dsh-market/dsh-market) 后可直接搜索 **`dsh-chief`**（或 **`DSH 参谋长`**）点击安装，也可使用 CLI 一键装入（`web` 环境把 `desktop` 改为 `web`）：
 
 ```bash
-# 方式 1：通过 npm 官方源安装（国内自动走镜像加速，支持后续检测升级）
+# 方式 1：通过 npm 官方源安装最新版（v1.3.0，国内自动走镜像加速，支持后续检测升级）
 dsh plugin --profile desktop add dsh-chief
 
-# 方式 2：直接安装最新已发布 GitHub Release 预构建包（v1.2.1）
+# 方式 2：安装历史归档 GitHub Release 预构建包（v1.2.1 归档快照）
 dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.2.1/dsh-chief-1.2.1.tgz
 
 # 方式 3：通过 GitHub 仓库源码直接安装
