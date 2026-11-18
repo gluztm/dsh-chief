@@ -197,8 +197,8 @@ dsh plugin --profile desktop add dsh-chief
 # 方式 2：从 GitHub 仓库直接安装（与 main 最新代码同步）
 dsh plugin --profile desktop add github:gluztm/dsh-chief
 
-# 方式 3：安装历史归档预构建包（v1.2.1 快照）
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.2.1/dsh-chief-1.2.1.tgz
+# 方式 3：安装 GitHub Release 预构建包（v1.3.0）
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.3.0/dsh-chief-1.3.0.tgz
 ```
 
 装好后重启或刷新 DSH 客户端，点工作区右上角 **✦ `DSH 参谋长`** 图标打开面板。
@@ -230,6 +230,18 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 - **跨进程与多线程文件锁**：`board-store.js`、`chief-state.js`、`archive-core.js` 对每次落盘使用带 `O_EXCL` 和随机抖动重试的文件锁（包含 Windows NTFS 瞬态 `EPERM/EACCES/EBUSY` 重试）以及 `threadId` 唯一临时文件原子替换，并发写入不丢单。
 - **27 条接口同源环回校验**：全部 `/api/dsh-chief/*` 接口先校验 Loopback 来源与 `Origin/Host`，连接守卫异常时 fail-closed 返回 `403`。
 - **凭据防误存与零遥测**：禁止写入 `sk-*`、`ghp_*`、Bearer Token、`AIza*`、`AKIA*` 与私钥片段；一键收纳含疑似密钥的便签会自动脱敏为 `[REDACTED]`。所有状态、档案与审计日志完全留在本地 `~/.dsh/chief/`，零外部依赖，零遥测上报。
+
+---
+
+## 贡献者
+
+| 贡献者 | 主要工作 |
+| --- | --- |
+| [gluztm](https://github.com/gluztm) | 项目发起人、产品定义与长期维护 |
+| [Gemini](https://github.com/gemini-code-assist) | 功能研发、`v1.3.0` 模块化拆分、安全执行器与自动化门禁实现 |
+| [Codex](https://github.com/codex) | 模块化架构设计、高并发压测与红队边界审查 |
+| ChatGPT | 演进路线讨论与架构梳理 |
+| [deepseek-ai](https://github.com/deepseek-ai) | DeepSeek Harness 宿主运行时与 SuperAgent 协同机制支持 |
 
 ---
 

@@ -197,8 +197,8 @@ dsh plugin --profile desktop add dsh-chief
 # Option 2: Install directly from GitHub main branch
 dsh plugin --profile desktop add github:gluztm/dsh-chief
 
-# Option 3: Install archived historical GitHub Release tarball (v1.2.1)
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.2.1/dsh-chief-1.2.1.tgz
+# Option 3: Install prebuilt GitHub Release tarball (v1.3.0)
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.3.0/dsh-chief-1.3.0.tgz
 ```
 
 ### Host Version Compatibility
@@ -226,6 +226,18 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 - **Process & Worker-Thread Lock Safety**: `board-store.js`, `chief-state.js`, and `archive-core.js` serialize mutations with `O_EXCL` spin locks (handling transient Windows NTFS `EPERM`/`EACCES`/`EBUSY` retries) and `threadId`-scoped temporary files before atomic rename.
 - **27 Loopback-Guarded HTTP Routes**: All `/api/dsh-chief/*` endpoints validate local origin/host headers and fail closed (`403`) if connection checks throw.
 - **Secret Protection & Zero Telemetry**: Refuses to persist `sk-*`, `ghp_*`, Bearer tokens, `AIza*`, `AKIA*`, or private keys (auto-redacting to `[REDACTED]` when sweeping temporary notes). All boards, archives, and `chief-audit.jsonl` stay locally under `~/.dsh/chief/`.
+
+---
+
+## Contributors
+
+| Contributor | Role |
+| --- | --- |
+| [gluztm](https://github.com/gluztm) | Creator, product design, and maintainer |
+| [Gemini](https://github.com/gemini-code-assist) | Feature development, `v1.3.0` modular split, safety executor, and CI gates |
+| [Codex](https://github.com/codex) | Modular architecture design, concurrency stress tests, and red-team boundary audits |
+| ChatGPT | Roadmap review and architecture structuring |
+| [deepseek-ai](https://github.com/deepseek-ai) | DeepSeek Harness host runtime and SuperAgent workflow alignment |
 
 ---
 
