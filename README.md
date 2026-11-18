@@ -240,7 +240,6 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 | [gluztm](https://github.com/gluztm) | 项目发起人、产品定义与长期维护 |
 | [Gemini](https://github.com/gemini-code-assist) | 功能研发、`v1.3.0` 模块化拆分、安全执行器与自动化门禁实现 |
 | [Codex](https://github.com/codex) | 模块化架构设计、高并发压测与红队边界审查 |
-| ChatGPT | 演进路线讨论与架构梳理 |
 | [deepseek-ai](https://github.com/deepseek-ai) | DeepSeek Harness 宿主运行时与 SuperAgent 协同机制支持 |
 
 ---
