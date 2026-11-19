@@ -37,23 +37,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ## [1.3.0] - 2026-11-18
 
 ### Added
-- **模块化架构拆分（减少单文件依赖）**：将 4 个超长单体文件拆分为 **29 个后端 ESM 模块 + 16 个前端源码模块**，保持 `index.js`、`chief.js`、`archives.js`、`client.js` 公开导出 100% 兼容，强制零 `export let/var` 可变导出、无环依赖，并配套 `ARCHITECTURE.md`、`scripts/build-client.mjs` 与 `.github/workflows/ci.yml` 双版本 Node (22 / 24) CI 门禁。
-- **授权/提权后自动续跑 (`resumeTasks`)**：用户点击「允许本次操作」或完成提权审批后，按轻量恢复账本（30 分钟 TTL + 最大深度熔断）自动续接未完成的多步参谋任务，拒绝或过期自动取消不空转。
-- **独立只追加审计账本 (`chief-audit.jsonl`)**：所有权限判定、审批放行/拒绝与安全拦截均独立追加落盘至 `chief-audit.jsonl`，不受状态文件截断影响。
-- **顶栏常驻版本号与对话流筛选**：参谋长标题栏常驻展示当前版本徽章（`v1.3.0`）；参谋页支持 **`全部 / 💬 问答 / 📋 回执`** 视觉筛选，并将待定建议收拢至顶部统一「`▶ 执行建议`」批量执行。
 
-### Security
-- **命令与内容安全卫兵归一化**：`chief-executor.js` 在安全检查前统一执行 NFKC 规范化、PowerShell `-EncodedCommand` 解码、引号拼接还原、引号内反斜杠（如 `".\"env`）与 CMD `^` 插入符折叠、以及 `git` / `npm` 子命令提取；`checkForbiddenBounds` 同步覆盖 `write_file` / `edit_file` / 递话参数正文。
-- **凭据路径与 NTFS ADS 拦截**：拦截工作区外越界写入、凭据符号链接及 NTFS Alternate Data Streams（如 `safe.txt:.env`）。
-- **审批快照哈希锁与失败默认拒绝**：待批操作绑定 SHA-256 `payloadHash`，拦截篡改与重放审批并全部记入审计；同源 HTTP `guard()` 检测到连接守卫异常时 fail-closed 返回 `403`。
+#### 🧩 模块化低耦合架构与双版本 CI (`ARCHITECTURE.md` + `build-client.mjs`)
+- **前后端模块化拆分**：将 4 个超长单体文件拆为 **29 个后端模块 + 16 个前端源码模块**，`index.js`、`chief.js`、`archives.js`、`client.js` 公开导出保持 100% 兼容。
+- **静态边界与双版本门禁**：强制零 `export let/var` 可变导出、零循环依赖，新增 GitHub Actions Node `22 / 24` 自动门禁。
+
+#### 🔄 审批续跑、独立审计与对话流筛选 (`chief-executor.js` + `chief-state.js`)
+- **点完允许自动接着跑 (`resumeTasks`)**：点击「允许本次操作」或完成提权后，按 30 分钟 TTL 与深度熔断自动续接未走完的多步任务，拒绝或超时自动取消不空转。
+- **独立只追加审计账本 (`chief-audit.jsonl`)**：权限判定、放行/拒绝与安全拦截统一追加写入 `~/.dsh/chief/chief-audit.jsonl`，不受状态文件截断影响。
+- **顶栏版本号与对话流筛选**：标题栏常驻显示当前版本徽章（`v1.3.0`）；参谋页支持 `全部 / 💬 问答 / 📋 回执` 筛选，待定建议统一收拢至顶部「`▶ 执行建议`」。
 
 ### Changed
-- **存储层并发锁与原子写鲁棒性加固**：`board-store.js`、`chief-state.js`、`archive-core.js` 统一引入跨进程/跨工作线程 `O_EXCL` 自旋锁与 `threadId` 唯一临时文件路径，把 Windows NTFS 瞬态 `EPERM` / `EACCES` / `EBUSY` 纳入随机抖动等待，并对 `fs.renameSync` 增加瞬态重试，消除高并发多线程场景下的丢写风险。
-- **模型上下文窗口异步回写**：`subagent-runtime.js` 兼容同步与异步 `resolveModelInfo` 查询，缓存并及时更新会话 Token 窗口统计。
+- **跨进程与多线程文件锁加固 (`O_EXCL`)**：`board-store.js`、`chief-state.js`、`archive-core.js` 引入 `threadId` 唯一临时文件与 Windows NTFS `EPERM / EACCES / EBUSY` 随机抖动自旋重试，消除高并发丢写。
+- **模型上下文窗口异步回写 (`subagent-runtime.js`)**：兼容同步与异步 `resolveModelInfo` 查询，及时缓存并刷新会话 Token 窗口统计。
 
 ### Fixed
-- **修复关闭右侧面板后每 3.2 秒自动弹回与假 Toggle**：区分首次启动自动挂载与用户手动收起状态，支持底部入口点击真实折叠/展开。
-- **修复档案页「一键收纳入柜」无响应与未刷新**：补齐会话看板、根会话看板与横幅显式指定共享便签三路收纳，自动对疑似密钥串执行 `[REDACTED]` 脱敏入柜，并将最新 `board`、`archives` 与分柜实时计数即时同步至前端状态。
+- **命令与路径安全卫兵反混淆 (`chief-executor.js`)**：检查前统一执行 NFKC 规范化、PowerShell `-EncodedCommand` 解码、引号拼接与 `^` 插入符折叠；拦截越界写入、凭据符号链接与 NTFS ADS 流（如 `safe.txt:.env`）；待批操作绑定 SHA-256 `payloadHash`，同源 `guard()` 异常默认返回 `403`。
+- **修复关闭右侧栏后每 3.2 秒自动弹回**：区分首次启动自动展开与用户手动收起状态，底部入口点击恢复真实折叠/展开（Toggle）。
+- **修复档案页「一键收纳入柜」漏收与不刷新**：补齐会话看板、根会话看板与共享便签三路收纳，疑似密钥自动 `[REDACTED]` 脱敏入柜，并即时同步前端分柜计数。
 
 ## [1.2.1] - 2026-11-17
 
