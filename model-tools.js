@@ -91,6 +91,7 @@ export function createModelTools(deps) {
           'note.remove',
           'note.read',
           'archive.search',
+          'archive.pull',
           'archive.read',
           'archive.save',
           'context.compact',
@@ -107,11 +108,12 @@ export function createModelTools(deps) {
           + 'Use "graph.plan" (or "task.batch") to plan a hierarchical/DAG task graph in one call (supports parentId, blockedBy, owner/subagent, intent, evidence). '
           + 'Use "task.dispatch" to spawn or message a subagent, "team.steer" to steer a subagent, and "mail.send" to relay messages across lead/subagents/sessions. '
           + 'Use "inquiry.reply" (inquiryId, text) whenever you see a priority [INQUIRY #id] from DSH Chief — answer accurately and continue your current work immediately without stopping. '
-          + 'Use "chief.request" (subject, text) to ask DSH Chief for cross-session coordination, permission elevation, or to report exploration & planning results. '
+          + 'Use "chief.request" (subject, text) to ask DSH Chief for cross-session coordination, permission elevation, to report exploration & planning results, or when blocked by an insurmountable guard wall that cannot be bypassed safely. '
           + 'Use "wall.list" (read-only) to inspect currently active persistent guard walls defending high-risk paths/commands. '
           + 'Use "bounds.propose" (field: "forbidden"|"allowed"|"notes", item, reason) when hitting a permission/sandbox/environment wall or summarizing boundaries ("allowed" = 必做事项, "forbidden" = 禁止红线, "notes" = 注意事项) so DSH Chief can request user approval. '
           + 'Use "permission.request" (targetMode: "assistant"|"strategist"|"chief", reason) when requesting higher DSH Chief permission tier from the user. '
-          + 'Session Engineering Archives ("archive.search", "archive.read", "archive.save") access ONLY the current conversation\'s Session Cabinet (never Global Cabinet or unflipped Precipitated cold vault). '
+          + 'Session Engineering Archives ("archive.search", "archive.pull", "archive.read", "archive.save") access ONLY the current conversation\'s Session Cabinet (never Global Cabinet or unflipped Precipitated cold vault). '
+          + 'When you see a hook 🪝 in the digest, call "archive.pull" (with id or title) to read that curated dossier on demand. '
           + 'When Smart Co-Managed Compaction ("✦ 智选") is enabled, call "context.compact" with a concise phase-summary in "text" at clean phase boundaries to ask DSH Chief to harvest details into this session\'s cabinet and compact.',
       },
       tasks: {
@@ -176,10 +178,10 @@ export function createModelTools(deps) {
         enum: ['plan', 'goal'],
         description: 'mode.set: how this board is run. plan = a list of steps being ticked off. goal = one persistent objective steered toward.',
       },
-      id: { type: 'string', description: 'Task id for update/claim/release/remove/dispatch/verify, or archive id for archive.read / archive.save.' },
+      id: { type: 'string', description: 'Task id for update/claim/release/remove/dispatch/verify, or archive id for archive.pull / archive.read / archive.save.' },
       inquiryId: { type: 'string', description: 'Inquiry id (e.g. inq_xxx) when action is "inquiry.reply".' },
       noteId: { type: 'string', description: 'Note id for note.write / note.pin / note.unpin / note.remove; omit to create a new note.' },
-      archiveId: { type: 'string', description: 'Archive dossier id for archive.read / archive.save (on-demand cold archive lookup/update).' },
+      archiveId: { type: 'string', description: 'Archive dossier id for archive.pull / archive.read / archive.save (on-demand session cabinet lookup/pull).' },
       query: { type: 'string', description: 'Keyword query for archive.search (searched only on explicit user demand).' },
       folder: { type: 'string', description: 'Filing cabinet drawer id for archive.search / archive.save (coords / incidents / contracts / ops / plans / inbox).' },
       paperclip: { type: 'string', enum: ['gold', 'silver', 'copper'], description: 'Paperclip importance badge for archive.save ("gold" anchor, "silver" verified, "copper" historical).' },
@@ -268,6 +270,11 @@ export function createModelTools(deps) {
         description: 'mail.send: delivery posture ("steer" cuts into next step boundary, "followup" queues/wakes next turn, "silent" drops into chief inbox for next pre-step).',
       },
       unreadOnly: { type: 'boolean', description: 'mail.inbox: when true, returns only unread messages.' },
+      reasoningEffort: {
+        type: 'string',
+        enum: ['off', 'low', 'medium', 'high', 'xhigh'],
+        description: 'task.dispatch: optional model reasoning effort hint (respects user 🔒 lock).',
+      },
       by: { type: 'string', description: 'Who acts: an agent label or a user name. Defaults to "agent".' },
       session: { type: 'string', description: 'Session id that owns the change; the GUI fills it automatically.' },
       scope: { type: 'string', enum: ['session', 'shared'], description: 'Board to hit. Default "session" = the caller\'s own (or root tree) board; "shared" = the machine-wide anchor board.' },
@@ -304,7 +311,10 @@ export function createModelTools(deps) {
           }
           if (view.archiveItem) {
             const it = view.archiveItem
-            lines.push('📎 archive «' + it.title + '» [' + it.folder + ' · ' + it.paperclip + '] (' + it.id + ')')
+            const hooks = Array.isArray(it.hookKeywords) && it.hookKeywords.length ? ` 🪝[${it.hookKeywords.join(' · ')}]` : ''
+            const pulledTag = Array.isArray(it.leadPulledSessions) && it.leadPulledSessions.length ? ' · 📖 主代理已拉阅' : ''
+            lines.push('📎 archive «' + it.title + '» [' + it.folder + ' · ' + it.paperclip + pulledTag + '] (' + it.id + ')' + hooks)
+            if (it.hookCue) lines.push('hookCue: ' + it.hookCue)
             lines.push('summary: ' + (it.summary || ''))
             for (const pt of Array.isArray(it.points) ? it.points : []) {
               lines.push('  • ' + pt.title + ': ' + (pt.detail || pt.cue || ''))

@@ -108,37 +108,37 @@
   - **安全边界**：仅传递摘要与安全态势，不外泄冷库隐私；脱敏内部诊断噪音。
 
 - **模块**：`chief-archives.js` (L5) & `chief-compaction.js` (L6)
-  - **职责**：`chief-archives.js` 执行 LLM 回合收割、经验沉淀、全局蒸馏与跨窗口递档；`chief-compaction.js` 执行空闲等待、Token 测算、抢救压缩与智能阈值建议。
+  - **职责**：`chief-archives.js` 执行 LLM 回合收割、经验沉淀、全局蒸馏、跨窗口递档与托管模式后台「🌙 梦境漫游」（`runManagedDreamRoam`，仅梳理未织钩草稿/撤下桌面观察项归抽屉与提炼 `hookKeywords`/`hookCue`，不改代码且不回推桌面）；`chief-compaction.js` 执行空闲等待、Token 测算、抢救压缩与智能阈值建议。
   - **允许依赖**：`./archives.js` 门面、L1–L4（L6 可依赖 L5）、`./chief-executor.js`。
   - **禁止依赖**：`chief.js`, L7–L9。
   - **持有状态**：无全局可变锁（防重入依赖 `chief-state`）。
   - **副作用**：写三层档案柜或调用宿主 `/compact` 压缩会话。
-  - **安全边界**：尊重 `archives.js` 0-token 沉淀封存与凭据过滤；压缩前自动落盘防丢记忆。
+  - **安全边界**：尊重 `archives.js` 0-token 冷藏隔离与凭据过滤；压缩前自动落盘防丢记忆。
 
-- **模块**：`chief-commands.js` (L7) & `chief-review.js` (L8) & `chief-approvals.js` (L9)
-  - **职责**：L7 处理自然语言指令编排（`askOrCommandChief`，支持 `_resumeCtx` 授权恢复、`_fromLeadRequest` 主对话直传协办、空白新对话首轮勘探→计划→汇报策略、`inquiries` 优先问询与 `wallProposals` 手搓物理驻墙呈批）、边界浓缩与 `handleLeadDirectRequestToChief`（注册于 `chief-network` 钩子）；L8 处理防抖回合审查、`runTurnReview` 与自动驾驶防空转收工（启动时向 `chief-view.js` 注册 `checkAndStopIdleAutoPilot` 钩子）；L9 处理建议卡片与顶部统一批量执行（`executeBatchSuggestions`，含 `guard_wall` 物理墙落锁）、L2 审批单 `payloadHash` 核验/一次性放行（`handleApprovalDecision`）及提权裁决后自动续跑恢复（`handleElevationDecision`）。
-  - **允许依赖**：遵循严格偏序 DAG（L7→L1..L6 + `./chief-executor.js`；L8→L1..L7；L9→L1..L7 + `./chief-executor.js`；门面 `chief.js` 共 67 项导出）。
-  - **禁止依赖**：反向导入 `./chief.js` 或下层调用上层。
+- **模块**：`chief-commands.js` (L7) & `chief-approvals.js` (L8) & `chief-review.js` (L9)
+  - **职责**：L7 处理自然语言指令编排（`askOrCommandChief`，含双通道主会话档案注入 `executeChiefArchiveInjectionOp`、`effortOps` 跨模型思考强度调控与 `lockedModelEfforts` 用户 `🔒 锁挡` 硬拦截、`inquiries` 优先问询与 `wallProposals` 手搓物理驻墙呈批）、边界浓缩与 `handleLeadDirectRequestToChief`；L8（`chief-approvals.js`）处理建议卡片（含 `archive_op` / `model_effort`）、顶部与一站式批量执行（`executeBatchSuggestions`）、L2 审批单 `payloadHash` 核验/一次性放行（`handleApprovalDecision`）及提权后自动续跑恢复；L9（`chief-review.js`）处理基于 `runMode` (`off`/`patrol`/`managed`) 的回合巡检/托管督导、`runManagedDreamRoam` 触发、`L3 + 强介入` 一站式安全建议收口执行（输出 `'🏁 一站式战报回执'`）与 5 条件自动休眠守护（`checkAndStopIdleAutoPilot`，默认 15 分钟无活动且 0 在途/doing/待批/问询/未归位观察即切回 `off`）。
+  - **允许依赖**：遵循严格单向无环 DAG（`chief-review.js -> chief-approvals.js -> chief-commands.js -> chief-archives.js -> chief-view.js -> chief-models.js -> chief-state.js` + `./chief-executor.js`；门面 `chief.js` 保持严格 67 项导出）。
+  - **禁止依赖**：反向导入 `./chief.js` 或同/下层循环依赖。
   - **持有状态**：`chief-review.js` 唯一持有 `reviewTimers`（Map）与 `lastReviewAtByRoot`（Map）。
   - **副作用**：运行参谋工具循环、入队待审批/提权/物理墙提案卡片、批准并核验 `payloadHash` 后触发单次执行与未超期恢复事务续跑。
-  - **安全边界**：所有工具与命令执行唯一通过 `chief-executor.js`；L2 审批单一次性消费 + SHA-256 `payloadHash` 防篡改，拒绝与重放必入 `auditLog` 及 `chief-audit.jsonl`；自动续跑严格受 `resumeDepth < 2` 与 30 分钟 TTL 约束；`chatTriggered` 触发对话后顺势背景更新摘要（60 秒节流防抖，不阻塞回复）。
+  - **安全边界**：所有工具与命令执行唯一通过 `chief-executor.js`；L2 审批单一次性消费 + SHA-256 `payloadHash` 防篡改，拒绝与重放必入 `auditLog` 及 `chief-audit.jsonl`；自动续跑严格受 `resumeDepth < 2` 与 30 分钟 TTL 约束；`chatTriggered` 触发对话后顺势背景更新摘要（60 秒节流防抖，不阻塞回复）；`resolveModelInfo` 能力自适应与 `lockedModelEfforts` 锁挡一票否决硬约束。
 
 ---
 
 ## 三、三层工程档案系统（`archives.js` + 4 模块）
 
 - **模块**：`archive-core.js` (L1 唯一状态所有者) → `archive-cabinets.js` (L2 柜管理) → `archive-precipitated.js` (L3 冷库) → `archive-dossiers.js` (L4 卷宗业务)
-  - **职责**：`archive-core` 提供路径/锁/缓存/原子写/密钥检测/mutator 钩子槽；`archive-cabinets` 管理多柜注册与 `board.json` 旧数据迁移；`archive-precipitated` 管理沉淀冷库 0-token 封存与跨库调入；`archive-dossiers` 管理普通卷宗 CRUD、Diff、搜索与跨会话复制（加载时注册 mutator 钩子）。
-  - **允许依赖**：严格 `L4 → L3 → L2 → L1` 单向依赖，外部一律导入门面 `./archives.js`。
+  - **职责**：`archive-core` 提供 `DESKTOP_TOKEN_BUDGET = 2400` / `DESKTOP_MAX_ITEMS = 6`、`hookKeywords`/`hookCue`/`hasHook` 归一化、路径/锁/缓存/原子写/密钥检测；`archive-cabinets` 管理多柜注册与旧数据迁移；`archive-precipitated` 管理冷藏冷库 0-token 隔离、人类速览钩子与抽屉归类；`archive-dossiers` 管理三层卷宗 CRUD、谁在看状态计算（`computeArchiveViewerStatus`）、认知桌面预算挤退（入 `recentlyUnpinnedWatch`）、`pullByLead` / `pullByChief` / `markDeliveredToLead` 留痕与跨会话复制。
+  - **允许依赖**：严格 `L4 → L3 → L2 → L1` 单向依赖，外部一律导入门面 `./archives.js`（42 项导出）。
   - **禁止依赖**：任何 `archive-*.js` 反向导入 `./archives.js`、`./chief.js` 或 `./index.js`。
   - **持有状态**：`archive-core.js` 唯一持有 `heldArchiveLocks`（Set）、`archiveCache`（经 getter/setter 访问）、`seq` 与 `archiveMutatorHook`。
   - **副作用**：读写项目级/全局级档案柜 JSON 与 `.lock`。
-  - **安全边界**：`SECRET_PATTERN` 拦截 API Key/Token 落盘；冷库未显式 `flipOut` 恒返回 `[]`（0-token）；`copyPrecipitatedToVault` 必须在 `finally { release() }` 释放冷库锁后才调用目标库写入，彻底杜绝锁序死锁；跨会话复制永不自动泄露冷库内容。
+  - **安全边界**：`SECRET_PATTERN` 拦截 API Key/Token 落盘；主对话 `digest` 禁止注入未织钩草稿、全局柜、与未人工翻牌冷库（仅认知桌面置顶全文 + 本局已织钩轻量 `🪝` 索引）；冷库未显式 `flipOut` 恒返回 `[]`（0-token）；`copyPrecipitatedToVault` 必须在 `finally { release() }` 释放冷库锁后才写目标库；所有桌面置顶遵循 `session -> global` 锁序。
 
 ---
 
 ## 四、客户端 ES Module 架构（`pkg/src/client/` 16 模块 → `pkg/client.js`）
 
-- **分层结构**：`react-runtime.js` / `constants.js` (L0 常量与宿主桥) → `store.js` (L1 **唯一可变状态所有者**：`store`, `listeners`, `SESSION_SOURCES`, `runtimeRefs`) → `utils.js` (L2 纯工具) → `api.js` (L3 HTTP 通信与会话切换状态清理) / `styles.js` (L3 CSS) → `components/common.js` / `modals.js` (L4 通用组件与 14 个安全弹窗) → `tabs/*.js` (L5 6 个业务页签) → `components/Panel.js` (L6 主面板与 8 插槽外壳) → `entry.js` (L7 `createClientPlugin()` 入口)。
+- **分层结构**：`react-runtime.js` / `constants.js` (L0 常量与宿主桥) → `store.js` (L1 **唯一可变状态所有者**：`store`, `listeners`, `SESSION_SOURCES`, `runtimeRefs`) → `utils.js` (L2 纯工具) → `api.js` (L3 HTTP 通信与会话切换状态清理) / `styles.js` (L3 CSS，含 `data-tone="dream"` 毛玻璃与 `.dnb-paper-dossier` 动态俯视纸质卡) → `components/common.js` / `modals.js` (L4 通用组件与弹窗) → `tabs/*.js` (L5 6 个业务页签) → `components/Panel.js` (L6 主面板顶栏正交三态切换与 8 插槽外壳) → `entry.js` (L7 `createClientPlugin()` 入口)。
 - **构建与禁忌**：由零依赖拓扑排序打包器 [build-client.mjs](file:///D:/Agents%20WorkSpace/DSH-Data/WorkShop/notebook-panel/pkg/scripts/build-client.mjs) 输出单文件 `pkg/client.js`（`window.__ModuleLoader__.load({ id: 'dsh-chief' })`）；严禁新增跨模块 `export let` 重新赋值，严禁跳过 `npm run build:client`。
-- **界面版本徽章与控制交互**：参谋长面板标题栏（`components/Panel.js` `.dnb-ver-chip`）常驻显示 `v1.4.0`；`SuggestionBanner` 顶部提供唯一「▶ 执行建议」入口并区隔问答/回执样式（`tabs/chief.js`）；右下角与输入栏触发按钮采用真 Toggle 与启动单次引导（`store.js`/`entry.js`），手动关闭后绝不自动弹回。发版前打包脚本将强校验 `package.json`、`board-schema.js`（`BACKEND_BUILD`）与 `src/client/constants.js`（`EXPECTED_BACKEND_BUILD`）三端一致。
+- **界面版本徽章与控制交互**：参谋长面板标题栏（`components/Panel.js` `.dnb-ver-chip`）常驻显示 `v1.5.0`；顶部正交运行模式切换为 `⏸ 关停 | 🛡 巡检 | 🤖 托管`；档案页常驻置顶认知桌面进度条与三层可折叠纸质卷宗卡（折叠态仅显标题+关键词钩子+谁在看徽章，点击展开）；参谋回复卡右上显示思考挡位角标，驾驶舱与模型选择器搭载 `180°` 扇形思考强度表盘与团队思考强度「自动 / 手动」切换；流光毛玻璃舞台支持鼠标单击立即收起遮罩恢复面板操作，并保持彩色流光外框提示后台仍在运作；`package.json`、`board-schema.js`（`BACKEND_BUILD`）与 `src/client/constants.js`（`EXPECTED_BACKEND_BUILD`）三端强制同源为 `1.5.0`。

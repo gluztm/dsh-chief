@@ -13,11 +13,16 @@ import {
   STATUS_BG,
   TABS,
   DOCK_POLL_MS,
+  RUN_MODE_OPTIONS,
+  THINKING_EFFORT_OPTIONS,
 } from '../constants.js'
 import {
   store,
   patch,
+  subscribe,
   useStore,
+  service,
+  isSubagentSessionId,
   focusObjectiveInPyramid,
   selectPanel,
   rightbarExpanded,
@@ -33,6 +38,7 @@ import {
   shortModelName,
   fullModelWithChannel,
   isInternalProbeName,
+  sessionIdFromUrl,
 } from '../utils.js'
 import {
   loadChiefView,
@@ -70,37 +76,65 @@ import { ChiefTab, ChiefComposerBar } from '../tabs/chief.js'
 import { PeersTab } from '../tabs/peers.js'
 
 function ChiefWorkStageOverlay({ fx }) {
-  if (!fx || !fx.label) return null
+  const fxKey = fx && fx.label ? String(fx.token || fx.id || (fx.tone || 'neon') + ':' + String(fx.label)) : ''
+  const [dismissedKey, setDismissedKey] = React.useState('')
+  React.useEffect(() => {
+    if (!fxKey && dismissedKey) setDismissedKey('')
+  }, [fxKey, dismissedKey])
+  if (!fxKey) return null
+  const stageDismissed = dismissedKey === fxKey
   const tone = fx.tone || 'neon'
   const chars = Array.from(String(fx.label))
   return h(
     React.Fragment,
     null,
-    h('div', { className: 'dnb-chief-fx-border', 'data-tone': tone, 'aria-hidden': true }),
-    h(
-      'div',
-      { className: 'dnb-chief-fx-stage', 'data-tone': tone, role: 'status', 'aria-live': 'polite' },
-      h(
-        'div',
-        { className: 'dnb-chief-fx-pill' },
-        h('span', { className: 'dnb-chief-fx-ring', 'aria-hidden': true }),
-        h(
+    h('div', {
+      className: 'dnb-chief-fx-border',
+      'data-tone': tone,
+      'data-dismissed': stageDismissed ? '1' : '0',
+      'aria-hidden': true,
+    }),
+    !stageDismissed
+      ? h(
           'div',
-          { className: 'dnb-chief-fx-text' },
-          chars.map((ch, idx) =>
+          {
+            className: 'dnb-chief-fx-stage',
+            'data-tone': tone,
+            role: 'status',
+            'aria-live': 'polite',
+            title: '点击任意处解除毛玻璃遮罩，恢复操作（外框流光表示参谋长仍在运作）',
+            onClick: e => {
+              e.stopPropagation()
+              setDismissedKey(fxKey)
+            },
+          },
+          h(
+            'div',
+            { className: 'dnb-chief-fx-pill' },
+            h('span', { className: 'dnb-chief-fx-ring', 'aria-hidden': true }),
             h(
-              'span',
-              {
-                key: idx,
-                className: 'dnb-wave-char',
-                style: { '--char-i': idx },
-              },
-              ch === ' ' ? '\u00A0' : ch,
+              'div',
+              { className: 'dnb-chief-fx-text' },
+              chars.map((ch, idx) =>
+                h(
+                  'span',
+                  {
+                    key: idx,
+                    className: 'dnb-wave-char',
+                    style: { '--char-i': idx },
+                  },
+                  ch === ' ' ? '\u00A0' : ch,
+                ),
+              ),
             ),
           ),
-        ),
-      ),
-    ),
+          h(
+            'div',
+            { className: 'dnb-chief-fx-hint' },
+            '点击任意处收起遮罩继续操作 · 外框流光表示仍在运作',
+          ),
+        )
+      : null,
   )
 }
 
@@ -188,7 +222,11 @@ function PanelInner(props) {
       h(
         'div',
         { className: 'dnb-head', style: { position: 'relative' } },
-        h('span', { className: 'dnb-title', style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
+        h('span', {
+          className: 'dnb-title',
+          style: { display: 'inline-flex', alignItems: 'center', gap: 5 },
+          title: `${BRAND_NAME} v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? (view.staleBackendDetected ? `（宿主内存后端仍为 v${meta.backendBuild}，重载后同步）` : '（前后端已同步）') : ''}${view.sessionId ? ` · 会话 ${shortSession(view.sessionId)}` : ''}`,
+        },
           h(Icon, { name: 'sparkles', size: 14, style: { color: 'var(--dnb-accent)' } }),
           BRAND_NAME,
         ),
@@ -198,10 +236,7 @@ function PanelInner(props) {
           title: view.staleBackendDetected
             ? `前端面板 v${EXPECTED_BACKEND_BUILD} · 宿主内存后端仍为 v${meta.backendBuild || '旧版'}（重载插件或重启客户端后同步）`
             : `DSH 参谋长版本：v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? '（前后端已同步）' : ''}`,
-        }, 'v' + EXPECTED_BACKEND_BUILD),
-        view.sessionId
-          ? h('span', { className: 'dnb-session-chip' }, shortSession(view.sessionId))
-          : null,
+        }, view.staleBackendDetected ? `旧后端 · v${EXPECTED_BACKEND_BUILD}` : ('v' + EXPECTED_BACKEND_BUILD)),
         meta.linkedPeersCount > 0
           ? h('button', {
               className: 'dnb-head-pill',
@@ -232,30 +267,44 @@ function PanelInner(props) {
           }, (() => {
             const cat = view.secModelsCatalog || (view.secView && view.secView.models) || null
             const eff = meta.modelRef || meta.resolvedModelRef || meta.followModelRef || ''
-            if (!eff) return '✦ 自动跟随'
-            const tag = shortModelName(eff, cat, true)
-            return meta.modelRef ? '✦ ' + tag : '✦ 跟随·' + clampTitle(tag, 15)
+            const effortKey = meta.thinkingEffort || 'auto'
+            const effortOpt = THINKING_EFFORT_OPTIONS.find(x => x.key === effortKey)
+            const effBadge = effortOpt ? effortOpt.shortLabel : '🪄 自动'
+            const tag = eff ? clampTitle(shortModelName(eff, cat, true), 14) : '自动'
+            return `${tag} · ${effBadge}`
           })()),
-          h('button', {
-            className: 'dnb-head-pill',
-            'data-pilot': (meta.paceMode === 'auto') ? '1' : '0',
-            style: meta.paceMode === 'stopped'
-              ? { borderColor: 'rgba(255, 69, 58, 0.52)', color: '#ff6961', background: 'rgba(255, 69, 58, 0.10)' }
-              : (meta.paceMode === 'smart'
-                  ? { borderColor: 'rgba(10, 132, 255, 0.38)', color: 'var(--dnb-accent)' }
-                  : undefined),
-            title: (() => {
-              const pm = meta.paceMode || 'manual'
-              if (pm === 'stopped') return '当前节奏：已停止参谋长（强介入、空转监控与断线续跑已全部暂停 · 点击切换恢复）'
-              if (pm === 'auto') return '当前节奏：全自动托管（节流自动巡检、递话与摘要 · 点击切换节奏）'
-              if (pm === 'smart') return '当前节奏：关键巡检（仅撞墙/阶段节点节流巡检，摘要按需手动 · 点击切换节奏）'
-              return '当前节奏：按需手动（后台零自动总结，省 Token 不空转 · 点击切换节奏）'
-            })(),
-            onClick: () => patch({ secPaceMenuOpen: !view.secPaceMenuOpen, secModelMenuOpen: false, secPermMenuOpen: false }),
-          },
-            meta.paceMode === 'auto' ? h(Icon, { name: 'bolt', size: 11 }) : null,
-            meta.paceMode === 'stopped' ? '⏹ 已停' : (meta.paceMode === 'auto' ? '托管' : (meta.paceMode === 'smart' ? '👁 巡检' : '⏸ 按需')),
-          ),
+          (() => {
+            const curRunMode = meta.stopped
+              ? 'off'
+              : (meta.runMode && ['off', 'patrol', 'managed'].includes(meta.runMode)
+                  ? meta.runMode
+                  : (meta.paceMode === 'auto' ? 'managed' : (meta.paceMode === 'smart' ? 'patrol' : 'off')))
+            return h(
+              'div',
+              { className: 'dnb-run-mode-pill', role: 'group', 'aria-label': '参谋运行模式' },
+              RUN_MODE_OPTIONS.map(opt =>
+                h('button', {
+                  key: opt.key,
+                  type: 'button',
+                  className: 'dnb-run-mode-btn',
+                  'data-active': curRunMode === opt.key ? '1' : '0',
+                  'data-rm': opt.key,
+                  title: opt.hint,
+                  onClick: () => {
+                    if (opt.key === 'managed' && curRunMode !== 'managed') {
+                      patch({ autoPilotConfirmOpen: true, secPaceMenuOpen: false })
+                      return
+                    }
+                    patch({ secPaceMenuOpen: false })
+                    void updateSecConfig({
+                      runMode: opt.key,
+                      ...(opt.key === 'off' ? { paceMode: 'manual', autoPilot: false } : {}),
+                    })
+                  },
+                }, opt.shortLabel),
+              ),
+            )
+          })(),
           h('button', {
             className: 'dnb-icon-btn',
             'data-active': view.searchOpen ? '1' : '0',
@@ -483,14 +532,46 @@ export function Panel(props) {
 
 /* -------------------------------------------------- Session & Triggers */
 
+function useIsSubagentSession(sessionId) {
+  const [isSub, setIsSub] = React.useState(isSubagentSessionId(sessionId))
+  React.useEffect(() => {
+    const check = () => {
+      const next = isSubagentSessionId(sessionId)
+      setIsSub(prev => (prev === next ? prev : next))
+    }
+    check()
+    const unsubStore = subscribe(check)
+    const sessions = service('sessions')
+    let unsubSessions = null
+    try {
+      if (sessions && sessions.list && typeof sessions.list.subscribe === 'function') {
+        unsubSessions = sessions.list.subscribe(check)
+      } else if (sessions && typeof sessions.subscribe === 'function') {
+        unsubSessions = sessions.subscribe(check)
+      }
+    } catch {}
+    return () => {
+      unsubStore()
+      if (typeof unsubSessions === 'function') {
+        try { unsubSessions() } catch {}
+      }
+    }
+  }, [sessionId])
+  return isSub
+}
+
 export function SessionProbe(props) {
   const sessionId = props && props.sessionId ? String(props.sessionId) : ''
   const inputActions = props ? props.inputActions : null
+  const isSubagent = useIsSubagentSession(sessionId)
   React.useEffect(() => {
-    if (!sessionId) return undefined
+    if (!sessionId || isSubagent) {
+      adoptSession('header', '')
+      return undefined
+    }
     adoptSession('header', sessionId, inputActions)
     return () => adoptSession('header', '')
-  }, [sessionId, inputActions])
+  }, [sessionId, inputActions, isSubagent])
   return null
 }
 
@@ -563,19 +644,26 @@ function TriggerButton(props) {
 export function ComposerEntry(props) {
   const sessionId = props && props.sessionId ? String(props.sessionId) : ''
   const inputActions = props ? props.inputActions : null
+  const isSubagent = useIsSubagentSession(sessionId)
   React.useEffect(() => {
-    if (!sessionId) return undefined
+    if (!sessionId || isSubagent) {
+      adoptSession('composer', '')
+      return undefined
+    }
     adoptSession('composer', sessionId, inputActions)
     return () => adoptSession('composer', '')
-  }, [sessionId, inputActions])
+  }, [sessionId, inputActions, isSubagent])
+  if (isSubagent) return null
   return h(React.Fragment, null, h(Style, null), h(TriggerButton, { compact: true }))
 }
 
 export function CornerTrigger() {
   const view = useStore()
   const dockShown = useDockShown()
+  const urlSid = sessionIdFromUrl()
+  const isSubagent = useIsSubagentSession(urlSid)
   const showing = view.open || view.panel === SIDE_ID || dockShown
-  if (showing) return null
+  if (showing || isSubagent) return null
   return h(
     'button',
     {
@@ -617,6 +705,7 @@ export function MainPanel() {
 
 export function SidebarChiefTab(props) {
   const sessionId = props && props.sessionId ? String(props.sessionId) : ''
+  const isSubagent = useIsSubagentSession(sessionId)
   React.useEffect(() => {
     runtimeRefs.dockMountCount += 1
     patch({ dock: true })
@@ -626,9 +715,12 @@ export function SidebarChiefTab(props) {
     }
   }, [])
   React.useEffect(() => {
-    if (!sessionId) return undefined
+    if (!sessionId || isSubagent) {
+      adoptSession('dock', '')
+      return undefined
+    }
     adoptSession('dock', sessionId, null)
     return () => adoptSession('dock', '')
-  }, [sessionId])
+  }, [sessionId, isSubagent])
   return h('div', { className: 'dnb-page dnb-dock-page' }, h(Panel, { variant: 'dock' }))
 }

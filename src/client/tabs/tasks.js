@@ -1486,9 +1486,13 @@ export function TasksTab({ board }) {
                     flexShrink: 0,
                   },
                 }),
+            h(Icon, { name: 'agentSub', size: 12, style: { color: '#34d399', flexShrink: 0 } }),
             h('span', {
               style: { fontWeight: 700, fontSize: 13, color: 'var(--dnb-text)', wordBreak: 'break-all' },
             }, '@' + shortAgentName(agentObj.name, tier > 1)),
+            agentObj.reasoningEffort
+              ? h('span', { className: 'dnb-chat-effort-badge', style: { fontSize: 9.5 } }, `🧠${agentObj.reasoningEffort}`)
+              : null,
           ),
           h(
             'span',
@@ -1735,7 +1739,12 @@ export function TasksTab({ board }) {
                 h(
                   'div',
                   { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-                  h('span', { style: { fontWeight: 700, fontSize: 12.8, color: 'var(--dnb-text)' } }, '📋 主代理直管阶段'),
+                  h(
+                    'span',
+                    { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 12.8, color: 'var(--dnb-text)' } },
+                    h(Icon, { name: 'agentLead', size: 12.5, style: { color: '#60a5fa', flexShrink: 0 } }),
+                    '主代理直管阶段',
+                  ),
                   h('span', { className: 'dnb-tag', style: { fontSize: 10.5 } }, `${leadDirectRoots.length} 项任务`),
                 ),
                 h(
@@ -2491,26 +2500,25 @@ export function TasksTab({ board }) {
               )
             : null,
 
-          // Open Status Filter Strip (all options laid out!)
+          // Minimal Text Status Filter Strip
           allTasks.length > 0
             ? h(
                 'div',
-                { style: { display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center', marginBottom: 8 } },
+                { className: 'dnb-text-filter-bar', style: { marginBottom: 6 } },
                 STATUS_FILTERS.map(f =>
                   h(
                     'button',
                     {
                       key: f.key,
                       type: 'button',
-                      className: 'dnb-pill',
+                      className: 'dnb-text-filter-btn',
                       'data-active': statusFilter === f.key ? '1' : '0',
-                      style: { height: 24, padding: '0 8.5px', fontSize: 11 },
                       onClick: () => patch({ taskStatusFilter: f.key }),
                     },
                     f.key === 'doing' && doingTotal > 0
-                      ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8.5px', color: '#409cff' } })
+                      ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#409cff' } })
                       : f.color
-                        ? h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: f.color } })
+                        ? h('span', { style: { width: 5.5, height: 5.5, borderRadius: '50%', background: f.color } })
                         : null,
                     `${f.label} ${f.count}`,
                   ),
@@ -2520,11 +2528,11 @@ export function TasksTab({ board }) {
                       'button',
                       {
                         type: 'button',
-                        className: 'dnb-pill',
-                        style: { height: 24, padding: '0 8px', fontSize: 11, color: 'var(--dnb-text-3)' },
+                        className: 'dnb-text-filter-btn',
+                        style: { marginLeft: 'auto' },
                         onClick: () => patch({ taskStatusFilter: 'all', filterAgent: '', focusTaskId: '' }),
                       },
-                      '重置筛选 ×',
+                      '重置 ×',
                     )
                   : null,
               )
@@ -2555,7 +2563,7 @@ export function TasksTab({ board }) {
                   'data-active': viewMode === 'canvas' ? '1' : '0',
                   title: '可自由缩放的全景 SVG 画布',
                   onClick: () => patch({ taskViewMode: 'canvas' }),
-                }, '缩放画布'),
+                }, '画布'),
                 h('button', {
                   type: 'button',
                   className: 'dnb-seg-btn',

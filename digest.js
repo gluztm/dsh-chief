@@ -325,13 +325,16 @@ function linkedPeersLines(extras, limit = 4) {
 
 function takenOutArchiveLines(extras, limit, budget) {
   const taken = extras && Array.isArray(extras.takenOutArchives) ? extras.takenOutArchives : []
-  const briefs = extras && Array.isArray(extras.sessionArchiveBriefs) ? extras.sessionArchiveBriefs : []
-  if (!taken.length && !briefs.length) return []
+  const hooks = extras && Array.isArray(extras.sessionHookedArchives) ? extras.sessionHookedArchives : []
+  if (!taken.length && !hooks.length) return []
   const linesOut = []
+  const total = Number.isFinite(budget) ? Math.max(220, budget) : ANCHOR_BUDGET
   if (taken.length) {
-    const shown = taken.slice(0, limit || 4)
-    const header = '📌 当前摆上桌面备选（重点强调，主模型与参谋长共同关注） ' + taken.length + ' 份:'
-    const total = Number.isFinite(budget) ? Math.max(200, budget) : ANCHOR_BUDGET
+    const shown = taken.slice(0, limit || 6)
+    const tokLabel = Number.isFinite(Number(extras && extras.desktopUsedTokens)) && Number(extras.desktopUsedTokens) > 0
+      ? ` · ${Number(extras.desktopUsedTokens)}/2400 Tokens`
+      : ''
+    const header = `📌 桌面在读档案（主代理与参谋同看 · 唯一正文注入源 · ${taken.length} 份${tokLabel}）:`
     const build = perItem =>
       [header].concat(
         shown.map(item => {
@@ -348,10 +351,16 @@ function takenOutArchiveLines(extras, limit, budget) {
     }
     linesOut.push(...lines)
   }
-  if (briefs.length) {
-    const idxText = briefs.slice(0, 6).map(b => `《${clamp(b.title || '未命名', 28)}》`).join('、')
-    const more = briefs.length > 6 ? ` 等共 ${briefs.length} 份` : ''
-    linesOut.push(`🗂️ 本会话档案柜封存索引：${idxText}${more}（按需调用 chief_board({ action: "archive.search" }) 检索）`)
+  if (hooks.length) {
+    const shownHooks = hooks.slice(0, 6)
+    linesOut.push('🪝 本局档案柜可用钩子（参谋已整理 · 需看正文请调 chief_board({ action: "archive.pull", id: "档案ID" }) 拉出）：')
+    for (const hItem of shownHooks) {
+      const kws = Array.isArray(hItem.hookKeywords) && hItem.hookKeywords.length
+        ? ' ' + hItem.hookKeywords.slice(0, 4).map(k => '#' + clamp(k, 14)).join(' ')
+        : ''
+      const cue = hItem.hookCue ? ' — ' + clamp(hItem.hookCue, 34) : ''
+      linesOut.push(`  · [${hItem.id}] 《${clamp(hItem.title || '未命名', 30)}》${kws}${cue}`)
+    }
   }
   return linesOut
 }

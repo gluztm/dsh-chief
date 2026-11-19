@@ -10,7 +10,7 @@ export const SIDE_ID = 'dsh-chief'
 
 export const BRAND_NAME = 'DSH 参谋长'
 
-export const EXPECTED_BACKEND_BUILD = '1.4.0'
+export const EXPECTED_BACKEND_BUILD = '1.5.0'
 
 export const CHIEF_PERMISSION_LABELS = {
   advisor: 'L0 · 顾问模式',
@@ -25,6 +25,21 @@ export const INTERVENTION_TIER_DESC = {
   strategist: 'L2 参谋档：自动分析并生成关键动作（工作区改动/递话/压缩），逐项弹窗授权后才执行',
   chief: 'L3 参谋长档：高自主闭环督导（直控主对话/子代理、纠偏、压缩与续跑），含防死循环熔断',
 }
+
+export const RUN_MODE_OPTIONS = [
+  { key: 'off', label: '⏸ 关停', shortLabel: '⏸ 关停', hint: '0 后台消耗，仅显式 Q&A / 按钮触发；禁止自动巡检、梦境漫游或断线续跑' },
+  { key: 'patrol', label: '🛡 巡检', shortLabel: '🛡 巡检', hint: '常规回合 0 Token；仅在阻墙拦截/异常/断流时精准唤醒，支持 Auto continue' },
+  { key: 'managed', label: '🤖 托管', shortLabel: '🤖 托管', hint: '持续后台监工 + 🌙 梦境漫游整理卷宗织钩子 + 15 分钟 5 条件自动休眠' },
+]
+
+export const THINKING_EFFORT_OPTIONS = [
+  { key: 'auto', label: '🪄 自适应', shortLabel: '🪄 自动', badge: '🪄 自动换挡', hint: '按当前任务复杂度自动升降挡（摘要/梦境漫游→关，诊断/筑墙→高/极高）' },
+  { key: 'off', label: '⚡ 关闭思考', shortLabel: '⚡ 关', badge: '⚡ 关闭思考', hint: '极速低延迟文本输出，不开深度推理链' },
+  { key: 'low', label: '🔅 低强度', shortLabel: '🔅 低', badge: '🔅 低思考', hint: '轻量校验与一般问答' },
+  { key: 'medium', label: '⚖️ 中强度', shortLabel: '⚖️ 中', badge: '⚖️ 中思考', hint: '日常均衡推理与复盘' },
+  { key: 'high', label: '🔥 高强度', shortLabel: '🔥 高', badge: '🔥 高思考', hint: '复杂排障、筑墙、强介入与经验沉淀' },
+  { key: 'xhigh', label: '🧠 极高强度', shortLabel: '🧠 极高', badge: '🧠 极高思考', hint: '多边界碰撞、紧急危情诊断与全局深推演' },
+]
 
 export const STATUSES = ['todo', 'doing', 'blocked', 'done']
 

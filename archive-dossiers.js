@@ -9,6 +9,8 @@ import {
   POINTS_CAP,
   SECRET_PATTERN,
   DEFAULT_ARCHIVE_FOLDERS,
+  DESKTOP_TOKEN_BUDGET,
+  DESKTOP_MAX_ITEMS,
   nextId,
   str,
   clamp,
@@ -23,6 +25,10 @@ import {
   normalizeFolder,
   normalizePoint,
   normalizeTags,
+  normalizeSessionIdList,
+  normalizeDesktopMeta,
+  estimateArchiveTokens,
+  deriveHookFromStructuredItem,
   normalizeArchiveItem,
   normalizeGlobalVaultEntry,
   firstMeaningfulSentence,
@@ -252,6 +258,111 @@ export function getThreeTierArchiveCounts(rootSessionId = '', flippedIds = [], t
   }
 }
 
+export function computeArchiveViewerStatus(item, sid = '', vaultScope = 'session') {
+  const takenOut = Boolean(sid && Array.isArray(item?.takenOutSessions) && item.takenOutSessions.includes(sid))
+  if (takenOut) {
+    return {
+      code: 'on_desktop',
+      tone: 'amber',
+      label: vaultScope === 'global'
+        ? '📌 桌面在读(全局调入) · 主代理与参谋同看'
+        : '📌 桌面在读 · 主代理与参谋同看',
+    }
+  }
+  if (vaultScope === 'global') {
+    if (sid && Array.isArray(item?.chiefDeliveredSessions) && item.chiefDeliveredSessions.includes(sid)) {
+      return { code: 'global_delivered', tone: 'cyan', label: '📨 参谋已递交本局主代理' }
+    }
+    if (sid && (
+      (Array.isArray(item?.chiefMountedSessions) && item.chiefMountedSessions.includes(sid))
+      || (Array.isArray(item?.chiefPulledSessions) && item.chiefPulledSessions.includes(sid))
+    )) {
+      return { code: 'chief_reading', tone: 'accent', label: '👁️ 参谋参阅中' }
+    }
+    if (item?.hasHook) {
+      return { code: 'global_hooked', tone: 'purple', label: '🪝 参谋见钩可拉（主会话隔离）' }
+    }
+    return { code: 'human_only', tone: 'muted', label: '🔒 仅人类可见（待整理织钩）' }
+  }
+  if (sid && Array.isArray(item?.leadPulledSessions) && item.leadPulledSessions.includes(sid)) {
+    return { code: 'lead_pulled', tone: 'emerald', label: '📖 主代理已拉阅 · 参谋可读' }
+  }
+  if (sid && Array.isArray(item?.chiefDeliveredSessions) && item.chiefDeliveredSessions.includes(sid)) {
+    return { code: 'chief_delivered', tone: 'cyan', label: '📨 参谋已递交主代理 · 参谋可读' }
+  }
+  if (item?.hasHook) {
+    return { code: 'session_hooked', tone: 'teal', label: '🪝 主代理见钩可拉 · 参谋可读' }
+  }
+  return { code: 'chief_only', tone: 'blue', label: '👁️ 仅参谋可读（待整理织钩）' }
+}
+
+function buildDesktopSummary(sid, sessionStore, globalStore) {
+  const pinnedDocuments = []
+  if (sid) {
+    const pushDesk = (items, scope) => {
+      for (const it of (Array.isArray(items) ? items : [])) {
+        if (!Array.isArray(it.takenOutSessions) || !it.takenOutSessions.includes(sid)) continue
+        const meta = (it.desktopMeta && it.desktopMeta[sid]) || {}
+        pinnedDocuments.push({
+          id: it.id,
+          title: it.title,
+          summary: it.summary,
+          folder: it.folder,
+          paperclip: it.paperclip,
+          vaultScope: scope,
+          tags: it.tags || [],
+          hasHook: Boolean(it.hasHook),
+          hookKeywords: Array.isArray(it.hookKeywords) ? it.hookKeywords : [],
+          hookCue: it.hookCue || '',
+          estimatedTokens: estimateArchiveTokens(it),
+          pinnedAt: Number(meta.pinnedAt) || Number(it.updatedAt) || 0,
+          pinnedBy: meta.by || 'user',
+          viewerStatus: computeArchiveViewerStatus(it, sid, scope),
+          points: Array.isArray(it.points) ? it.points : [],
+        })
+      }
+    }
+    if (sessionStore && !sessionStore.unboundSession) pushDesk(sessionStore.items, 'session')
+    if (globalStore) pushDesk(globalStore.items, 'global')
+  }
+  pinnedDocuments.sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0))
+  const usedTokens = pinnedDocuments.reduce((acc, it) => acc + (Number(it.estimatedTokens) || 0), 0)
+  return {
+    pinnedDocuments,
+    usedTokens,
+    tokenBudget: DESKTOP_TOKEN_BUDGET,
+    maxItems: DESKTOP_MAX_ITEMS,
+    usagePct: Math.min(100, Math.round((usedTokens / DESKTOP_TOKEN_BUDGET) * 100)),
+    recentlyUnpinnedWatch: (sessionStore && Array.isArray(sessionStore.recentlyUnpinnedWatch))
+      ? sessionStore.recentlyUnpinnedWatch
+      : [],
+  }
+}
+
+function buildPrecipitatedFolderMeta(precipList = []) {
+  const counts = {}
+  const golds = {}
+  const folderMap = new Map(DEFAULT_ARCHIVE_FOLDERS.map(f => [f.id, { ...f }]))
+  for (const p of (Array.isArray(precipList) ? precipList : [])) {
+    if (!p) continue
+    const fid = str(p.folder, 'ops').trim() || 'ops'
+    counts[fid] = (counts[fid] || 0) + 1
+    if (p.paperclip === 'gold') golds[fid] = (golds[fid] || 0) + 1
+    if (!folderMap.has(fid)) {
+      folderMap.set(fid, {
+        id: fid,
+        label: clamp(fid, 40),
+        hint: '冷藏沉淀分类抽屉',
+        accent: '#f59e0b',
+        order: 65,
+      })
+    }
+  }
+  return [...folderMap.values()]
+    .sort((a, b) => (a.order || 99) - (b.order || 99))
+    .map(f => ({ ...f, count: counts[f.id] || 0, goldCount: golds[f.id] || 0 }))
+}
+
 /**
  * Tier-1 Lazy Load (`GET /api/dsh-chief/archives`):
  * - `scope === 'global'`: reads standalone System Global Cold Vault (`global-vault/vault-chief-global.json`),
@@ -306,6 +417,8 @@ export function listArchiveHeaders(rootSessionId = '', opts = {}, targetOpt) {
     const hay = [
       it.title,
       it.summary,
+      (it.hookKeywords || []).join(' '),
+      it.hookCue || '',
       (it.tags || []).join(' '),
       ...(it.points || []).map(p => `${p.title} ${p.cue}`),
       it.body,
@@ -328,6 +441,7 @@ export function listArchiveHeaders(rootSessionId = '', opts = {}, targetOpt) {
     goldCount: goldByFolder[f.id] || 0,
   }))
 
+  const activeScopeName = isGlobalReq ? 'global' : 'session'
   const headers = filtered.map((it) => {
     const diffEntry = (isGlobalReq ? diff.globalDiffMap.get(it.id) : diff.sessionDiffMap.get(it.id)) || {}
     return {
@@ -340,8 +454,16 @@ export function listArchiveHeaders(rootSessionId = '', opts = {}, targetOpt) {
       paperclip: it.paperclip,
       tags: it.tags,
       cold: true,
+      hasHook: Boolean(it.hasHook),
+      hookKeywords: Array.isArray(it.hookKeywords) ? it.hookKeywords : [],
+      hookCue: it.hookCue || '',
+      estimatedTokens: estimateArchiveTokens(it),
       takenOut: Boolean(sid && Array.isArray(it.takenOutSessions) && it.takenOutSessions.includes(sid)),
       chiefMounted: Boolean(isGlobalReq && sid && Array.isArray(it.chiefMountedSessions) && it.chiefMountedSessions.includes(sid)),
+      leadPulled: Boolean(!isGlobalReq && sid && Array.isArray(it.leadPulledSessions) && it.leadPulledSessions.includes(sid)),
+      chiefPulled: Boolean(sid && Array.isArray(it.chiefPulledSessions) && it.chiefPulledSessions.includes(sid)),
+      chiefDelivered: Boolean(sid && Array.isArray(it.chiefDeliveredSessions) && it.chiefDeliveredSessions.includes(sid)),
+      viewerStatus: computeArchiveViewerStatus(it, sid, activeScopeName),
       diffStatus: diffEntry.diffStatus || (isGlobalReq ? (sid ? 'global_only' : 'unbound') : 'local_only'),
       matchedGlobalId: !isGlobalReq ? (diffEntry.matchedGlobalId || '') : '',
       matchedSessionItemId: isGlobalReq ? (diffEntry.matchedSessionItemId || '') : '',
@@ -359,9 +481,26 @@ export function listArchiveHeaders(rootSessionId = '', opts = {}, targetOpt) {
   const precipitated = includePrecipitated
     ? listPrecipitatedHeaders(cabInfo.projectKey, sid, target)
     : undefined
+  const precipitatedFolders = includePrecipitated ? buildPrecipitatedFolderMeta(precipitated) : undefined
+  const desktop = buildDesktopSummary(sid, sessionStore, globalVault)
   const counts = (opts && opts.includeCounts !== false)
     ? getThreeTierArchiveCounts(sid, (opts && opts.flippedIds) || [], baseTarget)
     : undefined
+
+  const hookedCount = store.items.filter(it => it.hasHook).length
+  const viewerSummary = isGlobalReq
+    ? {
+        scope: 'global',
+        hookedCount,
+        totalCount: store.items.length,
+        label: `🌐 全局档案柜：主会话默认隔离 · ${hookedCount}/${store.items.length} 份已织就钩子（参谋见钩可拉）`,
+      }
+    : {
+        scope: 'session',
+        hookedCount,
+        totalCount: store.items.length,
+        label: `🗂️ 本局档案柜：参谋随时可读 · ${hookedCount}/${store.items.length} 份已织就钩子（主代理见钩可拉）`,
+      }
 
   return {
     ok: true,
@@ -374,13 +513,14 @@ export function listArchiveHeaders(rootSessionId = '', opts = {}, targetOpt) {
     activeCabinetId: isGlobalReq ? '' : cabInfo.activeCabinetId,
     cabinets: isGlobalReq ? [] : cabInfo.cabinets,
     totalCount: store.items.length,
-    takenOutCount: sid
-      ? store.items.filter(it => Array.isArray(it.takenOutSessions) && it.takenOutSessions.includes(sid)).length
-      : 0,
+    takenOutCount: desktop.pinnedDocuments.length,
+    desktop,
+    viewerSummary,
+    recentlyUnpinnedWatch: desktop.recentlyUnpinnedWatch,
     diffSummary: diff.summary,
     folders,
     items: headers,
-    ...(precipitated !== undefined ? { precipitated } : {}),
+    ...(precipitated !== undefined ? { precipitated, precipitatedFolders, precipitatedViewerSummary: { scope: 'precipitated', label: '🧊 冷藏档案柜：仅人类可见（钩子专供人类速览 · 主会话与参谋均 0 Token 隔离）' } } : {}),
     ...(counts !== undefined ? { counts } : {}),
   }
 }
@@ -417,6 +557,11 @@ export function getArchiveDetail(idOrTitle = '', rootSessionId = '', targetOpt) 
       cold: hit.cold,
       takenOut: Boolean(sid && Array.isArray(hit.takenOutSessions) && hit.takenOutSessions.includes(sid)),
       chiefMounted: Boolean(isGlobal && sid && Array.isArray(hit.chiefMountedSessions) && hit.chiefMountedSessions.includes(sid)),
+      hasHook: Boolean(hit.hasHook),
+      hookKeywords: Array.isArray(hit.hookKeywords) ? hit.hookKeywords : [],
+      hookCue: hit.hookCue || '',
+      estimatedTokens: estimateArchiveTokens(hit),
+      viewerStatus: computeArchiveViewerStatus(hit, sid, isGlobal ? 'global' : 'session'),
       organizedBy: hit.organizedBy,
       points: hit.points,
       body: hit.body,
@@ -445,7 +590,14 @@ export function getTakenOutArchivesForSession(rootSessionId = '', targetOpt) {
     vaultScope: 'session',
   })
   if (store.unboundSession) return []
-  return store.items.filter(it => Array.isArray(it.takenOutSessions) && it.takenOutSessions.includes(sid))
+  return store.items
+    .filter(it => Array.isArray(it.takenOutSessions) && it.takenOutSessions.includes(sid))
+    .sort((a, b) => {
+      const aPin = Number(a?.desktopMeta?.[sid]?.pinnedAt || a.updatedAt || 0)
+      const bPin = Number(b?.desktopMeta?.[sid]?.pinnedAt || b.updatedAt || 0)
+      return bPin - aPin
+    })
+    .slice(0, DESKTOP_MAX_ITEMS)
 }
 
 function scoreAndRankArchiveItems(store, query = '', opts = {}) {
@@ -539,6 +691,161 @@ export function searchGlobalVaultForChief(query = '', opts = {}, targetOpt) {
   }
 }
 
+function upsertWatchEntry(store, item, vaultScope, by = 'user') {
+  if (!store || !item || !item.id) return
+  const arr = Array.isArray(store.recentlyUnpinnedWatch) ? store.recentlyUnpinnedWatch.slice() : []
+  const filtered = arr.filter(x => !(x && x.id === item.id && x.vaultScope === vaultScope))
+  filtered.unshift({
+    id: item.id,
+    vaultScope: vaultScope === 'global' ? 'global' : 'session',
+    title: clamp(item.title || '未命名卷宗', 120),
+    folder: str(item.folder, 'inbox').trim() || 'inbox',
+    unpinnedAt: Date.now(),
+    by: clamp(by || 'user', 30),
+  })
+  store.recentlyUnpinnedWatch = filtered.slice(0, 12)
+}
+
+function removeWatchEntry(store, id, vaultScope = '') {
+  if (!store || !Array.isArray(store.recentlyUnpinnedWatch) || !id) return
+  store.recentlyUnpinnedWatch = store.recentlyUnpinnedWatch.filter(x =>
+    !(x && x.id === id && (!vaultScope || x.vaultScope === vaultScope))
+  )
+}
+
+function mutateDesktopPinState(op, payload, effectiveTarget, baseOpts) {
+  const sid = cleanRootSessionId(payload.rootSessionId || payload.session || effectiveTarget.rootSessionId)
+  if (!sid) return { ok: false, error: '当前未绑定对话会话，无法操作认知桌面' }
+  const id = str(payload.archiveId || payload.id, '').trim()
+  const targetScope = normalizeVaultScope(payload.vaultScope || payload.scope || effectiveTarget.vaultScope) === 'global' ? 'global' : 'session'
+  const by = clamp(payload.by || 'user', 30)
+  const isPin = op === 'takeOut' || op === 'pinToDesktop'
+
+  const sessionOpt = {
+    ...baseOpts,
+    cwd: effectiveTarget.cwd || baseOpts.cwd,
+    projectKey: effectiveTarget.projectKey || baseOpts.projectKey,
+    cabinetId: targetScope === 'session' ? (effectiveTarget.cabinetId || baseOpts.cabinetId) : '',
+    rootSessionId: sid,
+    vaultScope: 'session',
+  }
+  const globalOpt = {
+    ...baseOpts,
+    cwd: effectiveTarget.cwd || baseOpts.cwd,
+    projectKey: effectiveTarget.projectKey || baseOpts.projectKey,
+    cabinetId: '',
+    rootSessionId: sid,
+    vaultScope: 'global',
+  }
+
+  // Always lock session -> global to maintain strict single lock ordering
+  return withArchiveLock(sessionOpt, (_sFile, sResolved) => {
+    const sessTarget = { ...sessionOpt, cabinetId: sResolved.cabinetId, projectKey: sResolved.projectKey, vaultScope: 'session' }
+    const sessStore = loadArchiveStore(sessTarget)
+    return withArchiveLock(globalOpt, () => {
+      const globStore = loadGlobalVaultRaw(globalOpt)
+      const activeStore = targetScope === 'global' ? globStore : sessStore
+      const targetItem = activeStore.items.find(it => it.id === id)
+        || activeStore.items.find(it => normalizeArchiveTitleKey(it.title) === normalizeArchiveTitleKey(id))
+      if (!targetItem) return { ok: false, error: '未找到该工程档案：' + id }
+
+      let sessDirty = false
+      let globDirty = false
+      const evictedTitles = []
+      const evictedItems = []
+
+      if (isPin) {
+        const clipWeight = { copper: 1, silver: 2, gold: 3 }
+        const otherPinned = []
+        const pushOther = (items, sc) => {
+          for (const it of items) {
+            if (!Array.isArray(it.takenOutSessions) || !it.takenOutSessions.includes(sid)) continue
+            if (sc === targetScope && it.id === targetItem.id) continue
+            const meta = (it.desktopMeta && it.desktopMeta[sid]) || {}
+            otherPinned.push({
+              item: it,
+              scope: sc,
+              tokens: estimateArchiveTokens(it),
+              priority: (clipWeight[it.paperclip] || 2) * 10 + (Number(meta.priority) || 0),
+              pinnedAt: Number(meta.pinnedAt) || Number(it.updatedAt) || 0,
+            })
+          }
+        }
+        pushOther(sessStore.items, 'session')
+        pushOther(globStore.items, 'global')
+
+        const itemTokens = estimateArchiveTokens(targetItem)
+        let usedTokens = otherPinned.reduce((sum, x) => sum + x.tokens, 0)
+        otherPinned.sort((a, b) => a.priority - b.priority || a.pinnedAt - b.pinnedAt)
+
+        while ((otherPinned.length >= DESKTOP_MAX_ITEMS || (otherPinned.length > 0 && usedTokens + itemTokens > DESKTOP_TOKEN_BUDGET))) {
+          if (payload.autoEvict === false || payload.strictBudget === true) {
+            return {
+              ok: false,
+              overBudget: true,
+              usedTokens,
+              itemTokens,
+              tokenBudget: DESKTOP_TOKEN_BUDGET,
+              maxItems: DESKTOP_MAX_ITEMS,
+              error: `认知桌面容量已达上限（当前 ${usedTokens}/${DESKTOP_TOKEN_BUDGET} Tokens，${otherPinned.length}/${DESKTOP_MAX_ITEMS} 份），需先撤下旧文档或允许自动置换`,
+            }
+          }
+          const victim = otherPinned.shift()
+          if (!victim) break
+          victim.item.takenOutSessions = (victim.item.takenOutSessions || []).filter(s => s !== sid)
+          if (victim.item.desktopMeta && victim.item.desktopMeta[sid]) {
+            delete victim.item.desktopMeta[sid]
+          }
+          usedTokens = Math.max(0, usedTokens - victim.tokens)
+          evictedTitles.push(victim.item.title)
+          evictedItems.push({ id: victim.item.id, title: victim.item.title, vaultScope: victim.scope })
+          upsertWatchEntry(sessStore, victim.item, victim.scope, by)
+          if (victim.scope === 'global') globDirty = true
+          else sessDirty = true
+        }
+
+        targetItem.takenOutSessions = normalizeSessionIdList([...(targetItem.takenOutSessions || []), sid])
+        targetItem.desktopMeta = normalizeDesktopMeta({
+          ...(targetItem.desktopMeta || {}),
+          [sid]: {
+            pinnedAt: Date.now(),
+            by,
+            priority: clipWeight[targetItem.paperclip] || 2,
+          },
+        })
+        removeWatchEntry(sessStore, targetItem.id, targetScope)
+        sessDirty = true
+        if (targetScope === 'global') globDirty = true
+      } else {
+        targetItem.takenOutSessions = (targetItem.takenOutSessions || []).filter(s => s !== sid)
+        if (targetItem.desktopMeta && targetItem.desktopMeta[sid]) {
+          delete targetItem.desktopMeta[sid]
+        }
+        upsertWatchEntry(sessStore, targetItem, targetScope, by)
+        sessDirty = true
+        if (targetScope === 'global') globDirty = true
+      }
+
+      if (sessDirty) saveArchiveStore(sessStore, sessTarget)
+      if (globDirty) saveGlobalVaultRaw(globStore, globalOpt)
+
+      const desktop = buildDesktopSummary(sid, sessStore, globStore)
+      return {
+        ok: true,
+        id: targetItem.id,
+        title: targetItem.title,
+        takenOut: isPin,
+        evictedTitles,
+        evictedItems,
+        desktop,
+        isSystemGlobalVault: targetScope === 'global',
+        counts: getThreeTierArchiveCounts(sid, [], sessTarget),
+        meta: getArchiveMeta(sid, targetScope === 'global' ? globalOpt : sessTarget),
+      }
+    })
+  })
+}
+
 /* ------------------------------------------- Cabinet & Archive Mutations */
 
 export function mutateArchive(payload = {}, targetOpt) {
@@ -557,6 +864,27 @@ export function mutateArchive(payload = {}, targetOpt) {
 
   if (['listCabinets', 'createCabinet', 'switchCabinet', 'renameCabinet', 'deleteCabinet'].includes(op)) {
     return mutateCabinetRegistry({ ...payload, vaultScope }, effectiveTarget)
+  }
+
+  if (op === 'takeOut' || op === 'pinToDesktop' || op === 'putBack' || op === 'unpinFromDesktop') {
+    return mutateDesktopPinState(op, payload, effectiveTarget, baseOpts)
+  }
+
+  if (op === 'desktopStatus') {
+    const sessStore = rootSessionId
+      ? loadArchiveStore({ ...effectiveTarget, vaultScope: 'session' })
+      : { items: [], unboundSession: true, recentlyUnpinnedWatch: [] }
+    const globStore = loadGlobalVaultRaw(effectiveTarget)
+    return {
+      ok: true,
+      desktop: buildDesktopSummary(rootSessionId, sessStore, globStore),
+      sessionHooks: (sessStore.items || []).filter(it => it.hasHook && !(it.takenOutSessions || []).includes(rootSessionId)).map(it => ({
+        id: it.id, title: it.title, folder: it.folder, hookKeywords: it.hookKeywords || [], hookCue: it.hookCue || '',
+      })),
+      globalHooks: (globStore.items || []).filter(it => it.hasHook && !(it.takenOutSessions || []).includes(rootSessionId)).map(it => ({
+        id: it.id, title: it.title, folder: it.folder, hookKeywords: it.hookKeywords || [], hookCue: it.hookCue || '',
+      })),
+    }
   }
 
   return withArchiveLock(effectiveTarget, (_file, resolved) => {
@@ -620,9 +948,12 @@ export function mutateArchive(payload = {}, targetOpt) {
         }
         if (Array.isArray(payload.points) && payload.points.length) {
           existing.points = payload.points.map((p, i) => normalizePoint(p, i)).filter(Boolean).slice(0, POINTS_CAP)
-          existing.organizedBy = payload.organizedBy || 'user'
+          existing.organizedBy = ['auto', 'chief', 'user'].includes(payload.organizedBy) ? payload.organizedBy : 'user'
         } else if (bodyChanged) {
           existing.points = extractStructuredPoints(existing.title, existing.body)
+        }
+        if (['auto', 'chief', 'user'].includes(payload.organizedBy)) {
+          existing.organizedBy = payload.organizedBy
         }
         if (typeof payload.summary === 'string' && payload.summary.trim()) {
           existing.summary = clamp(payload.summary, 140)
@@ -632,6 +963,14 @@ export function mutateArchive(payload = {}, targetOpt) {
             140,
           )
         }
+        const hookNow = deriveHookFromStructuredItem({
+          ...existing,
+          ...(Array.isArray(payload.hookKeywords) ? { hookKeywords: payload.hookKeywords } : {}),
+          ...(typeof payload.hookCue === 'string' ? { hookCue: payload.hookCue } : {}),
+        }, existing.organizedBy === 'chief' || payload.hasHook === true || existing.hasHook === true)
+        existing.hasHook = hookNow.hasHook
+        existing.hookKeywords = hookNow.hookKeywords
+        existing.hookCue = hookNow.hookCue
         existing.contentHash = computeEntryContentHash(existing)
         existing.updatedAt = Date.now()
         saveArchiveStore(store, lockTarget)
@@ -697,6 +1036,9 @@ export function mutateArchive(payload = {}, targetOpt) {
         cold: true,
         takenOutSessions: (payload.takeOutNow || payload.takeOut) && rootSessionId && resolved.vaultScope !== 'global' ? [rootSessionId] : [],
         chiefMountedSessions: resolved.vaultScope === 'global' && payload.mountChief && rootSessionId ? [rootSessionId] : [],
+        hasHook: Boolean(payload.hasHook || payload.organizedBy === 'chief'),
+        ...(Array.isArray(payload.hookKeywords) ? { hookKeywords: payload.hookKeywords } : {}),
+        ...(typeof payload.hookCue === 'string' ? { hookCue: payload.hookCue } : {}),
         organizedBy: ['auto', 'chief', 'user'].includes(payload.organizedBy)
           ? payload.organizedBy
           : (Array.isArray(payload.points) && payload.points.length ? 'user' : 'auto'),
@@ -767,25 +1109,99 @@ export function mutateArchive(payload = {}, targetOpt) {
       }
     }
 
-    if (op === 'takeOut' || op === 'putBack') {
-      const id = str(payload.archiveId || payload.id, '').trim()
-      if (!rootSessionId) return { ok: false, error: '当前未绑定对话会话，无法摆到桌面备选' }
-      const item = store.items.find(it => it.id === id)
-      if (!item) return { ok: false, error: '未找到该工程档案：' + id }
-      const set = new Set(item.takenOutSessions || [])
-      if (op === 'takeOut') set.add(rootSessionId)
-      else set.delete(rootSessionId)
-      item.takenOutSessions = [...set]
+    if (op === 'pullByLead') {
+      if (resolved.vaultScope === 'global') {
+        return { ok: false, denied: true, error: '主代理不可直接拉取全局档案柜未上桌卷宗，请由参谋长整理呈递或摆上桌面' }
+      }
+      if (!rootSessionId) {
+        return { ok: false, error: '当前为空白新对话，尚未建立本局档案柜' }
+      }
+      const q = str(payload.archiveId || payload.id || payload.title, '').trim()
+      if (!q) return { ok: false, error: 'pullByLead 需要指定档案 id 或标题' }
+      const qLow = q.toLowerCase()
+      const item = store.items.find(it => it.id === q)
+        || store.items.find(it => it.title === q)
+        || store.items.find(it => it.title.toLowerCase().includes(qLow))
+      if (!item) return { ok: false, error: '未找到本局工程档案：' + q }
+      const isOnDesk = Array.isArray(item.takenOutSessions) && item.takenOutSessions.includes(rootSessionId)
+      if (!item.hasHook && !isOnDesk && payload.allowUnorganized !== true) {
+        return { ok: false, unhooked: true, error: `本局档案《${item.title}》尚未经过参谋长整理织就钩子，暂未向主代理开放拉阅` }
+      }
+      item.leadPulledSessions = normalizeSessionIdList([...(item.leadPulledSessions || []), rootSessionId])
       saveArchiveStore(store, lockTarget)
       return {
         ok: true,
-        id: item.id,
-        title: item.title,
-        takenOut: op === 'takeOut',
-        isSystemGlobalVault: resolved.vaultScope === 'global',
-        counts: getThreeTierArchiveCounts(rootSessionId, [], lockTarget),
-        meta: getArchiveMeta(rootSessionId, lockTarget),
+        vaultScope: 'session',
+        item: {
+          ...item,
+          viewerStatus: computeArchiveViewerStatus(item, rootSessionId, 'session'),
+        },
       }
+    }
+
+    if (op === 'pullByChief') {
+      const q = str(payload.archiveId || payload.id || payload.title, '').trim()
+      if (!q) return { ok: false, error: 'pullByChief 需要指定档案 id 或标题' }
+      const qLow = q.toLowerCase()
+      const item = store.items.find(it => it.id === q)
+        || store.items.find(it => it.title === q)
+        || store.items.find(it => it.title.toLowerCase().includes(qLow))
+      if (!item) return { ok: false, error: '未找到工程档案：' + q }
+      if (resolved.vaultScope === 'global') {
+        const mounted = Boolean(rootSessionId && Array.isArray(item.chiefMountedSessions) && item.chiefMountedSessions.includes(rootSessionId))
+        if (!item.hasHook && !mounted && payload.allowUnhooked !== true) {
+          return { ok: false, unhooked: true, error: `全局档案《${item.title}》尚未经过参谋整理织就钩子，请先由人类整理或开放参阅` }
+        }
+      }
+      if (rootSessionId) {
+        item.chiefPulledSessions = normalizeSessionIdList([...(item.chiefPulledSessions || []), rootSessionId])
+        if (resolved.vaultScope === 'global') {
+          item.chiefMountedSessions = normalizeSessionIdList([...(item.chiefMountedSessions || []), rootSessionId])
+        }
+        saveArchiveStore(store, lockTarget)
+      }
+      return {
+        ok: true,
+        vaultScope: resolved.vaultScope,
+        isSystemGlobalVault: resolved.vaultScope === 'global',
+        item: {
+          ...item,
+          viewerStatus: computeArchiveViewerStatus(item, rootSessionId, resolved.vaultScope),
+        },
+      }
+    }
+
+    if (op === 'markDeliveredToLead') {
+      if (!rootSessionId) return { ok: false, error: '当前为空白新对话，无法向主代理递交档案' }
+      const q = str(payload.archiveId || payload.id || payload.title, '').trim()
+      if (!q) return { ok: false, error: 'markDeliveredToLead 需要指定档案 id 或标题' }
+      const qLow = q.toLowerCase()
+      const item = store.items.find(it => it.id === q)
+        || store.items.find(it => it.title === q)
+        || store.items.find(it => it.title.toLowerCase().includes(qLow))
+      if (!item) return { ok: false, error: '未找到工程档案：' + q }
+      item.chiefDeliveredSessions = normalizeSessionIdList([...(item.chiefDeliveredSessions || []), rootSessionId])
+      saveArchiveStore(store, lockTarget)
+      return {
+        ok: true,
+        vaultScope: resolved.vaultScope,
+        isSystemGlobalVault: resolved.vaultScope === 'global',
+        item: {
+          ...item,
+          viewerStatus: computeArchiveViewerStatus(item, rootSessionId, resolved.vaultScope),
+        },
+      }
+    }
+
+    if (op === 'clearUnpinnedWatch') {
+      const targetIds = Array.isArray(payload.ids) ? new Set(payload.ids.map(String)) : null
+      if (resolved.vaultScope === 'session') {
+        store.recentlyUnpinnedWatch = targetIds
+          ? (store.recentlyUnpinnedWatch || []).filter(w => w && !targetIds.has(w.id))
+          : []
+        saveArchiveStore(store, lockTarget)
+      }
+      return { ok: true, recentlyUnpinnedWatch: store.recentlyUnpinnedWatch || [] }
     }
 
     if (op === 'cycleClip' || op === 'setClip') {
@@ -813,6 +1229,9 @@ export function mutateArchive(payload = {}, targetOpt) {
       item.folder = folder
       if (payload.folderLabel && !store.folders.some(f => f.id === folder)) {
         store.folders.push(normalizeFolder({ id: folder, label: payload.folderLabel, order: 58 }))
+      }
+      if (resolved.vaultScope === 'session' && folder !== 'inbox') {
+        removeWatchEntry(store, item.id, 'session')
       }
       item.updatedAt = Date.now()
       saveArchiveStore(store, lockTarget)
@@ -1014,8 +1433,19 @@ export function applyChiefArchiveCurations(curations = [], newFolders = [], targ
           target.points = validPts
         }
       }
+      const hook = deriveHookFromStructuredItem({
+        ...target,
+        ...(Array.isArray(c.hookKeywords) ? { hookKeywords: c.hookKeywords } : {}),
+        ...(typeof c.hookCue === 'string' && c.hookCue.trim() ? { hookCue: c.hookCue.trim() } : {}),
+      }, true)
+      target.hasHook = hook.hasHook
+      target.hookKeywords = hook.hookKeywords
+      target.hookCue = hook.hookCue
       target.organizedBy = 'chief'
       target.updatedAt = Date.now()
+      if (target.folder !== 'inbox' || c.clearUnpinnedWatch) {
+        removeWatchEntry(store, target.id)
+      }
       updatedCount += 1
     }
 

@@ -28,6 +28,7 @@ import {
   evaluateChiefPermissionGate,
   buildCapabilityScope,
   validateGuardWallInput,
+  listGuardWalls,
   CHIEF_TOOLS_PROMPT_GUIDE,
   runChiefAgenticLoop,
   stripToolCallMarkup,
@@ -51,6 +52,7 @@ import {
   normalizeSuggestion,
   resolveWorkspaceConfig,
   appendChiefAuditLog,
+  pushAuditToWs,
   queueChiefApproval,
   requestChiefElevation,
   upsertTaskLedgerOnWs,
@@ -121,6 +123,15 @@ const ASK_CHIEF_SYSTEM = [
   '      "reason": "手搓这堵物理墙的原因"',
   '    }',
   '  ],',
+  '  "wallRemovalProposals": [',
+  '    {',
+  '      "wallId": "阻塞任务的动态物理驻墙 ID（必须精确匹配上下文清单中的 wallId，极低概率仅在确认无替代路时填写）",',
+  '      "wallTitle": "对应物理驻墙名称",',
+  '      "action": "pause|remove",',
+  '      "blockerEvidence": "主/子代理撞墙且确无绕过可能的实测证据（必填）",',
+  '      "reason": "为何必须申请暂挂/拆除这堵物理墙才能继续当前任务"',
+  '    }',
+  '  ],',
   '  "memoryChanges": [',
   '    { "op": "add", "category": "discipline|architecture|progress|preference|team", "text": "一句独立完整的持久事实或规矩（不超过200字，绝不存密钥密码）" },',
   '    { "op": "edit", "index": 2, "text": "替换第2条的新内容" },',
@@ -150,10 +161,15 @@ const ASK_CHIEF_SYSTEM = [
   '    { "op": "bounds.remove", "field": "forbidden|allowed|notes", "item": "要移除的旧边界条文", "pinGlobal": false }',
   '  ],',
   '  "archiveOps": [',
-  '    { "op": "organize", "vaultScope": "session|global", "scope": "unorganized|all", "instruction": "整理分类要求" },',
+  '    { "op": "organize", "vaultScope": "session|global", "scope": "unorganized|all", "instruction": "整理分类并织就钩子要求" },',
   '    { "op": "distill_to_global", "ids": ["可选：指定本局档案ID，留空自动筛选可复用本局经验"], "instruction": "提炼入全局要求" },',
-  '    { "op": "take_out|put_back|mount_chief|unmount_chief|copy_to_global|copy_to_session|pull_precipitated|delete", "vaultScope": "session|global|precipitated", "id": "目标档案ID", "title": "或标题关键词", "targetScope": "session|global" },',
-  '    { "op": "save", "vaultScope": "session|global", "title": "档案标题", "folder": "inbox|architecture|contracts|pitfalls|ops", "summary": "摘要", "body": "正文", "takeOut": false }',
+  '    { "op": "pull_global", "id": "全局钩子档案ID", "title": "或标题关键词（参谋见全局钩子后按需拉阅全文）" },',
+  '    { "op": "pin_to_desktop|unpin_from_desktop|deliver_to_lead", "vaultScope": "session|global", "id": "档案ID", "title": "或标题关键词", "target": "lead", "instruction": "可选附言（仅本局/已织钩全局；严禁触碰冷藏柜）" },',
+  '    { "op": "copy_to_global|copy_to_session|move_folder|delete", "vaultScope": "session|global", "id": "目标档案ID", "title": "或标题关键词", "folder": "可选抽屉ID" },',
+  '    { "op": "save", "vaultScope": "session|global", "title": "档案标题", "folder": "inbox|coords|incidents|contracts|ops|plans", "summary": "摘要", "body": "正文", "takeOut": false }',
+  '  ],',
+  '  "effortOps": [',
+  '    { "target": "lead 或子代理名（如 coder）", "effort": "off|low|medium|high|xhigh", "reason": "为何调整该模型思考强度" }',
   '  ],',
   '  "networkOps": [',
   '    { "op": "link|unlink", "targetSessionId": "目标独立会话ID或名称关键词" }',
@@ -163,8 +179,8 @@ const ASK_CHIEF_SYSTEM = [
   '宰相参谋与行事准则：',
   '- 【懒介入与主会话优先铁律（严禁抢活越俎代庖）】：即使你已拥有高权限，也必须遏制亲自写代码或跑项目命令的冲动！凡是修改项目源码、跑构建测试、长程勘探排障，只要主对话在线可用且用户没有明确指定“参谋长你亲自来做/别找主对话”，一律优先放在 `"relays"` 中以正式执行请求形式交由 `@lead` 动手执行！只有用户点名直办、纯参谋内务（看板/档案/记忆/边界/物理墙草案）或主对话失联卡死时才亲自调工具。',
   '- 【优先问询渠道（缺信息就问主对话，严禁瞎猜）】：无论是在自主调配还是回答用户问题时，只要缺乏代码细节或实时状态确认，请输出 `"inquiries"` 向 `@lead` 发出优先问询，主对话会在不打断手头动作的情况下原路快答。',
-  '- 【手搓动态物理墙】：当用户让你“筑一堵物理墙/锁死某个目录或仓库/禁跑某个高危命令”时，直接将大白话诉求编译成 `"wallProposals"`（跨会话常驻设 `"scope": "global"`），呈交用户一键确认落锁（只准帮用户筑墙，绝无权私拆已有物理墙）。',
-  '- 【许愿框全权自治】：无论整理/分类/提炼档案入全局、上下桌面、设定/覆盖/清空边界、重设/重编任务（`task.reset`/`graph.plan`），还是连接/断开独立窗口协同网络（`networkOps`），只要用户开口许愿且符合当前权限，直接输出对应 JSON ops 执行到位（严禁越级让本局档案直接跳级沉淀，必须遵循 `本局 -> 全局 -> 沉淀` 梯度），绝不推辞让用户自己去点按钮！',
+  '- 【手搓动态物理墙与极低概率请示拆墙】：\n  1) 当用户让你“筑一堵物理墙/锁死某个目录或仓库/禁跑某个高危命令”时，直接将大白话诉求编译成 `"wallProposals"`（跨会话常驻设 `"scope": "global"`），呈交用户一键确认落锁；\n  2) **拆墙红线（极低触发）**：任何权限下（哪怕是 L3 最高权限）你都绝无权私拆或绕过物理驻墙！仅当主代理或子代理真实撞墙并确认无法绕过、向你上报阻断情况，且你独立复核确认确因该动态物理墙导致任务彻底无法推进、无合法替代路径时，才允许填入 `"wallRemovalProposals"` 向人类提交拆墙审批申请（硬安全内核规则永远不可申请拆除）；平时一切情形严禁主动填 `"wallRemovalProposals"`。',
+  '- 【许愿框全权自治与三层档案隔离】：无论整理/分类/织钩/提炼档案入全局、`pin_to_desktop` 摆上认知桌面（2400 Tokens / 6 份上限）、`deliver_to_lead` 一次性向主对话递送关键档案、还是设定边界/重编任务、`effortOps` 调配主对话/子代理思考深度，只要符合当前权限，直接输出对应 JSON ops 执行到位。严禁触碰或读取冷藏档案柜（`precipitated` 100% 人类专属）；严禁越级让本局档案直接跳级沉淀，必须遵循 `本局 -> 全局 -> 冷藏` 梯度。',
   '- 【严守当前权限与禁止红线】：绝不越过当前权限等级上限，也绝不执行触发 `禁止红线 (forbidden)` 的写操作或高危命令。',
   '- 【问进展 / 问步骤 / 问卡点 / 求建议】：当用户询问“现在在做什么 / 处于什么步骤 / 目前进度如何 / 卡在哪里”等态势问题时，你面前的上下文已经完整包含「实时对话流快照」+「小任务板 (Plan)」+「任务图」+「断点游标」！直接用简明人话分点作答并放进 JSON 的 `reply` 字段，**严禁退化成纯工具 XML/DSML 标签输出，更严禁盲目运行 `run_command` / `list_dir` 扫盘**！只有用户明确要求去核查具体源码文件/跑命令实测时，才在 JSON `toolCalls` 里调工具。',
   '- 【代维护看板】：当用户让你「把某任务标为完成/受阻」「记一下下一步干啥」「改总目标」时，直接通过 `boardOps`（`task.update` / `cursor.set` / `objective.set` / `task.add`）落实（若强介入已锁定核心目标，则提示先解锁或关闭强介入）。',
@@ -187,6 +203,14 @@ const CONCISE_BRIEF_ASK_EXTRA = [
   '  - 【🙋 用户需要提供什么】一句话说明需用户提供/拍板的内容（或“暂无需您额外提供”）',
   '  - 【💡 参谋长建议】一句话给出明确建议',
   '- ⚠️ JSON 顶层结构铁律：上述六句话战报只能作为顶层合法 JSON 对象内 `"reply"` 字段的字符串值！绝不允许直接裸输出 Markdown！若用户要求手搓物理驻墙或提炼/总结工作边界（或你在回复中提出了要补充/禁用的红线或边界），必须同步将完整条目填入 `"wallProposals"` 与 `"boundProposals"` 数组（JSON 字符串内的正则反斜杠须写双反斜杠 `\\\\`）。',
+].join('\n')
+
+const CONSULT_CHIEF_EXTRA = [
+  '',
+  '💡 【当前为「参谋页面咨询（按需给建议）」模式 — 实事求是铁律】：',
+  '- 请结合当前任务进展、最近对话、工作边界与团队状态，在 `"reply"` 中坦诚给出真正有价值的观察、风险提醒或推进建议。',
+  '- 若当前推进顺利确实暂无建议，或用户关心的事项属于人类拍板/外部事务/非参谋与代理会话能管得了的范畴：**直接如实告诉用户就行！严禁为了凑动作而硬编 `"relays"`、`"boardOps"`、`"archiveOps"`、`"boundProposals"` 或执行建议，上述动作数组务必全部留空 `[]`**！',
+  '- 仅当确实存在可落地的具体动作建议时，才填入对应 JSON 字段，并严格遵守当前四级权限（L0 仅文本分析与必要提权申请，L1–L3 按对应权限审批/执行机制运行）。',
 ].join('\n')
 
 function extractFallbackBoundProposalsFromText(rawText = '', userInput = '') {
@@ -570,51 +594,155 @@ export function applyBoardOps(deps, rootId, boardOps, opts = {}) {
  * while strictly preserving the upward gradient (`session -> global -> precipitated`;
  * direct session -> precipitated jump is forbidden).
  */
+const MAIN_INJECT_ARCHIVE_OPS = new Set(['pin_to_desktop', 'unpin_from_desktop', 'take_out', 'put_back', 'deliver_to_lead'])
+
+function normalizeArchiveOpName(rawOp) {
+  const s = String(rawOp || '').trim()
+  if (s === 'take_out') return 'pin_to_desktop'
+  if (s === 'put_back') return 'unpin_from_desktop'
+  return s
+}
+
+function resolveItemIdForChiefScope(scope, rawId, rawTitle, { sessionOpt, globalOpt }) {
+  const idQ = String(rawId || '').trim()
+  const titleQ = String(rawTitle || '').trim().toLowerCase()
+  const opt = scope === 'global' ? globalOpt : sessionOpt
+  if (!opt) return idQ
+  const store = loadArchiveStore(opt)
+  const items = Array.isArray(store.items) ? store.items : []
+  if (idQ) {
+    const exact = items.find(it => it.id === idQ)
+    if (exact) return exact.id
+  }
+  if (titleQ) {
+    const byTitle = items.find(it => String(it.title || '').toLowerCase().includes(titleQ))
+    if (byTitle) return byTitle.id
+  }
+  return idQ
+}
+
+/**
+ * Shared Chief executor for main-session archive injection ops (`pin_to_desktop`, `unpin_from_desktop`, `deliver_to_lead`)
+ * and `pull_global`, enforcing strict cold-vault isolation and dual-channel injection rules.
+ */
+export async function executeChiefArchiveInjectionOp(deps, rootId, opItem = {}, opts = {}) {
+  const sid = rootId && rootId !== 'global' ? String(rootId).trim() : ''
+  const op = normalizeArchiveOpName(opItem.op)
+  const scope = opItem.vaultScope === 'precipitated'
+    ? 'precipitated'
+    : (opItem.vaultScope === 'global' ? 'global' : 'session')
+  if (scope === 'precipitated' || op === 'pull_precipitated') {
+    return { ok: false, blocked: true, error: '冷藏档案柜 100% 归属人类专属隔离，参谋无权读档或推送。' }
+  }
+  if (!sid) {
+    return { ok: false, error: '当前为空白未绑定会话，无法推上桌面或递送主对话。' }
+  }
+  const globalOpt = archiveTargetForRoot(deps, sid, { vaultScope: 'global' })
+  const sessionOpt = archiveTargetForRoot(deps, sid, { vaultScope: 'session' })
+  const hitId = resolveItemIdForChiefScope(scope, opItem.id || opItem.archiveId, opItem.title, { sessionOpt, globalOpt })
+  if (!hitId) {
+    return { ok: false, error: '未匹配到目标工程档案。' }
+  }
+  const targetOpt = scope === 'global' ? globalOpt : sessionOpt
+
+  if (op === 'pin_to_desktop' || op === 'unpin_from_desktop') {
+    const mOp = op === 'pin_to_desktop' ? 'pinToDesktop' : 'unpinFromDesktop'
+    const r = mutateArchive({
+      op: mOp,
+      vaultScope: scope,
+      rootSessionId: sid,
+      id: hitId,
+      by: opts.by || 'chief',
+    }, targetOpt)
+    if (!r || !r.ok) {
+      return { ok: false, error: (r && r.error) || '桌面调配失败' }
+    }
+    const ev = Array.isArray(r.evicted) && r.evicted.length > 0 ? `（超 2400 Tokens/6 份自动撤回：${r.evicted.map(x => `《${clamp(x.title, 18)}》`).join('、')}）` : ''
+    const actionText = `${op === 'pin_to_desktop' ? '📌 摆上桌面' : '撤出桌面'} #${hitId}${ev}`
+    return { ok: true, op, scope, id: hitId, evicted: r.evicted || [], actionText }
+  }
+
+  if (op === 'deliver_to_lead') {
+    const det = getArchiveDetail(hitId, sid, targetOpt)
+    if (!det || !det.ok || !det.item) {
+      return { ok: false, error: '未读取到待递送档案内容' }
+    }
+    const it = det.item
+    const ptLines = Array.isArray(it.points) && it.points.length > 0
+      ? it.points.slice(0, 5).map(pt => `- ${pt.title}：${clamp(pt.detail || pt.cue, 180)}`)
+      : []
+    const instr = cleanMultiline(opItem.instruction || opItem.note || '', 240)
+    const msgBody = [
+      `[DSH 参谋长档案馆 · 一次性重点递送（不占桌面置顶槽）]`,
+      `来源：${scope === 'global' ? '🌐 全局档案柜（参谋核准后专递）' : '🗂️ 本局档案柜'} · 《${clamp(it.title, 48)}》 (id=${it.id})`,
+      instr ? `参谋附言：${instr}` : '',
+      it.summary ? `提要：${clamp(it.summary, 200)}` : '',
+      ...(ptLines.length ? ['核心要点：', ...ptLines] : []),
+      !ptLines.length && it.body ? `正文节选：\n${clamp(it.body, 900)}` : '',
+    ].filter(Boolean).join('\n')
+
+    const deliverTarget = String(opItem.target || 'lead').trim() || 'lead'
+    const deliv = await deliverCrossMessage(deps, {
+      fromSession: sid,
+      fromLabel: opts.byLabel || 'DSH 参谋长 (档案馆重点递送)',
+      target: deliverTarget,
+      subject: `档案馆递送《${clamp(it.title, 28)}》`,
+      text: msgBody,
+      mode: 'steer',
+      envelopeKind: 'execution_request',
+      recordBoardLog: true,
+    })
+    mutateArchive({ op: 'markDeliveredToLead', vaultScope: scope, rootSessionId: sid, id: hitId }, targetOpt)
+    return {
+      ok: Boolean(deliv && deliv.ok),
+      op,
+      scope,
+      id: hitId,
+      delivery: deliv,
+      actionText: deliv && deliv.ok
+        ? `📨 递送档案《${clamp(it.title, 20)}》→ ${deliv.target || deliverTarget}`
+        : `递送失败：${(deliv && deliv.error) || '目标不可达'}`,
+    }
+  }
+
+  if (op === 'pull_global') {
+    const r = mutateArchive({ op: 'pullByChief', vaultScope: 'global', rootSessionId: sid, id: hitId }, globalOpt)
+    if (r && r.ok) {
+      return { ok: true, op, scope: 'global', id: hitId, actionText: `👁️ 参谋拉阅全局档案 #${hitId}` }
+    }
+    return { ok: false, error: (r && r.error) || '全局拉阅失败' }
+  }
+
+  return { ok: false, error: `不支持的档案注入指令：${op}` }
+}
+
+/**
+ * Execute Wishing-Box `archiveOps` requested by user in natural language (`整理`/`提炼入全局`/内务操作),
+ * strictly enforcing cold-vault 0-byte isolation (`precipitated` blocked) and upward gradient (`session -> global -> precipitated`).
+ */
 async function applyArchiveOps(deps, rootId, archiveOps, ctx = {}) {
   const executed = []
   if (!Array.isArray(archiveOps) || !archiveOps.length) return { executed, changed: false }
   const sid = rootId && rootId !== 'global' ? String(rootId).trim() : ''
   const globalOpt = archiveTargetForRoot(deps, sid || 'global', { vaultScope: 'global' })
   const sessionOpt = sid ? archiveTargetForRoot(deps, sid, { vaultScope: 'session' }) : null
-  const projectKey = resolveProjectKey(globalOpt.cwd)
   let changed = false
 
-  const resolveItemInScope = (scope, rawId, rawTitle) => {
-    const idQ = String(rawId || '').trim()
-    const titleQ = String(rawTitle || '').trim().toLowerCase()
-    if (scope === 'precipitated') {
-      const items = listPrecipitatedHeaders(projectKey, sid, globalOpt) || []
-      if (idQ) {
-        const exact = items.find(it => it.id === idQ)
-        if (exact) return exact.id
-      }
-      if (titleQ) {
-        const byTitle = items.find(it => String(it.title || '').toLowerCase().includes(titleQ))
-        if (byTitle) return byTitle.id
-      }
-      return idQ
-    }
-    const opt = scope === 'global' ? globalOpt : sessionOpt
-    if (!opt) return idQ
-    const store = loadArchiveStore(opt)
-    const items = Array.isArray(store.items) ? store.items : []
-    if (idQ) {
-      const exact = items.find(it => it.id === idQ)
-      if (exact) return exact.id
-    }
-    if (titleQ) {
-      const byTitle = items.find(it => String(it.title || '').toLowerCase().includes(titleQ))
-      if (byTitle) return byTitle.id
-    }
-    return idQ
-  }
+  const resolveItemInScope = (scope, rawId, rawTitle) =>
+    resolveItemIdForChiefScope(scope, rawId, rawTitle, { sessionOpt, globalOpt })
 
   for (const opItem of archiveOps.slice(0, 8)) {
     if (!opItem || typeof opItem !== 'object') continue
-    const op = String(opItem.op || '').trim()
+    const op = normalizeArchiveOpName(opItem.op)
     const scope = opItem.vaultScope === 'precipitated'
       ? 'precipitated'
       : (opItem.vaultScope === 'global' ? 'global' : 'session')
+
+    // Cold vault (`precipitated`) is 100% human-only: Chief may never inspect, pin, or pull from it.
+    if (scope === 'precipitated' || op === 'pull_precipitated') {
+      executed.push('🧊 已拦截：冷藏档案柜仅人类可见，参谋无权读取或调取')
+      continue
+    }
 
     if (op === 'organize') {
       const orgScope = opItem.vaultScope === 'global' ? 'global' : 'session'
@@ -641,10 +769,16 @@ async function applyArchiveOps(deps, rootId, archiveOps, ctx = {}) {
         changed = true
         executed.push(`提炼入全局 ×${r.createdCount ?? 0}`)
       }
+    } else if (op === 'pull_global') {
+      const r = await executeChiefArchiveInjectionOp(deps, rootId, { ...opItem, op: 'pull_global', vaultScope: 'global' })
+      if (r && r.ok) {
+        changed = true
+        executed.push(r.actionText)
+      }
     } else if (op === 'save' || op === 'create') {
-      if (scope === 'precipitated') continue // strict gradient: cannot write directly into precipitated
       if (scope === 'session' && !sid) continue
       const targetOpt = scope === 'global' ? globalOpt : sessionOpt
+      const allowPin = Boolean(opItem.takeOut) && optsTakeOutAllowed(ctx)
       const r = mutateArchive({
         op: 'save',
         vaultScope: scope,
@@ -654,37 +788,19 @@ async function applyArchiveOps(deps, rootId, archiveOps, ctx = {}) {
         title: clamp(opItem.title || '参谋长工作归档', 160),
         summary: clamp(opItem.summary || '', 400),
         body: cleanMultiline(opItem.body || opItem.summary || opItem.title || '', 12000),
-        takeOutNow: Boolean(opItem.takeOut),
+        takeOutNow: allowPin,
+        organizedBy: 'chief',
         by: 'chief',
       }, targetOpt)
       if (r && r.ok) {
         changed = true
         executed.push(`存档(${scope === 'global' ? '全局' : '本局'})：《${clamp(opItem.title || '', 24)}》`)
       }
-    } else if (op === 'take_out' || op === 'put_back') {
-      if (!sid) continue
-      const hitId = resolveItemInScope(scope, opItem.id || opItem.archiveId, opItem.title)
-      if (!hitId) continue
-      if (scope === 'precipitated') {
-        const pOp = op === 'take_out' ? 'flipOut' : 'sealBack'
-        const r = mutatePrecipitated(projectKey, { op: pOp, id: hitId, rootSessionId: sid }, { ...globalOpt, rootSessionId: sid })
-        if (r && r.ok) {
-          updateWorkspaceFlippedIds(sid, pOp === 'flipOut' ? { flippedId: hitId } : { sealId: hitId })
-          changed = true
-          executed.push(`${op === 'take_out' ? '摆上桌面(沉淀)' : '放回封存(沉淀)'} #${hitId}`)
-        }
-      } else {
-        const targetOpt = scope === 'global' ? globalOpt : sessionOpt
-        const r = mutateArchive({
-          op: op === 'take_out' ? 'takeOut' : 'putBack',
-          vaultScope: scope,
-          rootSessionId: sid,
-          id: hitId,
-        }, targetOpt)
-        if (r && r.ok) {
-          changed = true
-          executed.push(`${op === 'take_out' ? '摆上桌面' : '放回封存'} #${hitId}`)
-        }
+    } else if (op === 'pin_to_desktop' || op === 'unpin_from_desktop' || op === 'deliver_to_lead') {
+      const r = await executeChiefArchiveInjectionOp(deps, rootId, opItem, ctx)
+      if (r && r.ok) {
+        changed = true
+        executed.push(r.actionText)
       }
     } else if (op === 'mount_chief' || op === 'unmount_chief') {
       if (!sid) continue
@@ -718,23 +834,7 @@ async function applyArchiveOps(deps, rootId, archiveOps, ctx = {}) {
         changed = true
         executed.push(`全局调入本局 #${hitId}`)
       }
-    } else if (op === 'pull_precipitated') {
-      const targetScope = opItem.targetScope === 'global' ? 'global' : 'session'
-      if (targetScope === 'session' && !sid) continue
-      const hitId = resolveItemInScope('precipitated', opItem.id || opItem.archiveId, opItem.title)
-      if (!hitId) continue
-      const r = copyPrecipitatedToVault(projectKey, {
-        id: hitId,
-        targetScope,
-        rootSessionId: sid,
-        takeOutNow: Boolean(opItem.takeOut),
-      }, { ...globalOpt, rootSessionId: sid })
-      if (r && r.ok) {
-        changed = true
-        executed.push(`沉淀无损调入${targetScope === 'global' ? '全局' : '本局'} #${hitId}`)
-      }
     } else if (op === 'move_folder' && opItem.folder) {
-      if (scope === 'precipitated') continue
       if (scope === 'session' && !sid) continue
       const targetOpt = scope === 'global' ? globalOpt : sessionOpt
       const hitId = resolveItemInScope(scope, opItem.id || opItem.archiveId, opItem.title)
@@ -745,7 +845,6 @@ async function applyArchiveOps(deps, rootId, archiveOps, ctx = {}) {
         executed.push(`移动档案分类 → ${opItem.folder}`)
       }
     } else if (op === 'delete' || op === 'remove') {
-      if (scope === 'precipitated') continue
       if (scope === 'session' && !sid) continue
       const targetOpt = scope === 'global' ? globalOpt : sessionOpt
       const hitId = resolveItemInScope(scope, opItem.id || opItem.archiveId, opItem.title)
@@ -759,6 +858,10 @@ async function applyArchiveOps(deps, rootId, archiveOps, ctx = {}) {
   }
 
   return { executed, changed }
+}
+
+function optsTakeOutAllowed(ctx) {
+  return Boolean(ctx && ctx.allowPinToDesktop !== false)
 }
 
 /** Execute Wishing-Box `networkOps` to link or unlink standalone DSH sessions. */
@@ -1155,9 +1258,11 @@ export async function askOrCommandChief(deps, {
   text = '',
   forcedTarget = '',
   forcedMode = 'steer',
+  quickAction = '',
   images = [],
   _resumeCtx = null,
   _fromLeadRequest = false,
+  _wallBlockerEscalation = false,
 }) {
   const rawInput = cleanMultiline(text, 2000)
   const rawImages = Array.isArray(images) ? images : []
@@ -1217,6 +1322,8 @@ export async function askOrCommandChief(deps, {
     pendingApprovalList = [],
     target = '',
     forceReceipt = false,
+    thinkingEffort = '',
+    thinkingEffortMode = '',
   }) => {
     const cleanActions = Array.isArray(actions) ? actions.filter(Boolean) : []
     const isReceipt = Boolean(isResumeTurn || _fromLeadRequest || forceReceipt || elevationObj || pendingApprovalList.length > 0 || cleanActions.length > 0)
@@ -1292,6 +1399,8 @@ export async function askOrCommandChief(deps, {
       role: 'chief',
       kind: isReceipt ? 'receipt' : 'qa',
       ...(attachedTaskId ? { resumeTaskId: attachedTaskId } : {}),
+      ...(thinkingEffort ? { thinkingEffort } : {}),
+      ...(thinkingEffortMode ? { thinkingEffortMode } : {}),
       text: chiefText,
       actions: finalActions,
       at: Date.now(),
@@ -1445,39 +1554,48 @@ export async function askOrCommandChief(deps, {
     }
   }
 
-  // Watch all 3 archive vaults in background (sealed items NEVER leak to Lead unless placed onto desk!)
+  // Watch session & hooked global archives in background (cold vault is 100% isolated from Chief & Lead!)
   const visibleArchives = collectChiefVisibleArchives(deps, rootId, state)
   const watchLines = []
-  const fmtWatchTag = (label, it) => `[${label}${it.id ? ` | id=${it.id}` : ''}] 《${clamp(it.title, 36)}》：${clamp(it.summary, 80)}`
+  const fmtWatchTag = (label, it) => `[${label}${it.id ? ` | id=${it.id}` : ''}] 《${clamp(it.title, 36)}》：${clamp(it.summary || it.hookCue, 80)}`
   const watchEntries = [
-    ...visibleArchives.deskSessionItems.map(it => fmtWatchTag('桌面·本局(主可见)', it)),
-    ...visibleArchives.deskGlobalItems.map(it => fmtWatchTag('桌面·全局(主可见)', it)),
-    ...visibleArchives.deskFlippedItems.map(it => fmtWatchTag('桌面·沉淀(主可见)', it)),
-    ...visibleArchives.mountedGlobalItems.map(it => fmtWatchTag('全局参阅·主隐', it)),
-    ...((visibleArchives.sealedWatch && visibleArchives.sealedWatch.sessionSealed) || []).map(it => fmtWatchTag('本局封存·主隐', it)),
-    ...((visibleArchives.sealedWatch && visibleArchives.sealedWatch.globalSealed) || []).map(it => fmtWatchTag('全局封存·主隐', it)),
-    ...((visibleArchives.sealedWatch && visibleArchives.sealedWatch.precipSealed) || []).map(it => fmtWatchTag('沉淀封存·主隐', it)),
+    ...visibleArchives.deskSessionItems.map(it => fmtWatchTag('桌面·本局(主与参谋共阅)', it)),
+    ...visibleArchives.deskGlobalItems.map(it => fmtWatchTag('桌面·全局(主与参谋共阅)', it)),
+    ...visibleArchives.deskFlippedItems.map(it => fmtWatchTag('桌面·冷藏已翻牌(主与参谋共阅)', it)),
+    ...visibleArchives.mountedGlobalItems.map(it => fmtWatchTag('全局已拉阅·主隐', it)),
+    ...((visibleArchives.sessionItems || []).filter(it => !it.takenOut).slice(0, 8).map(it => `[本局档案·参谋随时可读${it.hasHook ? ' 🪝已织钩' : ' (未织钩)'} | id=${it.id}] 《${clamp(it.title, 36)}》：${clamp(it.summary, 70)}`)),
+    ...((visibleArchives.recentlyUnpinnedWatch || []).slice(0, 4).map(w => `[刚撤下桌面·待观察归位 | id=${w.id}] 《${clamp(w.title, 36)}》`)),
+    ...((visibleArchives.globalHookIndex || []).slice(0, 8).map(it => `[全局钩子·参谋见钩可拉(发 pull_global) | id=${it.id}] 《${clamp(it.title, 36)}》 🪝[${(it.hookKeywords || []).slice(0, 3).join('·')}] ${clamp(it.hookCue, 60)}`)),
   ]
   if (watchEntries.length > 0) {
-    watchLines.push('', '## 9. 参谋长三库档案全览（封存项仅参谋长关注、未注入主对话；上桌面备选项主对话亦重点看到；支持许愿框 archiveOps）', ...watchEntries.map(x => '- ' + x))
+    watchLines.push('', '## 9. 参谋长档案馆线索与认知桌面（冷库严密隔离；桌面主对话可见；全局仅暴露已织钩子）', ...watchEntries.map(x => '- ' + x))
   }
 
-  // On-demand lazy archive lookup ONLY when the user explicitly asks Chief about archives (Chief searches Session + System Global Cold Vault on demand)
-  const asksArchiveExplicitly = /(?:档案|卷宗|归档|以前|历史记录|工程坐标|老笔记|全局|沉淀|查一下.*(?:怎么|路径|命令|配置))/.test(input)
+  // On-demand lazy archive lookup ONLY when the user explicitly asks Chief about archives (searches Session + Hooked Global Vault; unhooked Global/Cold blocked)
+  const asksArchiveExplicitly = /(?:档案|卷宗|归档|以前|历史记录|工程坐标|老笔记|全局|查一下.*(?:怎么|路径|命令|配置))/.test(input)
   const onDemandArchiveLines = []
   if (asksArchiveExplicitly) {
     const sessionTarget = rootId && rootId !== 'global' ? archiveTargetForRoot(deps, rootId, { vaultScope: 'session' }) : null
     const globalTarget = archiveTargetForRoot(deps, rootId, { vaultScope: 'global' })
     const foundSess = sessionTarget ? searchArchives(input, { limit: 3, vaultScope: 'session' }, sessionTarget) : { ok: true, hits: [] }
-    const foundGlob = searchGlobalVaultForChief(input, { limit: 3 }, globalTarget)
+    const foundGlobRaw = searchGlobalVaultForChief(input, { limit: 5 }, globalTarget)
+    const pulledOrDeskGlobIds = new Set([
+      ...(visibleArchives.mountedGlobalItems || []).map(x => x.id),
+      ...(visibleArchives.deskGlobalItems || []).map(x => x.id),
+    ])
+    const foundGlobHits = (Array.isArray(foundGlobRaw.hits) ? foundGlobRaw.hits : []).filter(h => h && h.hasHook === true).slice(0, 3)
     const combinedHits = [
-      ...(Array.isArray(foundSess.hits) ? foundSess.hits.map(h => ({ ...h, _scopeLabel: '本会话档案', _target: sessionTarget })) : []),
-      ...(Array.isArray(foundGlob.hits) ? foundGlob.hits.map(h => ({ ...h, _scopeLabel: '系统全局档案', _target: globalTarget })) : []),
+      ...(Array.isArray(foundSess.hits) ? foundSess.hits.map(h => ({ ...h, _scope: 'session', _scopeLabel: '本会话档案', _target: sessionTarget })) : []),
+      ...foundGlobHits.map(h => ({ ...h, _scope: 'global', _scopeLabel: '系统全局档案(已织钩)', _target: globalTarget })),
     ]
     if (combinedHits.length > 0) {
-      onDemandArchiveLines.push('', '## 7. 按需调取的档案柜卷宗（含本会话档案柜与参谋长专属全局档案柜，仅参谋长侧检索）')
+      onDemandArchiveLines.push('', '## 7. 按需检索到的档案卷宗（仅本局与已织钩全局；未拉阅全局仅展示钩子）')
       for (let i = 0; i < combinedHits.length; i += 1) {
         const hit = combinedHits[i]
+        if (hit._scope === 'global' && !pulledOrDeskGlobIds.has(hit.id)) {
+          onDemandArchiveLines.push(`- 🪝 [全局钩子待拉阅/${hit.folderLabel} | id=${hit.id}] 《${hit.title}》 关键词=[${(hit.hookKeywords || []).join('·')}] ${clamp(hit.hookCue || hit.summary, 90)}（如需详情可输出 archiveOps pull_global）`)
+          continue
+        }
         onDemandArchiveLines.push(`- 📎 [${hit._scopeLabel}/${hit.folderLabel}] 《${hit.title}》：${hit.summary}`)
         if (i < 3) {
           const det = getArchiveDetail(hit.id, rootId, hit._target)
@@ -1594,8 +1712,17 @@ export async function askOrCommandChief(deps, {
 
   const isBlankContext = liveDigest.summaryLines.length === 0 && !board.objective && !(board.plan || []).length
   const resolvedCwd = deps && typeof deps.getSessionCwd === 'function' ? deps.getSessionCwd(rootId) : ''
+  const cwdForPromptWalls = resolveSessionWorkspaceCwd(deps, rootId) || resolvedCwd
+  const activeDynamicWalls = listGuardWalls({ cwd: cwdForPromptWalls }).filter(w => w && w.scope !== 'paused')
+  if (activeDynamicWalls.length > 0) {
+    promptLines.push(
+      '',
+      '## 6.8 当前生效动态物理驻墙参考（仅作阻断排查，严禁私拆；仅代理撞墙无法绕过上报且确无法继续时才可请示审批）',
+      ...activeDynamicWalls.slice(0, 8).map(w => `- [${w.id}] (${w.scope}/${w.ruleType}) ${w.title} :: ${Array.isArray(w.patterns) ? w.patterns.join(', ') : ''}`),
+    )
+  }
   const explicitCompactReq = !imageBlocks.length && isExplicitCompactCommand(input)
-  const statusOnlyInquiry = !imageBlocks.length && !explicitCompactReq && isPureStatusInquiry(input)
+  const statusOnlyInquiry = !imageBlocks.length && !explicitCompactReq && quickAction !== 'consult_chief' && !_wallBlockerEscalation && isPureStatusInquiry(input)
   const userExplicitDirect = /(?:参谋长.*?(?:亲自|自己|直接|别找主)|你自己(?:动手|改|跑|查|写)|别派发|勿转主对话)/.test(input)
   const hasLiveLead = Boolean(
     deps
@@ -1616,6 +1743,16 @@ export async function askOrCommandChief(deps, {
   const effectiveSystem = [
     ASK_CHIEF_SYSTEM,
     ...(isConciseBrief ? [CONCISE_BRIEF_ASK_EXTRA] : []),
+    ...(quickAction === 'consult_chief' ? [CONSULT_CHIEF_EXTRA] : []),
+    ...(_wallBlockerEscalation
+      ? [
+          '',
+          '🧱 【当前正在评估主/子代理提交的“撞墙阻断上报”】：',
+          '- 请严格核对代理是否真的撞到了上述动态物理驻墙，以及**是否真的没有任何合法替代途径继续完成任务**；',
+          '- 若有替代做法（如改用只读核查、调整目标路径/命令或分步处理），**绝不申请拆墙**，直接在 `reply` 中给出合法绕行路径即可；',
+          '- 只有确认确被某堵动态墙彻底卡死无法推进时，才可在 `"wallRemovalProposals"` 中提出针对该精确 `wallId` 的暂挂/拆墙申请单供人类逐项批示！',
+        ]
+      : []),
     ...(isBlankContext
       ? [
           '',
@@ -1642,6 +1779,14 @@ export async function askOrCommandChief(deps, {
   const upsertArchiveFn = buildChiefArchiveUpsertFn(deps, rootId)
   const compactNowFn = buildChiefCompactFn(deps, rootId)
 
+  const askReasonKind = statusOnlyInquiry
+    ? 'quick_status'
+    : (/筑墙|物理墙|guard.?wall/i.test(input)
+        ? 'craft_wall'
+        : (isBlankContext
+            ? 'blank_explore'
+            : ((effCfg.tacticalModes && effCfg.tacticalModes.intervention) ? 'strong_intervention' : 'ask_chat')))
+
   const loopRes = await runChiefAgenticLoop(deps, {
     rootId,
     sessionId: rootId,
@@ -1655,9 +1800,9 @@ export async function askOrCommandChief(deps, {
     board,
     maxSteps: statusOnlyInquiry ? 1 : 4,
     readOnlyToolsOnly: false,
-    disableTools: statusOnlyInquiry,
+    disableTools: statusOnlyInquiry || (_wallBlockerEscalation && permRank < 3),
     lazyDeferWorkspaceWritesToLead,
-    callLlmFn: (callOpts) => callChiefLlm(deps, { ...callOpts, maxTokens: SUMMARY_MAX_TOKENS }),
+    callLlmFn: (callOpts) => callChiefLlm(deps, { reasonKind: askReasonKind, ...callOpts, maxTokens: SUMMARY_MAX_TOKENS }),
     extractJsonFn: extractJsonObject,
     upsertArchiveFn,
     compactNowFn,
@@ -1935,6 +2080,8 @@ export async function askOrCommandChief(deps, {
           elevationObj: autoElevOut,
           pendingApprovalList: queuedApprovals,
           forceReceipt: true,
+          thinkingEffort: llmRes.thinkingEffort || '',
+          thinkingEffortMode: llmRes.thinkingEffortMode || effCfg.thinkingEffort || 'auto',
         })
       })
       return {
@@ -1980,7 +2127,7 @@ export async function askOrCommandChief(deps, {
       conciseBrief: isConciseBrief,
     })
     const replyText = isConciseBrief ? sanitizeConciseBriefText(rawFallbackReply) : rawFallbackReply
-    const fallbackBounds = permRank >= 1 ? extractFallbackBoundProposalsFromText(rawFallbackReply, input) : []
+    const fallbackBounds = (permRank >= 1 && quickAction !== 'consult_chief') ? extractFallbackBoundProposalsFromText(rawFallbackReply, input) : []
     const createdFallbackBounds = []
     const BOUND_COL_LABEL_FB = { forbidden: '禁止红线', allowed: '必做事项', notes: '注意事项' }
 
@@ -2018,6 +2165,8 @@ export async function askOrCommandChief(deps, {
         elevationObj: fallbackElev,
         pendingApprovalList: queuedApprovals,
         forceReceipt: createdFallbackBounds.length > 0,
+        thinkingEffort: llmRes.thinkingEffort || '',
+        thinkingEffortMode: llmRes.thinkingEffortMode || effCfg.thinkingEffort || 'auto',
       })
     })
     return {
@@ -2142,9 +2291,30 @@ export async function askOrCommandChief(deps, {
     : (Array.isArray(parsed.boundaryProposals) && parsed.boundaryProposals.length > 0
         ? parsed.boundaryProposals
         : extractFallbackBoundProposalsFromText(parsed.reply || '', input))
+  const rawArchiveOps = Array.isArray(parsed.archiveOps) ? parsed.archiveOps.slice(0, 8) : []
+  const rawEffortOps = Array.isArray(parsed.effortOps) ? parsed.effortOps.slice(0, 6) : []
+  const internalArchiveOps = []
+  const mainInjectArchiveOps = []
+  for (const opItem of rawArchiveOps) {
+    if (!opItem || typeof opItem !== 'object') continue
+    const normOp = normalizeArchiveOpName(opItem.op)
+    const sc = opItem.vaultScope === 'precipitated'
+      ? 'precipitated'
+      : (opItem.vaultScope === 'global' ? 'global' : 'session')
+    if (sc === 'precipitated' || normOp === 'pull_precipitated') {
+      internalArchiveOps.push(opItem)
+    } else if (MAIN_INJECT_ARCHIVE_OPS.has(normOp)) {
+      mainInjectArchiveOps.push({ ...opItem, op: normOp, vaultScope: sc })
+    } else if (normOp === 'save' && opItem.takeOut) {
+      internalArchiveOps.push({ ...opItem, takeOut: false })
+      mainInjectArchiveOps.push({ op: 'pin_to_desktop', vaultScope: sc, title: opItem.title, instruction: opItem.summary || '' })
+    } else {
+      internalArchiveOps.push(opItem)
+    }
+  }
   const hasSystemOps = Boolean(
     (Array.isArray(parsed.boardOps) && parsed.boardOps.length > 0)
-    || (Array.isArray(parsed.archiveOps) && parsed.archiveOps.length > 0)
+    || internalArchiveOps.length > 0
     || (Array.isArray(parsed.networkOps) && parsed.networkOps.length > 0)
     || (Array.isArray(parsed.memoryChanges) && parsed.memoryChanges.length > 0)
     || rawBoundListSrc.length > 0
@@ -2161,6 +2331,9 @@ export async function askOrCommandChief(deps, {
   let executedBoardOps = []
   let executedArchiveOps = []
   let executedNetworkOps = []
+  let executedEffortOps = []
+  const pendingArchiveSuggestions = []
+  const pendingEffortSuggestions = []
   let appliedFacts = []
   const proposedBounds = []
   const existingBounds = (board && board.bounds) || { allowed: [], forbidden: [], notes: [] }
@@ -2184,7 +2357,7 @@ export async function askOrCommandChief(deps, {
     executedBoardOps = applyBoardOps(deps, rootId, parsed.boardOps, { callerOrigin: 'chief_llm' })
     for (const b of executedBoardOps) actionBadges.push(b)
 
-    const archiveExec = await applyArchiveOps(deps, rootId, parsed.archiveOps, { input })
+    const archiveExec = await applyArchiveOps(deps, rootId, internalArchiveOps, { input, allowPinToDesktop: false })
     executedArchiveOps = archiveExec.executed || []
     for (const a of executedArchiveOps) actionBadges.push(a)
 
@@ -2202,6 +2375,161 @@ export async function askOrCommandChief(deps, {
         outcome: 'ok',
         by: 'chief',
       })
+    }
+  }
+
+  // Dual-channel main injection from archives (Channel A: desktop pin/unpin, Channel B: deliver_to_lead)
+  // L0/L1 -> Suggestion pill; L2 -> Approval card + TaskLedger; L3 -> Direct execution
+  for (const item of mainInjectArchiveOps) {
+    const scopeLabel = item.vaultScope === 'global' ? '全局档案柜' : '本局档案柜'
+    const refText = item.title ? `《${clamp(item.title, 28)}》` : `#${item.id || item.archiveId || '?'}`
+    const opDesc = item.op === 'pin_to_desktop'
+      ? `将${scopeLabel}档案置顶桌面`
+      : (item.op === 'unpin_from_desktop' ? `将${scopeLabel}档案撤回抽屉` : `向主对话递送${scopeLabel}档案`)
+    if (relayGate.decision === 'deny_mode' || relayGate.decision === 'deny_unacknowledged_l3' || relayGate.decision === 'deny_policy_plugin') {
+      if (relayGate.decision !== 'deny_policy_plugin' && permRank < 2) {
+        pendingArchiveSuggestions.push({
+          kind: 'archive_op',
+          fromAgent: '📌 参谋档案馆通道',
+          title: `${opDesc}：${refText}`,
+          reason: clamp(item.instruction || `当前处于 L${permRank} 只读/助手档，后台不直接注入主会话；点「执行建议」即刻落位。`, 180),
+          target: item.target || 'lead',
+          targetLabel: item.op === 'deliver_to_lead' ? '主对话 (@lead)' : '📌 认知桌面',
+          mode: 'steer',
+          draftText: `${opDesc} ${refText}${item.instruction ? ' — ' + item.instruction : ''}`,
+          archiveSpec: {
+            op: item.op,
+            vaultScope: item.vaultScope,
+            id: item.id || item.archiveId || '',
+            title: item.title || '',
+            target: item.target || 'lead',
+            instruction: item.instruction || '',
+          },
+        })
+        actionBadges.push(`💡 建议档案注入：${refText}`)
+      } else {
+        workflowBlockedNeedsElevation = workflowBlockedNeedsElevation || relayGate.decision !== 'deny_policy_plugin'
+        actionBadges.push(relayGate.badge || '🔒 权限禁注档案')
+      }
+      continue
+    }
+    if (relayGate.decision === 'require_approval') {
+      const apr = queueChiefApproval(rootId, {
+        category: 'main_workflow',
+        operationLabel: opDesc,
+        targetLabel: `${scopeLabel} · ${refText}`,
+        reason: clamp(item.instruction || 'L2 参谋模式：向主对话桌面或正文注入档案前需逐项确认', 140),
+        impact: item.op === 'deliver_to_lead' ? '将把该卷宗摘要与要点投递至主对话并唤醒查收' : '将调整主对话共享认知桌面置顶列表（受 2400 Tokens/6 份预算约束）',
+        preview: clamp(`${opDesc} ${refText}${item.instruction ? '\n附言：' + item.instruction : ''}`, 240),
+        kind: 'archive_op',
+        capabilityScope: buildCapabilityScope({ kind: 'archive_op', tool: 'archive_op', target: refText }),
+        payload: {
+          op: item.op,
+          vaultScope: item.vaultScope,
+          id: item.id || item.archiveId || '',
+          title: item.title || '',
+          target: item.target || 'lead',
+          instruction: item.instruction || '',
+        },
+        by: 'chief',
+      })
+      if (apr) queuedApprovals.push(apr)
+      actionBadges.push(`🛡️ 待确认档案注入：${refText}`)
+      appendChiefAuditLog(rootId, { mode: permissionMode, stage: 'permission_gate', decision: 'pending_approval', operation: opDesc, target: refText, reason: clamp(input, 120), outcome: 'pending', by: 'chief' })
+      continue
+    }
+    const execOut = await executeChiefArchiveInjectionOp(deps, rootId, item, { input })
+    if (execOut && execOut.ok) {
+      executedArchiveOps.push(execOut.actionText)
+      actionBadges.push(execOut.actionText)
+      appendChiefAuditLog(rootId, { mode: permissionMode, stage: 'executor', decision: 'executed', operation: opDesc, target: refText, reason: clamp(input, 120), outcome: 'ok', by: 'chief' })
+    }
+  }
+
+  // Hot reasoning-effort shifting (`effortOps`) with 4-tier permission gate + teamEffortMode + per-agent user 🔒 veto lock
+  const userLocks = (effCfg && effCfg.lockedModelEfforts && typeof effCfg.lockedModelEfforts === 'object') ? effCfg.lockedModelEfforts : {}
+  const isManualTeamEffort = Boolean(effCfg && effCfg.teamEffortMode === 'manual')
+  if (isManualTeamEffort && rawEffortOps.length > 0) {
+    actionBadges.push('✋ 团队思考强度已设为手动，跳过自动调挡')
+    appendChiefAuditLog(rootId, {
+      mode: permissionMode,
+      stage: 'model_effort_lock',
+      decision: 'blocked',
+      operation: '调节模型思考强度',
+      target: rawEffortOps.map(ef => String((ef && (ef.target || ef.agent)) || 'lead').replace(/^@/, '')).join(','),
+      reason: '团队思考强度处于「手动」模式，已跳过自动调挡',
+      outcome: 'blocked',
+      by: 'chief',
+    })
+  }
+  for (const ef of (isManualTeamEffort ? [] : rawEffortOps)) {
+    if (!ef || typeof ef !== 'object') continue
+    const efTarget = clamp(String(ef.target || ef.agent || 'lead').trim().replace(/^@/, ''), 64) || 'lead'
+    const rawEf = String(ef.effort || ef.reasoningEffort || 'medium').trim().toLowerCase()
+    const efVal = ['off', 'low', 'medium', 'high', 'xhigh'].includes(rawEf) ? rawEf : 'medium'
+    const efReason = clamp(String(ef.reason || '按任务复杂度协同调节模型思考强度').trim(), 180)
+    const shortEfTarget = efTarget.split('/').pop()
+    const isUserLocked = Boolean(userLocks[efTarget] === true || userLocks[shortEfTarget] === true)
+    if (isUserLocked) {
+      actionBadges.push(`🔒 用户已锁挡 @${efTarget}`)
+      appendChiefAuditLog(rootId, { mode: permissionMode, stage: 'model_effort_lock', decision: 'blocked', operation: '调节模型思考强度', target: efTarget, reason: `用户开启「🔒 锁挡」，阻止调为 ${efVal}`, outcome: 'blocked', by: 'chief' })
+      continue
+    }
+    if (relayGate.decision === 'deny_mode' || relayGate.decision === 'deny_unacknowledged_l3' || relayGate.decision === 'deny_policy_plugin') {
+      if (relayGate.decision !== 'deny_policy_plugin' && permRank < 2) {
+        pendingEffortSuggestions.push({
+          kind: 'model_effort',
+          fromAgent: '🧠 思考强度建议',
+          title: `建议调挡 @${efTarget} → ${efVal}`,
+          reason: efReason,
+          target: efTarget,
+          targetLabel: efTarget === 'lead' ? '主对话 (@lead)' : `@${efTarget}`,
+          mode: 'silent',
+          draftText: `将 @${efTarget} 思考强度设为 ${efVal}（${efReason}）`,
+          effortSpec: { target: efTarget, effort: efVal, reason: efReason },
+        })
+        actionBadges.push(`💡 建议调挡 @${efTarget}→${efVal}`)
+      } else {
+        workflowBlockedNeedsElevation = workflowBlockedNeedsElevation || relayGate.decision !== 'deny_policy_plugin'
+        actionBadges.push(relayGate.badge || '🔒 权限禁调档位')
+      }
+      continue
+    }
+    if (relayGate.decision === 'require_approval') {
+      const apr = queueChiefApproval(rootId, {
+        category: 'main_workflow',
+        operationLabel: '调节模型思考强度',
+        targetLabel: efTarget === 'lead' ? '主对话 (@lead)' : `@${efTarget}`,
+        reason: efReason,
+        impact: `批准后将静默热调节 @${efTarget} 的推理思考深度为 ${efVal}`,
+        preview: `@${efTarget} → ${efVal}`,
+        kind: 'model_effort',
+        capabilityScope: buildCapabilityScope({ kind: 'model_effort', tool: 'model_effort', target: efTarget }),
+        payload: { target: efTarget, reasoningEffort: efVal, reason: efReason },
+        by: 'chief',
+      })
+      if (apr) queuedApprovals.push(apr)
+      actionBadges.push(`🛡️ 待确认调挡 @${efTarget}→${efVal}`)
+      appendChiefAuditLog(rootId, { mode: permissionMode, stage: 'permission_gate', decision: 'pending_approval', operation: '调节模型思考强度', target: efTarget, reason: efReason, outcome: 'pending', by: 'chief' })
+      continue
+    }
+    if (deps && typeof deps.controlMainAgent === 'function') {
+      const ctrlRes = await deps.controlMainAgent({
+        rootId,
+        sessionId: rootId,
+        op: 'set_effort',
+        target: efTarget,
+        reasoningEffort: efVal,
+        reason: efReason,
+        byUser: false,
+      }).catch(e => ({ ok: false, error: (e && e.message) || 'effort-control-failed' }))
+      if (ctrlRes && ctrlRes.ok) {
+        const tag = `🧠 调挡 @${efTarget} → ${ctrlRes.reasoningEffort || efVal}`
+        executedEffortOps.push(tag)
+        actionBadges.push(tag)
+      } else if (ctrlRes && ctrlRes.lockedByUser) {
+        actionBadges.push(`🔒 用户已锁挡 @${efTarget}`)
+      }
     }
   }
 
@@ -2275,10 +2603,102 @@ export async function askOrCommandChief(deps, {
   const BOUND_COL_LABEL = { forbidden: '禁止红线', allowed: '必做事项', notes: '注意事项' }
   const createdInquiries = []
   const proposedWalls = []
+  const proposedWallRemovals = []
   const cwdForWall = resolveSessionWorkspaceCwd(deps, rootId)
+  const rawWallRemovalProposals = Array.isArray(parsed.wallRemovalProposals) ? parsed.wallRemovalProposals.slice(0, 2) : []
 
   mutateChiefState((s) => {
     const ws = ensureWorkspace(s, rootId)
+
+    // Ultra-strict, all-tier (L0-L3) Human Approval Wall-Removal Proposal Gate
+    if (rawWallRemovalProposals.length > 0) {
+      const hasWallBlockLog = (Array.isArray(ws.auditLog) ? ws.auditLog : [])
+        .some(e => e && e.stage === 'guard_wall' && e.outcome === 'blocked')
+      const mentionsBlocker = /(?:撞墙|物理驻墙|物理墙|无法绕过|事前物理拦截|guard_wall|wall-)/i.test(input)
+      const hasWallBlockerEvidence = Boolean(_wallBlockerEscalation || (hasWallBlockLog && mentionsBlocker))
+      if (!hasWallBlockerEvidence) {
+        pushAuditToWs(ws, {
+          mode: permissionMode,
+          stage: 'guard_wall',
+          rule: 'wall_removal_denied_no_blocker_evidence',
+          decision: 'rejected',
+          operation: '拦截无依据拆墙提议',
+          target: 'guard_walls',
+          reason: '未收到主/子代理真实撞墙且无法绕过阻断上报，拒绝生成拆墙申请',
+          outcome: 'rejected',
+          by: 'chief',
+        }, rootId)
+      } else {
+        const activeWalls = listGuardWalls({ cwd: cwdForWall }).filter(w => w && w.scope !== 'paused')
+        for (const rawWr of rawWallRemovalProposals) {
+          if (!rawWr || typeof rawWr !== 'object') continue
+          const reqId = String(rawWr.wallId || rawWr.id || '').trim()
+          const reqTitle = String(rawWr.wallTitle || rawWr.title || '').trim()
+          const matchedWall = activeWalls.find(w =>
+            (reqId && w.id === reqId)
+            || (reqTitle && w.title === reqTitle),
+          )
+          if (!matchedWall) continue
+          const blockerEv = cleanMultiline(rawWr.blockerEvidence || rawWr.evidence || '', 260)
+          const removeReason = cleanMultiline(rawWr.reason || '', 220)
+          if (!blockerEv || !removeReason) continue
+          const dupWr = ws.suggestions.some(ex =>
+            ex
+            && ex.status === 'pending'
+            && ex.kind === 'wall_removal'
+            && ex.wallRemovalSpec
+            && ex.wallRemovalSpec.wallId === matchedWall.id,
+          )
+          if (dupWr) continue
+          const actMode = String(rawWr.action || '').trim().toLowerCase() === 'remove' ? 'remove' : 'pause'
+          const patStr = Array.isArray(matchedWall.patterns) ? matchedWall.patterns.join(', ') : ''
+          const sug = normalizeSuggestion({
+            kind: 'wall_removal',
+            fromAgent: '⚠️ 参谋请示拆墙（极低概率 · 阻断复核）',
+            title: `请示${actMode === 'remove' ? '拆除' : '暂挂'}物理墙：${clamp(matchedWall.title, 28)}`,
+            reason: clamp(removeReason, 200),
+            target: 'guard_walls',
+            targetLabel: clamp(matchedWall.title, 36),
+            mode: 'silent',
+            draftText: [
+              `目标物理驻墙：${matchedWall.title} (${matchedWall.id})`,
+              `拦截规则：[${matchedWall.ruleType}] ${patStr}`,
+              `代理阻断依据：${blockerEv}`,
+              `拟批准操作：${actMode === 'remove' ? '永久移除该物理驻墙' : '暂挂休眠该物理驻墙（可随时恢复）'}`,
+            ].join('\n'),
+            evidence: blockerEv,
+            wallRemovalSpec: {
+              wallId: matchedWall.id,
+              wallTitle: matchedWall.title,
+              action: actMode,
+              patterns: matchedWall.patterns || [],
+              reason: removeReason,
+              blockerEvidence: blockerEv,
+              reportedBy: _fromLeadRequest ? 'lead/subagent' : 'chief_review',
+            },
+            popup: true,
+            urgency: 'high',
+          })
+          if (sug) {
+            ws.suggestions.push(sug)
+            if (ws.suggestions.length > SUGGESTIONS_CAP) ws.suggestions = ws.suggestions.slice(-SUGGESTIONS_CAP)
+            proposedWallRemovals.push(sug)
+            actionBadges.push(`⚠️ 请示拆墙：${clamp(matchedWall.title, 18)}`)
+            pushAuditToWs(ws, {
+              mode: permissionMode,
+              stage: 'guard_wall',
+              rule: 'wall_removal_requested',
+              decision: 'pending_approval',
+              operation: '参谋呈报人工审批拆墙',
+              target: `${matchedWall.title} (${matchedWall.id})`,
+              reason: clamp(removeReason, 180),
+              outcome: 'pending',
+              by: 'chief',
+            }, rootId)
+          }
+        }
+      }
+    }
     for (const rawInq of rawInquiries) {
       if (!rawInq || typeof rawInq !== 'object') continue
       const qText = cleanMultiline(rawInq.question || rawInq.text || '', 500)
@@ -2412,18 +2832,32 @@ export async function askOrCommandChief(deps, {
       }
     }
 
+    for (const rawSug of [...pendingArchiveSuggestions, ...pendingEffortSuggestions]) {
+      const sug = normalizeSuggestion(rawSug)
+      if (!sug) continue
+      const dup = ws.suggestions.some(ex => ex && ex.status === 'pending' && ex.kind === sug.kind && ex.title === sug.title)
+      if (!dup) {
+        ws.suggestions.push(sug)
+        if (ws.suggestions.length > SUGGESTIONS_CAP) ws.suggestions = ws.suggestions.slice(-SUGGESTIONS_CAP)
+      }
+    }
+
     persistTurnChatAndResume(ws, {
       chiefText: replyText,
       actions: actionBadges,
       elevationObj: finalElevation,
       pendingApprovalList: queuedApprovals,
+      thinkingEffort: llmRes.thinkingEffort || '',
+      thinkingEffortMode: llmRes.thinkingEffortMode || effCfg.thinkingEffort || 'auto',
       forceReceipt: Boolean(
         relayResults.length > 0
         || createdInquiries.length > 0
         || proposedWalls.length > 0
+        || proposedWallRemovals.length > 0
         || appliedFacts.length > 0
         || executedBoardOps.length > 0
         || executedArchiveOps.length > 0
+        || executedEffortOps.length > 0
         || executedNetworkOps.length > 0
         || loopToolRecords.some(r => {
           const tName = r && ((r.call && (r.call.tool || r.call.name)) || (r.result && r.result.tool) || r.tool || '')
@@ -2495,14 +2929,18 @@ export async function askOrCommandChief(deps, {
     relays: relayResults,
     inquiries: createdInquiries,
     wallProposals: proposedWalls,
+    wallRemovalProposals: proposedWallRemovals,
     actionBadges,
     memoryChanges: appliedFacts,
     boardOps: executedBoardOps,
     archiveOps: executedArchiveOps,
+    effortOps: executedEffortOps,
     networkOps: executedNetworkOps,
     boundProposals: proposedBounds,
     toolRecords: loopToolRecords,
     pendingApprovals: queuedApprovals,
+    thinkingEffort: llmRes.thinkingEffort || '',
+    thinkingEffortMode: llmRes.thinkingEffortMode || effCfg.thinkingEffort || 'auto',
     ...(finalElevation ? { elevationRequested: finalElevation } : {}),
     permissionMode,
     ...(freshBoard ? { board: freshBoard } : {}),
@@ -2825,6 +3263,32 @@ export async function handleLeadDirectRequestToChief(deps, {
   const permRank = permissionRank(permissionMode)
   const summaryTitle = clamp(subject || cleanBody, 48)
   let ledgerTaskId = ''
+
+  // Rare path: Lead / Subagent reports an insurmountable dynamic guard-wall blocker -> read-only Chief evaluation first; any wall removal still requires explicit human approval across L0-L3
+  const combinedReqText = `${subject || ''} ${cleanBody}`
+  const isWallBlockerEscalation = /(?:撞墙阻断|物理驻墙|物理墙|无法绕过|事前物理拦截|guard_wall|wall-[a-z0-9]+)/i.test(combinedReqText)
+  if (isWallBlockerEscalation) {
+    const cwdNow = resolveSessionWorkspaceCwd(deps, rootId)
+    const activeWallsNow = listGuardWalls({ cwd: cwdNow }).filter(w => w && w.scope !== 'paused')
+    if (activeWallsNow.length > 0) {
+      const evalRes = await askOrCommandChief(deps, {
+        sessionId: rootId,
+        text: `[来自 ${fromLabel} 的撞墙阻断上报 · ${subject || '物理墙评估'}]\n${cleanBody}`,
+        _fromLeadRequest: true,
+        _wallBlockerEscalation: true,
+      })
+      if (evalRes && Array.isArray(evalRes.wallRemovalProposals) && evalRes.wallRemovalProposals.length > 0) {
+        return {
+          ok: true,
+          mode: permissionMode,
+          actionTaken: 'wall_removal_requested',
+          wallRemovalProposals: evalRes.wallRemovalProposals,
+          reply: evalRes.reply || '',
+          ...(evalRes.view ? { view: evalRes.view } : {}),
+        }
+      }
+    }
+  }
 
   mutateChiefState((s) => {
     const ws = ensureWorkspace(s, rootId)

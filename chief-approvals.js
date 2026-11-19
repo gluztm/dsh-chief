@@ -42,9 +42,9 @@ import { deliverCrossMessage } from './chief-network.js'
 import { getChiefView } from './chief-view.js'
 import { buildChiefArchiveUpsertFn } from './chief-archives.js'
 import { buildChiefCompactFn, recordSmartCompactionChatReceipt } from './chief-compaction.js'
-import { askOrCommandChief } from './chief-commands.js'
+import { askOrCommandChief, executeChiefArchiveInjectionOp } from './chief-commands.js'
 
-export async function handleSuggestionDecision(deps, { sessionId, suggestionId, decision, editedText, boundField, pinGlobal, _suppressChatReceipt = false }) {
+export async function handleSuggestionDecision(deps, { sessionId, suggestionId, decision, editedText, boundField, pinGlobal, _suppressChatReceipt = false, _byUserClick = true }) {
   const rootId = deps.resolveRootSessionId(sessionId) || String(sessionId || 'global')
   let found = null
   mutateChiefState((state) => {
@@ -186,6 +186,60 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
     }
   }
 
+  if (decision === 'approve' && found.kind === 'wall_removal') {
+    const cwdNow = resolveSessionWorkspaceCwd(deps, rootId)
+    const spec = (found.wallRemovalSpec && typeof found.wallRemovalSpec === 'object') ? found.wallRemovalSpec : {}
+    const targetWallId = String(spec.wallId || '').trim()
+    const opType = spec.action === 'remove' ? 'remove' : 'set_scope'
+    if (!targetWallId) {
+      return { ok: false, error: '拆墙申请缺少有效的目标物理驻墙 ID (wallId)' }
+    }
+    const wallRes = mutateGuardWalls({
+      op: opType,
+      wallId: targetWallId,
+      ...(opType === 'set_scope' ? { scope: 'paused' } : {}),
+      cwd: cwdNow,
+      callerOrigin: 'human_approval',
+      humanConfirmToken: HUMAN_BOUNDS_CONFIRM_TOKEN,
+    })
+    if (!wallRes || !wallRes.ok) {
+      return { ok: false, error: (wallRes && wallRes.error) || '按人工批复调整物理驻墙失败' }
+    }
+    const wallTitle = spec.wallTitle || (wallRes.wall && wallRes.wall.title) || targetWallId
+    const actVerb = opType === 'remove' ? '拆除移除' : '暂挂休眠'
+    mutateChiefState((state) => {
+      const ws = ensureWorkspace(state, rootId)
+      if (!_suppressChatReceipt) {
+        ws.chat.push({
+          id: nextId('chat'),
+          role: 'chief',
+          kind: 'receipt',
+          text: `- 【🧱 已按人工批示${actVerb}物理驻墙】${wallTitle} (\`${targetWallId}\`)\n- 【代理上报与拆墙依据】${clamp(spec.blockerEvidence || found.reason || '主/子代理撞墙无法绕过，参谋呈报经人类批准后执行', 180)}`,
+          actions: [`已${actVerb}驻墙`],
+          at: Date.now(),
+        })
+        if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+      }
+      pushAuditToWs(ws, {
+        mode: resolveWorkspaceConfig(state, rootId).permissionMode,
+        stage: 'guard_wall',
+        rule: 'wall_removal_approved',
+        decision: 'executed',
+        operation: `人工批复${actVerb}物理驻墙`,
+        target: `${wallTitle} (${targetWallId})`,
+        reason: clamp(spec.reason || found.reason || '代理撞墙无法绕过，经人类显式审批后放行', 180),
+        outcome: 'ok',
+        by: 'operator',
+      }, rootId)
+    })
+    return {
+      ok: true,
+      wallRemoved: { wallId: targetWallId, title: wallTitle, action: opType === 'remove' ? 'remove' : 'pause' },
+      guardWalls: wallRes.walls,
+      view: _suppressChatReceipt ? null : await getChiefView(deps, rootId, { autoSummarize: false }),
+    }
+  }
+
   if (decision === 'approve' && found.kind === 'goal_approval') {
     const res = deps.runAction
       ? deps.runAction({ action: 'goal.approve', session: rootId, by: 'user' })
@@ -210,6 +264,53 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
       ok: Boolean(res && res.ok),
       goalRejected: true,
       view: await getChiefView(deps, rootId, { autoSummarize: false }),
+    }
+  }
+
+  if (decision === 'approve' && found.kind === 'archive_op') {
+    const spec = (found.archiveSpec && typeof found.archiveSpec === 'object')
+      ? found.archiveSpec
+      : ((found.archiveOp && typeof found.archiveOp === 'object') ? found.archiveOp : {})
+    const archRes = await executeChiefArchiveInjectionOp(deps, rootId, {
+      op: spec.op || 'pin_to_desktop',
+      vaultScope: spec.vaultScope || 'session',
+      id: spec.id || '',
+      title: spec.title || found.title || '',
+      target: spec.target || found.target || 'lead',
+      instruction: editedText || spec.instruction || found.reason || '',
+    }, { byLabel: 'DSH 参谋长 (获批档案调配)' }).catch(e => ({ ok: false, error: (e && e.message) || 'archive-op-failed' }))
+    return {
+      ok: Boolean(archRes && archRes.ok),
+      archiveApplied: archRes,
+      error: archRes && !archRes.ok ? archRes.error : '',
+      view: _suppressChatReceipt ? null : await getChiefView(deps, rootId, { autoSummarize: false }),
+    }
+  }
+
+  if (decision === 'approve' && found.kind === 'model_effort') {
+    const spec = (found.effortSpec && typeof found.effortSpec === 'object')
+      ? found.effortSpec
+      : ((found.effortOp && typeof found.effortOp === 'object') ? found.effortOp : {})
+    const target = spec.target || found.target || 'lead'
+    const eff = spec.effort || 'medium'
+    const effReason = spec.reason || found.reason || '按参谋建议调整思考强度'
+    const effRes = deps && typeof deps.controlMainAgent === 'function'
+      ? await deps.controlMainAgent({
+          rootId,
+          sessionId: rootId,
+          op: 'set_effort',
+          target,
+          reasoningEffort: eff,
+          reason: effReason,
+          byUser: Boolean(_byUserClick !== false),
+        }).catch(e => ({ ok: false, error: (e && e.message) || 'effort-failed' }))
+      : { ok: false, error: '当前宿主未绑定会话控制接口' }
+    return {
+      ok: Boolean(effRes && effRes.ok),
+      effortApplied: effRes,
+      lockedByUser: Boolean(effRes && effRes.lockedByUser),
+      error: effRes && !effRes.ok ? effRes.error : '',
+      view: _suppressChatReceipt ? null : await getChiefView(deps, rootId, { autoSummarize: false }),
     }
   }
 
@@ -250,6 +351,10 @@ export async function executeBatchSuggestions(deps, {
   ids = [],
   includeGoalApproval = false,
   pinGlobalDefault = undefined,
+  skipGuardWalls = false,
+  skipGlobalBounds = false,
+  byAutoRunner = false,
+  skipChatReceipt = false,
 } = {}) {
   const rootId = (deps && typeof deps.resolveRootSessionId === 'function' ? deps.resolveRootSessionId(sessionId) : '') || String(sessionId || 'global')
   const stateSnap = loadChiefState()
@@ -276,7 +381,7 @@ export async function executeBatchSuggestions(deps, {
       blocked: [],
       skippedGoals: [],
       summaries: ['当前没有待执行的参谋长建议。'],
-      view: await getChiefView(deps, rootId, { autoSummarize: false }),
+      view: skipChatReceipt ? null : await getChiefView(deps, rootId, { autoSummarize: false }),
     }
   }
 
@@ -291,8 +396,20 @@ export async function executeBatchSuggestions(deps, {
       skippedGoals.push({ id: sug.id, title: sug.title })
       continue
     }
+    if (skipGuardWalls && (sug.kind === 'guard_wall' || sug.kind === 'wall_removal')) {
+      skippedGoals.push({ id: sug.id, title: sug.title })
+      continue
+    }
+    if (sug.kind === 'wall_removal' && byAutoRunner) {
+      skippedGoals.push({ id: sug.id, title: sug.title })
+      continue
+    }
+    if (skipGlobalBounds && sug.kind === 'bound' && sug.pinGlobal) {
+      skippedGoals.push({ id: sug.id, title: sug.title })
+      continue
+    }
 
-    if (sug.kind !== 'bound' && sug.kind !== 'goal_approval' && sug.kind !== 'guard_wall') {
+    if (sug.kind !== 'bound' && sug.kind !== 'goal_approval' && sug.kind !== 'guard_wall' && sug.kind !== 'wall_removal') {
       const cmdSample = `${sug.draftText || ''}\n${sug.title || ''}`.trim()
       const guardRes = evaluateSafetyGuardHardRules({
         tool: 'relay',
@@ -314,7 +431,7 @@ export async function executeBatchSuggestions(deps, {
             target: clamp(sug.title, 80),
             reason: guardRes.reason,
             outcome: 'blocked',
-            by: 'operator',
+            by: byAutoRunner ? 'chief' : 'operator',
           }, rootId)
         })
         blocked.push({ id: sug.id, title: sug.title, reason: guardRes.reason })
@@ -329,6 +446,7 @@ export async function executeBatchSuggestions(deps, {
       decision: 'approve',
       pinGlobal: sug.kind === 'bound' && typeof pinGlobalDefault === 'boolean' ? pinGlobalDefault : undefined,
       _suppressChatReceipt: true,
+      _byUserClick: !byAutoRunner,
     })
 
     if (res && res.ok) {
@@ -340,8 +458,15 @@ export async function executeBatchSuggestions(deps, {
         const scopeLabel = w.scope === 'workspace' ? '仅本工程' : '🌐全局随身'
         const patPreview = Array.isArray(w.patterns) ? clamp(w.patterns.join(', '), 60) : ''
         summaries.push(`🧱 已落锁物理驻墙「${clamp(w.title, 36)}」（${scopeLabel}${patPreview ? ` · \`${patPreview}\`` : ''}）`)
+      } else if (res.wallRemoved) {
+        const r = res.wallRemoved
+        summaries.push(`🧱 已按人工批复${r.action === 'remove' ? '拆除' : '暂挂'}物理驻墙「${clamp(r.title || r.wallId, 36)}」`)
       } else if (res.goalApproved) {
         summaries.push('✅ 已批准并结项当前核心目标')
+      } else if (res.archiveApplied && res.archiveApplied.actionText) {
+        summaries.push(`✅ ${res.archiveApplied.actionText}`)
+      } else if (res.effortApplied && res.effortApplied.reasoningEffort) {
+        summaries.push(`✅ 🧠 已调挡 @${res.effortApplied.target || 'lead'} → ${res.effortApplied.reasoningEffort}`)
       } else if (res.delivery && res.delivery.target) {
         summaries.push(`✅ 已采纳并递话给 @${res.delivery.target}：「${clamp(sug.title, 36)}」`)
       } else {
@@ -350,7 +475,7 @@ export async function executeBatchSuggestions(deps, {
     } else {
       const errMsg = (res && res.error) || '执行未完成'
       failed.push({ id: sug.id, title: sug.title, error: errMsg })
-      summaries.push(`⚠️ 未完成「${clamp(sug.title, 36)}」：${errMsg}`)
+      summaries.push(`${res && res.lockedByUser ? '🔒' : '⚠️'} ${res && res.lockedByUser ? '用户已锁挡跳过' : '未完成'}「${clamp(sug.title, 36)}」：${errMsg}`)
     }
   }
 
@@ -360,14 +485,14 @@ export async function executeBatchSuggestions(deps, {
       mode: permMode,
       stage: 'executor',
       decision: executed.length > 0 ? 'executed' : (blocked.length > 0 ? 'blocked' : 'noop'),
-      operation: '统一执行参谋建议',
+      operation: byAutoRunner ? 'L3强介入一站式执行建议' : '统一执行参谋建议',
       target: `${executed.length} 项执行 / ${blocked.length} 项拦截 / ${skippedGoals.length} 项跳过`,
       reason: clamp(summaries.slice(0, 3).join('；'), 200) || '批量执行建议',
       outcome: blocked.length > 0 && executed.length === 0 ? 'blocked' : 'ok',
-      by: 'operator',
+      by: byAutoRunner ? 'chief' : 'operator',
     }, rootId)
-    if (executed.length > 0 || blocked.length > 0 || failed.length > 0) {
-      const header = `- 【📋 统一执行参谋建议回执】完成 ${executed.length} 项${blocked.length ? ` · 拦截 ${blocked.length} 项` : ''}${failed.length ? ` · 异常 ${failed.length} 项` : ''}${skippedGoals.length ? ` · 保留目标结项请示 ${skippedGoals.length} 项单独拍板` : ''}`
+    if (!skipChatReceipt && (executed.length > 0 || blocked.length > 0 || failed.length > 0)) {
+      const header = `- 【📋 统一执行参谋建议回执】完成 ${executed.length} 项${blocked.length ? ` · 拦截 ${blocked.length} 项` : ''}${failed.length ? ` · 异常 ${failed.length} 项` : ''}${skippedGoals.length ? ` · 保留需单独拍板项 ${skippedGoals.length} 项` : ''}`
       const actionTags = [`📋 执行建议 ×${executed.length}`]
       if (blocked.length) actionTags.push(`🛡️ 红线拦截 ×${blocked.length}`)
       ws.chat.push({
@@ -393,7 +518,7 @@ export async function executeBatchSuggestions(deps, {
     failed,
     skippedGoals,
     summaries,
-    view: await getChiefView(deps, rootId, { autoSummarize: executed.some(e => e.kind === 'bound') }),
+    view: skipChatReceipt ? null : await getChiefView(deps, rootId, { autoSummarize: executed.some(e => e.kind === 'bound') }),
   }
 }
 
@@ -647,6 +772,46 @@ export async function handleApprovalDecision(deps, {
           ? (execRes.noop ? '已抢救细节入本会话档案柜（当前历史免压）' : '已抢救细节并完成主对话上下文静默压缩')
           : ((execRes && execRes.error) || '压缩未完成')
         appendChiefAuditLog(rootId, { mode: currentMode, stage: 'executor', rule: 'approved_once', decision: 'executed_approved', operation: found.operationLabel, target: found.targetLabel, reason: clamp(resultMsg, 120), outcome: execOk ? 'ok' : 'error', by: 'operator' })
+      }
+    } else if (found.kind === 'archive_op') {
+      const scopeCheck = verifyCapabilityScope(resolvedScope, { kind: 'archive_op', tool: 'archive_op', target: payload.title || payload.id || found.targetLabel || '' })
+      if (!scopeCheck.ok) {
+        execOk = false
+        execRes = { ok: false, deniedByScopeMismatch: true, error: scopeCheck.error }
+        resultMsg = scopeCheck.error
+        appendChiefAuditLog(rootId, { mode: currentMode, stage: 'scope_guard', rule: scopeCheck.rule, decision: 'rejected', operation: found.operationLabel, target: found.targetLabel, reason: scopeCheck.error, outcome: 'rejected', by: 'operator' })
+      } else {
+        execRes = await executeChiefArchiveInjectionOp(deps, rootId, payload, { input: found.reason || '', byLabel: 'DSH 参谋 (逐项授权档案调配)' })
+        execOk = Boolean(execRes && execRes.ok)
+        resultMsg = execOk ? (execRes.actionText || '已完成授权档案调配') : ((execRes && execRes.error) || '档案调配失败')
+        appendChiefAuditLog(rootId, { mode: currentMode, stage: 'executor', rule: 'approved_once', decision: 'executed_approved', operation: found.operationLabel, target: found.targetLabel, reason: clamp(resultMsg, 120), outcome: execOk ? 'ok' : 'error', by: 'operator' })
+      }
+    } else if (found.kind === 'model_effort') {
+      const effTarget = payload.target || 'lead'
+      const scopeCheck = verifyCapabilityScope(resolvedScope, { kind: 'model_effort', tool: 'model_effort', target: effTarget })
+      if (!scopeCheck.ok) {
+        execOk = false
+        execRes = { ok: false, deniedByScopeMismatch: true, error: scopeCheck.error }
+        resultMsg = scopeCheck.error
+        appendChiefAuditLog(rootId, { mode: currentMode, stage: 'scope_guard', rule: scopeCheck.rule, decision: 'rejected', operation: found.operationLabel, target: found.targetLabel, reason: scopeCheck.error, outcome: 'rejected', by: 'operator' })
+      } else if (deps && typeof deps.controlMainAgent === 'function') {
+        execRes = await deps.controlMainAgent({
+          rootId,
+          sessionId: rootId,
+          op: 'set_effort',
+          target: effTarget,
+          reasoningEffort: payload.reasoningEffort || payload.effort || 'medium',
+          reason: payload.reason || found.reason || '',
+          byUser: false,
+        })
+        execOk = Boolean(execRes && execRes.ok)
+        resultMsg = execOk
+          ? `已将 @${effTarget} 思考强度调为 ${execRes.reasoningEffort || payload.reasoningEffort || 'medium'}`
+          : ((execRes && execRes.error) || '思考强度调配未成功')
+        appendChiefAuditLog(rootId, { mode: currentMode, stage: execRes && execRes.lockedByUser ? 'model_effort_lock' : 'executor', rule: execRes && execRes.lockedByUser ? 'user_effort_lock' : 'approved_once', decision: execOk ? 'executed_approved' : 'blocked', operation: found.operationLabel, target: found.targetLabel, reason: clamp(resultMsg, 120), outcome: execOk ? 'ok' : 'blocked', by: 'operator' })
+      } else {
+        execOk = false
+        resultMsg = '当前宿主未提供代理思考强度控制接口'
       }
     } else if (found.kind === 'auto_continue') {
       if (deps && typeof deps.triggerAutoContinueNow === 'function') {

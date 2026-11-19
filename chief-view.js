@@ -263,28 +263,30 @@ function buildNarrativeInput({ board, facts, cluster, targets, peerProgress = []
     const dGlob = Array.isArray(archiveDigest.deskGlobalItems) ? archiveDigest.deskGlobalItems : []
     const dFlip = Array.isArray(archiveDigest.deskFlippedItems) ? archiveDigest.deskFlippedItems : []
     const mGlob = Array.isArray(archiveDigest.mountedGlobalItems) ? archiveDigest.mountedGlobalItems : []
-    const sw = archiveDigest.sealedWatch || {}
+    const sAll = Array.isArray(archiveDigest.sessionItems) ? archiveDigest.sessionItems : []
+    const gHooks = Array.isArray(archiveDigest.globalHookIndex) ? archiveDigest.globalHookIndex : []
+    const recentWatch = Array.isArray(archiveDigest.recentlyUnpinnedWatch) ? archiveDigest.recentlyUnpinnedWatch : []
     const deskAll = [
       ...dSess.map(it => `[桌面·本局(主可见)] 《${clamp(it.title, 40)}》：${clamp(it.summary || it.body, 140)}`),
       ...dGlob.map(it => `[桌面·全局(主可见)] 《${clamp(it.title, 40)}》：${clamp(it.summary || it.body, 140)}`),
-      ...dFlip.map(it => `[桌面·沉淀(主可见)] 《${clamp(it.title, 40)}》：${clamp(it.summary || it.rawBody, 140)}`),
+      ...dFlip.map(it => `[桌面·冷藏已翻牌(主可见)] 《${clamp(it.title, 40)}》：${clamp(it.summary || it.rawBody, 140)}`),
     ]
     if (deskAll.length > 0) {
-      lines.push('', '【当前摆上桌面备选（重点强调，主对话与参谋长共同可见）】', ...deskAll.slice(0, 8).map(x => '- ' + x))
+      lines.push('', '【当前认知桌面置顶（主对话与参谋长共同可见）】', ...deskAll.slice(0, 6).map(x => '- ' + x))
     }
     if (mGlob.length > 0) {
-      lines.push('', '【参谋长单独参阅中的全局档案（主对话不可见）】')
+      lines.push('', '【参谋长已拉阅的全局档案（主对话不可见）】')
       for (const it of mGlob.slice(0, 5)) {
         lines.push(`- [全局参阅] 《${clamp(it.title, 40)}》：${clamp(it.summary || it.body, 120)}`)
       }
     }
-    const sealedLines = [
-      ...((sw.sessionSealed || []).slice(0, 4).map(it => `- [本局封存·仅参谋关注] 《${clamp(it.title, 36)}》：${clamp(it.summary, 90)}`)),
-      ...((sw.globalSealed || []).slice(0, 4).map(it => `- [全局封存·仅参谋关注] 《${clamp(it.title, 36)}》：${clamp(it.summary, 90)}`)),
-      ...((sw.precipSealed || []).slice(0, 3).map(it => `- [沉淀封存·仅参谋关注] 《${clamp(it.title, 36)}》：${clamp(it.summary, 90)}`)),
+    const vaultIndexLines = [
+      ...sAll.filter(it => !it.takenOut).slice(0, 6).map(it => `- [本局档案·参谋随时可读] 《${clamp(it.title, 36)}》${it.hasHook ? '🪝[' + (it.hookKeywords || []).slice(0, 3).join('·') + ']' : '(待织钩)'}：${clamp(it.summary, 90)}`),
+      ...gHooks.slice(0, 5).map(it => `- [全局钩子·参谋见钩可拉] 《${clamp(it.title, 36)}》🪝[${(it.hookKeywords || []).slice(0, 3).join('·')}] ${clamp(it.hookCue, 60)}`),
+      ...recentWatch.slice(0, 3).map(w => `- [近期撤下桌面·待观察] 《${clamp(w.title, 36)}》`),
     ]
-    if (sealedLines.length > 0) {
-      lines.push('', '【参谋长后台守望的三库封存索引（主对话上下文零注入）】', ...sealedLines)
+    if (vaultIndexLines.length > 0) {
+      lines.push('', '【参谋长后台档案柜与钩子索引（未置顶桌面，主对话不注入）】', ...vaultIndexLines)
     }
   }
 
@@ -370,7 +372,7 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
   const view = clusterView(state, rootId)
   const modelsInfo = await listChiefModels(deps, false, rootId)
   const effCfgBefore = resolveWorkspaceConfig(state, rootId)
-  const paceMode = effCfgBefore.paceMode || 'manual'
+  const runMode = effCfgBefore.runMode || 'off'
   const isConciseBrief = Boolean(effCfgBefore.tacticalModes && effCfgBefore.tacticalModes.conciseBrief)
   const currentSig = view.clusterSig || computeClusterSig(directory.cluster)
   const peerProgress = directory.cluster.length > 1
@@ -402,7 +404,7 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
   const isFresh = !rawInput || (hasSaved && view.narrative.hash === inputHash)
   const cooledForAuto = Date.now() - lastSummaryAt >= AUTO_SUMMARY_COOLDOWN_MS
   const cooledForChat = Date.now() - lastSummaryAt >= CHAT_OPPORTUNISTIC_SUMMARY_COOLDOWN_MS
-  const allowBackgroundSummary = paceMode === 'auto' && autoSummarize && !isFresh && cooledForAuto
+  const allowBackgroundSummary = runMode === 'managed' && autoSummarize && !isFresh && cooledForAuto
   const allowChatSummary = Boolean(chatTriggered) && !isFresh && cooledForChat
 
   // Opportunistically refresh stale narrative in background after Chief chats (60s debounce),
@@ -417,6 +419,7 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
         : NARRATIVE_SYSTEM
       const res = await callChiefLlm(deps, {
         sessionId: rootId,
+        reasonKind: chatTriggered ? 'chat_summary' : 'auto_summary',
         system: sysPrompt,
         prompt: rawInput + (isConciseBrief
           ? '\n\n请开启【极简战报模式】：分结构列出多个简明短句，不写具体数字参数，精确概括现状：'
@@ -500,8 +503,8 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
     !_skipAutoPilotCheck
     && rootId
     && rootId !== 'global'
-    && effectiveConfigBeforeStop.autoPilot
-    && effectiveConfigBeforeStop.paceMode === 'auto'
+    && (effectiveConfigBeforeStop.autoPilot || effectiveConfigBeforeStop.runMode === 'managed')
+    && effectiveConfigBeforeStop.runMode === 'managed'
     && !effectiveConfigBeforeStop.stopped
   ) {
     if (idleAutoPilotHook) {

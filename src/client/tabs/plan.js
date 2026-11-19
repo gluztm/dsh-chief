@@ -266,18 +266,18 @@ export function PlanTab({ board }) {
                 alignItems: 'center',
                 justifyContent: 'space-between',
                 gap: 8,
-                padding: '5px 10px 7px',
+                padding: (isInterventionLocked || isGoalMode) ? '5px 10px 7px' : '4px 10px 6px',
                 borderTop: '1px solid var(--dnb-border)',
                 fontSize: 11,
                 color: (isInterventionLocked || isGoalMode) ? '#fbbf24' : 'var(--dnb-text-3)',
               },
             },
-            h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-              isInterventionLocked
-                ? '🔒 强介入监督目的地已锁定：所有自动介入均以本目标为终局，关闭强介入可解锁'
-                : isGoalMode
-                  ? '🎯 目标督导生效中：达成后将向您请示结项，未获批准不自动退回'
-                  : '标准计划推进模式（点击右上「🎯 设为目标」开启持续督导）'),
+            (isInterventionLocked || isGoalMode)
+              ? h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                  isInterventionLocked
+                    ? '🔒 强介入监督目的地已锁定，关闭强介入可解锁'
+                    : '🎯 目标督导生效中，达成后向您请示结项')
+              : h('span', null),
             h(
               'div',
               { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
@@ -298,8 +298,9 @@ export function PlanTab({ board }) {
                 : null,
               (current || '').trim()
                 ? h('button', {
-                    className: 'dnb-pill',
-                    style: { height: 21, padding: '0 8px', fontSize: 10.5 },
+                    type: 'button',
+                    className: 'dnb-text-filter-btn',
+                    style: { fontSize: 10.5 },
                     title: '让模型用大白话解释这个长期目标的核心问题与解决思路',
                     onClick: () => {
                       void askLeadModel(

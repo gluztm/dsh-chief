@@ -138,16 +138,11 @@ export function PeersTab({ view }) {
       'div',
       { className: 'dnb-section-head' },
       h(
-        'div',
-        { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
-        h('span', null, '当前互通对话网络'),
-        hasLinkedNetwork
-          ? h('span', {
-              className: 'dnb-tag',
-              style: { fontSize: 10, background: 'rgba(16,185,129,0.12)', color: '#10b981', fontWeight: 600 },
-              title: '已入网的独立对话会自动共享进度与协同信箱；断开联动后参谋摘要立即净化隔离',
-            }, '进度实时互通中')
-          : null,
+        'span',
+        {
+          title: hasLinkedNetwork ? '已入网的独立对话会自动共享进度与协同信箱；断开联动后参谋摘要立即净化隔离' : undefined,
+        },
+        '当前互通对话网络',
       ),
       h(
         'div',
@@ -344,23 +339,22 @@ export function PeersTab({ view }) {
       ),
       h(
         'div',
-        { style: { display: 'flex', alignItems: 'center', gap: 4, flexWrap: 'wrap' } },
+        { className: 'dnb-text-filter-bar', style: { padding: 0, gap: 3 } },
         [
           { key: 'all', label: '全部' },
-          { key: 'broadcast', label: '🌐 广播' },
-          { key: 'cross', label: '↔ 跨窗' },
-          { key: 'internal', label: '📁 内部' },
+          { key: 'broadcast', label: '广播' },
+          { key: 'cross', label: '跨窗' },
+          { key: 'internal', label: '内部' },
         ].map(f =>
           h('button', {
             key: f.key,
             type: 'button',
-            className: 'dnb-mini-btn',
-            'data-tone': mailFilter === f.key ? 'accent' : undefined,
-            style: { height: 20, padding: '0 7px', fontSize: 10.5 },
+            className: 'dnb-text-filter-btn',
+            'data-active': mailFilter === f.key ? '1' : '0',
             onClick: () => patch({ mailChannelFilter: f.key }),
           }, f.label),
         ),
-        mailbox.length ? h('span', { style: { marginLeft: 3 } }, String(mailbox.length)) : null,
+        mailbox.length ? h('span', { style: { marginLeft: 4, fontSize: 10.5 } }, String(mailbox.length)) : null,
       ),
     ),
     drawerList.length

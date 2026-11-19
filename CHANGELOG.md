@@ -5,6 +5,48 @@ All notable changes to **`dsh-chief`** (**DSH 参谋长**) will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.5.0] - 2026-11-19
+
+### Added
+
+#### 🗂️ 认知桌面、三层钩子渐变隔离与动态俯视纸质卷宗 UI (`archive-core.js` / `archive-dossiers.js` / `tabs/archives.js`)
+- **工程实现**：
+  - **三层钩子平滑可见性模型**：本局档案柜未整理草稿对主对话不可见、参谋随时可读，经参谋整理写入 `hookKeywords`/`hookCue`/`hasHook: true` 后仅向主对话注入轻量 `🪝` 索引并新增 `chief_board({ action: "archive.pull", id })` 按需拉阅（点亮 `leadPulledSessions` 与 `📖 主代理已拉阅` 徽章）；全局档案柜未织钩草稿对主对话和参谋双盲，织钩后仅向参谋开放 `globalHookIndex` 与 `pull_global` 拉阅（主对话仍 0 泄露）；冷藏档案柜（`precipitated`）新增 `precipitatedFolders` 折叠抽屉及人类速览钩子，对主对话和参谋维持 0-byte 隔离并拦截参谋 `archiveOps` 访问。
+  - **认知桌面预算驱动与双通道注入**：`digest.js` 与 `board-actions.js` 彻底肃清 `sessionArchiveBriefs` 全文泄露，确立置顶 `desktop`（上限 `2,400 Tokens / 6 份`）为唯一全文注入源；超额自动按 `copper < silver < gold`/Pin 时间挤退入 `recentlyUnpinnedWatch` 观察队列；新增 `executeChiefArchiveInjectionOp` 双通道（`pin_to_desktop`/`unpin_from_desktop` 通道 A、`deliver_to_lead` 一次性执行信封通道 B，记入 `chiefDeliveredSessions`），严格服从 L0–L3 权限门控。
+  - **动态俯视纸质卡片 UI**：新增 `.dnb-desktop-zone`（含实时 Token 占用条与「🌙 交参谋梦境漫游归入抽屉」快捷按钮）、`.dnb-vault-banner` 谁在看总览横幅、全三层 `.dnb-drawer-box` 折叠抽屉及 `.dnb-paper-dossier` 动态纸质卷宗卡（折叠态仅呈现标题、关键词钩子与谁在看徽章，点击后平滑展开操作栏与分块记忆点）。
+- **用户感知**：打开档案页顶部即见置顶「认知桌面」和 Token 额度条，三层档案像俯瞰书桌上的实体文件夹与纸页，未点开只看标题和关键词钩子，谁能看、谁在看一眼了然，主对话上下文不再被无关历史档案挤爆。
+
+#### 🤖 正交运行模式、托管「🌙 梦境漫游」、5 条件自动休眠与一站式执行 (`chief-review.js` / `auto-continue.js` / `runtime-hooks.js`)
+- **工程实现**：
+  - **三态正交总控 (`runMode: 'off' | 'patrol' | 'managed'`)**：统一替代旧版零散开关；`off` 后台 0 review LLM 消耗；`patrol` 常规回合 0 Token，仅在 `guard_wall_blocked`、`turn_error`、`stream_interrupted` 等异常事件唤醒巡检；`managed` 启用持续督导。
+  - **托管后台「🌙 梦境漫游」 (`runManagedDreamRoam`)**：托管态 L1+ 权限时自动分拣未织钩草稿与 `recentlyUnpinnedWatch` 入抽屉并生成钩子，同时点亮星空紫蓝毛玻璃遮罩 `data-tone="dream"`（`'🌙 参谋长正在梦境漫游 · 轻拢卷宗与织就钩子中...'`），严禁改写工作区代码或回推桌面。
+  - **5 条件自动休眠守护**：`checkAndStopIdleAutoPilot` 仅在（1）闲置达 `managedIdleTimeoutMs`（默认 15 分钟）且无运行中代理、（2）0 `doing` 任务、（3）0 待审批/提权、（4）0 未结 `inquiries`、（5）0 待复盘定时器且 `recentlyUnpinnedWatch` 清空时自动切回 `'off'`。
+  - **`Auto continue` 双模式唤醒与 L3 一站式建议收口**：`patrol` 与 `managed` 下断流事件过红线与物理墙检查后按 L0–L3 分级处置（L3 下发 `[EXECUTION_REQUEST #taskId]`）；`L3 + 强介入` 时 `executeBatchSuggestions` 自动执行安全建议（跳过 `guard_wall`、`goal_approval` 及 `pinGlobal`）并产出 `isOneStopReport: true` 合并战报卡片 `'🏁 一站式战报回执'`。
+- **用户感知**：关停即零消耗，巡检只在真出事或断线时介入，开启托管后参谋长会在空闲期悄悄「🌙 梦境漫游」归整卷宗并织好检索钩子，忙完 15 分钟所有待办归零后自动退回关停休眠。
+
+#### 🧠 思考强度、自适应换挡与跨模型每角色 `🔒 锁挡` 保护 (`chief-models.js` / `subagent-runtime.js` / `tabs/chief.js`)
+- **工程实现**：
+  - **6 档配置与模型能力对齐 (`thinkingEffort`)**：支持 `auto / off / low / medium / high / xhigh`，调用 `llm.resolveModelInfo` 自动降级或对非推理模型剥离参数；`decideAdaptiveChiefEffort` 在 `chat_summary` / `dream_roam` / `quick_status` 自动降为 `off`，常规复盘为 `medium`，`blank_explore` / `wall_blocked` / `craft_wall` / `precipitate` / `strong_intervention` 升为 `high`，`hazard_diagnosis` 升为 `xhigh`，并在聊天与回执卡落盘 `thinkingEffort` 与 `thinkingEffortMode` 角标元数据。
+  - **L2/L3 跨代理热调挡与 `🔒 锁挡` 一票否决**：通过 `effortOps`、看板 `task.dispatch({ reasoningEffort })` 与 `controlMainAgent({ op: 'set_effort' })` 静默热调 `@lead` 与子代理下一轮推理深度；新增 `lockedModelEfforts` 每角色锁挡，用户一键锁定后参谋 L2/L3 自动改挡被硬拦截并记入审计。
+- **用户感知**：可在模型选择器与参谋回复右上角直接看清每条回答使用的推理强度，默认「🪄 自适应」自动把好钢用在复杂排障与筑墙上；也能直接在前端一键锁定主对话或任意子代理的思考挡位，防止参谋越权改动。
+
+### Fixed
+- **加固模型思考锁挡 (`lockedModelEfforts`) 权限隔离与 `toggleLockAgentEffort` 落地 (`chief-state.js` / `api-routes.js`)**：封堵非人类调用方通过 `updateChiefConfig` 直接篡改 `lockedModelEfforts` 或已锁挡 `chief` 思考强度的旁路（Fail-Closed 拦截并写入 `model_effort_lock` 审计日志）；仅允许经宿主鉴权面板路由 (`/chief/config`) 或显式 `byUser: true` 人工操作修改。
+- **拦截 `inquiry.reply` 重复重放 (`chief-state.js`)**：`answerChiefInquiry` 校验问询当前状态，对已 `answered` 结案的 `inquiryId` 幂等拒绝并写入 `inquiry_reply_replay_rejected` 审计记录，杜绝覆盖原答案及重复写入聊天回执、审计日志与任务账本。
+- **修复 DSH 浅色主题下弹层仍为深色问题（Issue #3，`styles.js`）**：将 `--dnb-popover` 从固定深色的 `--dsw-alias-hovercard-bg` 切换为随主题变的 `--dsw-alias-bg-elevated`，并显式适配 `html[data-ds-theme-source="light"]` 与 `[data-ds-theme="light"]`（独立于系统 `prefers-color-scheme`，覆盖四级权限弹层、战术驾驶舱、更多菜单、流光毛玻璃与俯视角纸质卷宗，并防止系统浅色误染 DSH 深色主题）。
+- **子代理会话自动隐藏参谋长入口与防会话污染（Issue #4，`store.js` / `api.js` / `components/Panel.js`）**：新增 `isSubagentSessionId` 复用宿主 `sessions.subagentAddress` 与快照元信息识别子代理会话，在子代理对话框内自动隐藏输入框参谋长按钮（`ComposerEntry`）及主视口右下角悬浮入口（`CornerTrigger`），并阻止 `adoptSession` 被子代理窗格覆盖主会话焦点。
+- **自适应顶栏版本号、锁挡状态同步、强介入先锁目标即推与极低概率请示拆墙（`Panel.js` / `tasks.js` / `modals.js` / `chief.js` / `chief-commands.js` / `chief-approvals.js` / `api-routes.js`）**：
+  - 使用 `@container dnb-head` 在宽敞面板展示版本号、窄面板自动隐藏（未同步警示始终亮显）；
+  - 修复子代理/主对话思考强度 `🔒 锁挡` 按钮因 `effortLocked` 缓存及别名键导致的无法切换/解锁问题，并区分清晰锁定态图标文案；
+  - 开启「主动强介入」必须先填写并点选锁定核心总目标（未锁点击则目标框红框闪烁提醒），确认开启后按当前权限自动立即唤醒/审批首轮推进，无需再发“继续”；
+  - 参谋长请示拆墙机制落地（`kind: 'wall_removal'`）：仅当主/子代理真实撞墙无法绕过并上报、参谋独立复核确认无替代方案时方可提交审批单，任何 L0–L3 权限均不可自拆或由自动流水线跳过，必须人类点击批准才暂挂/拆除目标墙；
+  - 参谋摘要页新增「💡 咨询」按钮，坦诚给出建议或直接说明暂无建议/管不了的外部事项，不强行凑执行按钮，可执行项按标准权限与审批流程推进。
+- **扇形思考强度仪表盘、固定高度防抽搐、弹窗实底防透与团队思考强度「自动 / 手动」简洁切换（`chief-state.js` / `chief-commands.js` / `subagent-runtime.js` / `api-routes.js` / `components/common.js` / `components/modals.js` / `tabs/chief.js` / `tabs/tasks.js` / `styles.js`）**：
+  - 将模型选择器与战术驾驶舱中的思考强度替换为 180° 扇形档位表（`EffortFanGauge`）：支持拖拽/点击切换固定挡位或点按中心一键切回 `🪄 自动调节`，移除自动扫掠循环动画与底部自适应说明栏，保持原生气泡解释且彻底消除鼠标跨档悬停导致的弹窗高度抽搐；
+  - 取消针对单个主/子代理的思考档位下拉调控与 `锁挡` 按钮，改为在扇形表盘下方提供「团队思考强度（主/子代理）：自动 / 手动」一键切换（`teamEffortMode`，默认 `auto` 由参谋长按当前权限范围自动调节，切换 `manual` 则由人类掌控且参谋主动调挡门禁与执行均严格拦截）；
+  - 精简移除战术驾驶舱顶部 `拉起 / 复位` 把手，保留主代理与子代理卡片及调度标签前置 `agentLead` / `agentSub` 矢量图标，并为 `.dnb-tactical-pop` / `.dnb-perm-pop` / `.dnb-more-menu` / `.dnb-menu` 补充深/浅色实底背景修复深色模式下弹层半透明透底叠字问题。
+- **支持鼠标单击毛玻璃遮罩即穿透恢复操作且保留外框流光提示 (`components/Panel.js` / `styles.js`)**：当后台「🌙 梦境漫游」或自动审查点亮毛玻璃舞台时，新增 `点击任意处收起遮罩继续操作 · 外框流光表示仍在运作` 提示；用户鼠标单击毛玻璃任意区域即可立即卸除模糊与点击拦截层恢复自由操作面板，同时四边 `.dnb-chief-fx-border` 彩色流光外框依然保持运行，直至本轮后台运作结束。
+
 ## [1.4.0] - 2026-11-19
 
 ### Added

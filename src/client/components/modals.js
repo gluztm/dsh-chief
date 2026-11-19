@@ -5,7 +5,7 @@
  */
 
 import { React, h } from '../react-runtime.js'
-import { CHIEF_PERMISSION_LABELS, INTERVENTION_TIER_DESC } from '../constants.js'
+import { CHIEF_PERMISSION_LABELS, INTERVENTION_TIER_DESC, RUN_MODE_OPTIONS, THINKING_EFFORT_OPTIONS } from '../constants.js'
 import { patch, focusSecInput } from '../store.js'
 import {
   normalizeMaxTurnsVal,
@@ -33,7 +33,7 @@ import {
   rejectGoalApi,
   transfer,
 } from '../api.js'
-import { Icon, renderStructuredText } from './common.js'
+import { Icon, Switch, EffortFanGauge, renderStructuredText } from './common.js'
 
 export function ModelPickerPopover({ view }) {
   if (!view.secModelMenuOpen) return null
@@ -93,13 +93,21 @@ export function ModelPickerPopover({ view }) {
           position: 'absolute',
           top: 42,
           right: 12,
-          minWidth: 244,
-          maxWidth: 310,
-          maxHeight: 340,
+          minWidth: 262,
+          maxWidth: 316,
+          maxHeight: 'min(76vh, 480px)',
           overflowY: 'auto',
           zIndex: 9999,
         },
       },
+      h('div', { style: { padding: '6px 10px 8px', borderBottom: '1px solid var(--dnb-border)', marginBottom: 4 } },
+        h('div', { style: { fontSize: 10.5, fontWeight: 700, color: 'var(--dnb-text-3)', marginBottom: 4 } }, '🧠 参谋长思考强度（拖住弧线调挡 · 点中心自动）'),
+        h(EffortFanGauge, {
+          compact: true,
+          value: (view.chiefMeta && view.chiefMeta.thinkingEffort) || 'auto',
+          onChange: nextKey => void updateSecConfig({ thinkingEffort: nextKey }),
+        }),
+      ),
       h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } }, '选择参谋长专职模型'),
       h(
         'div',
@@ -177,29 +185,9 @@ export function ModelPickerPopover({ view }) {
 export function PacePickerPopover({ view }) {
   if (!view.secPaceMenuOpen) return null
   const meta = view.chiefMeta || {}
-  const currentPace = meta.paceMode || (meta.autoPilot ? 'auto' : 'manual')
-  const PACE_OPTIONS = [
-    {
-      key: 'manual',
-      title: '⏸ 按需手动（默认 · 省 Token）',
-      desc: '开着面板绝不后台自动总结或空转；仅在你点「提炼摘要」、浓缩边界或在下方参谋栏发话时才调模型。',
-    },
-    {
-      key: 'smart',
-      title: '👁 关键巡检（智能节流）',
-      desc: '摘要仍由你手动点；仅在代理撞墙报错或多代理关键节点冷却巡检（忽略内部检查点）。',
-    },
-    {
-      key: 'auto',
-      title: '⚡ 全自动托管',
-      desc: '仅限本对话生效：自动打理本局档案/非定住边界/阶段摘要，主代理与子代理完工且摘要收尾后自动停机防空转（开启需确认）。',
-    },
-    {
-      key: 'stopped',
-      title: '⏹ 停止参谋长（暂停自动化）',
-      desc: '暂停后台强介入推跑、空转拦截与断线自动续跑；保留手动问答与手工档案操作，可随时切回恢复。',
-    },
-  ]
+  const currentRunMode = meta.stopped
+    ? 'off'
+    : (meta.runMode || (meta.paceMode === 'auto' ? 'managed' : (meta.paceMode === 'smart' ? 'patrol' : 'off')))
   return h(
     React.Fragment,
     null,
@@ -219,9 +207,9 @@ export function PacePickerPopover({ view }) {
           zIndex: 9999,
         },
       },
-      h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } }, '参谋长工作节奏控制'),
-      PACE_OPTIONS.map(opt => {
-        const active = currentPace === opt.key
+      h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } }, '参谋长三态运行模式（与战术正交）'),
+      RUN_MODE_OPTIONS.map(opt => {
+        const active = currentRunMode === opt.key
         return h(
           'div',
           {
@@ -235,17 +223,20 @@ export function PacePickerPopover({ view }) {
               color: active ? 'var(--dnb-accent)' : undefined,
             },
             onClick: () => {
-              if (opt.key === 'auto' && currentPace !== 'auto') {
+              if (opt.key === 'managed' && currentRunMode !== 'managed') {
                 patch({ secPaceMenuOpen: false, autoPilotConfirmOpen: true })
                 return
               }
               patch({ secPaceMenuOpen: false })
-              void updateSecConfig({ paceMode: opt.key })
+              void updateSecConfig({
+                runMode: opt.key,
+                ...(opt.key === 'off' ? { paceMode: 'manual', autoPilot: false } : {}),
+              })
             },
           },
           h('div', { style: { minWidth: 0, flex: 1 } },
-            h('div', { style: { fontSize: 12, fontWeight: active ? 600 : 500, marginBottom: 2 } }, opt.title),
-            h('div', { style: { fontSize: 10.5, lineHeight: 1.4, color: 'var(--dnb-text-3)', whiteSpace: 'normal' } }, opt.desc),
+            h('div', { style: { fontSize: 12, fontWeight: active ? 600 : 500, marginBottom: 2 } }, opt.label),
+            h('div', { style: { fontSize: 10.5, lineHeight: 1.4, color: 'var(--dnb-text-3)', whiteSpace: 'normal' } }, opt.hint),
           ),
           active ? h(Icon, { name: 'check', size: 13, style: { marginTop: 2 } }) : null,
         )
@@ -256,6 +247,24 @@ export function PacePickerPopover({ view }) {
 
 function describeSuggestionMeta(sug) {
   if (!sug) return { typeLabel: '参谋建议', impact: '协同调整', expect: '按建议推进', tone: 'var(--dnb-accent)', bg: 'rgba(10, 132, 255, 0.12)' }
+  if (sug.kind === 'archive_op') {
+    return {
+      typeLabel: '📌 档案注入/桌面建议',
+      impact: `影响：${sug.targetLabel || '📌 认知桌面'}（不越级改动冷库）`,
+      expect: '预期：确认后执行桌面置顶/撤回或一次性递送主对话',
+      tone: '#f59e0b',
+      bg: 'rgba(245, 158, 11, 0.13)',
+    }
+  }
+  if (sug.kind === 'model_effort') {
+    return {
+      typeLabel: '🧠 模型思考调挡建议',
+      impact: `影响：调整 ${sug.targetLabel || '@lead'} 思考深度`,
+      expect: '预期：按建议实时热切换下一轮模型推理深度',
+      tone: '#a5b4fc',
+      bg: 'rgba(99, 102, 241, 0.16)',
+    }
+  }
   if (sug.kind === 'goal_approval') {
     return {
       typeLabel: '🎯 目标结项请示',
@@ -272,6 +281,17 @@ function describeSuggestionMeta(sug) {
       expect: '预期：确认后写入 guard-walls.json，所有代理触线即刻物理阻断',
       tone: '#f87171',
       bg: 'rgba(239, 68, 68, 0.13)',
+    }
+  }
+  if (sug.kind === 'wall_removal') {
+    const spec = (sug.wallRemovalSpec && typeof sug.wallRemovalSpec === 'object') ? sug.wallRemovalSpec : {}
+    const actText = spec.action === 'remove' ? '永久移除该物理驻墙' : '暂挂休眠该物理驻墙'
+    return {
+      typeLabel: '⚠️ 参谋请示拆墙（需人工批准）',
+      impact: `影响：${spec.wallTitle || sug.targetLabel || '目标物理驻墙'}（L0–L3 均须人类审批）`,
+      expect: `预期：批准后${actText}，参谋绝无权越权自拆`,
+      tone: '#ef4444',
+      bg: 'rgba(239, 68, 68, 0.18)',
     }
   }
   if (sug.kind === 'bound') {
@@ -307,7 +327,7 @@ export function SuggestionBanner({ view }) {
   const rawSuggestions = (view.secView && Array.isArray(view.secView.suggestions))
     ? view.secView.suggestions.filter(s => s && s.status === 'pending')
     : []
-  const rankSug = s => (s.kind === 'goal_approval' ? 0 : (s.kind === 'bound' || s.kind === 'guard_wall') ? 1 : 2)
+  const rankSug = s => ((s.kind === 'goal_approval' || s.kind === 'wall_removal') ? 0 : (s.kind === 'bound' || s.kind === 'guard_wall') ? 1 : 2)
   const suggestions = [...rawSuggestions].sort((a, b) => rankSug(a) - rankSug(b))
   const [expandedId, setExpandedId] = React.useState('')
   const [unselectedIds, setUnselectedIds] = React.useState({})
@@ -483,6 +503,8 @@ export function InterventionConfirmModal({ view, board }) {
 
   const [objDraft, setObjDraft] = React.useState(savedBoardObj)
   const [objLocked, setObjLocked] = React.useState(false)
+  const [objFlashRed, setObjFlashRed] = React.useState(false)
+  const [objGuardHint, setObjGuardHint] = React.useState('')
   const [suggestBusy, setSuggestBusy] = React.useState(false)
   const [suggestHistory, setSuggestHistory] = React.useState([])
   const [lastAiText, setLastAiText] = React.useState('')
@@ -491,11 +513,14 @@ export function InterventionConfirmModal({ view, board }) {
   const [confirmBusy, setConfirmBusy] = React.useState(false)
   const [wallsSecCollapsed, setWallsSecCollapsed] = React.useState(false)
   const [redlinesSecCollapsed, setRedlinesSecCollapsed] = React.useState(false)
+  const objBoxRef = React.useRef(null)
 
   React.useEffect(() => {
     if (!view.interventionModalOpen) return
     setObjDraft(savedBoardObj)
     setObjLocked(false)
+    setObjFlashRed(false)
+    setObjGuardHint('')
     setSuggestBusy(false)
     setSuggestHistory([])
     setLastAiText('')
@@ -509,6 +534,18 @@ export function InterventionConfirmModal({ view, board }) {
   if (!view.interventionModalOpen) return null
   const permMode = ['advisor', 'assistant', 'strategist', 'chief'].includes(meta.permissionMode) ? meta.permissionMode : 'advisor'
   const trimmedDraft = String(objDraft || '').trim()
+  const triggerObjRedFlash = (hintMsg) => {
+    setObjGuardHint(hintMsg || '请先明确核心总目标并点击右上角「🔒 锁定」，再开启强介入！')
+    setObjFlashRed(false)
+    const fire = () => setObjFlashRed(true)
+    if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fire)
+    else setTimeout(fire, 16)
+    try {
+      if (objBoxRef.current && typeof objBoxRef.current.scrollIntoView === 'function') {
+        objBoxRef.current.scrollIntoView({ behavior: 'smooth', block: 'center' })
+      }
+    } catch {}
+  }
   const noDefenseRules = activeWalls.length === 0 && forbiddenList.length === 0
   const allDefenseCollapsed = wallsSecCollapsed && redlinesSecCollapsed
   const toggleAllDefense = () => {
@@ -576,17 +613,19 @@ export function InterventionConfirmModal({ view, board }) {
           onClick: () => patch({ interventionModalOpen: false }),
         }, h(Icon, { name: 'x', size: 13 })),
       ),
-      // Core Objective Destination Editor inside Modal (建议 + 锁定)
+      // Core Objective Destination Editor inside Modal (建议 + 必须先点选锁定)
       h(
         'div',
         {
+          ref: objBoxRef,
+          className: objFlashRed ? 'dnb-obj-flash-red' : undefined,
           style: {
             borderRadius: 9,
             padding: '9px 10px',
             border: objLocked
-              ? '1px solid rgba(245, 158, 11, 0.55)'
-              : (!trimmedDraft ? '1px solid rgba(255, 69, 58, 0.45)' : '1px solid var(--dnb-border)'),
-            background: objLocked ? 'rgba(245, 158, 11, 0.07)' : 'var(--dnb-card)',
+              ? '1px solid rgba(245, 158, 11, 0.58)'
+              : '1.5px solid rgba(255, 69, 58, 0.62)',
+            background: objLocked ? 'rgba(245, 158, 11, 0.08)' : 'rgba(255, 69, 58, 0.06)',
             display: 'flex',
             flexDirection: 'column',
             gap: 6,
@@ -596,8 +635,10 @@ export function InterventionConfirmModal({ view, board }) {
         h(
           'div',
           { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
-          h('span', { style: { fontWeight: 700, color: 'var(--dnb-text)' } },
-            '🎯 强介入核心目标（默认带入规划核心目标，开启后将自动锁定）'),
+          h('span', { style: { fontWeight: 700, color: objLocked ? 'var(--dnb-text)' : '#ff6961' } },
+            objLocked
+              ? '🎯 强介入核心总目标（已锁定 · 开启后立即推进）'
+              : '🎯 强介入核心总目标（须先点右侧「锁定目标」才可开启）'),
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 5 } },
@@ -616,10 +657,23 @@ export function InterventionConfirmModal({ view, board }) {
             h('button', {
               type: 'button',
               className: 'dnb-mini-btn',
-              'data-tone': objLocked ? 'amber' : 'blue',
-              title: objLocked ? '点击解锁以继续编辑或点建议' : '锁定当前核心目标避免误改',
-              onClick: () => setObjLocked(v => !v),
-            }, objLocked ? '🔒 已锁定' : '🔒 锁定'),
+              'data-tone': objLocked ? 'amber' : 'red',
+              title: objLocked ? '点击解锁以继续编辑或点建议' : '点击锁定明确后的核心总目标，解锁“开启强介入”开关',
+              onClick: () => {
+                if (!objLocked && !trimmedDraft) {
+                  triggerObjRedFlash('请先填写明确的核心总目标，再点选「锁定目标」！')
+                  return
+                }
+                setObjLocked(v => {
+                  const nextLocked = !v
+                  if (nextLocked) {
+                    setObjFlashRed(false)
+                    setObjGuardHint('')
+                  }
+                  return nextLocked
+                })
+              },
+            }, objLocked ? '🔒 已锁定目标' : '🔓 锁定目标'),
           ),
         ),
         h('textarea', {
@@ -635,6 +689,7 @@ export function InterventionConfirmModal({ view, board }) {
             fontSize: 12,
             lineHeight: 1.45,
             resize: 'vertical',
+            borderColor: !objLocked ? 'rgba(255, 69, 58, 0.52)' : undefined,
             opacity: objLocked ? 0.88 : 1,
             cursor: objLocked ? 'not-allowed' : 'text',
           },
@@ -643,6 +698,8 @@ export function InterventionConfirmModal({ view, board }) {
             if (objLocked) return
             setObjDraft(e.target.value)
             setLastWasAiGuess(false)
+            if (objFlashRed) setObjFlashRed(false)
+            if (objGuardHint) setObjGuardHint('')
           },
         }),
         suggestRationale
@@ -650,8 +707,10 @@ export function InterventionConfirmModal({ view, board }) {
           : null,
         h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', lineHeight: 1.4 } },
           !trimmedDraft
-            ? h('span', { style: { color: '#ff6961', fontWeight: 600 } }, '⚠ 尚未填写核心目标：建议直接点右上「✦ 建议」自动填充（可反复点猜意图），或自行填写。')
-            : '后续参谋长每次介入都会对照此核心目标与「必做事项」核查完成度；开启强介入后将锁定本目标直到关闭。'),
+            ? h('span', { style: { color: '#ff6961', fontWeight: 600 } }, objGuardHint || '⚠ 请先明确核心总目标（可自行填写或点「✦ 建议」），再点击「锁定目标」。')
+            : (!objLocked
+                ? h('span', { style: { color: '#ff6961', fontWeight: 600 } }, objGuardHint || '⚠ 尚差一步：请点击右上「🔓 锁定目标」确认锁定后，方可开启强介入（开启后将立即开始推进）。')
+                : '✓ 核心总目标已锁定：点击下方开启强介入后，将直接锁定本目标并立即开始推进，无需再发“继续”。')),
       ),
       // Live Boundaries & Guard Walls Readback (Physical Guard Walls + Forbidden Redlines)
       h(
@@ -881,9 +940,29 @@ export function InterventionConfirmModal({ view, board }) {
         h('button', {
           type: 'button',
           className: 'dnb-primary-btn',
-          style: { height: 32, padding: '0 15px', fontSize: 12.5, background: '#f59e0b', color: '#111', fontWeight: 700, opacity: (view.interventionAgreed && !confirmBusy) ? 1 : 0.45 },
-          disabled: !view.interventionAgreed || confirmBusy,
+          style: {
+            height: 32,
+            padding: '0 15px',
+            fontSize: 12.5,
+            background: '#f59e0b',
+            color: '#111',
+            fontWeight: 700,
+            opacity: (view.interventionAgreed && objLocked && trimmedDraft && !confirmBusy) ? 1 : 0.48,
+          },
+          disabled: confirmBusy,
           onClick: async () => {
+            if (!trimmedDraft) {
+              triggerObjRedFlash('⚠ 未明确核心总目标：请先填写总目标并点击「锁定目标」，方可开启强介入！')
+              return
+            }
+            if (!objLocked) {
+              triggerObjRedFlash('⚠ 请先点选总目标框右上角的「🔓 锁定目标」按钮，锁定明确目标后才能开启强介入！')
+              return
+            }
+            if (!view.interventionAgreed) {
+              patch({ notice: '请先勾选下方风险确认框' })
+              return
+            }
             setConfirmBusy(true)
             try {
               const curMax = normalizeMaxTurnsVal(tm.maxInterventionTurns)
@@ -891,14 +970,16 @@ export function InterventionConfirmModal({ view, board }) {
                 tacticalModes: { ...tm, intervention: true, maxInterventionTurns: curMax },
                 confirmedInterventionRisk: true,
                 ...(curMax === 0 ? { confirmedUnlimitedTurns: true } : {}),
-                ...(trimmedDraft ? { coreObjective: trimmedDraft } : {}),
+                coreObjective: trimmedDraft,
+                objectiveLocked: true,
+                startImmediately: true,
               })
               if (ok) patch({ interventionModalOpen: false, interventionAgreed: false })
             } finally {
               setConfirmBusy(false)
             }
           },
-        }, confirmBusy ? '开启并锁定中…' : (trimmedDraft ? '确认锁定目标并开启强介入' : '确认启用主动强介入')),
+        }, confirmBusy ? '开启并立即推进中…' : '确认锁定并开启强介入'),
       ),
     ),
   )
@@ -984,7 +1065,7 @@ export function AutoPilotConfirmModal({ view }) {
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '⚡ 开启本会话全自动托管 — 作用域与防空转确认'),
+        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#34d399' } }, '🤖 开启托管模式 — 梦境漫游与 5 条件自动休眠确认'),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -996,16 +1077,16 @@ export function AutoPilotConfirmModal({ view }) {
         'div',
         { className: 'dnb-disclaimer-box' },
         h('div', { style: { marginBottom: 4 } },
-          h('strong', null, '1. 仅管当前对话（严格会话隔离）：'),
-          '全自动模式下，参谋长会自主打理本对话内的档案分类/归纳、非定住边界、任务进展更新与阶段摘要；绝不触碰全局定住红线、绝不写全局冷库，也绝不向外部对话窗口自动递话或串窗。',
+          h('strong', null, '1. 持续后台监工与会话隔离：'),
+          '托管模式下，参谋长会按当前权限等级（L0–L3）持续核查目标与红线、协同纠偏及触发断流续跑（绝不触碰全局定住红线，绝不读写冷藏档案柜）。',
         ),
         h('div', { style: { marginBottom: 4 } },
-          h('strong', null, '2. 防空转自动停机机制：'),
-          '当主对话代理与所有已派发子代理均结束工作且收尾摘要提炼完成后，参谋长会自动退出全自动托管并恢复为「⏸ 按需手动」，防止后台持续空转浪费算力。',
+          h('strong', null, '2. 🌙 后台「梦境漫游」轻拢卷宗：'),
+          'L1+ 权限时，后台会自动将未织钩子草稿与刚撤下桌面的卷宗分拣入抽屉并织就轻量钩子（只做收纳梳理，不改代码，不擅自回推桌面）。',
         ),
         h('div', null,
-          h('strong', null, '3. 随时可控：'),
-          '您随时可以点击顶部节奏按钮切回手动，或切至「⏹ 停止参谋长」。',
+          h('strong', null, '3. 五条件自动休眠守护（默认 15 分钟）：'),
+          '一旦连续闲置达 15 分钟（或核心目标收口）且 0 在途代理/doing 任务/待审批/在途问询/待归位列表，系统自动切回「⏸ 关停」以节省算力。',
         ),
       ),
       h(
@@ -1023,12 +1104,14 @@ export function AutoPilotConfirmModal({ view }) {
           style: { height: 32, padding: '0 15px', fontSize: 12.5, fontWeight: 700 },
           onClick: async () => {
             const ok = await updateSecConfig({
+              runMode: 'managed',
               paceMode: 'auto',
+              autoPilot: true,
               confirmedAutoPilot: true,
             })
             if (ok) patch({ autoPilotConfirmOpen: false })
           },
-        }, '⚡ 确认开启本对话全自动托管'),
+        }, '🤖 确认开启本对话托管模式'),
       ),
     ),
   )
@@ -1827,8 +1910,16 @@ export function OperationApprovalModal({ view }) {
       h(
         'div',
         { className: 'dnb-op-box' },
-        h('div', { style: { fontSize: 13, fontWeight: 700, color: '#d97706', display: 'flex', alignItems: 'center', gap: 6 } },
-          '🛡️ 操作授权请求'),
+        h('div', { style: { fontSize: 13, fontWeight: 700, color: '#d97706', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+          '🛡️ 操作授权请求',
+          active.kind === 'archive_op'
+            ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#fbbf24' } }, '📌 档案馆主会话注入')
+            : (active.kind === 'model_effort'
+                ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#a5b4fc' } }, '🧠 思考强度调挡')
+                : (active.kind === 'auto_continue'
+                    ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#38bdf8' } }, '⚡ 断线自动续跑')
+                    : null)),
+        ),
         h('div', { className: 'dnb-op-kv' },
           h('span', { className: 'dnb-op-k' }, '操作：'),
           h('span', null, active.operationLabel || '受控工作区或工作流操作'),

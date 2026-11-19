@@ -183,7 +183,7 @@ export function classifyTurnEndReason(reason, eventData = null) {
   return { kind, nestedKind, failure }
 }
 
-function buildContinuePrompt(trigger, toolSummary = {}, failure = null) {
+function buildContinuePrompt(trigger, toolSummary = {}, failure = null, taskId = '') {
   const pendingCount = Number(toolSummary.pendingCount) || 0
   const doneCount = Number(toolSummary.doneCount) || 0
 
@@ -216,7 +216,8 @@ function buildContinuePrompt(trigger, toolSummary = {}, failure = null) {
     guardText = `\n[幂等安全提醒] 上一轮已有工具调用完成${doneList}，请先核实已有产出，切勿重复执行会覆盖或叠加副作用的步骤。`
   }
 
-  return `[DSH 参谋长 · 断线续跑] ${lead}${guardText}`
+  const envelopeTag = taskId ? `[EXECUTION_REQUEST #${taskId}] ` : '[EXECUTION_REQUEST] '
+  return `${envelopeTag}[DSH 参谋长 · 断线续跑执行请求] ${lead}${guardText}`
 }
 
 /**
@@ -322,12 +323,18 @@ export function createAutoContinueEngine(options = {}) {
       return { ok: false, skipped: 'chief-stopped' }
     }
 
+    let verdict = null
     if (!bypassGate && typeof canAutoContinue === 'function') {
-      const verdict = await Promise.resolve(canAutoContinue({ sessionId, rootId, trigger, detail }))
+      verdict = await Promise.resolve(canAutoContinue({ sessionId, rootId, trigger, detail }))
       if (verdict && verdict.allowed === false) {
         st.stats.skippedStopped += 1
         if (verdict.logMessage) onLog(sessionId, verdict.logMessage)
-        return { ok: false, skipped: verdict.skipped || 'permission-mode', approvalId: verdict.approvalId }
+        return {
+          ok: false,
+          skipped: verdict.skipped || 'permission-mode',
+          approvalId: verdict.approvalId,
+          ...(verdict.taskId ? { taskId: verdict.taskId } : {}),
+        }
       }
     }
 
@@ -349,7 +356,8 @@ export function createAutoContinueEngine(options = {}) {
       return { ok: false, skipped: 'no-followup' }
     }
 
-    const text = buildContinuePrompt(trigger, st.lastToolSummary, st.lastFailure) + (detail ? `\n补充上下文：${clampText(detail, 180)}` : '')
+    const envelopeTaskId = (verdict && verdict.taskId) ? String(verdict.taskId) : ''
+    const text = buildContinuePrompt(trigger, st.lastToolSummary, st.lastFailure, envelopeTaskId) + (detail ? `\n补充上下文：${clampText(detail, 180)}` : '')
     const fallbackId = `ac-${Date.now().toString(36)}-${crypto.randomBytes(3).toString('hex')}`
     let envelope = null
     if (typeof createMessage === 'function') {

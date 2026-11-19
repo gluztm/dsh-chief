@@ -18,6 +18,10 @@ export const POINTS_CAP = 32
 
 export const PRECIPITATED_CAP = 300
 
+export const DESKTOP_TOKEN_BUDGET = 2400
+
+export const DESKTOP_MAX_ITEMS = 6
+
 export const SECRET_PATTERN = /(?:sk-[a-zA-Z0-9_-]{16,}|ghp_[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|Bearer\s+[A-Za-z0-9._~+/=-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/
 
 export const DEFAULT_ARCHIVE_FOLDERS = [
@@ -612,6 +616,86 @@ export function normalizeTags(list) {
   return out
 }
 
+export function normalizeSessionIdList(list, cap = 32) {
+  if (!Array.isArray(list)) return []
+  return [...new Set(list.map(s => String(s || '').trim()).filter(Boolean))].slice(0, cap)
+}
+
+export function normalizeDesktopMeta(raw) {
+  const out = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const [k, v] of Object.entries(raw)) {
+    const sid = String(k || '').trim()
+    if (!sid || !v || typeof v !== 'object') continue
+    out[sid] = {
+      pinnedAt: Number(v.pinnedAt) || Date.now(),
+      by: clamp(v.by || 'user', 30),
+      priority: Number.isFinite(Number(v.priority)) ? Number(v.priority) : 0,
+    }
+  }
+  return out
+}
+
+export function estimateArchiveTokens(item) {
+  if (!item || typeof item !== 'object') return 40
+  const pts = (Array.isArray(item.points) ? item.points : []).slice(0, 3)
+  const ptText = pts.map(p => `${p.title || ''} ${p.cue || p.detail || ''}`).join(' ')
+  const combined = `${item.title || ''}\n${item.summary || ''}\n${ptText || (item.body || '').slice(0, 480)}`
+  let cjkCount = 0
+  let asciiCount = 0
+  for (let i = 0; i < combined.length; i += 1) {
+    if (combined.charCodeAt(i) > 127) cjkCount += 1
+    else asciiCount += 1
+  }
+  const est = Math.ceil(cjkCount * 0.85 + asciiCount * 0.28) + 18
+  return Math.max(40, est)
+}
+
+export function deriveHookFromStructuredItem(raw, forceOrganized = false) {
+  const src = raw && typeof raw === 'object' ? raw : {}
+  const isOrganized = Boolean(forceOrganized || src.organizedBy === 'chief' || src.hasHook === true)
+  if (!isOrganized) {
+    return { hasHook: false, hookKeywords: [], hookCue: '' }
+  }
+  const candidates = []
+  if (Array.isArray(src.hookKeywords)) candidates.push(...src.hookKeywords)
+  if (Array.isArray(src.tags)) candidates.push(...src.tags)
+  if (Array.isArray(src.points)) {
+    for (const pt of src.points.slice(0, 4)) {
+      if (pt && pt.title) candidates.push(String(pt.title).split(/[：:·—]/)[0])
+    }
+  }
+  if (!candidates.length && src.title) {
+    const words = String(src.title).split(/[\s/·：:()（）]+/).filter(w => w.length >= 2)
+    candidates.push(...words.slice(0, 3))
+  }
+  const seen = new Set()
+  const hookKeywords = []
+  for (const cand of candidates) {
+    const kw = clamp(String(cand || '').replace(/^#+/, '').trim(), 16)
+    if (!kw || kw === 'anchor') continue
+    const low = kw.toLowerCase()
+    if (seen.has(low)) continue
+    seen.add(low)
+    hookKeywords.push(kw)
+    if (hookKeywords.length >= 5) break
+  }
+  if (!hookKeywords.length && src.folder) {
+    hookKeywords.push(clamp(src.folder, 16))
+  }
+  const rawCue = str(src.hookCue, '').trim()
+    || (Array.isArray(src.points) && src.points[0] && (src.points[0].cue || src.points[0].title))
+    || src.summary
+    || firstMeaningfulSentence(src.body || '')
+    || src.title
+  const hookCue = clamp(rawCue, 40)
+  return {
+    hasHook: true,
+    hookKeywords,
+    hookCue,
+  }
+}
+
 export function normalizeArchiveItem(raw) {
   if (!raw || typeof raw !== 'object') return null
   const body = cleanMultiline(raw.body || '', 30000)
@@ -639,12 +723,23 @@ export function normalizeArchiveItem(raw) {
     140,
   )
 
-  const takenOutSessions = Array.isArray(raw.takenOutSessions)
-    ? [...new Set(raw.takenOutSessions.map(s => String(s || '').trim()).filter(Boolean))].slice(0, 32)
-    : []
-  const chiefMountedSessions = Array.isArray(raw.chiefMountedSessions)
-    ? [...new Set(raw.chiefMountedSessions.map(s => String(s || '').trim()).filter(Boolean))].slice(0, 32)
-    : []
+  const takenOutSessions = normalizeSessionIdList(raw.takenOutSessions)
+  const chiefMountedSessions = normalizeSessionIdList(raw.chiefMountedSessions)
+  const leadPulledSessions = normalizeSessionIdList(raw.leadPulledSessions)
+  const chiefPulledSessions = normalizeSessionIdList(raw.chiefPulledSessions)
+  const chiefDeliveredSessions = normalizeSessionIdList(raw.chiefDeliveredSessions)
+  const organizedBy = ['auto', 'chief', 'user'].includes(raw.organizedBy) ? raw.organizedBy : 'auto'
+  const tags = normalizeTags(Array.isArray(raw.tags) ? raw.tags : [])
+  const hook = deriveHookFromStructuredItem({
+    ...raw,
+    title,
+    summary,
+    folder,
+    tags,
+    points,
+    body,
+    organizedBy,
+  }, organizedBy === 'chief' || raw.hasHook === true)
   const contentHash = str(raw.contentHash, '').trim() || computeEntryContentHash({ title, summary, body })
 
   return {
@@ -656,11 +751,18 @@ export function normalizeArchiveItem(raw) {
     summary,
     folder,
     paperclip,
-    tags: normalizeTags(Array.isArray(raw.tags) ? raw.tags : []),
+    tags,
     cold: raw.cold !== false,
     takenOutSessions,
     chiefMountedSessions,
-    organizedBy: ['auto', 'chief', 'user'].includes(raw.organizedBy) ? raw.organizedBy : 'auto',
+    leadPulledSessions,
+    chiefPulledSessions,
+    chiefDeliveredSessions,
+    desktopMeta: normalizeDesktopMeta(raw.desktopMeta),
+    hasHook: hook.hasHook,
+    hookKeywords: hook.hookKeywords,
+    hookCue: hook.hookCue,
+    organizedBy,
     points,
     body,
     contentHash,
@@ -684,6 +786,31 @@ export function normalizeGlobalVaultEntry(raw) {
     cold: true,
     chiefMountedSessions: Array.isArray(norm.chiefMountedSessions) ? norm.chiefMountedSessions : [],
   }
+}
+
+function normalizeRecentlyUnpinnedWatch(raw) {
+  if (!Array.isArray(raw)) return []
+  const out = []
+  const seen = new Set()
+  for (const item of raw) {
+    if (!item || typeof item !== 'object') continue
+    const id = str(item.id, '').trim()
+    const vaultScope = item.vaultScope === 'global' ? 'global' : 'session'
+    if (!id) continue
+    const key = `${vaultScope}:${id}`
+    if (seen.has(key)) continue
+    seen.add(key)
+    out.push({
+      id,
+      vaultScope,
+      title: clamp(item.title || '未命名卷宗', 120),
+      folder: str(item.folder, 'inbox').trim() || 'inbox',
+      unpinnedAt: Number(item.unpinnedAt) || Date.now(),
+      by: clamp(item.by || 'user', 30),
+    })
+    if (out.length >= 12) break
+  }
+  return out
 }
 
 export function normalizeArchiveStore(raw) {
@@ -733,6 +860,7 @@ export function normalizeArchiveStore(raw) {
     updatedAt: Number(src.updatedAt) || Date.now(),
     folders,
     items,
+    recentlyUnpinnedWatch: src.isSystemGlobalVault ? [] : normalizeRecentlyUnpinnedWatch(src.recentlyUnpinnedWatch),
   }
 }
 

@@ -5,7 +5,7 @@
  */
 
 import { React, h } from '../react-runtime.js'
-import { STATUSES, STATUS_LABEL, STATUS_BADGE, SIX_GOAL_ROWS_META } from '../constants.js'
+import { STATUSES, STATUS_LABEL, STATUS_BADGE, SIX_GOAL_ROWS_META, THINKING_EFFORT_OPTIONS } from '../constants.js'
 import { store, patch, focusObjectiveInPyramid, openSubagentChat } from '../store.js'
 import {
   clampTitle,
@@ -157,6 +157,21 @@ export function Icon({ name, size = 14, style }) {
           fillOpacity: 0.24,
         }),
         h('path', { d: 'M12 7.5v8.2M8.8 11.4h6.4' }),
+      )
+    case 'agentLead':
+      return h('svg', props,
+        h('rect', { x: 4, y: 5, width: 16, height: 14, rx: 4, fill: 'currentColor', fillOpacity: 0.14 }),
+        h('circle', { cx: 9.2, cy: 11.5, r: 1.1, fill: 'currentColor', stroke: 'none' }),
+        h('circle', { cx: 14.8, cy: 11.5, r: 1.1, fill: 'currentColor', stroke: 'none' }),
+        h('path', { d: 'M9 15h6M12 2v3' }),
+      )
+    case 'agentSub':
+      return h('svg', props,
+        h('circle', { cx: 7, cy: 6.5, r: 2.3 }),
+        h('circle', { cx: 17, cy: 17.5, r: 2.3, fill: 'currentColor', fillOpacity: 0.16 }),
+        h('path', { d: 'M7 8.8v3.7a4 4 0 0 0 4 4h3.7' }),
+        h('circle', { cx: 17, cy: 7.5, r: 1.8 }),
+        h('path', { d: 'M7 11.5h6.2a2 2 0 0 0 2-2V9.3' }),
       )
     default:
       return null
@@ -917,4 +932,329 @@ export function groupChatHistoryTurnsNewestFirst(rawList) {
   }
   turns.reverse()
   return turns
+}
+
+/* ------------------------------------------- Interactive Fan Thinking Gauge */
+
+const FAN_EFFORT_STEPS = [
+  { key: 'off', label: '关', deg: -180, color: '#94a3b8' },
+  { key: 'low', label: '低', deg: -135, color: '#38bdf8' },
+  { key: 'medium', label: '中', deg: -90, color: '#6366f1' },
+  { key: 'high', label: '高', deg: -45, color: '#f59e0b' },
+  { key: 'xhigh', label: '极高', deg: 0, color: '#ec4899' },
+]
+
+function fanPolarPoint(cx, cy, r, deg) {
+  const rad = (deg * Math.PI) / 180
+  return { x: cx + r * Math.cos(rad), y: cy + r * Math.sin(rad) }
+}
+
+function fanDescribeArc(cx, cy, r, startDeg, endDeg) {
+  if (Math.abs(endDeg - startDeg) < 0.2) return ''
+  const p0 = fanPolarPoint(cx, cy, r, startDeg)
+  const p1 = fanPolarPoint(cx, cy, r, endDeg)
+  const large = Math.abs(endDeg - startDeg) > 180 ? 1 : 0
+  return `M ${p0.x.toFixed(2)} ${p0.y.toFixed(2)} A ${r} ${r} 0 ${large} 1 ${p1.x.toFixed(2)} ${p1.y.toFixed(2)}`
+}
+
+function fanDescribeWedge(cx, cy, rInner, rOuter, startDeg, endDeg) {
+  const o0 = fanPolarPoint(cx, cy, rOuter, startDeg)
+  const o1 = fanPolarPoint(cx, cy, rOuter, endDeg)
+  const i1 = fanPolarPoint(cx, cy, rInner, endDeg)
+  const i0 = fanPolarPoint(cx, cy, rInner, startDeg)
+  return `M ${o0.x.toFixed(2)} ${o0.y.toFixed(2)} A ${rOuter} ${rOuter} 0 0 1 ${o1.x.toFixed(2)} ${o1.y.toFixed(2)} L ${i1.x.toFixed(2)} ${i1.y.toFixed(2)} A ${rInner} ${rInner} 0 0 0 ${i0.x.toFixed(2)} ${i0.y.toFixed(2)} Z`
+}
+
+function fanAngleToStep(deg) {
+  let best = FAN_EFFORT_STEPS[0]
+  let bestDist = Infinity
+  for (const step of FAN_EFFORT_STEPS) {
+    const d = Math.abs(deg - step.deg)
+    if (d < bestDist) {
+      bestDist = d
+      best = step
+    }
+  }
+  return best
+}
+
+export function EffortFanGauge({ value = 'auto', onChange, compact = false }) {
+  const svgRef = React.useRef(null)
+  const gradIdRef = React.useRef('dnb-fan-grad-' + Math.random().toString(36).slice(2, 8))
+  const [dragging, setDragging] = React.useState(false)
+  const [dragAngle, setDragAngle] = React.useState(null)
+  const [hoverKey, setHoverKey] = React.useState('')
+
+  const committedKey = THINKING_EFFORT_OPTIONS.some(o => o.key === value) ? value : 'auto'
+  const isAuto = committedKey === 'auto'
+  const committedStep = FAN_EFFORT_STEPS.find(s => s.key === committedKey) || null
+
+  const activeAngle = dragging && dragAngle !== null
+    ? dragAngle
+    : (committedStep ? committedStep.deg : -90)
+  const previewStep = dragging && dragAngle !== null ? fanAngleToStep(dragAngle) : committedStep
+  const showManualNeedle = !isAuto || dragging
+
+  const cx = 110
+  const cy = 98
+  const rTrack = 68
+  const needleRotateDeg = activeAngle + 90
+  const knobPt = fanPolarPoint(cx, cy, rTrack, activeAngle)
+
+  const pointerToAngle = (clientX, clientY) => {
+    const el = svgRef.current
+    if (!el) return -90
+    const rect = el.getBoundingClientRect()
+    if (!rect.width || !rect.height) return -90
+    const sx = ((clientX - rect.left) / rect.width) * 220
+    const sy = ((clientY - rect.top) / rect.height) * 116
+    let deg = (Math.atan2(sy - cy, sx - cx) * 180) / Math.PI
+    if (deg > 90) deg = -180
+    else if (deg > 0) deg = 0
+    return Math.max(-180, Math.min(0, deg))
+  }
+
+  const commitKey = (nextKey) => {
+    if (typeof onChange === 'function' && nextKey && nextKey !== committedKey) {
+      onChange(nextKey)
+    }
+  }
+
+  const handlePointerDown = (e) => {
+    if (e.button !== undefined && e.button !== 0) return
+    e.stopPropagation()
+    const ang = pointerToAngle(e.clientX, e.clientY)
+    setDragging(true)
+    setDragAngle(ang)
+    try {
+      if (e.currentTarget && typeof e.currentTarget.setPointerCapture === 'function') {
+        e.currentTarget.setPointerCapture(e.pointerId)
+      }
+    } catch {}
+  }
+
+  const handlePointerMove = (e) => {
+    if (!dragging) return
+    e.stopPropagation()
+    setDragAngle(pointerToAngle(e.clientX, e.clientY))
+  }
+
+  const handlePointerUp = (e) => {
+    if (!dragging) return
+    e.stopPropagation()
+    const ang = pointerToAngle(e.clientX, e.clientY)
+    const snapped = fanAngleToStep(ang)
+    setDragging(false)
+    setDragAngle(null)
+    try {
+      if (e.currentTarget && typeof e.currentTarget.releasePointerCapture === 'function') {
+        e.currentTarget.releasePointerCapture(e.pointerId)
+      }
+    } catch {}
+    if (snapped && typeof onChange === 'function') {
+      onChange(snapped.key)
+    }
+  }
+
+  const handlePointerCancel = () => {
+    if (!dragging) return
+    setDragging(false)
+    setDragAngle(null)
+  }
+
+  return h(
+    'div',
+    {
+      className: 'dnb-fan-gauge',
+      'data-compact': compact ? '1' : '0',
+      onClick: e => e.stopPropagation(),
+      onMouseLeave: () => setHoverKey(''),
+    },
+    h(
+      'div',
+      { className: 'dnb-fan-stage' },
+      h(
+        'svg',
+        {
+          ref: svgRef,
+          className: 'dnb-fan-svg',
+          'data-dragging': dragging ? '1' : '0',
+          viewBox: '0 0 220 116',
+          onPointerDown: handlePointerDown,
+          onPointerMove: handlePointerMove,
+          onPointerUp: handlePointerUp,
+          onPointerCancel: handlePointerCancel,
+        },
+        h(
+          'defs',
+          null,
+          h(
+            'linearGradient',
+            { id: gradIdRef.current, x1: '0%', y1: '50%', x2: '100%', y2: '50%' },
+            h('stop', { offset: '0%', stopColor: '#94a3b8' }),
+            h('stop', { offset: '26%', stopColor: '#38bdf8' }),
+            h('stop', { offset: '52%', stopColor: '#6366f1' }),
+            h('stop', { offset: '78%', stopColor: '#f59e0b' }),
+            h('stop', { offset: '100%', stopColor: '#ec4899' }),
+          ),
+        ),
+        // Segmented subtle track background across 5 notches
+        FAN_EFFORT_STEPS.map((step, i) => {
+          const prevDeg = i === 0 ? -180 : (FAN_EFFORT_STEPS[i - 1].deg + step.deg) / 2
+          const nextDeg = i === FAN_EFFORT_STEPS.length - 1 ? 0 : (step.deg + FAN_EFFORT_STEPS[i + 1].deg) / 2
+          const isLit = !isAuto && !dragging
+            ? (committedStep && step.deg <= committedStep.deg)
+            : (dragging && previewStep && step.deg <= previewStep.deg)
+          return h('path', {
+            key: 'seg-' + step.key,
+            d: fanDescribeArc(cx, cy, rTrack, Math.max(-180, prevDeg + 1.5), Math.min(0, nextDeg - 1.5)),
+            fill: 'none',
+            stroke: step.color,
+            strokeWidth: isLit ? 9 : 7,
+            strokeOpacity: isAuto ? 0.24 : (isLit ? 0.28 : 0.14),
+            strokeLinecap: 'round',
+          })
+        }),
+        // Continuous static gradient arc (full soft arc when auto, active slice when manual/dragging)
+        !showManualNeedle
+          ? h('path', {
+              className: 'dnb-fan-arc-active',
+              d: fanDescribeArc(cx, cy, rTrack, -180, 0),
+              fill: 'none',
+              stroke: `url(#${gradIdRef.current})`,
+              strokeWidth: 7.5,
+              strokeOpacity: 0.72,
+              strokeLinecap: 'round',
+            })
+          : (activeAngle > -179.4
+              ? h('path', {
+                  className: 'dnb-fan-arc-active',
+                  'data-dragging': dragging ? '1' : '0',
+                  d: fanDescribeArc(cx, cy, rTrack, -180, activeAngle),
+                  fill: 'none',
+                  stroke: `url(#${gradIdRef.current})`,
+                  strokeWidth: 8,
+                  strokeLinecap: 'round',
+                })
+              : null),
+        // Transparent interactive fan wedges for native title hover hints & click-to-snap
+        FAN_EFFORT_STEPS.map((step, i) => {
+          const wStart = i === 0 ? -180 : (FAN_EFFORT_STEPS[i - 1].deg + step.deg) / 2
+          const wEnd = i === FAN_EFFORT_STEPS.length - 1 ? 0 : (step.deg + FAN_EFFORT_STEPS[i + 1].deg) / 2
+          const opt = THINKING_EFFORT_OPTIONS.find(o => o.key === step.key) || {}
+          return h(
+            'path',
+            {
+              key: 'hit-' + step.key,
+              d: fanDescribeWedge(cx, cy, 30, 96, wStart, wEnd),
+              fill: hoverKey === step.key ? step.color : 'transparent',
+              fillOpacity: hoverKey === step.key ? 0.09 : 0,
+              style: { cursor: dragging ? 'grabbing' : 'pointer' },
+              onMouseEnter: () => setHoverKey(step.key),
+              onMouseLeave: () => setHoverKey(prev => (prev === step.key ? '' : prev)),
+            },
+            h('title', null, `${opt.label || step.label}：${opt.hint || ''}`),
+          )
+        }),
+        // Tick dots + outer labels
+        FAN_EFFORT_STEPS.map(step => {
+          const pt = fanPolarPoint(cx, cy, rTrack, step.deg)
+          const lpt = fanPolarPoint(cx, cy, rTrack + 17, step.deg)
+          const isCur = !isAuto && (dragging ? (previewStep && previewStep.key === step.key) : committedKey === step.key)
+          const isHover = hoverKey === step.key
+          return h(
+            'g',
+            { key: 'tick-' + step.key, style: { pointerEvents: 'none' } },
+            h('circle', {
+              cx: pt.x,
+              cy: pt.y,
+              r: isCur || isHover ? 4.4 : 2.6,
+              fill: isCur || isHover ? step.color : 'var(--dnb-text-3)',
+              fillOpacity: isCur || isHover ? 1 : 0.65,
+              stroke: 'var(--dnb-popover)',
+              strokeWidth: isCur ? 1.5 : 0,
+            }),
+            h(
+              'text',
+              {
+                x: lpt.x,
+                y: lpt.y + 3,
+                textAnchor: step.deg <= -155 ? 'end' : (step.deg >= -25 ? 'start' : 'middle'),
+                fontSize: compact ? 10 : 10.5,
+                fontWeight: isCur || isHover ? 700 : 500,
+                fill: isCur || isHover ? step.color : 'var(--dnb-text-3)',
+              },
+              step.label,
+            ),
+          )
+        }),
+        // Static/snapping needle only when manual fixed notch or actively dragging (no auto sweep animation)
+        showManualNeedle
+          ? h(
+              'g',
+              { transform: `translate(${cx}, ${cy})`, style: { pointerEvents: 'none' } },
+              h(
+                'g',
+                {
+                  className: 'dnb-fan-needle',
+                  'data-dragging': dragging ? '1' : '0',
+                  style: { transform: `rotate(${needleRotateDeg}deg)` },
+                },
+                h('line', {
+                  x1: 0,
+                  y1: 0,
+                  x2: 0,
+                  y2: -54,
+                  stroke: previewStep ? previewStep.color : '#818cf8',
+                  strokeWidth: 2.6,
+                  strokeLinecap: 'round',
+                }),
+                h('circle', {
+                  cx: 0,
+                  cy: -54,
+                  r: 3.2,
+                  fill: '#ffffff',
+                  stroke: previewStep ? previewStep.color : '#6366f1',
+                  strokeWidth: 1.6,
+                }),
+              ),
+            )
+          : null,
+        // Draggable thumb halo on the active track angle (when manual or dragging)
+        showManualNeedle
+          ? h('circle', {
+              cx: knobPt.x,
+              cy: knobPt.y,
+              r: dragging ? 7 : 5.5,
+              fill: previewStep ? previewStep.color : '#818cf8',
+              fillOpacity: 0.28,
+              style: { pointerEvents: 'none' },
+            })
+          : null,
+      ),
+      // Center Auto-Adjust Pivot Hub Button
+      h('button', {
+        type: 'button',
+        className: 'dnb-fan-hub',
+        'data-active': isAuto && !dragging ? '1' : '0',
+        title: isAuto
+          ? '当前已是「🪄 自动调节」：按任务复杂度自动切换参谋思考深度；拖住外圈弧线可手调挡位'
+          : '点击切回「🪄 自动调节」，或继续拖住弧线手调挡位',
+        onPointerDown: e => e.stopPropagation(),
+        onMouseEnter: () => setHoverKey('auto'),
+        onMouseLeave: () => setHoverKey(prev => (prev === 'auto' ? '' : prev)),
+        onClick: e => {
+          e.stopPropagation()
+          commitKey('auto')
+        },
+      },
+        h('span', { className: 'dnb-fan-hub-main' },
+          dragging && previewStep
+            ? previewStep.label
+            : (isAuto ? '🪄 自动' : (committedStep ? committedStep.label : '自动'))),
+        h('span', { className: 'dnb-fan-hub-sub' },
+          isAuto && !dragging ? '智能调节' : '点此自动'),
+      ),
+    ),
+  )
 }

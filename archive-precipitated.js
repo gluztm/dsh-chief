@@ -10,6 +10,7 @@ import {
   POINTS_CAP,
   PRECIPITATED_CAP,
   SECRET_PATTERN,
+  DEFAULT_ARCHIVE_FOLDERS,
   nextId,
   str,
   clamp,
@@ -26,6 +27,7 @@ import {
   normalizeTags,
   firstMeaningfulSentence,
   extractStructuredPoints,
+  deriveHookFromStructuredItem,
   invokeArchiveMutatorHook,
 } from './archive-core.js'
 import { loadGlobalVaultRaw, loadArchiveStore } from './archive-cabinets.js'
@@ -42,6 +44,17 @@ export function hasAnyPrecipitatedFilesOnDisk(targetOpt) {
   }
 }
 
+function mapPrecipitatedCategoryToFolder(category = '', rawFolder = '') {
+  const f = str(rawFolder, '').trim()
+  if (f) return f.slice(0, 64)
+  const cat = str(category, '').trim().toLowerCase()
+  if (cat === 'coords' || cat === 'env') return 'coords'
+  if (cat === 'incidents' || cat === 'troubleshooting' || cat === 'pitfalls') return 'incidents'
+  if (cat === 'contracts' || cat === 'architecture' || cat === 'contract') return 'contracts'
+  if (cat === 'plans' || cat === 'workflow') return 'plans'
+  return 'ops'
+}
+
 function normalizePrecipitatedEntry(raw) {
   if (!raw || typeof raw !== 'object') return null
   const title = clamp(raw.title || '', 180)
@@ -51,8 +64,22 @@ function normalizePrecipitatedEntry(raw) {
     .map((p, idx) => normalizePoint(p, idx))
     .filter(Boolean)
     .slice(0, POINTS_CAP)
-  const validCategories = ['coords', 'incidents', 'contracts', 'ops', 'plans', 'architecture', 'env', 'contract', 'troubleshooting', 'workflow', 'general']
+  const validCategories = ['coords', 'incidents', 'contracts', 'ops', 'plans', 'architecture', 'env', 'contract', 'troubleshooting', 'workflow', 'patterns', 'pitfalls', 'toolchain', 'general']
   const category = validCategories.includes(raw.category) ? raw.category : 'general'
+  const folder = mapPrecipitatedCategoryToFolder(category, raw.folder)
+  const paperclip = ['gold', 'silver', 'copper'].includes(raw.paperclip) ? raw.paperclip : 'gold'
+  const tags = normalizeTags(Array.isArray(raw.tags) ? raw.tags : [])
+  const summary = clamp(raw.summary || (points[0] && points[0].cue) || firstMeaningfulSentence(rawBody) || title, 180)
+  const normPoints = points.length ? points : extractStructuredPoints(title, rawBody)
+  const hook = deriveHookFromStructuredItem({
+    ...raw,
+    title: title || '跨会话可复用工程经验',
+    summary,
+    folder,
+    tags,
+    points: normPoints,
+    body: rawBody,
+  }, true)
   const flippedOutSessions = Array.isArray(raw.flippedOutSessions)
     ? [...new Set(raw.flippedOutSessions.map(s => str(s, '').trim()).filter(Boolean))].slice(0, 32)
     : []
@@ -61,15 +88,20 @@ function normalizePrecipitatedEntry(raw) {
     id: str(raw.id, '').trim() || nextId('prec'),
     title: title || '跨会话可复用工程经验',
     category,
-    summary: clamp(raw.summary || (points[0] && points[0].cue) || firstMeaningfulSentence(rawBody) || title, 180),
-    points: points.length ? points : extractStructuredPoints(title, rawBody),
+    folder,
+    paperclip,
+    summary,
+    points: normPoints,
     rawBody,
     purified: raw.purified !== false,
     sourceCabinetId: str(raw.sourceCabinetId || raw.sourceCabinet, '').trim(),
     sourceDrawer: str(raw.sourceDrawer, '').trim(),
     sourceSession: str(raw.sourceSession, '').trim(),
     sourceTitles: Array.isArray(raw.sourceTitles) ? raw.sourceTitles.map(t => clamp(t, 80)).slice(0, 40) : [],
-    tags: normalizeTags(Array.isArray(raw.tags) ? raw.tags : []),
+    tags,
+    hasHook: true,
+    hookKeywords: hook.hookKeywords,
+    hookCue: hook.hookCue,
     flippedOutSessions,
     by: clamp(raw.by || 'chief', 40),
     createdAt: Number(raw.createdAt) || Date.now(),
@@ -249,15 +281,21 @@ export function copyPrecipitatedToVault(projectKey = 'proj-default', payload = {
   }
 }
 
-/** Listed ONLY for Chief background sealed-archive watch (never injected into Lead prompt unless placed on desk). */
-export function collectSealedWatchSummary(rootSessionId = '', projectKey = 'proj-default', targetOpt, opts = {}) {
+/**
+ * Listed ONLY for Chief background hook/sealed-archive watch (never injected into Lead prompt unless placed on desk).
+ * Three-tier hook contract:
+ * - Session vault: Chief always sees session sealed entries (Lead sees only Chief-curated hooks).
+ * - Global vault: Chief sees ONLY entries that already have Chief-curated hooks (`hasHook === true`), zero raw leak!
+ * - Precipitated vault: 100% human-only (0 disk read, 0 hook leak to Chief or Lead).
+ */
+export function collectSealedWatchSummary(rootSessionId = '', _projectKey = 'proj-default', targetOpt, opts = {}) {
   const sid = cleanRootSessionId(rootSessionId)
   const base = resolveTargetOpts(targetOpt)
   const capPerVault = Math.max(2, Math.min(Number(opts.limitPerVault) || 8, 16))
 
   let sessionSealed = []
   let globalSealed = []
-  let precipSealed = []
+  const precipSealed = []
 
   if (sid) {
     try {
@@ -273,7 +311,16 @@ export function collectSealedWatchSummary(rootSessionId = '', projectKey = 'proj
         sessionSealed = (sStore.items || [])
           .filter(it => !Array.isArray(it.takenOutSessions) || !it.takenOutSessions.includes(sid))
           .slice(0, capPerVault)
-          .map(it => ({ id: it.id, scope: 'session', title: it.title, folder: it.folder, summary: it.summary }))
+          .map(it => ({
+            id: it.id,
+            scope: 'session',
+            title: it.title,
+            folder: it.folder,
+            summary: it.summary,
+            hasHook: Boolean(it.hasHook),
+            hookKeywords: Array.isArray(it.hookKeywords) ? it.hookKeywords : [],
+            hookCue: it.hookCue || '',
+          }))
       }
     } catch {}
   }
@@ -281,20 +328,27 @@ export function collectSealedWatchSummary(rootSessionId = '', projectKey = 'proj
   try {
     const gStore = loadGlobalVaultRaw(base)
     globalSealed = (gStore.items || [])
-      .filter(it => !sid || !Array.isArray(it.takenOutSessions) || !it.takenOutSessions.includes(sid))
+      .filter(it =>
+        it.hasHook === true
+        && (!sid || !Array.isArray(it.takenOutSessions) || !it.takenOutSessions.includes(sid))
+      )
       .slice(0, capPerVault)
-      .map(it => ({ id: it.id, scope: 'global', title: it.title, folder: it.folder, summary: it.summary, chiefMounted: Boolean(sid && Array.isArray(it.chiefMountedSessions) && it.chiefMountedSessions.includes(sid)) }))
+      .map(it => ({
+        id: it.id,
+        scope: 'global',
+        title: it.title,
+        folder: it.folder,
+        hasHook: true,
+        hookKeywords: Array.isArray(it.hookKeywords) ? it.hookKeywords : [],
+        hookCue: it.hookCue || '',
+        chiefMounted: Boolean(
+          sid && (
+            (Array.isArray(it.chiefMountedSessions) && it.chiefMountedSessions.includes(sid))
+            || (Array.isArray(it.chiefPulledSessions) && it.chiefPulledSessions.includes(sid))
+          )
+        ),
+      }))
   } catch {}
-
-  if (hasAnyPrecipitatedFilesOnDisk(base)) {
-    try {
-      const pStore = loadPrecipitatedStoreRaw(projectKey || base.projectKey || 'proj-default', base)
-      precipSealed = (pStore.items || [])
-        .filter(it => !sid || !Array.isArray(it.flippedOutSessions) || !it.flippedOutSessions.includes(sid))
-        .slice(0, capPerVault)
-        .map(it => ({ id: it.id, scope: 'precipitated', title: it.title, category: it.category, summary: it.summary }))
-    } catch {}
-  }
 
   return { sessionSealed, globalSealed, precipSealed }
 }
@@ -305,22 +359,33 @@ export function listPrecipitatedHeaders(projectKey = 'proj-default', rootSession
   if (!fs.existsSync(file)) return []
   const sid = str(rootSessionId, '').trim()
   const store = loadPrecipitatedStoreRaw(projectKey, targetOpt)
-  return store.items.map(it => ({
-    id: it.id,
-    title: it.title,
-    category: it.category,
-    summary: it.summary,
-    purified: it.purified,
-    sourceCabinetId: it.sourceCabinetId,
-    sourceDrawer: it.sourceDrawer,
-    sourceTitles: it.sourceTitles,
-    tags: it.tags,
-    pointCount: Array.isArray(it.points) ? it.points.length : 0,
-    flippedOut: Boolean(sid && Array.isArray(it.flippedOutSessions) && it.flippedOutSessions.includes(sid)),
-    points: (it.points || []).map(p => ({ id: p.id, title: p.title, cue: p.cue, detail: p.detail })),
-    createdAt: it.createdAt,
-    updatedAt: it.updatedAt,
-  }))
+  return store.items.map(it => {
+    const flippedOut = Boolean(sid && Array.isArray(it.flippedOutSessions) && it.flippedOutSessions.includes(sid))
+    return {
+      id: it.id,
+      title: it.title,
+      category: it.category,
+      folder: it.folder || mapPrecipitatedCategoryToFolder(it.category),
+      paperclip: it.paperclip || 'gold',
+      summary: it.summary,
+      hasHook: true,
+      hookKeywords: Array.isArray(it.hookKeywords) ? it.hookKeywords : [],
+      hookCue: it.hookCue || '',
+      purified: it.purified,
+      sourceCabinetId: it.sourceCabinetId,
+      sourceDrawer: it.sourceDrawer,
+      sourceTitles: it.sourceTitles,
+      tags: it.tags,
+      pointCount: Array.isArray(it.points) ? it.points.length : 0,
+      flippedOut,
+      viewerStatus: flippedOut
+        ? { code: 'human_unsealed', tone: 'amber', label: '🔓 人类已翻出 · 仅本局参阅' }
+        : { code: 'human_only', tone: 'ice', label: '🧊 仅人类可见 · 钩子速览' },
+      points: (it.points || []).map(p => ({ id: p.id, title: p.title, cue: p.cue, detail: p.detail })),
+      createdAt: it.createdAt,
+      updatedAt: it.updatedAt,
+    }
+  })
 }
 
 export function getPrecipitatedDetail(projectKey = 'proj-default', id = '', rootSessionId = '', targetOpt) {
@@ -410,6 +475,20 @@ export function mutatePrecipitated(projectKey = 'proj-default', payload = {}, ta
       const [removed] = store.items.splice(idx, 1)
       savePrecipitatedStoreRaw(resolvedKey, store, targetOpt)
       return { ok: true, removedId: removed.id, title: removed.title }
+    }
+
+    if (op === 'moveFolder' || op === 'setFolder') {
+      const item = store.items.find(it => it.id === id)
+      if (!item) return { ok: false, error: '未找到沉淀经验：' + id }
+      const folder = str(payload.folder, '').trim()
+      if (!folder) return { ok: false, error: '请选择目标抽屉' }
+      item.folder = folder.slice(0, 64)
+      if (['gold', 'silver', 'copper'].includes(payload.paperclip)) {
+        item.paperclip = payload.paperclip
+      }
+      item.updatedAt = Date.now()
+      savePrecipitatedStoreRaw(resolvedKey, store, targetOpt)
+      return { ok: true, id: item.id, folder: item.folder, item }
     }
 
     if (op === 'updatePrecipitated') {

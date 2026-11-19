@@ -12,6 +12,7 @@ import { threadId } from 'node:worker_threads'
 import {
   resolveProjectKey,
   loadArchiveStore,
+  loadGlobalVaultRaw,
   getChiefMountedGlobalForSession,
   getTakenOutGlobalForSession,
   collectSealedWatchSummary,
@@ -92,6 +93,88 @@ export const CHIEF_EXEC_REQ_SOURCE = 'dsh-chief-execution-request'
 
 export const CHAT_OPPORTUNISTIC_SUMMARY_COOLDOWN_MS = 60_000
 
+export const CHIEF_RUN_MODES = ['off', 'patrol', 'managed']
+
+export const DEFAULT_MANAGED_IDLE_TIMEOUT_MS = 15 * 60 * 1000
+
+export const CHIEF_THINKING_EFFORTS = ['auto', 'off', 'low', 'medium', 'high', 'xhigh']
+
+export function normalizeRunMode(raw, fallbackCfg = null) {
+  const s = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+  if (s === 'off' || s === 'patrol' || s === 'managed') return s
+  if (s === 'stopped' || s === 'manual') return 'off'
+  if (s === 'smart') return 'patrol'
+  if (s === 'auto' || s === 'autopilot') return 'managed'
+  if (fallbackCfg && typeof fallbackCfg === 'object') {
+    if (fallbackCfg.stopped || fallbackCfg.paceMode === 'stopped') return 'off'
+    if (fallbackCfg.autoPilot || fallbackCfg.paceMode === 'auto') return 'managed'
+    if (fallbackCfg.paceMode === 'smart') return 'patrol'
+  }
+  return 'off'
+}
+
+export function normalizeThinkingEffort(raw) {
+  const s = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+  if (CHIEF_THINKING_EFFORTS.includes(s)) return s
+  return 'auto'
+}
+
+function normalizeTeamEffortMode(raw) {
+  return String(raw || '').trim().toLowerCase() === 'manual' ? 'manual' : 'auto'
+}
+
+export function normalizeLockedModelEfforts(raw) {
+  const out = {}
+  if (!raw || typeof raw !== 'object') return out
+  for (const [k, v] of Object.entries(raw)) {
+    const cleanKey = String(k || '').trim().slice(0, 64)
+    if (!cleanKey) continue
+    if (v === true) out[cleanKey] = true
+  }
+  return out
+}
+
+const EFFORT_ORDER_LADDER = ['off', 'low', 'medium', 'high', 'xhigh']
+
+export function resolveAlignedModelEffort(desiredEffort, supportedEfforts = []) {
+  const list = Array.isArray(supportedEfforts)
+    ? supportedEfforts.map(e => (typeof e === 'string' ? e : (e && e.id ? String(e.id) : ''))).filter(Boolean)
+    : []
+  if (!list.length) return undefined
+  const want = String(desiredEffort || '').trim().toLowerCase()
+  if (!want || want === 'auto') {
+    if (list.includes('medium')) return 'medium'
+    return list[Math.floor(list.length / 2)] || list[0]
+  }
+  if (list.includes(want)) return want
+  const wantIdx = EFFORT_ORDER_LADDER.indexOf(want)
+  if (wantIdx < 0) return list[0]
+  for (let d = 1; d < EFFORT_ORDER_LADDER.length; d += 1) {
+    if (wantIdx - d >= 0 && list.includes(EFFORT_ORDER_LADDER[wantIdx - d])) {
+      return EFFORT_ORDER_LADDER[wantIdx - d]
+    }
+    if (wantIdx + d < EFFORT_ORDER_LADDER.length && list.includes(EFFORT_ORDER_LADDER[wantIdx + d])) {
+      return EFFORT_ORDER_LADDER[wantIdx + d]
+    }
+  }
+  return list[0]
+}
+
+export function touchWorkspaceActivity(sessionId) {
+  const sid = String(sessionId || '').trim()
+  if (!sid || sid === 'global') return false
+  try {
+    mutateChiefState((state) => {
+      const ws = ensureWorkspace(state, sid)
+      if (!ws.runtimeGuard || typeof ws.runtimeGuard !== 'object') ws.runtimeGuard = {}
+      ws.runtimeGuard.lastActivityAt = Date.now()
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
 const SECRET_PATTERN = /(?:sk-[a-zA-Z0-9_-]{16,}|ghp_[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|Bearer\s+[A-Za-z0-9._~+/=-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/
 
 let dshAttachmentModulePromise = null
@@ -164,10 +247,12 @@ export function archiveTargetForRoot(deps, rootId, extra = '') {
 }
 
 /**
- * Chief-of-Staff visibility matrix (0-Token Global Cold Vault):
- * - Sees current session's Working Cabinet (`session`), if bound to a concrete rootSessionId
- * - Sees ONLY System Global Cold Vault entries explicitly mounted for Chief in THIS session (`chiefMountedSessions`) — 0 Token by default!
- * - Sees Precipitated Vault entries ONLY when explicitly `flippedOut` (`ws.flippedPrecipitatedIds`) for this session!
+ * Chief-of-Staff visibility matrix (Three-Tier Hook Architecture):
+ * - Session Working Cabinet: Chief can always read session items + `recentlyUnpinnedWatch`.
+ * - Global Vault: Unorganized global items (without hooks) are 0-token invisible to Chief!
+ *   Organized global items expose ONLY lightweight `globalHookIndex` (`hasHook: true`),
+ *   until Chief explicitly pulls/mounts them (`chiefMountedSessions` / `chiefPulledSessions`).
+ * - Precipitated Cold Vault: 100% invisible to Chief (0 disk read, 0 hook leak) unless User explicitly `flippedOut`!
  */
 export function collectChiefVisibleArchives(deps, rootId, stateSnapshot = null) {
   const sid = rootId && rootId !== 'global' ? String(rootId).trim() : ''
@@ -180,6 +265,9 @@ export function collectChiefVisibleArchives(deps, rootId, stateSnapshot = null) 
   let deskGlobalItems = []
   let deskFlippedItems = []
   let mountedGlobalItems = []
+  let sessionItems = []
+  let recentlyUnpinnedWatch = []
+  let globalHookIndex = []
   let sealedWatch = { sessionSealed: [], globalSealed: [], precipSealed: [] }
 
   try {
@@ -187,13 +275,54 @@ export function collectChiefVisibleArchives(deps, rootId, stateSnapshot = null) 
       const stSess = loadArchiveStore(sessionTarget)
       const allSess = Array.isArray(stSess.items) ? stSess.items : []
       deskSessionItems = allSess.filter(it => Array.isArray(it.takenOutSessions) && it.takenOutSessions.includes(sid)).slice(0, 6)
+      sessionItems = allSess.slice(0, 16).map(it => ({
+        id: it.id,
+        title: it.title,
+        folder: it.folder,
+        summary: it.summary,
+        paperclip: it.paperclip,
+        hasHook: Boolean(it.hasHook),
+        hookKeywords: Array.isArray(it.hookKeywords) ? it.hookKeywords : [],
+        hookCue: it.hookCue || '',
+        takenOut: Array.isArray(it.takenOutSessions) && it.takenOutSessions.includes(sid),
+        points: Array.isArray(it.points) ? it.points.slice(0, 3) : [],
+      }))
+      recentlyUnpinnedWatch = Array.isArray(stSess.recentlyUnpinnedWatch) ? stSess.recentlyUnpinnedWatch.slice() : []
     }
   } catch {}
   try {
+    const gStore = loadGlobalVaultRaw(globalTarget)
+    const gAll = Array.isArray(gStore && gStore.items) ? gStore.items : []
     if (sid) {
       deskGlobalItems = getTakenOutGlobalForSession(sid, globalTarget).slice(0, 6)
       mountedGlobalItems = getChiefMountedGlobalForSession(sid, globalTarget).slice(0, 6)
+      // Also include entries Chief pulled in this session
+      const pulledSet = new Set(mountedGlobalItems.map(x => x.id))
+      for (const g of gAll) {
+        if (g && Array.isArray(g.chiefPulledSessions) && g.chiefPulledSessions.includes(sid) && !pulledSet.has(g.id)) {
+          mountedGlobalItems.push(g)
+          pulledSet.add(g.id)
+          if (mountedGlobalItems.length >= 6) break
+        }
+      }
     }
+    globalHookIndex = gAll
+      .filter(it =>
+        it
+        && it.hasHook === true
+        && (!sid || (!Array.isArray(it.takenOutSessions) || !it.takenOutSessions.includes(sid)))
+        && (!sid || (!Array.isArray(it.chiefMountedSessions) || !it.chiefMountedSessions.includes(sid)))
+        && (!sid || (!Array.isArray(it.chiefPulledSessions) || !it.chiefPulledSessions.includes(sid)))
+      )
+      .slice(0, 12)
+      .map(it => ({
+        id: it.id,
+        title: it.title,
+        folder: it.folder,
+        paperclip: it.paperclip,
+        hookKeywords: Array.isArray(it.hookKeywords) ? it.hookKeywords : [],
+        hookCue: it.hookCue || '',
+      }))
   } catch {}
   try {
     if (sid) {
@@ -214,6 +343,9 @@ export function collectChiefVisibleArchives(deps, rootId, stateSnapshot = null) 
     deskGlobalItems,
     deskFlippedItems,
     mountedGlobalItems,
+    sessionItems,
+    recentlyUnpinnedWatch,
+    globalHookIndex,
     sealedWatch,
     sessionTarget,
     globalTarget,
@@ -382,7 +514,7 @@ function normalizePendingApproval(raw) {
   if (!opLabel) return null
   const validStatuses = ['pending', 'approved', 'rejected', 'executed', 'failed', 'expired']
   const status = validStatuses.includes(raw.status) ? raw.status : 'pending'
-  const validKinds = ['tool', 'relay', 'compact', 'auto_continue']
+  const validKinds = ['tool', 'relay', 'compact', 'auto_continue', 'archive_op', 'model_effort']
   const kind = validKinds.includes(raw.kind) ? raw.kind : 'tool'
   const validCategories = ['workspace_file', 'system_command', 'main_workflow', 'subagent_workflow']
   const category = validCategories.includes(raw.category) ? raw.category : 'workspace_file'
@@ -615,6 +747,9 @@ function emptyWorkspace() {
       lastGoalAchievedSig: '',
       autoPilotStartedAt: 0,
       autoPilotHadTurn: false,
+      managedStartedAt: 0,
+      lastActivityAt: 0,
+      lastDreamRoamAt: 0,
       lastAutoArchiveOrgAt: 0,
     },
     flippedPrecipitatedIds: [],
@@ -648,12 +783,19 @@ export function normalizeSuggestion(raw) {
   if (!raw || typeof raw !== 'object') return null
   const title = clamp(raw.title, 90)
   if (!title) return null
-  const kind = ['bound', 'board', 'goal_approval', 'relay', 'advice', 'guard_wall'].includes(raw.kind) ? raw.kind : 'relay'
+  const kind = ['bound', 'board', 'goal_approval', 'relay', 'advice', 'guard_wall', 'wall_removal', 'archive_op', 'model_effort'].includes(raw.kind) ? raw.kind : 'relay'
   const boundField = ['forbidden', 'allowed', 'notes'].includes(raw.boundField) ? raw.boundField : 'forbidden'
   const replaces = Array.isArray(raw.replaces)
     ? raw.replaces.map(x => String(x || '').trim()).filter(Boolean).slice(0, 20)
     : []
   const wallSpec = raw.wallSpec && typeof raw.wallSpec === 'object' ? { ...raw.wallSpec } : null
+  const wallRemovalSpec = raw.wallRemovalSpec && typeof raw.wallRemovalSpec === 'object' ? { ...raw.wallRemovalSpec } : null
+  const archiveSpec = (raw.archiveSpec && typeof raw.archiveSpec === 'object')
+    ? { ...raw.archiveSpec }
+    : ((raw.archiveOp && typeof raw.archiveOp === 'object') ? { ...raw.archiveOp } : null)
+  const effortSpec = (raw.effortSpec && typeof raw.effortSpec === 'object')
+    ? { ...raw.effortSpec }
+    : ((raw.effortOp && typeof raw.effortOp === 'object') ? { ...raw.effortOp } : null)
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : nextId('sug'),
     kind,
@@ -661,18 +803,21 @@ export function normalizeSuggestion(raw) {
     replaces,
     pinGlobal: Boolean(raw.pinGlobal),
     ...(wallSpec ? { wallSpec } : {}),
+    ...(wallRemovalSpec ? { wallRemovalSpec } : {}),
+    ...(archiveSpec ? { archiveSpec } : {}),
+    ...(effortSpec ? { effortSpec } : {}),
     fromAgent: clamp(raw.fromAgent || '', 48),
     title,
     reason: clamp(raw.reason || '', 220),
-    target: clamp(raw.target || (kind === 'bound' ? 'bounds' : kind === 'guard_wall' ? 'guard_walls' : kind === 'goal_approval' ? 'board' : 'lead'), 64),
-    targetLabel: clamp(raw.targetLabel || raw.target || (kind === 'bound' ? '工作边界' : kind === 'guard_wall' ? '物理驻墙' : kind === 'goal_approval' ? '目标结项批示' : kind === 'advice' ? '参谋进言' : '主对话'), 40),
+    target: clamp(raw.target || (kind === 'bound' ? 'bounds' : (kind === 'guard_wall' || kind === 'wall_removal') ? 'guard_walls' : kind === 'goal_approval' ? 'board' : kind === 'archive_op' ? 'archive' : kind === 'model_effort' ? 'lead' : 'lead'), 64),
+    targetLabel: clamp(raw.targetLabel || raw.target || (kind === 'bound' ? '工作边界' : kind === 'guard_wall' ? '物理驻墙' : kind === 'wall_removal' ? '物理驻墙拆墙申请' : kind === 'goal_approval' ? '目标结项批示' : kind === 'advice' ? '参谋进言' : kind === 'archive_op' ? '档案与桌面调配' : kind === 'model_effort' ? '模型思考强度调节' : '主对话'), 40),
     mode: ['steer', 'followup', 'silent'].includes(raw.mode) ? raw.mode : (kind === 'advice' ? 'followup' : 'steer'),
     draftText: cleanMultiline(raw.draftText || '', 600),
     evidence: cleanMultiline(raw.evidence || '', 600),
     missing: clamp(raw.missing || '', 300),
     boardOp: raw.boardOp && typeof raw.boardOp === 'object' ? raw.boardOp : null,
-    popup: Boolean(raw.popup || kind === 'advice'),
-    urgency: ['normal', 'high'].includes(raw.urgency) ? raw.urgency : 'normal',
+    popup: Boolean(raw.popup || kind === 'advice' || kind === 'wall_removal'),
+    urgency: ['normal', 'high'].includes(raw.urgency) ? raw.urgency : (kind === 'wall_removal' ? 'high' : 'normal'),
     status: ['pending', 'applied', 'dismissed'].includes(raw.status) ? raw.status : 'pending',
     createdAt: Number(raw.createdAt) || Date.now(),
   }
@@ -763,6 +908,8 @@ function normalizeWorkspace(raw) {
       const imageCount = Math.max(0, Math.round(Number(item.imageCount) || 0))
       const kind = item.kind === 'receipt' ? 'receipt' : (item.kind === 'qa' ? 'qa' : '')
       const resumeTaskId = item.resumeTaskId ? String(item.resumeTaskId) : ''
+      const thinkingEffort = typeof item.thinkingEffort === 'string' && item.thinkingEffort ? item.thinkingEffort : ''
+      const thinkingEffortMode = item.thinkingEffortMode === 'auto' || item.thinkingEffortMode === 'manual' ? item.thinkingEffortMode : ''
       return {
         id: String(item.id || nextId('chat')),
         role: item.role === 'user' ? 'user' : 'chief',
@@ -770,6 +917,9 @@ function normalizeWorkspace(raw) {
         target: item.target ? String(item.target) : '',
         ...(kind ? { kind } : {}),
         ...(resumeTaskId ? { resumeTaskId } : {}),
+        ...(thinkingEffort ? { thinkingEffort } : {}),
+        ...(thinkingEffortMode ? { thinkingEffortMode } : {}),
+        ...(item.isOneStopReport ? { isOneStopReport: true } : {}),
         ...(imageCount > 0 ? { imageCount } : {}),
         actions: Array.isArray(item.actions) ? item.actions.slice(0, 8) : [],
         at: Number(item.at) || Date.now(),
@@ -810,6 +960,9 @@ function normalizeWorkspace(raw) {
     lastGoalAchievedSig: String(rg.lastGoalAchievedSig || ''),
     autoPilotStartedAt: Math.max(0, Number(rg.autoPilotStartedAt) || 0),
     autoPilotHadTurn: Boolean(rg.autoPilotHadTurn),
+    managedStartedAt: Math.max(0, Number(rg.managedStartedAt) || Number(rg.autoPilotStartedAt) || 0),
+    lastActivityAt: Math.max(0, Number(rg.lastActivityAt) || 0),
+    lastDreamRoamAt: Math.max(0, Number(rg.lastDreamRoamAt) || 0),
     lastAutoArchiveOrgAt: Math.max(0, Number(rg.lastAutoArchiveOrgAt) || 0),
   }
   base.chiefRiskAck = normalizeChiefRiskAck(src.chiefRiskAck)
@@ -836,14 +989,24 @@ function normalizeWorkspace(raw) {
     const validPaces = ['manual', 'smart', 'auto', 'stopped']
     const pm = validPaces.includes(src.config.paceMode) ? src.config.paceMode : undefined
     const rawStopped = typeof src.config.stopped === 'boolean' ? src.config.stopped : (pm === 'stopped')
+    const rm = normalizeRunMode(src.config.runMode, { ...src.config, stopped: rawStopped, paceMode: pm })
     const rawPerm = typeof src.config.permissionMode === 'string'
       ? normalizePermissionMode(src.config.permissionMode, { requireAck: true, hasChiefRiskAck: ackOk })
       : DEFAULT_CHIEF_PERMISSION_MODE
     const plugCheck = validatePolicyPluginList(src.config.policyPlugins)
     const policyPlugins = plugCheck.ok ? plugCheck.plugins : []
+    const lockedModelEfforts = normalizeLockedModelEfforts(src.config.lockedModelEfforts)
+    const managedIdleTimeoutMs = Number.isFinite(Number(src.config.managedIdleTimeoutMs)) && Number(src.config.managedIdleTimeoutMs) >= 50
+      ? Math.min(2 * 60 * 60 * 1000, Math.round(Number(src.config.managedIdleTimeoutMs)))
+      : DEFAULT_MANAGED_IDLE_TIMEOUT_MS
     base.config = {
       ...(typeof src.config.modelRef === 'string' ? { modelRef: src.config.modelRef.trim() } : {}),
       permissionMode: rawPerm,
+      runMode: rm,
+      managedIdleTimeoutMs,
+      ...(typeof src.config.thinkingEffort === 'string' ? { thinkingEffort: normalizeThinkingEffort(src.config.thinkingEffort) } : {}),
+      ...(typeof src.config.teamEffortMode === 'string' ? { teamEffortMode: normalizeTeamEffortMode(src.config.teamEffortMode) } : {}),
+      ...(Object.keys(lockedModelEfforts).length ? { lockedModelEfforts } : {}),
       ...(typeof src.config.stopped === 'boolean' || pm === 'stopped' ? { stopped: rawStopped } : {}),
       ...(pm ? { paceMode: pm, autoPilot: !rawStopped && pm === 'auto', autoReview: !rawStopped && pm !== 'manual' } : {}),
       ...(policyPlugins.length > 0 ? { policyPlugins } : {}),
@@ -955,16 +1118,42 @@ export function resolveWorkspaceConfig(state, sessionId = '') {
   })
   const permissionMode = resolvedRoleCaps.role
   const chiefRiskVerified = permissionMode === 'chief' ? ackOk : false
+  const runMode = stopped
+    ? 'off'
+    : (wsCfg && typeof wsCfg.runMode === 'string' && CHIEF_RUN_MODES.includes(wsCfg.runMode)
+        ? wsCfg.runMode
+        : normalizeRunMode(undefined, { stopped, paceMode, autoPilot: paceMode === 'auto' }))
+  const thinkingEffort = normalizeThinkingEffort(
+    (wsCfg && typeof wsCfg.thinkingEffort === 'string' && wsCfg.thinkingEffort)
+      || (typeof base.thinkingEffort === 'string' && base.thinkingEffort)
+      || 'auto',
+  )
+  const teamEffortMode = normalizeTeamEffortMode(
+    (wsCfg && typeof wsCfg.teamEffortMode === 'string' && wsCfg.teamEffortMode)
+      || (typeof base.teamEffortMode === 'string' && base.teamEffortMode)
+      || 'auto',
+  )
+  const lockedModelEfforts = normalizeLockedModelEfforts(wsCfg && wsCfg.lockedModelEfforts)
+  const managedIdleTimeoutMs = wsCfg && Number.isFinite(Number(wsCfg.managedIdleTimeoutMs)) && Number(wsCfg.managedIdleTimeoutMs) >= 50
+    ? Math.min(2 * 60 * 60 * 1000, Math.round(Number(wsCfg.managedIdleTimeoutMs)))
+    : (Number.isFinite(Number(base.managedIdleTimeoutMs)) && Number(base.managedIdleTimeoutMs) >= 50
+        ? Math.min(2 * 60 * 60 * 1000, Math.round(Number(base.managedIdleTimeoutMs)))
+        : DEFAULT_MANAGED_IDLE_TIMEOUT_MS)
   return {
     modelRef,
     paceMode,
+    runMode,
+    managedIdleTimeoutMs,
+    thinkingEffort,
+    teamEffortMode,
+    lockedModelEfforts,
     stopped,
     permissionMode,
     capabilities: resolvedRoleCaps.capabilities,
     policyPlugins,
     chiefRiskVerified,
-    autoPilot: !stopped && paceMode === 'auto',
-    autoReview: !stopped && paceMode !== 'manual',
+    autoPilot: !stopped && runMode === 'managed',
+    autoReview: !stopped && runMode === 'managed',
     tacticalModes: mergedTactical,
   }
 }
@@ -1041,6 +1230,12 @@ function normalizeState(raw) {
     config: {
       modelRef: typeof cfg.modelRef === 'string' ? cfg.modelRef.trim() : '',
       paceMode,
+      runMode: stopped ? 'off' : normalizeRunMode(cfg.runMode, { stopped, paceMode }),
+      managedIdleTimeoutMs: Number.isFinite(Number(cfg.managedIdleTimeoutMs)) && Number(cfg.managedIdleTimeoutMs) >= 50
+        ? Math.min(2 * 60 * 60 * 1000, Math.round(Number(cfg.managedIdleTimeoutMs)))
+        : DEFAULT_MANAGED_IDLE_TIMEOUT_MS,
+      thinkingEffort: normalizeThinkingEffort(cfg.thinkingEffort),
+      teamEffortMode: normalizeTeamEffortMode(cfg.teamEffortMode),
       stopped,
       permissionMode: DEFAULT_CHIEF_PERMISSION_MODE,
       autoPilot: !stopped && paceMode === 'auto',
@@ -1205,9 +1400,32 @@ export function answerChiefInquiry(sessionId = 'global', { inquiryId = '', answe
       }
     }
     if (idx < 0) return { ok: false, error: `未找到待回复问询：${inquiryId || '最近未答问询'}` }
+    const existing = ws.inquiries[idx]
+    if (!existing || existing.status === 'answered' || (existing.status !== 'pending' && existing.status !== 'delivered')) {
+      const prevId = (existing && existing.inquiryId) || inquiryId
+      const prevStatus = (existing && existing.status) || 'unknown'
+      pushAuditToWs(ws, {
+        mode: resolveWorkspaceConfig(state, rootId).permissionMode,
+        stage: 'inquiry_channel',
+        rule: 'inquiry_reply_replay_rejected',
+        decision: 'rejected',
+        operation: '拦截重复问询答复',
+        target: prevId,
+        reason: `问询 #${prevId} 已结案 (status=${prevStatus})，拒绝重放覆写`,
+        outcome: 'rejected',
+        by: clamp(by || 'lead', 40),
+      }, rootId)
+      return {
+        ok: false,
+        alreadyAnswered: true,
+        code: 'inquiry_already_answered',
+        error: `问询 #${prevId} 已回复结案，拒绝重复应答`,
+        inquiry: existing,
+      }
+    }
     const now = Date.now()
     const item = {
-      ...ws.inquiries[idx],
+      ...existing,
       status: 'answered',
       answer: cleanAns,
       answeredBy: clamp(by || 'lead', 40),
@@ -1670,14 +1888,18 @@ export function deployChiefWorkspaceState(deps, {
     })
     if (toWs.chat.length > CHAT_CAP) toWs.chat = toWs.chat.slice(-CHAT_CAP)
 
-    // Clone safe workspace chief config (model, pace, tactical preferences), ALWAYS forcing intervention=false & L0 advisor!
+    // Clone safe workspace chief config (model, effort, tactical preferences), ALWAYS forcing intervention=false, runMode='off' & L0 advisor!
     const fromCfg = resolveWorkspaceConfig(state, fromKey)
     toWs.config = {
       modelRef: fromCfg.modelRef || '',
-      paceMode: fromCfg.paceMode || 'manual',
+      paceMode: 'manual',
+      runMode: 'off',
+      thinkingEffort: fromCfg.thinkingEffort || 'auto',
+      teamEffortMode: fromCfg.teamEffortMode || 'auto',
+      managedIdleTimeoutMs: fromCfg.managedIdleTimeoutMs || DEFAULT_MANAGED_IDLE_TIMEOUT_MS,
       permissionMode: DEFAULT_CHIEF_PERMISSION_MODE,
-      autoPilot: Boolean(fromCfg.autoPilot),
-      autoReview: Boolean(fromCfg.autoReview),
+      autoPilot: false,
+      autoReview: false,
       tacticalModes: {
         ...normalizeTacticalModes(fromCfg.tacticalModes),
         intervention: false,
@@ -1764,6 +1986,60 @@ export function updateChiefConfig(patch) {
       }
     }
 
+    // Hard gate on model thinking effort lock mutations (human UI / explicit byUser only)
+    const callerBy = typeof safePatch.by === 'string' ? safePatch.by.trim() : ''
+    const isHumanBy = !callerBy || /^(?:user|human|operator|ui_panel)$/i.test(callerBy)
+    const isHumanLockCaller = safePatch._fromUiPanel === true
+      || (safePatch.byUser === true && isHumanBy)
+    const wantsLockMutation = safePatch.lockedModelEfforts !== undefined
+      || safePatch.toggleLockAgentEffort !== undefined
+      || safePatch.teamEffortMode !== undefined
+    if (wantsLockMutation && !isHumanLockCaller) {
+      pushAuditToWs(ws, {
+        mode: effBefore.permissionMode,
+        stage: 'model_effort_lock',
+        rule: 'effort_lock_human_only',
+        decision: 'blocked',
+        operation: '修改模型思考强度锁挡',
+        target: sid,
+        reason: `未授权来源 (${callerBy || 'unknown'}) 试图修改 lockedModelEfforts，仅允许人类面板显式操作`,
+        outcome: 'rejected',
+        by: clamp(callerBy || 'unknown', 40),
+      }, sid)
+      return {
+        ok: false,
+        blocked: true,
+        lockedByUser: true,
+        code: 'effort_lock_human_only',
+        error: '思考强度锁挡 (lockedModelEfforts) 仅允许人类通过面板或显式 byUser 授权修改，已拦截越权变更',
+      }
+    }
+    if (
+      typeof safePatch.thinkingEffort === 'string'
+      && effBefore.lockedModelEfforts
+      && effBefore.lockedModelEfforts.chief === true
+      && !isHumanLockCaller
+    ) {
+      pushAuditToWs(ws, {
+        mode: effBefore.permissionMode,
+        stage: 'model_effort_lock',
+        rule: 'effort_lock_human_only',
+        decision: 'blocked',
+        operation: '修改参谋长思考强度',
+        target: sid,
+        reason: `参谋长思考强度已被用户锁定 (lockedModelEfforts.chief)，拒绝非人类来源 (${callerBy || 'unknown'}) 修改`,
+        outcome: 'rejected',
+        by: clamp(callerBy || 'unknown', 40),
+      }, sid)
+      return {
+        ok: false,
+        blocked: true,
+        lockedByUser: true,
+        code: 'effort_lock_human_only',
+        error: '参谋长思考强度已被用户锁定 (lockedModelEfforts.chief)，仅允许人类显式修改',
+      }
+    }
+
     // Check explicit Policy Plugin list (restrict-only) BEFORE applying any changes
     let validatedPlugins = null
     if (safePatch.policyPlugins !== undefined) {
@@ -1845,18 +2121,22 @@ export function updateChiefConfig(patch) {
     }
 
     const wantsAutoPilot = Boolean(
-      safePatch.paceMode === 'auto'
-      || (typeof safePatch.paceMode !== 'string' && safePatch.stopped !== true && safePatch.autoPilot === true)
+      safePatch.runMode === 'managed'
+      || safePatch.paceMode === 'auto'
+      || (typeof safePatch.paceMode !== 'string' && typeof safePatch.runMode !== 'string' && safePatch.stopped !== true && safePatch.autoPilot === true)
     )
-    if (wantsAutoPilot && effBefore.paceMode !== 'auto' && safePatch.confirmedAutoPilot !== true) {
+    if (wantsAutoPilot && effBefore.runMode !== 'managed' && effBefore.paceMode !== 'auto' && safePatch.confirmedAutoPilot !== true) {
       return {
         ok: false,
         requireAutoPilotConfirm: true,
-        error: '开启「⚡ 全自动托管」需先确认本会话自治范围与防空转退出弹窗（confirmedAutoPilot: true）',
+        error: '开启「🤖 托管模式」需先确认本会话自治范围与 5 条件自动休眠保护（confirmedAutoPilot: true）',
       }
     }
-    if (ws && wantsAutoPilot && effBefore.paceMode !== 'auto') {
-      ws.runtimeGuard.autoPilotStartedAt = Date.now()
+    if (ws && wantsAutoPilot && (effBefore.runMode !== 'managed' || effBefore.paceMode !== 'auto')) {
+      const now = Date.now()
+      ws.runtimeGuard.autoPilotStartedAt = now
+      ws.runtimeGuard.managedStartedAt = now
+      ws.runtimeGuard.lastActivityAt = now
       ws.runtimeGuard.autoPilotHadTurn = false
     }
 
@@ -1878,46 +2158,91 @@ export function updateChiefConfig(patch) {
       }
     }
 
-    const applyPatchTo = (targetCfg, allowIntervention, allowAutoPilot = allowIntervention, allowPermSync = false) => {
+    const applyPatchTo = (targetCfg, allowIntervention, allowAutoPilot = allowIntervention, allowPermSync = false, allowLocks = false) => {
       if (typeof safePatch.modelRef === 'string') targetCfg.modelRef = safePatch.modelRef.trim()
+      if (typeof safePatch.thinkingEffort === 'string') {
+        targetCfg.thinkingEffort = normalizeThinkingEffort(safePatch.thinkingEffort)
+      }
+      if (allowLocks && typeof safePatch.teamEffortMode === 'string') {
+        targetCfg.teamEffortMode = normalizeTeamEffortMode(safePatch.teamEffortMode)
+      }
+      if (Number.isFinite(Number(safePatch.managedIdleTimeoutMs)) && Number(safePatch.managedIdleTimeoutMs) >= 50) {
+        targetCfg.managedIdleTimeoutMs = Math.min(2 * 60 * 60 * 1000, Math.round(Number(safePatch.managedIdleTimeoutMs)))
+      }
+      if (allowLocks && (
+        (safePatch.lockedModelEfforts && typeof safePatch.lockedModelEfforts === 'object')
+        || (safePatch.toggleLockAgentEffort && typeof safePatch.toggleLockAgentEffort === 'object')
+      )) {
+        const curLocks = { ...(targetCfg.lockedModelEfforts || {}) }
+        if (safePatch.lockedModelEfforts && typeof safePatch.lockedModelEfforts === 'object') {
+          for (const [lk, lv] of Object.entries(safePatch.lockedModelEfforts)) {
+            const ck = String(lk || '').trim().slice(0, 64)
+            if (!ck) continue
+            if (lv === true) curLocks[ck] = true
+            else delete curLocks[ck]
+          }
+        }
+        if (safePatch.toggleLockAgentEffort && typeof safePatch.toggleLockAgentEffort === 'object') {
+          const lk = String(safePatch.toggleLockAgentEffort.target || 'lead').trim().slice(0, 64)
+          if (lk) {
+            if (safePatch.toggleLockAgentEffort.locked === true) curLocks[lk] = true
+            else delete curLocks[lk]
+          }
+        }
+        targetCfg.lockedModelEfforts = curLocks
+      }
       if (allowPermSync && normalizedReqPerm) {
         targetCfg.permissionMode = normalizedReqPerm
       }
-      if (typeof safePatch.paceMode === 'string' && ['manual', 'smart', 'auto', 'stopped'].includes(safePatch.paceMode)) {
+      if (typeof safePatch.runMode === 'string' && CHIEF_RUN_MODES.includes(safePatch.runMode)) {
+        const nextRun = (!allowAutoPilot && safePatch.runMode === 'managed') ? 'off' : safePatch.runMode
+        targetCfg.runMode = nextRun
+        targetCfg.stopped = false
+        targetCfg.paceMode = nextRun === 'managed' ? 'auto' : (nextRun === 'patrol' ? 'smart' : 'manual')
+        targetCfg.autoPilot = nextRun === 'managed' && allowAutoPilot
+        targetCfg.autoReview = nextRun === 'managed' && allowAutoPilot
+      } else if (typeof safePatch.paceMode === 'string' && ['manual', 'smart', 'auto', 'stopped'].includes(safePatch.paceMode)) {
         const nextPace = (!allowAutoPilot && safePatch.paceMode === 'auto') ? 'manual' : safePatch.paceMode
         targetCfg.paceMode = nextPace
         const isStopped = nextPace === 'stopped'
         targetCfg.stopped = isStopped
+        targetCfg.runMode = isStopped ? 'off' : (nextPace === 'auto' ? 'managed' : (nextPace === 'smart' ? 'patrol' : 'off'))
         targetCfg.autoPilot = !isStopped && nextPace === 'auto' && allowAutoPilot
-        targetCfg.autoReview = !isStopped && nextPace !== 'manual'
+        targetCfg.autoReview = !isStopped && nextPace === 'auto' && allowAutoPilot
       } else if (typeof safePatch.stopped === 'boolean') {
         targetCfg.stopped = safePatch.stopped
         if (safePatch.stopped) {
           targetCfg.paceMode = 'stopped'
+          targetCfg.runMode = 'off'
           targetCfg.autoPilot = false
           targetCfg.autoReview = false
         } else {
           if (targetCfg.paceMode === 'stopped') targetCfg.paceMode = 'manual'
           if (!allowAutoPilot && targetCfg.paceMode === 'auto') targetCfg.paceMode = 'manual'
+          targetCfg.runMode = normalizeRunMode(targetCfg.runMode, targetCfg)
           targetCfg.autoPilot = targetCfg.paceMode === 'auto' && allowAutoPilot
-          targetCfg.autoReview = targetCfg.paceMode !== 'manual'
+          targetCfg.autoReview = targetCfg.paceMode === 'auto' && allowAutoPilot
         }
       } else if (typeof safePatch.autoPilot === 'boolean') {
         const nextAuto = Boolean(safePatch.autoPilot && allowAutoPilot)
         targetCfg.stopped = false
         targetCfg.paceMode = nextAuto ? 'auto' : 'manual'
+        targetCfg.runMode = nextAuto ? 'managed' : 'off'
         targetCfg.autoPilot = nextAuto
         targetCfg.autoReview = nextAuto
       }
-      if (!allowAutoPilot && targetCfg.paceMode === 'auto') {
+      if (!allowAutoPilot && (targetCfg.paceMode === 'auto' || targetCfg.runMode === 'managed')) {
         targetCfg.paceMode = 'manual'
+        targetCfg.runMode = 'off'
         targetCfg.autoPilot = false
+        targetCfg.autoReview = false
       }
-      if (typeof safePatch.autoReview === 'boolean' && typeof safePatch.paceMode !== 'string' && typeof safePatch.stopped !== 'boolean') {
+      if (typeof safePatch.autoReview === 'boolean' && typeof safePatch.paceMode !== 'string' && typeof safePatch.runMode !== 'string' && typeof safePatch.stopped !== 'boolean') {
         targetCfg.autoReview = safePatch.autoReview
         if (!safePatch.autoReview) {
           targetCfg.stopped = false
           targetCfg.paceMode = 'manual'
+          targetCfg.runMode = 'off'
         }
       }
       if (incomingTactical) {
@@ -1936,11 +2261,16 @@ export function updateChiefConfig(patch) {
       ws.config = {
         modelRef: effBefore.modelRef || '',
         paceMode: effBefore.paceMode || 'manual',
+        runMode: effBefore.runMode || 'off',
+        thinkingEffort: effBefore.thinkingEffort || 'auto',
+        teamEffortMode: effBefore.teamEffortMode || 'auto',
+        managedIdleTimeoutMs: effBefore.managedIdleTimeoutMs || DEFAULT_MANAGED_IDLE_TIMEOUT_MS,
+        lockedModelEfforts: { ...(effBefore.lockedModelEfforts || {}) },
         permissionMode: effBefore.permissionMode || DEFAULT_CHIEF_PERMISSION_MODE,
         tacticalModes: { ...effBefore.tacticalModes },
       }
     }
-    applyPatchTo(ws.config, true, true, true)
+    applyPatchTo(ws.config, true, true, true, isHumanLockCaller)
     if (validatedPlugins !== null) {
       if (safePatch.policyPluginsScope === 'global') {
         state.config.policyPlugins = validatedPlugins
@@ -1959,9 +2289,9 @@ export function updateChiefConfig(patch) {
         by: clamp(safePatch.by || 'operator', 40),
       }, sid)
     }
-    // Session permissionMode, intervention, and autoPilot NEVER leak globally across new sessions!
+    // Session permissionMode, intervention, lockedModelEfforts, and autoPilot NEVER leak globally across new sessions!
     state.config.permissionMode = DEFAULT_CHIEF_PERMISSION_MODE
-    applyPatchTo(state.config, false, false, false)
+    applyPatchTo(state.config, false, false, false, false)
 
     if (normalizedReqPerm) {
       if (normalizedReqPerm === 'chief' && safePatch.confirmedChiefRisk === true) {

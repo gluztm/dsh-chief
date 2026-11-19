@@ -94,9 +94,14 @@ export const store = {
   wallDraftScope: 'global',
   // DSH Chief state
   chiefMeta: {
+    runMode: 'off',
+    managedIdleTimeoutMs: 15 * 60 * 1000,
     paceMode: 'manual',
     stopped: false,
     permissionMode: 'advisor',
+    thinkingEffort: 'auto',
+    teamEffortMode: 'auto',
+    lockedModelEfforts: {},
     chiefRiskVerified: false,
     chiefRiskAck: null,
     pendingApprovals: [],
@@ -205,8 +210,15 @@ export const store = {
   secNewFactText: '',
   secNewFactCat: 'discipline',
   secShowRawTurns: false,
-  // Engineering Memory Filing Cabinet (三层档案柜 · Session / System Global Cold / Precipitated Cold)
-  archiveTabScope: 'session',
+  // Engineering Memory Filing Cabinet (桌面独立 + 三层档案柜 · Desktop / Session / System Global Cold / Precipitated Cold)
+  archiveTabScope: 'desktop',
+  archiveSearchOpen: false,
+  archiveMoreMenuOpen: false,
+  archiveShowEmptyDrawers: false,
+  archiveSelectMode: false,
+  chiefMoreMenuOpen: false,
+  boundMoreMenuOpen: false,
+  chiefDisclaimerOpen: false,
   archiveUnboundSession: false,
   archiveSessionLoaded: false,
   globalVaultLoaded: false,
@@ -250,9 +262,14 @@ export const store = {
   archiveCabinets: [],
   archiveFolders: [],
   archiveItems: [],
+  archiveDesktop: { pinnedDocuments: [], usedTokens: 0, tokenBudget: 2400, maxItems: 6, usagePct: 0, recentlyUnpinnedWatch: [] },
+  archiveViewerSummary: null,
   globalVaultFolders: [],
   globalVaultItems: [],
   archivePrecipitated: [],
+  precipitatedFolders: [],
+  precipitatedViewerSummary: null,
+  precipOpenDrawers: { coords: true, incidents: true, contracts: true, ops: true, plans: true, inbox: true },
   flippedPrecipitatedIds: [],
   archiveNewCabinetOpen: false,
   archiveNewCabinetName: '',
@@ -357,6 +374,39 @@ export function service(name) {
   } catch {
     return null
   }
+}
+
+/** Detect whether a DSH sessionId belongs to a subagent (should hide Chief entry). */
+export function isSubagentSessionId(sessionId) {
+  const sid = typeof sessionId === 'string' ? sessionId.trim() : ''
+  if (!sid) return false
+  const sessions = service('sessions')
+  if (sessions) {
+    try {
+      if (typeof sessions.subagentAddress === 'function') {
+        const addr = sessions.subagentAddress(sid)
+        if (addr !== undefined && addr !== null) return true
+      }
+    } catch {}
+    try {
+      const snap = sessions.list && typeof sessions.list.getSnapshot === 'function'
+        ? sessions.list.getSnapshot()
+        : null
+      const entry = snap && snap.byId ? snap.byId[sid] : null
+      if (entry && typeof entry === 'object') {
+        if (entry.origin === 'subagent' || entry.kind === 'subagent') return true
+        const parent = entry.parentId || entry.parentSessionId
+        if (typeof parent === 'string' && parent.trim() && parent.trim() !== sid) return true
+      }
+    } catch {}
+  }
+  const idt = store.agentIdentity
+  if (idt && idt.sessionId === sid) {
+    if (idt.isSubagent) return true
+    if (idt.parentId && idt.parentId !== sid) return true
+  }
+  const subs = Array.isArray(store.subagents) ? store.subagents : []
+  return subs.some(s => s && s.id === sid && s.parentId && s.parentId !== sid)
 }
 
 export function selectPanel(id) {

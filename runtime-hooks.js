@@ -31,9 +31,16 @@ import {
   queueChiefApproval,
   appendChiefAuditLog,
 } from './chief.js'
+import {
+  touchWorkspaceActivity,
+  upsertTaskLedgerOnWs,
+  normalizeSuggestion,
+  ensureWorkspace,
+  SUGGESTIONS_CAP,
+} from './chief-state.js'
 import { createAutoContinueEngine } from './auto-continue.js'
 import { bootstrapArchivesFromSharedBoard } from './archives.js'
-import { normalizePermissionMode, evaluatePreExecuteDefense } from './chief-executor.js'
+import { normalizePermissionMode, evaluatePreExecuteDefense, evaluateSafetyGuardHardRules, listGuardWalls } from './chief-executor.js'
 import {
   newId,
   nowMs,
@@ -170,7 +177,7 @@ export function createRuntimeHooks(deps) {
         const st = loadChiefState()
         const rk = resolveRootSessionId(rootKey || sid) || rootKey || sid
         const cfg = resolveWorkspaceConfig(st, rk)
-        return Boolean(cfg.stopped || cfg.paceMode === 'stopped')
+        return Boolean(cfg.stopped || cfg.paceMode === 'stopped' || cfg.runMode === 'off')
       } catch {
         return false
       }
@@ -200,28 +207,88 @@ export function createRuntimeHooks(deps) {
           const state = loadChiefState()
           const ws = state && state.workspaces && state.workspaces[key] ? state.workspaces[key] : null
           const effCfg = resolveWorkspaceConfig(state, key)
+          const runMode = effCfg && effCfg.runMode ? effCfg.runMode : 'off'
+          if ((effCfg && effCfg.stopped) || (runMode !== 'patrol' && runMode !== 'managed')) {
+            return { allowed: false, skipped: 'run-mode-off', logMessage: '参谋处于「⏸ 关停」模式，仅 patrol/managed 模式允许 Auto continue 唤醒' }
+          }
+
+          // Check forbidden bounds and active guard walls BEFORE continuing
+          const cwdForCheck = (key && key !== 'global' && getSessionCwd(runtime, key)) || process.cwd()
+          const board = key && key !== 'global' ? boardForSession(boardFileFor(key)) : null
+          const detailSample = `${trigger || ''} ${detail || ''}`.trim()
+          const safetyGuard = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: detailSample, board })
+          if (safetyGuard && safetyGuard.blocked) {
+            appendChiefAuditLog(key, {
+              mode: effCfg.permissionMode || 'advisor',
+              stage: 'safety_guard',
+              rule: safetyGuard.rule || 'auto_continue_blocked',
+              decision: 'blocked',
+              operation: '断线续跑边界检查',
+              target: sessionId,
+              reason: safetyGuard.reason,
+              outcome: 'blocked',
+              by: 'auto-continue',
+            })
+            return { allowed: false, skipped: 'guard-wall-blocked', logMessage: `安全护栏阻断自动续跑：${safetyGuard.reason}` }
+          }
+          const activeWalls = listGuardWalls(cwdForCheck)
+          if (detail && Array.isArray(activeWalls) && activeWalls.some(w => w && w.enabled && w.mode === 'deny' && Array.isArray(w.patterns) && w.patterns.some(p => p && detail.includes(p)))) {
+            return { allowed: false, skipped: 'guard-wall-blocked', logMessage: '触发动态物理墙保护红线，已暂停自动续跑等待人工确认' }
+          }
+
           const hasAck = hasValidChiefRiskAck(ws)
           const mode = normalizePermissionMode(effCfg && effCfg.permissionMode, {
             requireAck: true,
             hasChiefRiskAck: hasAck,
           })
           if (mode === 'advisor') {
-            return { allowed: false, skipped: 'advisor-readonly', logMessage: 'L0 顾问模式（只读）：禁止自动向主对话续跑' }
+            return { allowed: false, skipped: 'advisor-readonly', logMessage: 'L0 顾问模式（只读）：检测到断流仅作提示，不向主对话发送续跑请求' }
           }
           if (mode === 'assistant') {
-            return { allowed: false, skipped: 'assistant-no-workflow', logMessage: 'L1 助手模式：仅维护参谋系统，跳过主对话断线自动续跑' }
+            mutateChiefState((s) => {
+              const w = ensureWorkspace(s, key)
+              const sug = normalizeSuggestion({
+                kind: 'advice',
+                fromAgent: '⚡ 断流检测提醒',
+                title: `主对话断流待手动续跑（${trigger}）`,
+                reason: detail ? String(detail).slice(0, 160) : 'L1 助手模式不接管主对话工作流，点此一键下发续跑请求。',
+                target: 'lead',
+                targetLabel: '主对话 (@lead)',
+                mode: 'followup',
+                draftText: `[EXECUTION_REQUEST] 检测到上一轮中断（${trigger}），请核查进度后继续推进。`,
+              })
+              if (sug && !w.suggestions.some(x => x && x.status === 'pending' && x.title === sug.title)) {
+                w.suggestions.push(sug)
+                if (w.suggestions.length > SUGGESTIONS_CAP) w.suggestions = w.suggestions.slice(-SUGGESTIONS_CAP)
+              }
+            })
+            return { allowed: false, skipped: 'assistant-no-workflow', logMessage: 'L1 助手模式：已记入建议卡提醒断流，跳过主对话工作流续跑' }
           }
           if (mode === 'strategist') {
+            let ledgerId = ''
+            mutateChiefState((s) => {
+              const w = ensureWorkspace(s, key)
+              const entry = upsertTaskLedgerOnWs(w, {
+                kind: 'auto_continue',
+                status: 'awaiting_approval',
+                originalText: `[断线续跑 · ${trigger}] ${detail ? String(detail).slice(0, 160) : '异常中断恢复'}`,
+                forcedTarget: 'lead',
+                lastReceipt: '等待 L2 逐项授权唤醒主对话',
+              })
+              if (entry) ledgerId = entry.taskId || entry.id
+            })
             const apr = queueChiefApproval(key, {
               category: 'main_workflow',
               operationLabel: '断线自动续跑主对话',
               targetLabel: '主对话 (@lead)',
-              reason: `检测到会话中断或未收口（${trigger}），L2 参谋模式需您允许后再发送续跑指令`,
-              impact: '点击「允许本次操作」后将立即唤醒主对话继续推进当前任务',
+              reason: `检测到会话中断或未收口（${trigger}），已核验安全边界与物理墙，L2 参谋模式需您允许后唤醒续跑`,
+              impact: '点击「允许本次操作」后将发出 [EXECUTION_REQUEST] 信封唤醒主对话继续推进',
               preview: detail ? String(detail).slice(0, 220) : `触发原因：${trigger}`,
               dedupeKey: `autocont:${sessionId}:${trigger}:${Math.floor(Date.now() / 15_000)}`,
               kind: 'auto_continue',
-              payload: { sessionId, trigger, detail: detail || '' },
+              taskId: ledgerId,
+              resumeTaskId: ledgerId,
+              payload: { sessionId, trigger, detail: detail || '', taskId: ledgerId },
               by: 'auto-continue',
             })
             appendChiefAuditLog(key, {
@@ -238,10 +305,23 @@ export function createRuntimeHooks(deps) {
               allowed: false,
               skipped: 'pending-approval',
               approvalId: apr && apr.id,
+              taskId: ledgerId,
               logMessage: `L2 参谋模式：已提交断线续跑逐项授权弹窗（${trigger}）`,
             }
           }
-          return { allowed: true }
+          let l3TaskId = ''
+          mutateChiefState((s) => {
+            const w = ensureWorkspace(s, key)
+            const entry = upsertTaskLedgerOnWs(w, {
+              kind: 'auto_continue',
+              status: 'running',
+              originalText: `[L3 断线自动续跑 · ${trigger}] ${detail ? String(detail).slice(0, 160) : '异常中断自动恢复'}`,
+              forcedTarget: 'lead',
+              lastReceipt: '已过边界与物理墙核验，准备下发 [EXECUTION_REQUEST]',
+            })
+            if (entry) l3TaskId = entry.taskId || entry.id
+          })
+          return { allowed: true, taskId: l3TaskId }
         } catch {
           return { allowed: false, skipped: 'permission-error' }
         }
@@ -329,7 +409,8 @@ export function createRuntimeHooks(deps) {
             linkedPeersCount: linked.linkedPeersCount,
             linkedPeersProgress: linked.linkedPeersProgress,
             takenOutArchives: archCtx.takenOutArchives,
-            sessionArchiveBriefs: archCtx.sessionArchiveBriefs,
+            sessionHookedArchives: archCtx.sessionHookedArchives,
+            desktopUsedTokens: archCtx.desktopUsedTokens,
             smartCompactActive: archCtx.smartCompactActive,
             chiefPermissionMode: archCtx.chiefPermissionMode,
           })
@@ -414,6 +495,10 @@ export function createRuntimeHooks(deps) {
       try {
         if (!event || !session || !session.id) return
         const id = String(session.id)
+        const rootIdForAct = resolveRootSessionId(id) || id
+        if (event.type === 'turn/start' || event.type === 'message/user' || event.type === 'tool/call' || event.type === 'turn/end') {
+          touchWorkspaceActivity(rootIdForAct)
+        }
         if (event.type === 'tool/call' && event.data) {
           const turn = event.data.turn
           noteToolCall(id, turn)
@@ -427,17 +512,25 @@ export function createRuntimeHooks(deps) {
           const reason = String(rawReason && typeof rawReason === 'object' ? (rawReason.kind || '') : (rawReason || '')).toLowerCase()
           const nestedReason = String(rawReason && typeof rawReason === 'object' && rawReason.reason && typeof rawReason.reason === 'object' ? (rawReason.reason.kind || '') : '').toLowerCase()
           const isStoppedByUserOrPolicy = reason === 'aborted' || reason === 'blocked' || nestedReason === 'aborted' || nestedReason === 'blocked'
+          const abnormalTrig = (reason === 'error' || nestedReason === 'error')
+            ? 'turn_error'
+            : ((reason === 'interrupted' || nestedReason === 'interrupted' || reason === 'max-tokens' || reason === 'no-visible-output') ? 'stream_interrupted' : '')
           const turnNum = Number(event.data && event.data.turn)
           const steerKey = `${id}:${turnNum}`
           const steeredAt = deps.hostState.autoSteeredTurns.get(steerKey) || 0
           if (steeredAt) deps.hostState.autoSteeredTurns.delete(steerKey)
           if (!isStoppedByUserOrPolicy && !(steeredAt && Date.now() - steeredAt < 30_000)) {
             const rootId = resolveRootSessionId(id) || id
-            if (!isRootStopped(rootId, id)) {
+            if (!isRootStopped(rootId, id) || abnormalTrig) {
               const agents = runtime && runtime.get ? runtime.get('agents') : null
               const liveAgent = agents && typeof agents.get === 'function' ? agents.get(id) : null
               if (liveAgent) {
-                scheduleChiefTurnReview(makeChiefDeps(runtime), { agent: liveAgent, sessionId: id, turn: event.data && event.data.turn })
+                scheduleChiefTurnReview(makeChiefDeps(runtime), {
+                  agent: liveAgent,
+                  sessionId: id,
+                  turn: event.data && event.data.turn,
+                  ...(abnormalTrig ? { abnormalTrigger: abnormalTrig } : {}),
+                })
               }
             }
           }
@@ -672,9 +765,19 @@ export function createRuntimeHooks(deps) {
                   })
                 })
               }
+              if (effCfg && (effCfg.runMode === 'patrol' || effCfg.runMode === 'managed') && !effCfg.stopped) {
+                scheduleChiefTurnReview(makeChiefDeps(runtime), {
+                  agent: caller,
+                  sessionId: sid || rootId,
+                  abnormalTrigger: 'guard_wall_blocked',
+                })
+              }
+              const escalationCue = verdict.wallId
+                ? `（严禁尝试命令或路径变形绕过物理墙 [${verdict.wallId}]；仅当你确认无任何合法替代方案可继续任务时，可调用 chief_board({ action: "chief.request", subject: "撞墙阻断上报", text: "说明被拦截墙(${verdict.wallId})、为何无法绕过及当前卡点" }) 上报参谋长评估）`
+                : ''
               return {
                 kind: 'deny',
-                reason: `[DSH 安全卫兵事前物理拦截] ${verdict.reason}`,
+                reason: `[DSH 安全卫兵事前物理拦截] ${verdict.reason}${escalationCue}`,
                 info: { stage: verdict.stage, rule: verdict.rule, wallId: verdict.wallId || '' },
               }
             } else if (verdict && verdict.decision === 'ask') {

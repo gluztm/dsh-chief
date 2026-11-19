@@ -10,10 +10,13 @@ import os from 'node:os'
 import { answerMemory } from './memory.js'
 import {
   loadChiefState,
+  resolveWorkspaceConfig,
+  appendChiefAuditLog,
   getLinkedCluster,
   collectClusterPeerProgress,
   deliverCrossMessage,
 } from './chief.js'
+import { resolveAlignedModelEffort } from './chief-state.js'
 import {
   API,
   newId,
@@ -156,6 +159,25 @@ export function createSubagentRuntime(deps) {
     return getSubagentRoster(rt, rootId, board)
   }
 
+  function readAgentReasoningEffort(ag) {
+    if (!ag || typeof ag !== 'object') return ''
+    try {
+      if (ag.model && typeof ag.model.current === 'function') {
+        const cur = ag.model.current()
+        if (cur && typeof cur.reasoningEffort === 'string' && cur.reasoningEffort) return cur.reasoningEffort
+      }
+      if (ag.session && typeof ag.session.requestHeader === 'function') {
+        const h = ag.session.requestHeader()
+        if (h && h.config && typeof h.config.reasoningEffort === 'string') return h.config.reasoningEffort
+      }
+      if (ag.session && ag.session.modelSelection && typeof ag.session.modelSelection.reasoningEffort === 'string') {
+        return ag.session.modelSelection.reasoningEffort
+      }
+      if (ag.config && typeof ag.config.reasoningEffort === 'string') return ag.config.reasoningEffort
+    } catch {}
+    return ''
+  }
+
   /** Synchronous roster combining cached subagent tree + live agent status + board task assignments. */
   function getSubagentRoster(runtime, sessionId, board) {
     const rt = runtime || deps.hostState.activeRuntime
@@ -163,6 +185,11 @@ export function createSubagentRuntime(deps) {
     const agents = rt ? rt.get('agents') : null
     const cached = deps.hostState.subagentTreeCache.get(rootId) || []
     const byName = new Map()
+    let locks = {}
+    try {
+      const cfg = resolveWorkspaceConfig(loadChiefState(), rootId)
+      locks = (cfg && cfg.lockedModelEfforts) || {}
+    } catch {}
 
     const liveStatus = (id, fallback) => {
       try {
@@ -173,11 +200,22 @@ export function createSubagentRuntime(deps) {
       } catch {}
       return fallback || 'inactive'
     }
+    const liveEffort = (id) => {
+      try {
+        if (agents && typeof agents.get === 'function' && id) {
+          return readAgentReasoningEffort(agents.get(id))
+        }
+      } catch {}
+      return ''
+    }
 
     for (const row of cached) {
+      const short = String(row.name || '').split('/').pop()
       byName.set(row.name, {
         ...row,
         status: liveStatus(row.id, row.status),
+        reasoningEffort: liveEffort(row.id) || row.reasoningEffort || '',
+        effortLocked: Boolean(locks[row.name] || locks[short] || locks[row.id]),
         tasks: [],
       })
     }
@@ -187,6 +225,8 @@ export function createSubagentRuntime(deps) {
         id: rootId,
         name: 'lead',
         status: liveStatus(rootId, 'inactive'),
+        reasoningEffort: liveEffort(rootId),
+        effortLocked: Boolean(locks.lead || locks[rootId]),
         description: '主代理 (Root Coordinator)',
         mode: 'continuable',
         tasks: [],
@@ -198,10 +238,13 @@ export function createSubagentRuntime(deps) {
       const ownerRaw = String(t.subagent || t.owner || '').trim()
       if (!ownerRaw || ownerRaw === 'agent' || ownerRaw === 'operator' || ownerRaw === 'user') continue
       if (!byName.has(ownerRaw)) {
+        const short = ownerRaw.split('/').pop()
         byName.set(ownerRaw, {
           id: String(t.session || ''),
           name: ownerRaw,
           status: t.status === 'doing' ? liveStatus(t.session, 'running') : 'inactive',
+          reasoningEffort: liveEffort(t.session),
+          effortLocked: Boolean(locks[ownerRaw] || locks[short] || (t.session && locks[t.session])),
           description: t.title || '',
           mode: 'continuable',
           tasks: [],
@@ -761,6 +804,11 @@ export function createSubagentRuntime(deps) {
     const otherTokens = Math.max(0, usedTokens - overheadTokens - messageTokens)
     const pct = contextWindow > 0 ? Math.min(100, Math.round((usedTokens / contextWindow) * 100)) : 0
 
+    let effortLocked = false
+    try {
+      const cfg = resolveWorkspaceConfig(loadChiefState(), rootSid || sid)
+      effortLocked = Boolean(cfg && cfg.lockedModelEfforts && cfg.lockedModelEfforts.lead)
+    } catch {}
     return {
       totalTokens: usedTokens,
       usedTokens,
@@ -772,6 +820,8 @@ export function createSubagentRuntime(deps) {
       otherTokens,
       overheadTokens,
       modelRef,
+      reasoningEffort: readAgentReasoningEffort(ag),
+      effortLocked,
       seq,
       source,
     }
@@ -907,12 +957,195 @@ export function createSubagentRuntime(deps) {
         })
       },
       executeSubagentAction: (input, callerAgent, signal) => executeSubagentAction(rt, input, callerAgent, signal),
-      async controlMainAgent({ rootId = '', sessionId = '', op = 'steer', modelRef = '', reasoningEffort = '', message = '', reason = '' } = {}) {
+      async controlMainAgent({ rootId = '', sessionId = '', op = 'steer', target = '', modelRef = '', reasoningEffort = '', message = '', reason = '', byUser = false } = {}) {
         const targetSid = String(sessionId || rootId || '').trim()
         if (!targetSid || targetSid === 'global') {
           return { ok: false, error: '当前为空白未绑定会话，无法直接控制主对话代理' }
         }
         const ctrl = rt ? rt.get('sessionController') : null
+        if (op === 'set_effort') {
+          const wantRaw = String(reasoningEffort || '').trim().toLowerCase()
+          const validEff = ['off', 'low', 'medium', 'high', 'xhigh'].includes(wantRaw) ? wantRaw : 'medium'
+          const fallbackTarget = !target && modelRef && !String(modelRef).includes('/') ? String(modelRef) : ''
+          const rawTarget = String(target || fallbackTarget || '').trim().replace(/^@/, '')
+          const isLead = !rawTarget || rawTarget === 'lead' || rawTarget === 'main' || rawTarget === targetSid
+          const targetKey = isLead ? 'lead' : rawTarget
+          const rootKey = String(rootId || resolveRootSessionId(targetSid) || targetSid).trim()
+          const effCfg = resolveWorkspaceConfig(loadChiefState(), rootKey)
+          const locks = (effCfg && effCfg.lockedModelEfforts) || {}
+
+          const agents = rt ? rt.get('agents') : null
+          const subagents = rt ? rt.get('subagents') : null
+          let resolvedAgentId = isLead ? targetSid : ''
+          let targetAgent = isLead && agents && typeof agents.get === 'function' ? agents.get(targetSid) : null
+
+          if (!isLead) {
+            const leadAg = agents && typeof agents.get === 'function' ? agents.get(targetSid) : null
+            if (subagents && typeof subagents.resolveName === 'function' && leadAg) {
+              try {
+                resolvedAgentId = await subagents.resolveName(leadAg, targetKey, new AbortController().signal)
+              } catch {}
+            }
+            if (!resolvedAgentId) {
+              const board = loadBoard(boardFileFor(rootKey))
+              const roster = getSubagentRoster(rt, rootKey, board)
+              const matched = roster.find(r => r.name === targetKey || r.name.endsWith('/' + targetKey) || r.id === targetKey)
+              if (matched && matched.id) resolvedAgentId = matched.id
+            }
+            if (!resolvedAgentId && agents && typeof agents.get === 'function' && agents.get(targetKey)) {
+              resolvedAgentId = targetKey
+            }
+            if (resolvedAgentId && agents && typeof agents.get === 'function') {
+              targetAgent = agents.get(resolvedAgentId)
+            }
+          }
+
+          if (!targetAgent && resolvedAgentId && ctrl && typeof ctrl.resolveAgent === 'function') {
+            try {
+              const resolved = await ctrl.resolveAgent(resolvedAgentId)
+              if (resolved && resolved.agent) targetAgent = resolved.agent
+            } catch {}
+          }
+
+          const shortTarget = targetKey.split('/').pop()
+          const isManualTeamEffort = Boolean(effCfg && effCfg.teamEffortMode === 'manual')
+          if (!byUser && isManualTeamEffort) {
+            appendChiefAuditLog(rootKey, {
+              mode: effCfg.permissionMode,
+              stage: 'model_effort_lock',
+              decision: 'blocked',
+              operation: '调节模型思考强度',
+              target: targetKey,
+              reason: `团队思考强度处于「手动」模式，阻止参谋将 ${targetKey} 调为 ${validEff}`,
+              outcome: 'blocked',
+              by: 'chief',
+            })
+            return {
+              ok: false,
+              lockedByUser: true,
+              manualMode: true,
+              target: targetKey,
+              error: '当前团队思考强度已设为「手动」模式，参谋不会自动调节主/子代理思考强度',
+              badge: '✋ 团队调挡已设为手动',
+            }
+          }
+          const isLocked = Boolean(
+            locks[targetKey] === true
+            || locks[shortTarget] === true
+            || (resolvedAgentId && locks[resolvedAgentId] === true)
+          )
+          if (!byUser && isLocked) {
+            appendChiefAuditLog(rootKey, {
+              mode: effCfg.permissionMode,
+              stage: 'model_effort_lock',
+              decision: 'blocked',
+              operation: '调节模型思考强度',
+              target: targetKey,
+              reason: `用户已开启「🔒 锁挡」，阻止参谋将 ${targetKey} 调为 ${validEff}`,
+              outcome: 'blocked',
+              by: 'chief',
+            })
+            return {
+              ok: false,
+              lockedByUser: true,
+              target: targetKey,
+              error: `用户已锁定 ${isLead ? '主对话 (@lead)' : '@' + targetKey} 的思考强度（🔒），参谋无权覆盖`,
+              badge: '🔒 用户已锁挡',
+            }
+          }
+
+          let curModel = null
+          try {
+            if (targetAgent && targetAgent.model && typeof targetAgent.model.current === 'function') {
+              curModel = targetAgent.model.current()
+            }
+          } catch {}
+          let provider = String((curModel && curModel.provider) || '').trim()
+          let model = String((curModel && curModel.model) || '').trim()
+          if ((!provider || !model) && modelRef && modelRef.includes('/')) {
+            const idx = modelRef.indexOf('/')
+            provider = modelRef.slice(0, idx).trim()
+            model = modelRef.slice(idx + 1).trim()
+          }
+          if ((!provider || !model) && isLead) {
+            const bd = getSessionContextBreakdown(rt, targetSid, targetAgent)
+            if (bd && bd.modelRef && bd.modelRef.includes('/')) {
+              const idx = bd.modelRef.indexOf('/')
+              provider = bd.modelRef.slice(0, idx).trim()
+              model = bd.modelRef.slice(idx + 1).trim()
+            }
+          }
+
+          let finalEffort = validEff
+          const llm = deps.hostState.activeLlm || (rt ? rt.get('llm') : null)
+          if (llm && typeof llm.resolveModelInfo === 'function' && provider && model) {
+            try {
+              const info = await llm.resolveModelInfo(provider, model)
+              if (info && info.reasoning && Array.isArray(info.reasoning.efforts)) {
+                if (info.reasoning.efforts.length === 0) {
+                  return {
+                    ok: false,
+                    nonReasoningModel: true,
+                    error: `当前模型 ${provider}/${model} 不支持思考强度调节`,
+                  }
+                }
+                finalEffort = resolveAlignedModelEffort(validEff, info.reasoning.efforts) || validEff
+              }
+            } catch {}
+          }
+
+          let applied = false
+          try {
+            if (targetAgent && targetAgent.model && typeof targetAgent.model.select === 'function') {
+              await targetAgent.model.select({
+                ...(curModel && typeof curModel === 'object' ? curModel : {}),
+                ...(provider ? { provider } : {}),
+                ...(model ? { model } : {}),
+                reasoningEffort: finalEffort,
+              })
+              applied = true
+            } else if (isLead && ctrl && typeof ctrl.selectModel === 'function' && model) {
+              await ctrl.selectModel({
+                sessionId: resolvedAgentId,
+                ...(provider ? { provider } : {}),
+                model,
+                reasoningEffort: finalEffort,
+              })
+              applied = true
+            } else if (targetAgent && typeof targetAgent.setModel === 'function') {
+              targetAgent.setModel({
+                ...(provider ? { provider } : {}),
+                ...(model ? { model } : {}),
+                reasoningEffort: finalEffort,
+              })
+              applied = true
+            }
+          } catch (err) {
+            return { ok: false, error: '调节思考强度失败：' + ((err && err.message) || String(err || 'unknown')) }
+          }
+
+          if (!applied) {
+            return { ok: false, error: `未找到在线代理 ${targetKey} 或当前宿主未提供热调挡接口` }
+          }
+
+          appendChiefAuditLog(rootKey, {
+            mode: effCfg.permissionMode,
+            stage: 'model_effort',
+            decision: byUser ? 'user_changed' : 'executed',
+            operation: '调节模型思考强度',
+            target: targetKey,
+            reason: reason || `${byUser ? '人类用户' : '参谋长'}将 ${targetKey} 思考强度设为 ${finalEffort}`,
+            outcome: 'ok',
+            by: byUser ? 'user' : 'chief',
+          })
+          return {
+            ok: true,
+            target: targetKey,
+            targetId: resolvedAgentId,
+            reasoningEffort: finalEffort,
+            badge: `🧠 ${isLead ? '主对话' : '@' + targetKey} 思考强度 → ${finalEffort}`,
+          }
+        }
         if (op === 'switch_model') {
           const rawRef = String(modelRef || '').trim()
           if (!rawRef) return { ok: false, error: 'switch_model 需要 modelRef 参数（如 provider/model）' }
@@ -1079,6 +1312,18 @@ export function createSubagentRuntime(deps) {
         const providerName = str(args.provider, targetTask.preset === 'fork' ? 'fork' : 'spawn') || 'spawn'
         const preset = str(args.preset, targetTask.preset && targetTask.preset !== 'fork' && targetTask.preset !== 'spawn' ? targetTask.preset : '')
         const candidateName = sanitizeSubagentName(requestedTarget, targetTask.id)
+        const reqEffortRaw = str(args.reasoningEffort || args.effort, '').trim().toLowerCase()
+        let allowedEffort = ['off', 'low', 'medium', 'high', 'xhigh'].includes(reqEffortRaw) ? reqEffortRaw : ''
+        if (allowedEffort) {
+          try {
+            const effCfg = resolveWorkspaceConfig(loadChiefState(), rootId)
+            const locks = (effCfg && effCfg.lockedModelEfforts) || {}
+            const isHuman = by === 'operator' || by === 'user'
+            if (!isHuman && (locks[candidateName] || locks[requestedTarget])) {
+              allowedEffort = ''
+            }
+          } catch {}
+        }
 
         let existingTargetId = ''
         if (requestedTarget && requestedTarget !== 'agent' && requestedTarget !== 'operator' && requestedTarget !== 'lead') {
@@ -1092,6 +1337,15 @@ export function createSubagentRuntime(deps) {
         }
 
         if (existingTargetId && existingTargetId !== String(liveCaller.id)) {
+          if (allowedEffort && agents && typeof agents.get === 'function') {
+            try {
+              const exAg = agents.get(existingTargetId)
+              if (exAg && exAg.model && typeof exAg.model.select === 'function') {
+                const cur = typeof exAg.model.current === 'function' ? exAg.model.current() : {}
+                await exAg.model.select({ ...(cur || {}), reasoningEffort: allowedEffort })
+              }
+            } catch {}
+          }
           await subagents.sendMessage(liveCaller, existingTargetId, [{ type: 'text', text: brief }], { signal: sig })
           dispatchedName = requestedTarget || candidateName
           childSessionId = String(existingTargetId)
@@ -1107,6 +1361,7 @@ export function createSubagentRuntime(deps) {
               prompt: [{ type: 'text', text: brief }],
               parent: liveCaller,
               ...(preset ? { agentPreset: preset } : {}),
+              ...(allowedEffort ? { agentReasoningEffort: allowedEffort, reasoningEffort: allowedEffort } : {}),
               signal: sig,
               delivery: 'parent',
             })
@@ -1122,6 +1377,7 @@ export function createSubagentRuntime(deps) {
                 prompt: [{ type: 'text', text: brief }],
                 parent: liveCaller,
                 ...(preset ? { agentPreset: preset } : {}),
+                ...(allowedEffort ? { agentReasoningEffort: allowedEffort, reasoningEffort: allowedEffort } : {}),
                 signal: sig,
                 delivery: 'parent',
               })

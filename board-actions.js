@@ -16,6 +16,7 @@ import {
 } from './chief.js'
 import {
   resolveProjectKey,
+  listArchiveHeaders,
   getArchiveDetail,
   searchArchives,
   mutateArchive,
@@ -143,6 +144,7 @@ export function createBoardActions(deps) {
       || action === 'memory.ask'
       || action === 'archive.search'
       || action === 'archive.read'
+      || action === 'archive.pull'
       || action === 'archive.save'
     ) {
       return runActionUnlocked(args)
@@ -186,13 +188,46 @@ export function createBoardActions(deps) {
       }
     }
 
+    if (action === 'archive.pull') {
+      const target = str(args.archiveId !== undefined ? args.archiveId : (args.id !== undefined ? args.id : args.title), '').trim()
+      if (!target) return { ok: false, error: 'archive.pull requires archiveId, id, or title' }
+      const reqScope = str(args.vaultScope || args.scope, 'session').trim().toLowerCase()
+      if (reqScope === 'global' || reqScope === 'precipitated' || reqScope === 'cold') {
+        return { ok: false, denied: true, error: '主代理禁止直接拉取全局或冷藏档案柜卷宗，请仅拉取本局档案柜带钩子卷宗' }
+      }
+      const rootSid = resolveRootSessionId(session) || session
+      if (!rootSid) return { ok: false, error: '当前未绑定对话会话，无法拉取本局档案柜' }
+      const res = mutateArchive({
+        op: 'pullByLead',
+        vaultScope: 'session',
+        rootSessionId: rootSid,
+        id: target,
+        archiveId: target,
+        title: target,
+      }, archiveTarget(deps.hostState.activeRuntime, rootSid, { cabinetId: str(args.cabinetId, ''), vaultScope: 'session' }))
+      if (!res || !res.ok) return { ok: false, error: (res && res.error) || '拉取本局档案失败' }
+      return {
+        ok: true,
+        archiveItem: res.item,
+        board: session ? loadBoard(file) : emptyBoard(),
+      }
+    }
+
     if (action === 'archive.read') {
       const target = str(args.archiveId !== undefined ? args.archiveId : (args.id !== undefined ? args.id : args.title), '').trim()
       if (!target) return { ok: false, error: 'archive.read requires archiveId, id, or title' }
+      const reqScope = str(args.vaultScope || args.scope, 'session').trim().toLowerCase()
+      if (reqScope === 'global' || reqScope === 'precipitated' || reqScope === 'cold') {
+        return { ok: false, denied: true, error: '主代理禁止跨柜读取全局或冷藏档案柜' }
+      }
       const rootSid = resolveRootSessionId(session) || session
       if (!rootSid) return { ok: false, error: '当前未绑定对话会话，无法读取本会话档案柜' }
-      const res = getArchiveDetail(target, rootSid, archiveTarget(deps.hostState.activeRuntime, rootSid, { cabinetId: str(args.cabinetId, ''), vaultScope: 'session' }))
+      const archOpt = archiveTarget(deps.hostState.activeRuntime, rootSid, { cabinetId: str(args.cabinetId, ''), vaultScope: 'session' })
+      const res = getArchiveDetail(target, rootSid, archOpt)
       if (!res.ok) return { ok: false, error: res.error }
+      if (res.item && res.item.hasHook) {
+        mutateArchive({ op: 'pullByLead', vaultScope: 'session', rootSessionId: rootSid, id: res.item.id }, archOpt)
+      }
       return {
         ok: true,
         archiveItem: res.item,
@@ -1513,10 +1548,30 @@ export function createBoardActions(deps) {
     return [...working, ...takenGlobal, ...mappedFlipped]
   }
 
-  /** Collect digest-safe archive context for Lead/Subagent prompt: ONLY desk-spotlight items across all 3 vaults (sealed items NEVER leak to Lead), plus Smart Compaction flag & posture. */
+  /** Collect digest-safe archive context for Lead/Subagent prompt: ONLY desk-spotlight items + Chief-curated session hooks (0 raw/global/cold leak!). */
   function collectDigestArchiveContext(runtime, rootId, cabinetId = '') {
     const takenOutArchives = rootId ? collectTakenOutAndFlipped(runtime, rootId, cabinetId) : []
-    const sessionArchiveBriefs = []
+    let sessionHookedArchives = []
+    let desktopUsedTokens = 0
+    if (rootId && rootId !== 'global') {
+      try {
+        const targetOpt = archiveTarget(runtime, rootId, { cabinetId, vaultScope: 'session' })
+        const hdrRes = listArchiveHeaders(rootId, { vaultScope: 'session', includeCounts: false }, targetOpt)
+        if (hdrRes && hdrRes.ok) {
+          desktopUsedTokens = Number(hdrRes.desktop && hdrRes.desktop.usedTokens) || 0
+          sessionHookedArchives = (Array.isArray(hdrRes.items) ? hdrRes.items : [])
+            .filter(it => it && it.hasHook && !it.takenOut)
+            .slice(0, 6)
+            .map(it => ({
+              id: it.id,
+              title: it.title,
+              folder: it.folder,
+              hookKeywords: Array.isArray(it.hookKeywords) ? it.hookKeywords : [],
+              hookCue: it.hookCue || '',
+            }))
+        }
+      } catch {}
+    }
     let smartCompactActive = false
     let chiefPermissionMode = DEFAULT_CHIEF_PERMISSION_MODE
     if (rootId) {
@@ -1532,7 +1587,7 @@ export function createBoardActions(deps) {
         })
       } catch {}
     }
-    return { takenOutArchives, sessionArchiveBriefs, smartCompactActive, chiefPermissionMode }
+    return { takenOutArchives, sessionHookedArchives, desktopUsedTokens, smartCompactActive, chiefPermissionMode }
   }
 
   /* ------------------------------------------------------------------- auto sync */

@@ -1,6 +1,6 @@
 {
   "name": "dsh-chief",
-  "version": "1.4.0",
+  "version": "1.5.0",
   "icon": "icon.svg",
   "type": "module",
   "description": "Right-sidebar supervisor for DeepSeek Harness (DSH): prevents context-compaction amnesia, monitors subagent DAGs, gates file edits and shell commands behind per-action approvals, breaks runaway loops, and hands off long sessions without bloating prompt tokens.",
@@ -61,8 +61,8 @@
     "build:client": "node ./scripts/build-client.mjs",
     "check:client": "node ./scripts/build-client.mjs --check",
     "check:syntax": "node -e \"const fs=require('fs'),path=require('path'),cp=require('child_process');const walk=d=>{for(const e of fs.readdirSync(d,{withFileTypes:true})){const p=path.join(d,e.name);if(e.isDirectory()&&(e.name==='safety'||e.name==='src'||e.name==='client'))walk(p);else if(e.isFile()&&e.name.endsWith('.js'))cp.execFileSync(process.execPath,['--check',p]);}};walk('.');\"",
-    "test:ci": "npm run check:client && npm run check:syntax && node ./tests/verify-v130-release-gate.mjs && node ./tests/verify-v140-safety-gate.mjs && node ./tests/verify-v140-collab-gate.mjs",
-    "test": "node ./tests/verify-v130-release-gate.mjs && node ./tests/verify-v140-safety-gate.mjs && node ./tests/verify-v140-collab-gate.mjs && node -e \"const fs=require('fs'),path=require('path'),cp=require('child_process');if(fs.existsSync('../tools')){for(const s of ['verify-chief-facade-split.mjs','verify-index-modular-split.mjs','verify-archives-modular-split.mjs','verify-client-modular-build.mjs','verify-v121-permissions-and-ui.mjs','verify-compaction-and-blank-chat.mjs','check-action-surface.mjs','verify-v130-four-chains.mjs']){cp.execFileSync(process.execPath,[path.resolve('..','tools',s)],{stdio:'inherit'});}}\""
+    "test:ci": "npm run check:client && npm run check:syntax && node ./tests/verify-v130-release-gate.mjs && node ./tests/verify-v140-safety-gate.mjs && node ./tests/verify-v140-collab-gate.mjs && node ./tests/verify-v150-final-gate.mjs",
+    "test": "node ./tests/verify-v130-release-gate.mjs && node ./tests/verify-v140-safety-gate.mjs && node ./tests/verify-v140-collab-gate.mjs && node ./tests/verify-v150-final-gate.mjs && node -e \"const fs=require('fs'),path=require('path'),cp=require('child_process');if(fs.existsSync('../tools')){for(const s of ['verify-chief-facade-split.mjs','verify-index-modular-split.mjs','verify-archives-modular-split.mjs','verify-client-modular-build.mjs','verify-v121-permissions-and-ui.mjs','verify-compaction-and-blank-chat.mjs','check-action-surface.mjs','verify-v130-four-chains.mjs']){cp.execFileSync(process.execPath,[path.resolve('..','tools',s)],{stdio:'inherit'});}}\""
   },
   "exports": {
     ".": "./index.js",

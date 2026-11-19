@@ -13,6 +13,7 @@ import {
   FACT_CAT_TONE,
   RELAY_MODES,
   SEC_MAX_IMAGES,
+  THINKING_EFFORT_OPTIONS,
 } from '../constants.js'
 import { store, patch, runtimeRefs } from '../store.js'
 import {
@@ -35,6 +36,7 @@ import {
 import {
   Icon,
   Switch,
+  EffortFanGauge,
   renderStructuredHeading,
   parseNarrativeBlocks,
   renderStructuredItem,
@@ -64,6 +66,13 @@ export function ChiefTab({ board, view }) {
   React.useEffect(() => {
     void loadChiefView(false)
   }, [view.sessionId])
+
+  React.useEffect(() => {
+    if (!view.chiefMoreMenuOpen) return
+    const close = () => patch({ chiefMoreMenuOpen: false })
+    document.addEventListener('click', close)
+    return () => document.removeEventListener('click', close)
+  }, [view.chiefMoreMenuOpen])
 
   const sec = view.secView || {}
 
@@ -114,44 +123,25 @@ export function ChiefTab({ board, view }) {
             const syncOnDigest = Boolean(hState.syncOnDigest ?? hMeta.syncOnDigest)
             return h(
               'div',
-              { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', justifyContent: 'flex-end' } },
-              h(
-                'div',
-                {
-                  style: {
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    padding: '1px 8px',
-                    height: 26,
-                    borderRadius: 99,
-                    border: isHandoffPinned ? '1px solid rgba(245,158,11,0.4)' : '1px solid var(--dnb-border)',
-                    background: isHandoffPinned ? 'rgba(245,158,11,0.08)' : 'var(--dnb-card)',
-                    opacity: isHandoffPinned ? 0.65 : 1,
-                  },
-                  title: isHandoffPinned
-                    ? '交接单已被人类定住锁定，参谋长不可覆盖；如需恢复同步请前往「规划」页解除定住'
-                    : '开启后，点击「提炼摘要」完成时会自动一键同步更新交接单',
-                },
-                h('span', { style: { fontSize: 11, color: isHandoffPinned ? '#f59e0b' : 'var(--dnb-text-2)', fontWeight: 500 } },
-                  isHandoffPinned ? '🔒 定住禁同步' : '同步交接单'),
-                h(Switch, {
-                  small: true,
-                  disabled: isHandoffPinned,
-                  checked: !isHandoffPinned && syncOnDigest,
-                  onChange: v => void toggleSyncHandoffOnDigest(v),
-                }),
-              ),
+              { style: { display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' } },
+              h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 25, padding: '0 9px', fontSize: 11, gap: 4 },
+                disabled: Boolean(view.secBusy),
+                title: '向参谋长咨询当前局势与可行建议（无建议或超出能力范围会直接说明，不强行凑执行）',
+                onClick: () => void submitChiefBar(
+                  '请结合当前任务进展、对话上下文、边界红线与团队状态，给我坦诚、接地气的参谋建议：当前有什么需要关注的卡点或更好的推进方向？若一切顺利暂无建议，或涉及非参谋与会话能处理的事项，直接实话告诉我即可，不要强行凑执行项。',
+                  'consult_chief',
+                ),
+              }, h(Icon, { name: 'sparkles', size: 11 }), '咨询'),
               h('button', {
                 className: 'dnb-pill',
                 style: {
-                  height: 26,
-                  padding: '0 11px',
-                  fontSize: 11.5,
+                  height: 25,
+                  padding: '0 10px',
+                  fontSize: 11,
                   gap: 4,
-                  borderColor: (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
-                    ? 'rgba(10, 132, 255, 0.45)'
-                    : undefined,
                   color: (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
                     ? 'var(--dnb-accent)'
                     : undefined,
@@ -163,19 +153,64 @@ export function ChiefTab({ board, view }) {
                 onClick: () => void loadChiefView(true, { syncHandoff: !isHandoffPinned && syncOnDigest }),
               },
                 (view.secRegenerating || narrative.summarizing)
-                  ? h(Icon, { name: 'refresh', size: 11.5, style: { animation: 'dnb-spin 0.9s linear infinite' } })
-                  : h(Icon, { name: 'sparkles', size: 11.5 }),
+                  ? h(Icon, { name: 'refresh', size: 11, style: { animation: 'dnb-spin 0.9s linear infinite' } })
+                  : h(Icon, { name: 'sparkles', size: 11 }),
                 (view.secRegenerating || narrative.summarizing) ? '提炼中…' : '提炼摘要',
                 (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
                   ? h('span', {
                       style: {
-                        width: 5.5,
-                        height: 5.5,
+                        width: 5,
+                        height: 5,
                         borderRadius: '50%',
                         background: 'var(--dnb-accent)',
                         flexShrink: 0,
                       },
                     })
+                  : null,
+              ),
+              h(
+                'div',
+                { className: 'dnb-more-wrap', onClick: e => e.stopPropagation() },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pill',
+                  style: { height: 25, padding: '0 7px', fontSize: 11 },
+                  'data-active': view.chiefMoreMenuOpen ? '1' : '0',
+                  title: '更多交接与摘要选项',
+                  onClick: () => patch({ chiefMoreMenuOpen: !view.chiefMoreMenuOpen }),
+                }, '⋯'),
+                view.chiefMoreMenuOpen
+                  ? h(
+                      'div',
+                      { className: 'dnb-more-menu', style: { minWidth: 196 } },
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-more-item',
+                        'data-active': (!isHandoffPinned && syncOnDigest) ? '1' : '0',
+                        disabled: isHandoffPinned,
+                        title: isHandoffPinned
+                          ? '交接单已被人类定住锁定，参谋长不可覆盖；如需恢复同步请前往「规划」页解除定住'
+                          : '开启后，点击「提炼摘要」完成时会自动一键同步更新交接单',
+                        onClick: () => {
+                          patch({ chiefMoreMenuOpen: false })
+                          void toggleSyncHandoffOnDigest(!syncOnDigest)
+                        },
+                      },
+                        h('span', null, isHandoffPinned ? '🔒 交接已定住' : '提炼时自动同步交接单'),
+                        h('span', { style: { fontSize: 10.5, opacity: 0.78 } }, isHandoffPinned ? '锁定' : (syncOnDigest ? '开' : '关')),
+                      ),
+                      h('div', { className: 'dnb-more-sep' }),
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-more-item',
+                        disabled: isHandoffPinned || view.secRegenerating || narrative.summarizing,
+                        title: isHandoffPinned ? '交接单已被人类定住，无法一键同步覆盖' : '将当前参谋摘要与态势一键写入交接单',
+                        onClick: () => {
+                          patch({ chiefMoreMenuOpen: false })
+                          void loadChiefView(false, { syncHandoff: true })
+                        },
+                      }, h('span', null, isHandoffPinned ? '🔒 交接已定住' : '↪ 立即更新交接单')),
+                    )
                   : null,
               ),
             )
@@ -207,30 +242,13 @@ export function ChiefTab({ board, view }) {
                       : ((narrative.at ? '更新于 ' + relativeTimeLabel(narrative.at) : '已提炼')
                           + (narrative.hasUnsummarizedChanges ? ' · 有新进展待提炼' : ''))),
               ),
-              h(
-                'div',
-                { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, flexWrap: 'wrap' } },
-                (() => {
-                  const hState = (board && board.handoff) || {}
-                  const hMeta = view.handoffMeta || {}
-                  const isPinned = Boolean(hState.pinned || hMeta.pinned)
-                  return h('button', {
-                    type: 'button',
-                    className: 'dnb-mini-btn',
-                    disabled: isPinned || view.secRegenerating || narrative.summarizing,
-                    style: isPinned ? { opacity: 0.45, cursor: 'not-allowed' } : undefined,
-                    title: isPinned ? '交接单已被人类定住，无法一键同步覆盖' : '将当前参谋摘要与态势一键写入交接单',
-                    onClick: () => void loadChiefView(false, { syncHandoff: true }),
-                  }, isPinned ? '🔒 交接已定住' : '↪ 更新交接单')
-                })(),
-                narrative.byModel
-                  ? h('span', {
-                      className: 'dnb-tag',
-                      style: { fontSize: 10.5 },
-                      title: narrative.byModel,
-                    }, shortModelName(narrative.byModel, view.secModelsCatalog || (sec && sec.models), true))
-                  : null,
-              ),
+              narrative.byModel
+                ? h('span', {
+                    className: 'dnb-tag',
+                    style: { fontSize: 10, flexShrink: 0, opacity: 0.78 },
+                    title: narrative.byModel,
+                  }, shortModelName(narrative.byModel, view.secModelsCatalog || (sec && sec.models), true))
+                : null,
             ),
             useSixBriefCards
               ? h(
@@ -275,8 +293,17 @@ export function ChiefTab({ board, view }) {
                   ? turns.filter(t => t.replies.some(r => isReceiptChatItem(r)))
                   : (chatFilter === 'qa' ? turns.filter(t => t.kind === 'turn') : turns)
 
+                const formatChiefReplyEffortBadge = (it) => {
+                  const eff = String((it && it.thinkingEffort) || '').trim().toLowerCase()
+                  if (!eff) return ''
+                  const opt = THINKING_EFFORT_OPTIONS.find(o => o.key === eff)
+                  const label = opt ? opt.shortLabel : eff
+                  return (it && it.thinkingEffortMode === 'auto') ? `🪄 自动→${label}` : `🧠 ${label}`
+                }
+
                 const renderTurnReplyCard = (item) => {
                   const isReceipt = isReceiptChatItem(item)
+                  const effortBadge = formatChiefReplyEffortBadge(item)
                   return h(
                     'div',
                     {
@@ -286,16 +313,28 @@ export function ChiefTab({ board, view }) {
                     },
                     h(
                       'div',
-                      { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6 } },
+                      { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6, flexWrap: 'wrap' } },
                       h(
                         'div',
                         { style: { display: 'flex', alignItems: 'center', gap: 5 } },
                         isReceipt
                           ? h('span', { className: 'dnb-receipt-badge' },
-                              item.resumeTaskId ? '⚡ 授权续跑回执' : '📋 执行回执')
+                              item.isOneStopReport
+                                ? '🏁 一站式战报回执'
+                                : (item.resumeTaskId ? '⚡ 授权续跑回执' : '📋 执行回执'))
                           : h('span', { className: 'dnb-qa-badge', 'data-role': 'chief' }, '✦ 参谋回答'),
                       ),
-                      h('span', null, timeLabel(item.at)),
+                      h(
+                        'div',
+                        { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+                        effortBadge
+                          ? h('span', {
+                              className: 'dnb-chat-effort-badge',
+                              title: item.thinkingEffortMode === 'auto' ? '自适应换挡本次实际生效思考强度' : '本次回复固定思考强度',
+                            }, effortBadge)
+                          : null,
+                        h('span', null, timeLabel(item.at)),
+                      ),
                     ),
                     renderStructuredText(item.text),
                     Array.isArray(item.actions) && item.actions.length
@@ -326,41 +365,19 @@ export function ChiefTab({ board, view }) {
                       const allTurnsCollapsed = showHistory && filteredTurns.length > 0 && filteredTurns.every(t => Boolean(collapsedMap[t.id]))
                       return h(
                         'div',
-                        { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' }, onClick: e => e.stopPropagation() },
-                        filteredTurns.length > 0
-                          ? h('button', {
-                              type: 'button',
-                              className: 'dnb-pill',
-                              style: { height: 22, padding: '0 8px', fontSize: 10.5 },
-                              title: allTurnsCollapsed ? '一键拉开全部会话框' : '一键收起全部会话框',
-                              onClick: () => {
-                                if (!showHistory) {
-                                  setShowHistory(true)
-                                  patch({ qaCollapsedTurnIds: {} })
-                                  return
-                                }
-                                if (allTurnsCollapsed) {
-                                  patch({ qaCollapsedTurnIds: {} })
-                                } else {
-                                  const nextMap = {}
-                                  for (const t of filteredTurns) nextMap[t.id] = true
-                                  patch({ qaCollapsedTurnIds: nextMap })
-                                }
-                              },
-                            }, allTurnsCollapsed ? '↕ 一键拉开' : '↕ 一键收起')
-                          : null,
+                        { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }, onClick: e => e.stopPropagation() },
                         h(
                           'div',
-                          { className: 'dnb-filter-seg' },
+                          { className: 'dnb-text-filter-bar', style: { padding: 0, gap: 3 } },
                           [
-                            { key: 'all', label: `全部 (${turns.length})` },
-                            { key: 'qa', label: `💬 问答 (${qaCount})` },
-                            { key: 'receipt', label: `📋 回执 (${receiptCount})` },
+                            { key: 'all', label: `全部 ${turns.length}` },
+                            { key: 'qa', label: `问答 ${qaCount}` },
+                            { key: 'receipt', label: `回执 ${receiptCount}` },
                           ].map(opt =>
                             h('button', {
                               key: opt.key,
                               type: 'button',
-                              className: 'dnb-filter-btn',
+                              className: 'dnb-text-filter-btn',
                               'data-active': chatFilter === opt.key ? '1' : '0',
                               onClick: () => {
                                 setChatFilter(opt.key)
@@ -368,6 +385,28 @@ export function ChiefTab({ board, view }) {
                               },
                             }, opt.label),
                           ),
+                          filteredTurns.length > 0
+                            ? h('button', {
+                                type: 'button',
+                                className: 'dnb-text-filter-btn',
+                                style: { marginLeft: 2 },
+                                title: allTurnsCollapsed ? '展开全部会话条目' : '收起全部会话条目',
+                                onClick: () => {
+                                  if (!showHistory) {
+                                    setShowHistory(true)
+                                    patch({ qaCollapsedTurnIds: {} })
+                                    return
+                                  }
+                                  if (allTurnsCollapsed) {
+                                    patch({ qaCollapsedTurnIds: {} })
+                                  } else {
+                                    const nextMap = {}
+                                    for (const t of filteredTurns) nextMap[t.id] = true
+                                    patch({ qaCollapsedTurnIds: nextMap })
+                                  }
+                                },
+                              }, allTurnsCollapsed ? '全展开' : '全收起')
+                            : null,
                         ),
                         h('button', {
                           type: 'button',
@@ -894,10 +933,12 @@ export function ChiefComposerBar({ view, barRef }) {
     view.tacticalMenuOpen
       ? h(
           'div',
-          { className: 'dnb-tactical-pop' },
+          {
+            className: 'dnb-tactical-pop',
+          },
           h(
             'div',
-            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
+            { className: 'dnb-tactical-head' },
             h('span', { style: { fontSize: 12, fontWeight: 700, color: 'var(--dnb-text)' } }, '🎛 参谋长战术驾驶舱'),
             h('button', {
               type: 'button',
@@ -906,6 +947,9 @@ export function ChiefComposerBar({ view, barRef }) {
               onClick: () => patch({ tacticalMenuOpen: false }),
             }, h(Icon, { name: 'x', size: 12 })),
           ),
+          h(
+            'div',
+            { className: 'dnb-tactical-body' },
           // Row 1: Intervention + Max Turns Stepper
           h(
             'div',
@@ -1141,19 +1185,83 @@ export function ChiefComposerBar({ view, barRef }) {
             ),
             h(Switch, { checked: Boolean(tm.conciseBrief), onChange: v => toggleTacticalField('conciseBrief', v) }),
           ),
-          // Dual Mandatory Disclaimer Footer
+          // Row 6: Chief Thinking Effort Fan Gauge + Team Effort Mode (Auto / Manual)
           h(
             'div',
-            { className: 'dnb-disclaimer-box' },
-            h('div', { style: { marginBottom: 4 } },
-              h('strong', null, '免责声明 1（模型依赖）：'),
-              '参谋长的一切自动审查、强介入驱动、压缩前抢救与红线拦截能力均高度依赖您为参谋长配置的底层大模型能力与上下文质量，不同模型在规划严谨度与遵循指令上的表现存在客观差异。',
-            ),
-            h('div', null,
-              h('strong', null, '免责声明 2（规则冲突）：'),
-              '若主会话或当前项目中挂载了过多的系统提示词（System Prompt）、Rules 或硬性规则，可能与本插件的自主干预逻辑产生指令冲突，进而导致介入循环异常、提前熔断或执行偏离预期。',
-            ),
+            { className: 'dnb-tactical-row', style: { flexDirection: 'column', alignItems: 'stretch', gap: 6 } },
+            h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '🧠 参谋长思考强度'),
+            h(EffortFanGauge, {
+              value: meta.thinkingEffort || 'auto',
+              onChange: nextKey => void updateSecConfig({ thinkingEffort: nextKey }),
+            }),
+            (() => {
+              const teamMode = meta.teamEffortMode === 'manual' ? 'manual' : 'auto'
+              return h(
+                'div',
+                { className: 'dnb-team-effort-row' },
+                h(
+                  'div',
+                  { className: 'dnb-team-effort-info' },
+                  h('div', { className: 'dnb-team-effort-title' }, '团队思考强度（主/子代理）'),
+                  h('div', { className: 'dnb-team-effort-sub' },
+                    teamMode === 'manual'
+                      ? '手动模式：参谋长不自动调节，由你自行掌控'
+                      : '默认自动：由参谋长按当前权限范围自动调节'),
+                ),
+                h(
+                  'div',
+                  { className: 'dnb-team-effort-seg', role: 'group', 'aria-label': '团队思考强度调控模式' },
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-team-effort-btn',
+                    'data-active': teamMode === 'auto' ? '1' : '0',
+                    title: '默认自动：由参谋长按当前权限范围自动调节主对话与子代理思考强度',
+                    onClick: () => {
+                      if (teamMode !== 'auto') void updateSecConfig({ teamEffortMode: 'auto' })
+                    },
+                  }, '自动'),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-team-effort-btn',
+                    'data-active': teamMode === 'manual' ? '1' : '0',
+                    title: '手动模式：参谋长停止自动调节主对话与子代理思考强度',
+                    onClick: () => {
+                      if (teamMode !== 'manual') void updateSecConfig({ teamEffortMode: 'manual' })
+                    },
+                  }, '手动'),
+                ),
+              )
+            })(),
           ),
+          // Collapsible Dual Mandatory Disclaimer Footer
+          h(
+            'div',
+            { style: { marginTop: 2 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-text-filter-btn',
+              style: { width: '100%', justifyContent: 'space-between', padding: '4px 6px', fontSize: 10.5 },
+              onClick: () => patch({ chiefDisclaimerOpen: !view.chiefDisclaimerOpen }),
+            },
+              h('span', null, 'ⓘ 模型能力与规则冲突说明'),
+              h('span', { style: { fontSize: 10, opacity: 0.7 } }, view.chiefDisclaimerOpen ? '▴ 收起' : '▾ 展开'),
+            ),
+            view.chiefDisclaimerOpen
+              ? h(
+                  'div',
+                  { className: 'dnb-disclaimer-box', style: { marginTop: 4 } },
+                  h('div', { style: { marginBottom: 4 } },
+                    h('strong', null, '免责声明 1（模型依赖）：'),
+                    '参谋长的一切自动审查、强介入驱动、压缩前抢救与红线拦截能力均高度依赖您为参谋长配置的底层大模型能力与上下文质量，不同模型在规划严谨度与遵循指令上的表现存在客观差异。',
+                  ),
+                  h('div', null,
+                    h('strong', null, '免责声明 2（规则冲突）：'),
+                    '若主会话或当前项目中挂载了过多的系统提示词（System Prompt）、Rules 或硬性规则，可能与本插件的自主干预逻辑产生指令冲突，进而导致介入循环异常、提前熔断或执行偏离预期。',
+                  ),
+                )
+              : null,
+          ),
+        ),
         )
       : null,
 
@@ -1381,16 +1489,22 @@ export function ChiefComposerBar({ view, barRef }) {
         type: 'button',
         className: 'dnb-sec-chip',
         'data-active': view.secPermMenuOpen ? '1' : '0',
-        style: permMode === 'chief'
-          ? { borderColor: 'rgba(245, 158, 11, 0.48)', color: '#f59e0b' }
-          : (permMode === 'strategist'
-              ? { borderColor: 'rgba(37, 99, 235, 0.48)', color: '#60a5fa' }
-              : (permMode === 'advisor'
-                  ? { borderColor: 'rgba(48, 209, 88, 0.42)', color: '#34d399' }
-                  : { borderColor: 'rgba(148, 163, 184, 0.45)', color: 'var(--dnb-text-2)' })),
         title: `${activePermObj.title}（${activePermObj.code}）— ${activePermObj.footer}（点击切换四级权限模型）`,
         onClick: () => patch({ secPermMenuOpen: !view.secPermMenuOpen, tacticalMenuOpen: false, secModelMenuOpen: false, secPaceMenuOpen: false }),
-      }, `${activePermObj.icon} ${activePermObj.shortLabel}`),
+      },
+        h('span', {
+          style: {
+            width: 6,
+            height: 6,
+            borderRadius: '50%',
+            flexShrink: 0,
+            background: permMode === 'chief'
+              ? '#f59e0b'
+              : (permMode === 'strategist' ? '#60a5fa' : (permMode === 'advisor' ? '#34d399' : '#94a3b8')),
+          },
+        }),
+        activePermObj.shortLabel,
+      ),
       h('button', {
         className: 'dnb-sec-chip',
         'data-active': activeTarget === 'auto' ? '1' : '0',
@@ -1409,7 +1523,7 @@ export function ChiefComposerBar({ view, barRef }) {
         },
           p.status === 'running'
             ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '7.5px', color: '#409cff' } })
-            : null,
+            : h(Icon, { name: p.key === 'lead' ? 'agentLead' : 'agentSub', size: 10.5 }),
           '@' + clampTitle(p.key === 'lead' ? '主对话' : shortAgentName(p.name, true), 9.5),
         ),
       ),

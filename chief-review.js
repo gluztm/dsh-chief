@@ -12,6 +12,7 @@ import {
   REVIEW_DELAY_MS,
   SMART_REVIEW_COOLDOWN_MS,
   AUTO_REVIEW_COOLDOWN_MS,
+  DEFAULT_MANAGED_IDLE_TIMEOUT_MS,
   SUMMARY_MAX_TOKENS,
   archiveTargetForRoot,
   nextId,
@@ -37,7 +38,7 @@ import {
 import { listChiefModels, callChiefLlm } from './chief-models.js'
 import { listPeerDirectory, deliverCrossMessage } from './chief-network.js'
 import { summarizingLocks, getChiefView, registerIdleAutoPilotHook } from './chief-view.js'
-import { organizeArchivesWithChief } from './chief-archives.js'
+import { runManagedDreamRoam } from './chief-archives.js'
 import {
   waitUntilAgentIdle,
   measureAgentSessionTokensFallback,
@@ -46,6 +47,7 @@ import {
   maybeRunPreCompaction,
 } from './chief-compaction.js'
 import { applyFactChanges, applyBoardOps } from './chief-commands.js'
+import { executeBatchSuggestions } from './chief-approvals.js'
 
 const TURN_REVIEW_SYSTEM = [
   '你是「DSH 参谋长」（宰相级协同与督导中枢）的后台复盘与督导模块。某个对话刚结束一轮输出。',
@@ -194,7 +196,7 @@ function extractLatestTurnDigest(agent, turn) {
 
 const lastReviewAtByRoot = new Map()
 
-export function scheduleChiefTurnReview(deps, { agent, sessionId, turn }) {
+export function scheduleChiefTurnReview(deps, { agent, sessionId, turn, abnormalTrigger = '' }) {
   const sid = String(sessionId || (agent && agent.id) || '').trim()
   if (!sid) return
   // Never waste tokens reviewing internal mnemon checkpoint / probe subagents
@@ -204,35 +206,41 @@ export function scheduleChiefTurnReview(deps, { agent, sessionId, turn }) {
   const state = loadChiefState()
   const rootKey = (deps && deps.resolveRootSessionId ? deps.resolveRootSessionId(sid, agent) : '') || sid
   const effCfg = resolveWorkspaceConfig(state, rootKey)
-  const paceMode = effCfg.paceMode || 'manual'
-  if (effCfg.stopped || paceMode === 'stopped') {
+  const runMode = effCfg.runMode || 'off'
+  const tactical = normalizeTacticalModes(effCfg.tacticalModes)
+  const wsSnap = state.workspaces && state.workspaces[rootKey] ? state.workspaces[rootKey] : null
+  const pendingSmart = Boolean(wsSnap && wsSnap.runtimeGuard && wsSnap.runtimeGuard.pendingSmartCompact)
+  const compactChannel = Boolean(tactical.autoCompact || tactical.smartCompact || pendingSmart)
+
+  if (effCfg.stopped || (runMode === 'off' && !compactChannel)) {
     clearTimeout(reviewTimers.get(rootKey))
     reviewTimers.delete(rootKey)
     return
   }
-  const tactical = normalizeTacticalModes(effCfg.tacticalModes)
-  const wsSnap = state.workspaces && state.workspaces[rootKey] ? state.workspaces[rootKey] : null
-  const pendingSmart = Boolean(wsSnap && wsSnap.runtimeGuard && wsSnap.runtimeGuard.pendingSmartCompact)
+
+  // In PATROL mode: normal turns consume 0 background tokens; wake ONLY on explicit abnormal triggers or compaction checks
+  const hasAbnormal = Boolean(String(abnormalTrigger || '').trim())
+  if (runMode === 'patrol' && !hasAbnormal && !compactChannel) {
+    return
+  }
+
   const board = deps && deps.boardForSession && deps.boardFileFor
     ? deps.boardForSession(deps.boardFileFor(rootKey))
     : null
   const isGoalMode = Boolean(board && board.mode === 'goal')
-  const hasHighPriorityChannel = isGoalMode || tactical.autoCompact || tactical.smartCompact || pendingSmart || tactical.intervention || tactical.redlineSentinel || tactical.strictVerify
-
-  // Default 'manual' mode without tactical/goal active: ZERO background LLM calls!
-  if (!hasHighPriorityChannel && (paceMode === 'manual' || effCfg.autoReview === false)) return
+  const hasHighPriorityChannel = hasAbnormal || isGoalMode || compactChannel || tactical.intervention || tactical.redlineSentinel || tactical.strictVerify
 
   clearTimeout(reviewTimers.get(rootKey))
   const delayMs = hasHighPriorityChannel ? 1_200 : REVIEW_DELAY_MS
   const timer = setTimeout(() => {
     reviewTimers.delete(rootKey)
-    runTurnReview(deps, { agent, sessionId: sid, turn }).catch(() => {})
+    runTurnReview(deps, { agent, sessionId: sid, turn, abnormalTrigger }).catch(() => {})
   }, delayMs)
   timer.unref?.()
   reviewTimers.set(rootKey, timer)
 }
 
-export async function runTurnReview(deps, { agent, sessionId, turn, force = false }) {
+export async function runTurnReview(deps, { agent, sessionId, turn, force = false, abnormalTrigger = '' }) {
   const sid = String(sessionId || (agent && agent.id) || '').trim()
   if (!sid) return { ok: false, skipped: 'no-session' }
   const rootId = (deps.resolveRootSessionId && deps.resolveRootSessionId(sid, agent)) || sid
@@ -240,25 +248,28 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   const stateBefore = loadChiefState()
   const effCfgBefore = resolveWorkspaceConfig(stateBefore, rootId)
   const tactical = normalizeTacticalModes(effCfgBefore.tacticalModes)
+  const runMode = effCfgBefore.runMode || 'off'
   const paceMode = effCfgBefore.paceMode || 'manual'
-  if (!force && (effCfgBefore.stopped || paceMode === 'stopped')) {
+  const wsBefore = ensureWorkspace(stateBefore, rootId)
+  const pendingSmart = Boolean(wsBefore.runtimeGuard && wsBefore.runtimeGuard.pendingSmartCompact)
+  const compactChannel = Boolean(tactical.autoCompact || tactical.smartCompact || pendingSmart)
+  const hasAbnormal = Boolean(String(abnormalTrigger || '').trim())
+
+  if (!force && effCfgBefore.stopped) {
     return { ok: false, skipped: 'chief-stopped' }
   }
-  const wsBefore = ensureWorkspace(stateBefore, rootId)
+  if (!force && runMode === 'off' && !compactChannel) {
+    return { ok: false, skipped: 'off' }
+  }
   const board = deps.boardForSession && deps.boardFileFor
     ? deps.boardForSession(deps.boardFileFor(rootId))
     : null
   const isGoalMode = Boolean(board && board.mode === 'goal')
-  const pendingSmart = Boolean(wsBefore.runtimeGuard && wsBefore.runtimeGuard.pendingSmartCompact)
   const smartCoManaged = Boolean(tactical.smartCompact)
-  const hasHighPriority = isGoalMode || tactical.intervention || tactical.redlineSentinel || tactical.strictVerify || tactical.autoCompact || tactical.smartCompact || pendingSmart
-
-  if (!force && !hasHighPriority && paceMode === 'manual') {
-    return { ok: false, skipped: 'manual' }
-  }
+  const hasHighPriority = hasAbnormal || isGoalMode || tactical.intervention || tactical.redlineSentinel || tactical.strictVerify || compactChannel
 
   // Always check pre-compaction pipeline first when autoCompact/smartCompact/pendingSmartCompact is active
-  if (tactical.autoCompact || tactical.smartCompact || pendingSmart) {
+  if (compactChannel) {
     const preRes = await maybeRunPreCompaction(deps, { agent, sessionId: sid, rootId, bypassIdleWait: Boolean(force) })
       .catch((err) => {
         const msg = (err && err.message) || String(err || 'pre-compact-error')
@@ -272,12 +283,28 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     }
   }
 
-  // If ONLY fixed-threshold autoCompact was on (without smartCompact or supervisor/pace), exit cleanly here
-  const needsSupervisorLlm = isGoalMode || tactical.intervention || tactical.redlineSentinel || tactical.strictVerify || smartCoManaged || paceMode !== 'manual'
-  if (!force && !needsSupervisorLlm) return { ok: true, onlyCompactionChecked: true }
+  // If runMode === 'off' and we only entered for standalone smartCompact/autoCompact pre-check,
+  // exit cleanly once autoCompact threshold isn't forcing LLM, except when smartCoManaged needs its idle evaluation.
+  if (!force && runMode === 'off' && !smartCoManaged) {
+    return { ok: true, onlyCompactionChecked: true }
+  }
+
+  // If ONLY fixed-threshold autoCompact was on (without smartCompact or patrol-abnormal or managed), exit cleanly
+  const needsSupervisorLlm = (runMode === 'managed')
+    || (runMode === 'patrol' && hasAbnormal)
+    || smartCoManaged
+    || (force && (isGoalMode || tactical.intervention || tactical.redlineSentinel || tactical.strictVerify))
+  if (!force && !needsSupervisorLlm && runMode !== 'patrol') {
+    return { ok: true, onlyCompactionChecked: true }
+  }
 
   const digest = extractLatestTurnDigest(agent, turn)
   if (!digest || !digest.text) return { ok: false, skipped: 'no-digest' }
+
+  const hasWallCue = hasAbnormal || /(?:permission denied|eacces|eperm|forbidden|blocked|not allowed|sandbox|read-only|撞墙|受阻|权限拒绝|越界)/i.test(digest.text)
+  if (!force && runMode === 'patrol' && !hasWallCue && !smartCoManaged) {
+    return { ok: false, skipped: 'patrol-no-abnormal' }
+  }
 
   const cursorKey = `${sid}`
   if (!force && wsBefore.reviewCursors[cursorKey] === digest.stamp) {
@@ -287,12 +314,11 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   const identity = deps.resolveAgentIdentity ? deps.resolveAgentIdentity(deps.runtime, sid, agent) : null
   if (identity && /^mnemon-(?:review|run)/i.test(String(identity.self || ''))) return { ok: false, skipped: 'mnemon' }
 
-  const hasWallCue = /(?:permission denied|eacces|eperm|forbidden|blocked|not allowed|sandbox|read-only|撞墙|受阻|权限拒绝|越界)/i.test(digest.text)
   const now = Date.now()
   const lastAt = Number(lastReviewAtByRoot.get(rootId) || 0)
   const cooldownMs = hasHighPriority
-    ? (smartCoManaged && !isGoalMode && !tactical.intervention ? 12_000 : 4_000)
-    : (paceMode === 'smart' ? (hasWallCue ? 45_000 : SMART_REVIEW_COOLDOWN_MS) : AUTO_REVIEW_COOLDOWN_MS)
+    ? (smartCoManaged && !isGoalMode && !tactical.intervention && !hasAbnormal ? 12_000 : 4_000)
+    : (runMode === 'patrol' ? (hasWallCue ? 45_000 : SMART_REVIEW_COOLDOWN_MS) : AUTO_REVIEW_COOLDOWN_MS)
   if (!force && now - lastAt < cooldownMs) return { ok: false, skipped: 'cooldown' }
 
   // Wait if supervisor/goal/smart-compact is active so turn-stopping settles to idle before evaluating usage
@@ -314,17 +340,14 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
 
   // In 'smart' background mode (without supervisor/goal), gate LLM call on wall cue or multi-agent human turn;
   // when ONLY smartCoManaged is enabled in manual pace, evaluate only after enough turns or context pressure.
-  if (!force && !isGoalMode && !tactical.intervention && !tactical.redlineSentinel && !tactical.strictVerify) {
-    if (smartCoManaged && paceMode === 'manual') {
+  if (!force && !isGoalMode && !tactical.intervention && !tactical.redlineSentinel && !tactical.strictVerify && !hasAbnormal) {
+    if (smartCoManaged && runMode === 'off') {
       const ratio = liveUsage && liveUsage.contextWindow ? (Number(liveUsage.totalTokens) || 0) / Number(liveUsage.contextWindow) : 0
       const sinceCompact = now - ((wsBefore.runtimeGuard && wsBefore.runtimeGuard.lastCompactedAt) || 0)
       if ((digest.stamp < 4 && ratio < 0.25) || sinceCompact < 20_000) {
         return { ok: false, skipped: 'smart-compact-light' }
       }
-    } else {
-      if (paceMode === 'smart' && !hasWallCue && !(digest.hasUser && realPeers.length > 1)) {
-        return { ok: false, skipped: 'smart-quiet' }
-      }
+    } else if (runMode === 'managed') {
       if (!digest.hasUser && realPeers.length <= 1 && !hasWallCue) return { ok: false, skipped: 'single-quiet' }
     }
   }
@@ -335,11 +358,13 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   }
 
   lastReviewAtByRoot.set(rootId, now)
-  const isAutoPilotActiveNow = Boolean(paceMode === 'auto' && effCfgBefore.autoPilot && !effCfgBefore.stopped)
+  const isAutoPilotActiveNow = Boolean(runMode === 'managed' && !effCfgBefore.stopped)
   const reviewWorkId = beginChiefActiveWork(rootId, {
     tone: 'neon',
     tab: '',
-    label: isAutoPilotActiveNow ? '参谋长正在自动托管巡检中...' : '参谋长正在后台巡检研判中...',
+    label: runMode === 'patrol'
+      ? '参谋长正在巡检异常与诊断边界中...'
+      : (isAutoPilotActiveNow ? '参谋长正在托管督导巡检中...' : '参谋长正在后台复盘研判中...'),
   })
   try {
   const speaker = identity && identity.isChild ? `子代理 @${identity.self}` : '主对话 (@lead)'
@@ -358,7 +383,8 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     tactical.strictVerify ? 'STRICT_VERIFY' : '',
     tactical.redlineSentinel ? 'REDLINE_SENTINEL' : '',
     tactical.conciseBrief ? 'CONCISE_BRIEF_3_BULLETS' : '',
-    Boolean(paceMode === 'auto' && effCfgBefore.autoPilot && !effCfgBefore.stopped) ? 'AUTO_PILOT_SESSION_ONLY' : '',
+    Boolean(runMode === 'managed' && !effCfgBefore.stopped) ? 'AUTO_PILOT_SESSION_ONLY' : '',
+    hasAbnormal ? `ABNORMAL_PATROL_TRIGGER(${abnormalTrigger})` : '',
   ].filter(Boolean)
 
   const smartUsageHint = smartCoManaged
@@ -366,7 +392,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     : ''
 
   const prompt = [
-    `当前激活监督模式：${activeFlags.join(' | ') || paceMode}`,
+    `当前激活监督模式：${activeFlags.join(' | ') || runMode}`,
     ...(smartUsageHint ? [smartUsageHint] : []),
     `工作区总目标 (Objective)：${(board && board.objective) || '（暂未开启 /goal 固定目标 — 请对照下方最新用户原始诉求核验完成度）'}`,
     `最新用户原始诉求：${digest.latestUserPrompt || '（见下方对话片段）'}`,
@@ -387,8 +413,12 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     digest.text,
   ].join('\n')
 
+  const reviewReasonKind = hasAbnormal
+    ? 'wall_blocked'
+    : (tactical.intervention ? 'strong_intervention' : 'turn_review')
   const res = await callChiefLlm(deps, {
     sessionId: rootId,
+    reasonKind: reviewReasonKind,
     system: TURN_REVIEW_SYSTEM,
     prompt,
     maxTokens: SUMMARY_MAX_TOKENS,
@@ -403,7 +433,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   const hasAckNow = hasValidChiefRiskAck(wsNowPerm)
   const permNow = normalizePermissionMode(cfgNow.permissionMode, { requireAck: true, hasChiefRiskAck: hasAckNow })
   const permRankNow = permissionRank(permNow)
-  const autoPilot = Boolean(cfgNow.paceMode === 'auto' && cfgNow.autoPilot && !cfgNow.stopped)
+  const autoPilot = Boolean(cfgNow.runMode === 'managed' && !cfgNow.stopped)
   const rawSuggestions = (Array.isArray(parsed.suggestions) ? parsed.suggestions : [])
     .map(raw => normalizeSuggestion({ ...raw, fromAgent: raw?.fromAgent || speaker }))
     .filter(Boolean)
@@ -530,8 +560,9 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
         }
       }
 
+      const useOneStopRunnerNow = Boolean(permNow === 'chief' && hasAckNow && tactical.intervention)
       for (const sug of rawSuggestions) {
-        if (sug.kind === 'bound') {
+        if (!useOneStopRunnerNow && sug.kind === 'bound') {
           const colList = Array.isArray(bounds[sug.boundField]) ? bounds[sug.boundField] : []
           if (colList.some(x => String(x).trim() === sug.draftText)) continue
           if (autoPilot && sug.draftText) {
@@ -541,7 +572,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
             continue
           }
         }
-        if (autoPilot && sug.kind === 'relay' && sug.draftText && isInternalRelayTarget(sug.target)) {
+        if (!useOneStopRunnerNow && autoPilot && sug.kind === 'relay' && sug.draftText && isInternalRelayTarget(sug.target)) {
           if (permNow === 'chief' && hasAckNow) {
             sug.status = 'applied'
             autoRelays.push(sug)
@@ -571,9 +602,9 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
         }
       }
 
-      if (autoPilot && rootId && rootId !== 'global') {
+      if (autoPilot && permRankNow >= 1 && rootId && rootId !== 'global') {
         const lastOrgAt = Number(ws.runtimeGuard.lastAutoArchiveOrgAt || 0)
-        if (!lastOrgAt || Date.now() - lastOrgAt > 180_000) {
+        if (!lastOrgAt || Date.now() - lastOrgAt > 60_000) {
           shouldAutoOrganizeSession = true
         }
       }
@@ -871,29 +902,91 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     }
   }
 
-  if (permRankNow >= 1 && shouldAutoOrganizeSession && rootId && rootId !== 'global') {
+  let dreamRoamRes = null
+  if (autoPilot && permRankNow >= 1 && !hazardStopped && rootId && rootId !== 'global') {
     try {
       const sessOpt = archiveTargetForRoot(deps, rootId, { vaultScope: 'session' })
+      const globOpt = archiveTargetForRoot(deps, rootId, { vaultScope: 'global' })
       const stSess = loadArchiveStore(sessOpt)
-      const unorgCount = (stSess.items || []).filter(
-        it => it.folder === 'inbox' || it.organizedBy !== 'chief' || (it.points || []).length <= 1,
-      ).length
-      if (unorgCount >= 3) {
+      const stGlob = loadArchiveStore(globOpt)
+      const hasWatch = Array.isArray(stSess.recentlyUnpinnedWatch) && stSess.recentlyUnpinnedWatch.length > 0
+      const hasUnhookedSess = (stSess.items || []).some(it => !it.hasHook || it.folder === 'inbox' || it.organizedBy !== 'chief' || (it.points || []).length <= 1)
+      const hasUnhookedGlob = (stGlob.items || []).some(it => !it.hasHook || it.folder === 'inbox' || it.organizedBy !== 'chief' || (it.points || []).length <= 1)
+      if (hasWatch || ((shouldAutoOrganizeSession || force) && (hasUnhookedSess || hasUnhookedGlob))) {
         updateChiefActiveWork(rootId, reviewWorkId, {
-          tone: 'archive',
+          tone: 'dream',
           tab: 'archive',
-          label: '参谋长正在自动整理本局档案中...',
+          label: '🌙 参谋长正在梦境漫游 · 轻拢卷宗与织就钩子中...',
         })
         mutateChiefState((s) => {
           const ws = ensureWorkspace(s, rootId)
           ws.runtimeGuard.lastAutoArchiveOrgAt = Date.now()
         })
-        await organizeArchivesWithChief(deps, {
+        dreamRoamRes = await runManagedDreamRoam(deps, { sessionId: rootId }).catch(() => null)
+      }
+    } catch {}
+  }
+
+  // L3 Chief + Strong Intervention: One-Stop Task Runner sweeping safe pending suggestions
+  // (excludes guard_wall, goal_approval, pinGlobal global bounds, and superseded L1 fallback advice when live intervention ran)
+  let oneStopReport = null
+  if (permNow === 'chief' && hasAckNow && tactical.intervention && !hazardStopped) {
+    try {
+      const wsLatest = ensureWorkspace(loadChiefState(), rootId)
+      const safePending = (wsLatest.suggestions || []).filter(s =>
+        s
+        && s.status === 'pending'
+        && s.kind !== 'guard_wall'
+        && s.kind !== 'wall_removal'
+        && s.kind !== 'goal_approval'
+        && !(s.kind === 'bound' && s.pinGlobal)
+        && !(interventionMessage && s.title === 'L1 强介入建议（等待拍板，未自动递给主对话）'),
+      )
+      if (safePending.length > 0) {
+        updateChiefActiveWork(rootId, reviewWorkId, {
+          tone: 'neon',
+          tab: 'chief',
+          label: '🏁 参谋长正在一站式推进建议清单中...',
+        })
+        const batchOut = await executeBatchSuggestions(deps, {
           sessionId: rootId,
-          vaultScope: 'session',
-          scope: 'unorganized',
-          instruction: '全自动托管轮后整理本会话未归档记录（仅限本会话）',
-        }).catch(() => null)
+          ids: safePending.map(s => s.id),
+          includeGoalApproval: false,
+          skipGuardWalls: true,
+          skipGlobalBounds: true,
+          byAutoRunner: true,
+          skipChatReceipt: true,
+        })
+        if (batchOut && (batchOut.executedCount > 0 || batchOut.blockedCount > 0 || batchOut.failedCount > 0)) {
+          oneStopReport = {
+            executedCount: batchOut.executedCount,
+            blockedCount: batchOut.blockedCount,
+            failedCount: batchOut.failedCount,
+            skippedGoalCount: batchOut.skippedGoalCount,
+            summaries: batchOut.summaries || [],
+          }
+          mutateChiefState((s) => {
+            const ws = ensureWorkspace(s, rootId)
+            ws.chat.push({
+              id: nextId('chat'),
+              role: 'chief',
+              kind: 'receipt',
+              isOneStopReport: true,
+              ...(res.thinkingEffort ? { thinkingEffort: res.thinkingEffort } : {}),
+              ...(res.thinkingEffortMode ? { thinkingEffortMode: res.thinkingEffortMode } : {}),
+              text: [
+                `- 【🏁 一站式战报回执】L3 强介入已顺序推进 ${batchOut.executedCount} 项安全建议${batchOut.blockedCount ? ` · 安全护栏拦禁 ${batchOut.blockedCount} 项` : ''}${batchOut.skippedGoalCount ? ` · 保留高危/结项/全局项 ${batchOut.skippedGoalCount} 项待您亲裁` : ''}`,
+                ...(batchOut.summaries || []).map(line => `  ${line}`),
+              ].join('\n'),
+              actions: [
+                `🏁 一站式执行 ×${batchOut.executedCount}`,
+                ...(batchOut.blockedCount ? [`🛡️ 红线拦截 ×${batchOut.blockedCount}`] : []),
+              ],
+              at: Date.now(),
+            })
+            if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+          })
+        }
       }
     } catch {}
   }
@@ -935,6 +1028,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   if (autoPilot && !interventionMessage && autoRelays.length === 0 && !circuitTripped) {
     autoPilotStopRes = await checkAndStopIdleAutoPilot(deps, rootId, {
       allowStartupGrace: false,
+      goalAchievedFastStop: Boolean(isGoalAchieved),
       directory,
       fromViewCheck: false,
     }).catch(() => null)
@@ -955,6 +1049,10 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     smartCompacted,
     circuitTripped,
     circuitReason,
+    ...(res.thinkingEffort ? { thinkingEffort: res.thinkingEffort } : {}),
+    ...(res.thinkingEffortMode ? { thinkingEffortMode: res.thinkingEffortMode } : {}),
+    ...(dreamRoamRes ? { dreamRoam: dreamRoamRes } : {}),
+    ...(oneStopReport ? { oneStopReport } : {}),
     ...(autoPilotStopRes ? { autoPilotStopped: Boolean(autoPilotStopRes.stopped) } : {}),
   }
   } finally {
@@ -963,10 +1061,13 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
 }
 
 /**
- * Anti-idle safeguard for session-scoped Full Auto-Pilot (`paceMode === 'auto'`):
- * Once Lead and all real non-probe child subagents within THIS session finish working AND
- * the closing narrative digest has finished catching up, automatically stand down to `manual`
- * so Chief never idles/spins indefinitely after work completes.
+ * 5-Condition Idle Auto-Sleep Guard for Managed mode (`runMode === 'managed'`):
+ * Auto-stands down `managed -> off` ONLY when ALL 5 conditions hold:
+ *  (1) Idle timeout elapsed (or goal-achieved fast stand-down) AND 0 running session agents;
+ *  (2) 0 `doing` tasks on board;
+ *  (3) 0 pending approvals / elevations;
+ *  (4) 0 pending/delivered open inquiries;
+ *  (5) 0 pending review timers AND empty `recentlyUnpinnedWatch` queue.
  */
 export async function checkAndStopIdleAutoPilot(deps, sessionId, opts = {}) {
   const sidRaw = String(sessionId || '').trim()
@@ -980,12 +1081,39 @@ export async function checkAndStopIdleAutoPilot(deps, sessionId, opts = {}) {
   const stBefore = loadChiefState()
   const effBefore = resolveWorkspaceConfig(stBefore, rootId)
   const wsBefore = ensureWorkspace(stBefore, rootId)
-  if (effBefore.stopped || effBefore.paceMode !== 'auto' || !effBefore.autoPilot) {
-    return { ok: true, stopped: false, reason: 'not-autopilot' }
+  if (effBefore.stopped || effBefore.runMode !== 'managed') {
+    return { ok: true, stopped: false, reason: 'not-managed' }
   }
+  // Condition 5a: 0 pending review timers
   if (reviewTimers.has(rootId)) {
     return { ok: true, stopped: false, reason: 'review-pending' }
   }
+  // Condition 3: 0 pending approvals / elevations
+  const hasPendingApr = Array.isArray(wsBefore.pendingApprovals) && wsBefore.pendingApprovals.some(a => a && a.status === 'pending')
+  if (hasPendingApr || wsBefore.pendingElevation) {
+    return { ok: true, stopped: false, reason: 'pending-approvals' }
+  }
+  // Condition 4: 0 pending / delivered inquiries
+  const hasOpenInq = Array.isArray(wsBefore.inquiries) && wsBefore.inquiries.some(q => q && (q.status === 'pending' || q.status === 'delivered'))
+  if (hasOpenInq) {
+    return { ok: true, stopped: false, reason: 'pending-inquiries' }
+  }
+  // Condition 2: 0 doing tasks on board
+  const board = deps && deps.boardForSession && deps.boardFileFor
+    ? deps.boardForSession(deps.boardFileFor(rootId))
+    : null
+  const doingTasks = (board && Array.isArray(board.tasks) ? board.tasks : []).filter(t => t && t.status === 'doing')
+  if (doingTasks.length > 0) {
+    return { ok: true, stopped: false, reason: 'tasks-doing' }
+  }
+  // Condition 5b: empty `recentlyUnpinnedWatch` queue
+  try {
+    const sessOpt = archiveTargetForRoot(deps, rootId, { vaultScope: 'session' })
+    const sStore = loadArchiveStore(sessOpt)
+    if (Array.isArray(sStore.recentlyUnpinnedWatch) && sStore.recentlyUnpinnedWatch.length > 0) {
+      return { ok: true, stopped: false, reason: 'unpinned-watch-pending' }
+    }
+  } catch {}
 
   const hasRunningInSession = (dirObj) => {
     try {
@@ -1022,16 +1150,26 @@ export async function checkAndStopIdleAutoPilot(deps, sessionId, opts = {}) {
     return false
   }
 
+  // Condition 1a: 0 running session agents
   const dirInitial = opts.directory || (deps ? await listPeerDirectory(deps, rootId) : { targets: [] })
   if (hasRunningInSession(dirInitial)) {
     return { ok: true, stopped: false, reason: 'agent-running' }
   }
 
-  if (opts.allowStartupGrace !== false) {
-    const startedAt = Number((wsBefore.runtimeGuard && wsBefore.runtimeGuard.autoPilotStartedAt) || 0)
-    const hadTurn = Boolean(wsBefore.runtimeGuard && wsBefore.runtimeGuard.autoPilotHadTurn)
-    if (!hadTurn && startedAt > 0 && Date.now() - startedAt < 15_000) {
-      return { ok: true, stopped: false, reason: 'startup-grace' }
+  // Condition 1b: idle timeout elapsed (or explicit goal-achieved fast stand-down)
+  const rg = (wsBefore.runtimeGuard && typeof wsBefore.runtimeGuard === 'object') ? wsBefore.runtimeGuard : {}
+  const lastActivity = Math.max(Number(rg.lastActivityAt) || 0, Number(rg.autoPilotStartedAt) || 0)
+  const idleTimeoutMs = Math.max(50, Number(effBefore.managedIdleTimeoutMs) || DEFAULT_MANAGED_IDLE_TIMEOUT_MS)
+  if (!opts.goalAchievedFastStop) {
+    if (opts.allowStartupGrace !== false) {
+      const startedAt = Number(rg.autoPilotStartedAt || 0)
+      const hadTurn = Boolean(rg.autoPilotHadTurn)
+      if (!hadTurn && startedAt > 0 && Date.now() - startedAt < Math.min(15_000, idleTimeoutMs)) {
+        return { ok: true, stopped: false, reason: 'startup-grace' }
+      }
+    }
+    if (lastActivity > 0 && Date.now() - lastActivity < idleTimeoutMs) {
+      return { ok: true, stopped: false, reason: 'idle-timeout-not-reached' }
     }
   }
 
@@ -1068,12 +1206,14 @@ export async function checkAndStopIdleAutoPilot(deps, sessionId, opts = {}) {
   mutateChiefState((s) => {
     const ws = ensureWorkspace(s, rootId)
     const effNow = resolveWorkspaceConfig(s, rootId)
-    if (effNow.stopped || effNow.paceMode !== 'auto' || !effNow.autoPilot) return
+    if (effNow.stopped || effNow.runMode !== 'managed') return
     if (!ws.config || typeof ws.config !== 'object') ws.config = { ...effNow }
+    ws.config.runMode = 'off'
     ws.config.paceMode = 'manual'
     ws.config.autoPilot = false
     ws.config.autoReview = false
-    if (s.config && s.config.paceMode === 'auto') {
+    if (s.config && (s.config.runMode === 'managed' || s.config.paceMode === 'auto')) {
+      s.config.runMode = 'off'
       s.config.paceMode = 'manual'
       s.config.autoPilot = false
       s.config.autoReview = false
@@ -1081,8 +1221,9 @@ export async function checkAndStopIdleAutoPilot(deps, sessionId, opts = {}) {
     ws.chat.push({
       id: nextId('chat'),
       role: 'chief',
-      text: '- 【⚡→⏸️ 防空转自动收工】本会话主代理与子代理均已结束任务且阶段摘要已收口，已自动退出「全自动托管」退回按需手动，随时可再次手动开启。',
-      actions: ['防空转收工'],
+      kind: 'receipt',
+      text: '- 【🤖→⏸ 托管自动休眠】连续闲置达阈值且在途任务、待批弹窗、在途问询与卷宗梳理均已清零，已自动将运行模式切换回「⏸ 关停」以节省 Token，随时可再次开启。',
+      actions: ['托管自动休眠'],
       at: Date.now(),
     })
     if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)

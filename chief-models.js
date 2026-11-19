@@ -10,6 +10,8 @@ import {
   SUMMARY_MAX_TOKENS,
   SUMMARY_RETRY_MAX_TOKENS,
   clamp,
+  normalizeThinkingEffort,
+  resolveAlignedModelEffort,
   resolveWorkspaceConfig,
   loadChiefState,
   mutateChiefState,
@@ -180,6 +182,75 @@ function profileDefaultModelRef(runtime) {
   return ''
 }
 
+const modelEffortCache = new Map()
+
+export function decideAdaptiveChiefEffort({
+  reasonKind = '',
+  userText = '',
+  isBlankContext = false,
+  tactical = {},
+} = {}) {
+  const rk = String(reasonKind || '').trim().toLowerCase()
+  const txt = String(userText || '').trim()
+
+  if (rk === 'chat_summary' || rk === 'dream_roam' || rk === 'quick_status' || rk === 'auto_summary') {
+    return 'off'
+  }
+  if (rk === 'hazard_diagnosis' || rk === 'multi_wall_collision') {
+    return 'xhigh'
+  }
+  if (
+    rk === 'blank_explore'
+    || rk === 'wall_blocked'
+    || rk === 'strong_intervention'
+    || rk === 'precipitate'
+    || rk === 'distill'
+    || rk === 'craft_wall'
+    || isBlankContext === true
+  ) {
+    if (tactical && tactical.intervention && /(?:架构|根因|死锁|并发|重构|安全审计)/.test(txt)) {
+      return 'xhigh'
+    }
+    return 'high'
+  }
+  if (txt && /(?:深度|全面|彻底|根因|重构|架构|死锁|并发|安全审计|复盘|仔细想|好好想|正则墙|物理墙)/.test(txt)) {
+    return 'high'
+  }
+  if (rk === 'ask_chat' && txt && txt.length <= 28 && /^(?:在吗|进度|到哪一步|怎么样|状态|你好|看看)/.test(txt)) {
+    return 'low'
+  }
+  return 'medium'
+}
+
+export async function resolveRouteCapabilities(llm, provider, model) {
+  const ref = provider && model ? `${provider}/${model}` : ''
+  if (ref && modelEffortCache.has(ref)) {
+    const cached = modelEffortCache.get(ref)
+    if (Date.now() - cached.at < CATALOG_TTL_MS * 6) return cached.data
+  }
+  const data = { defaultMaxTokens: 0, efforts: [], defaultEffort: '' }
+  try {
+    if (llm && typeof llm.resolveModelInfo === 'function' && provider && model) {
+      const info = await llm.resolveModelInfo(provider, model)
+      if (typeof info?.defaultMaxTokens === 'number' && info.defaultMaxTokens > 0) {
+        data.defaultMaxTokens = info.defaultMaxTokens
+      }
+      if (Array.isArray(info?.reasoning?.efforts)) {
+        data.efforts = info.reasoning.efforts.map(e => (
+          typeof e === 'string'
+            ? { id: e, name: e }
+            : { id: String(e?.id || ''), name: String(e?.name || e?.id || ''), description: String(e?.description || '') }
+        )).filter(e => e.id)
+      }
+      if (typeof info?.reasoning?.defaultEffort === 'string') {
+        data.defaultEffort = info.reasoning.defaultEffort
+      }
+    }
+  } catch {}
+  if (ref) modelEffortCache.set(ref, { at: Date.now(), data })
+  return data
+}
+
 export async function listChiefModels(deps, fresh = false, sessionId = '') {
   const llm = deps.getLlm ? deps.getLlm() : null
   const runtime = deps.runtime
@@ -297,6 +368,16 @@ export async function listChiefModels(deps, fresh = false, sessionId = '') {
 
   const picked = pickRouteFromItems(items, selectedRef, followRef, deps, sessionId, registeredProviderIds)
   const resolvedRef = (picked && picked.ref) || selectedRef || followRef || ''
+  let supportedEfforts = []
+  let defaultEffort = ''
+  if (resolvedRef) {
+    const parsedResolved = splitModelRef(resolvedRef)
+    if (parsedResolved) {
+      const caps = await resolveRouteCapabilities(llm, parsedResolved.provider, parsedResolved.model)
+      supportedEfforts = caps.efforts || []
+      defaultEffort = caps.defaultEffort || ''
+    }
+  }
   return {
     available: items.length > 0 || Boolean(resolvedRef),
     selectedRef,
@@ -305,6 +386,8 @@ export async function listChiefModels(deps, fresh = false, sessionId = '') {
     defaultRef: followRef,
     resolvedRef,
     resolvedLabel: formatChiefModelLabel(resolvedRef, items, rawProviders, true),
+    supportedEfforts,
+    defaultEffort,
     models: items,
   }
 }
@@ -397,21 +480,11 @@ function pickRouteFromItems(items, selectedRef, followRef, deps, sessionId, regi
   return queue[0] || null
 }
 
-async function callOneRoute(llm, route, system, userText, maxTokens = SUMMARY_MAX_TOKENS, sessionId = '', imageBlocks = []) {
-  let effort
-  let modelDefaultMaxTokens
-  try {
-    if (typeof llm.resolveModelInfo === 'function') {
-      const info = await llm.resolveModelInfo(route.provider, route.model)
-      if (typeof info?.defaultMaxTokens === 'number' && info.defaultMaxTokens > 0) {
-        modelDefaultMaxTokens = info.defaultMaxTokens
-      }
-      const efforts = info?.reasoning?.efforts
-      if (Array.isArray(efforts) && efforts.length > 0) {
-        effort = efforts.some(e => e.id === 'off') ? 'off' : efforts[0]?.id
-      }
-    }
-  } catch {}
+async function callOneRoute(llm, route, system, userText, maxTokens = SUMMARY_MAX_TOKENS, sessionId = '', imageBlocks = [], desiredEffort = 'medium') {
+  const caps = await resolveRouteCapabilities(llm, route.provider, route.model)
+  const modelDefaultMaxTokens = caps.defaultMaxTokens || 0
+  const efforts = Array.isArray(caps.efforts) ? caps.efforts : []
+  const effort = resolveAlignedModelEffort(desiredEffort, efforts)
 
   const targetBudget = Math.max(Number(maxTokens) || 0, SUMMARY_MAX_TOKENS)
   const firstBudget = modelDefaultMaxTokens ? Math.min(modelDefaultMaxTokens, targetBudget) : targetBudget
@@ -450,7 +523,7 @@ async function callOneRoute(llm, route, system, userText, maxTokens = SUMMARY_MA
         .map(b => b.text)
         .join('\n')
         .trim()
-      return { text, finishKind: finish?.kind || '', modelRef: route.ref }
+      return { text, finishKind: finish?.kind || '', modelRef: route.ref, thinkingEffort: effort || 'none' }
     }
 
     // Pure standalone fallback stream reader (for unit tests / lightweight hosts)
@@ -472,18 +545,18 @@ async function callOneRoute(llm, route, system, userText, maxTokens = SUMMARY_MA
         }
       }
     }
-    return { text: parts.join('').trim(), finishKind, modelRef: route.ref }
+    return { text: parts.join('').trim(), finishKind, modelRef: route.ref, thinkingEffort: effort || 'none' }
   }
 
-  let lastRes = { text: '', finishKind: '', modelRef: route.ref }
+  let lastRes = { text: '', finishKind: '', modelRef: route.ref, thinkingEffort: effort || 'none' }
   for (let i = 0; i < budgets.length; i += 1) {
     const res = await runOnce(budgets[i])
     lastRes = res
     if (res.text && res.finishKind !== 'max-tokens') {
-      return { text: res.text, modelRef: res.modelRef }
+      return { text: res.text, modelRef: res.modelRef, thinkingEffort: res.thinkingEffort }
     }
   }
-  return { text: lastRes.text, modelRef: lastRes.modelRef }
+  return { text: lastRes.text, modelRef: lastRes.modelRef, thinkingEffort: lastRes.thinkingEffort }
 }
 
 async function filterVisionRoutes(llm, queue) {
@@ -515,14 +588,51 @@ export async function callChiefLlm(deps, {
   maxTokens = SUMMARY_MAX_TOKENS,
   imageBlocks = [],
   allowTextFallbackOnVisionMiss = false,
+  reasonKind = '',
+  userText = '',
+  isBlankContext = false,
+  tactical = null,
+  effortOverride = '',
 }) {
   const safeImages = Array.isArray(imageBlocks) ? imageBlocks : []
+  const rootSid = (deps && deps.resolveRootSessionId ? deps.resolveRootSessionId(sessionId) : '') || String(sessionId || '').trim()
+  const st = loadChiefState()
+  const effCfg = resolveWorkspaceConfig(st, rootSid)
+  const cfgEffort = normalizeThinkingEffort(effortOverride || effCfg.thinkingEffort || 'auto')
+  const thinkingEffortMode = cfgEffort === 'auto' ? 'auto' : 'manual'
+  const desiredEffort = cfgEffort === 'auto'
+    ? decideAdaptiveChiefEffort({
+        reasonKind,
+        userText: userText || prompt,
+        isBlankContext,
+        tactical: tactical || effCfg.tacticalModes || {},
+      })
+    : cfgEffort
+
   if (deps && typeof deps.callLlmOverride === 'function') {
-    return deps.callLlmOverride({ sessionId, system, prompt, maxTokens, imageBlocks: safeImages, allowTextFallbackOnVisionMiss })
+    const overrideRes = await deps.callLlmOverride({
+      sessionId,
+      system,
+      prompt,
+      maxTokens,
+      imageBlocks: safeImages,
+      allowTextFallbackOnVisionMiss,
+      reasonKind,
+      desiredEffort,
+      thinkingEffortMode,
+    })
+    if (overrideRes && typeof overrideRes === 'object') {
+      return {
+        thinkingEffort: overrideRes.thinkingEffort || desiredEffort,
+        thinkingEffortMode: overrideRes.thinkingEffortMode || thinkingEffortMode,
+        ...overrideRes,
+      }
+    }
+    return overrideRes
   }
   const llm = deps.getLlm ? deps.getLlm() : null
   if (!llm || typeof llm.stream !== 'function') {
-    return { ok: false, error: '当前环境未挂载 LLM 服务' }
+    return { ok: false, error: '当前环境未挂载 LLM 服务', thinkingEffort: desiredEffort, thinkingEffortMode }
   }
   const catalog = await listChiefModels(deps, false, sessionId)
   const regSet = typeof llm.listProviders === 'function'
@@ -530,7 +640,7 @@ export async function callChiefLlm(deps, {
     : null
   const baseQueue = buildRouteQueue(catalog.models, catalog.selectedRef, catalog.followRef || catalog.defaultRef, deps, sessionId, regSet)
   if (!baseQueue.length) {
-    return { ok: false, error: '未找到可用的参谋长模型，请在 DSH 设置中配置模型供应商' }
+    return { ok: false, error: '未找到可用的参谋长模型，请在 DSH 设置中配置模型供应商', thinkingEffort: desiredEffort, thinkingEffortMode }
   }
 
   let queue = baseQueue
@@ -548,6 +658,8 @@ export async function callChiefLlm(deps, {
       return {
         ok: false,
         error: '当前参谋长及备选模型均不支持图片输入（仅纯文本），请在右上角切换支持视觉的多模态模型（如 Gemini / Claude / GPT-4o / Qwen-VL 等）后再试。',
+        thinkingEffort: desiredEffort,
+        thinkingEffortMode,
       }
     }
   }
@@ -555,22 +667,40 @@ export async function callChiefLlm(deps, {
   let lastError = '模型返回内容为空'
   for (const route of queue.slice(0, 4)) {
     try {
-      const res = await callOneRoute(llm, route, system, prompt, maxTokens, sessionId, sendImages)
-      if (res.text) return { ok: true, text: res.text, modelRef: res.modelRef, degradedToTextOnly }
+      const res = await callOneRoute(llm, route, system, prompt, maxTokens, sessionId, sendImages, desiredEffort)
+      if (res.text) {
+        return {
+          ok: true,
+          text: res.text,
+          modelRef: res.modelRef,
+          degradedToTextOnly,
+          thinkingEffort: res.thinkingEffort || desiredEffort,
+          thinkingEffortMode,
+        }
+      }
       lastError = `${route.ref} 返回内容为空`
       markRouteFailure(route, new Error(lastError))
     } catch (err) {
       lastError = String(err && err.message ? err.message : err)
       if (sendImages.length > 0 && allowTextFallbackOnVisionMiss) {
         try {
-          const textRes = await callOneRoute(llm, route, system, prompt, maxTokens, sessionId, [])
-          if (textRes.text) return { ok: true, text: textRes.text, modelRef: textRes.modelRef, degradedToTextOnly: true }
+          const textRes = await callOneRoute(llm, route, system, prompt, maxTokens, sessionId, [], desiredEffort)
+          if (textRes.text) {
+            return {
+              ok: true,
+              text: textRes.text,
+              modelRef: textRes.modelRef,
+              degradedToTextOnly: true,
+              thinkingEffort: textRes.thinkingEffort || desiredEffort,
+              thinkingEffortMode,
+            }
+          }
         } catch {}
       }
       markRouteFailure(route, err)
     }
   }
-  return { ok: false, error: lastError, degradedToTextOnly }
+  return { ok: false, error: lastError, degradedToTextOnly, thinkingEffort: desiredEffort, thinkingEffortMode }
 }
 
 /* -------------------------------------------------------------------------- */

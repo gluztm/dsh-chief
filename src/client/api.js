@@ -19,6 +19,7 @@ import {
   SESSION_SOURCES,
   patch,
   service,
+  isSubagentSessionId,
   runtimeRefs,
 } from './store.js'
 import {
@@ -99,9 +100,14 @@ function applySecView(viewData) {
     ...(Array.isArray(viewData.guardWalls) ? { guardWalls: viewData.guardWalls } : {}),
     chiefMeta: {
       ...prevMeta,
+      runMode: cfg.runMode || (cfg.stopped ? 'off' : (cfg.paceMode === 'auto' ? 'managed' : (cfg.paceMode === 'smart' ? 'patrol' : 'off'))),
+      managedIdleTimeoutMs: Number(cfg.managedIdleTimeoutMs) || prevMeta.managedIdleTimeoutMs || (15 * 60 * 1000),
       paceMode: cfg.paceMode || 'manual',
       stopped: Boolean(cfg.stopped || cfg.paceMode === 'stopped'),
       permissionMode: cfg.permissionMode || prevMeta.permissionMode || 'advisor',
+      thinkingEffort: cfg.thinkingEffort || prevMeta.thinkingEffort || 'auto',
+      teamEffortMode: cfg.teamEffortMode === 'manual' ? 'manual' : (cfg.teamEffortMode === 'auto' ? 'auto' : (prevMeta.teamEffortMode || 'auto')),
+      lockedModelEfforts: (cfg.lockedModelEfforts && typeof cfg.lockedModelEfforts === 'object') ? cfg.lockedModelEfforts : (prevMeta.lockedModelEfforts || {}),
       chiefRiskVerified: Boolean(cfg.chiefRiskVerified || (viewData.chiefRiskAck && viewData.chiefRiskAck.acknowledged)),
       chiefRiskAck: viewData.chiefRiskAck !== undefined ? viewData.chiefRiskAck : (prevMeta.chiefRiskAck || null),
       pendingApprovals: Array.isArray(viewData.pendingApprovals) ? viewData.pendingApprovals : [],
@@ -276,10 +282,28 @@ export async function loadChiefModels(fresh = false) {
 
 export async function updateSecConfig(nextCfg) {
   try {
+    let lockPatchPayload = null
+    if (nextCfg && nextCfg.toggleLockAgentEffort && typeof nextCfg.toggleLockAgentEffort === 'object') {
+      const t = String(nextCfg.toggleLockAgentEffort.target || 'lead').trim()
+      const l = Boolean(nextCfg.toggleLockAgentEffort.locked)
+      const aliases = Array.isArray(nextCfg.toggleLockAgentEffort.aliases)
+        ? nextCfg.toggleLockAgentEffort.aliases.map(x => String(x || '').trim()).filter(Boolean)
+        : []
+      const shortT = t.includes('/') ? t.split('/').pop() : ''
+      const keys = Array.from(new Set([t, shortT, ...aliases].filter(Boolean)))
+      if (keys.length) {
+        lockPatchPayload = {}
+        for (const k of keys) lockPatchPayload[k] = l
+      }
+    }
     const value = await call('chief/config', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ ...nextCfg, session: store.sessionId }),
+      body: JSON.stringify({
+        ...nextCfg,
+        ...(lockPatchPayload ? { lockedModelEfforts: lockPatchPayload } : {}),
+        session: store.sessionId,
+      }),
     })
     if (value && value.requireAutoPilotConfirm) {
       patch({ autoPilotConfirmOpen: true, secPaceMenuOpen: false })
@@ -289,10 +313,44 @@ export async function updateSecConfig(nextCfg) {
       patch({ error: (value && value.error) || '更新参谋长配置失败' })
       return null
     }
+    const resolvedLocks = (value.config && value.config.lockedModelEfforts && typeof value.config.lockedModelEfforts === 'object')
+      ? value.config.lockedModelEfforts
+      : ((value.view && value.view.config && value.view.config.lockedModelEfforts && typeof value.view.config.lockedModelEfforts === 'object')
+          ? value.view.config.lockedModelEfforts
+          : null)
+    const resolvedTeamEffortMode = (value.config && typeof value.config.teamEffortMode === 'string')
+      ? value.config.teamEffortMode
+      : ((value.view && value.view.config && typeof value.view.config.teamEffortMode === 'string')
+          ? value.view.config.teamEffortMode
+          : null)
+    const updatedSubagents = resolvedLocks && Array.isArray(store.subagents)
+      ? store.subagents.map(ag => {
+          if (!ag || typeof ag !== 'object') return ag
+          const nm = String(ag.name || '').replace(/^@/, '')
+          const shortNm = nm.split('/').pop()
+          const lockedNow = Boolean(
+            (nm && resolvedLocks[nm])
+            || (shortNm && resolvedLocks[shortNm])
+            || (ag.id && resolvedLocks[ag.id]),
+          )
+          return { ...ag, effortLocked: lockedNow }
+        })
+      : null
     patch({
       compactInputDraft: null,
       compactLowWarning: value.compactLowWarning || '',
+      ...((resolvedLocks || resolvedTeamEffortMode)
+        ? {
+            chiefMeta: {
+              ...store.chiefMeta,
+              ...(resolvedLocks ? { lockedModelEfforts: resolvedLocks } : {}),
+              ...(resolvedTeamEffortMode ? { teamEffortMode: resolvedTeamEffortMode === 'manual' ? 'manual' : 'auto' } : {}),
+            },
+          }
+        : {}),
+      ...(updatedSubagents ? { subagents: updatedSubagents } : {}),
     })
+    if (resolvedLocks) void refresh()
     if (nextCfg.ackHazardAlertId) {
       // Quietly acknowledged; no intrusive toast needed
     } else if (nextCfg.emergencyStopIntervention) {
@@ -322,12 +380,44 @@ export async function updateSecConfig(nextCfg) {
       } else if (normalizeMaxTurnsVal(nextCfg.tacticalModes.maxInterventionTurns) === 0 && Object.prototype.hasOwnProperty.call(nextCfg.tacticalModes, 'maxInterventionTurns') && !nextCfg.confirmedInterventionRisk) {
         patch({ notice: '♾️ 已启用无限督导轮次（只要参谋长判定未完成就会继续 push）' })
       } else if (typeof nextCfg.tacticalModes.intervention === 'boolean' && nextCfg.confirmedInterventionRisk) {
-        patch({ notice: nextCfg.tacticalModes.intervention ? '⚡ 已开启「主动强介入」模式' : '已关闭「主动强介入」模式' })
+        const ko = value.immediateKickoff
+        patch({
+          notice: nextCfg.tacticalModes.intervention
+            ? (ko && ko.triggered
+                ? '⚡ 已开启「主动强介入」并锁定总目标，正在立即唤醒推进'
+                : (ko && ko.queuedApproval
+                    ? '⚡ 已开启「主动强介入」，请授权首轮推进弹窗'
+                    : '⚡ 已开启「主动强介入」并锁定核心总目标'))
+            : '已关闭「主动强介入」模式',
+        })
       } else if (typeof nextCfg.tacticalModes.intervention === 'boolean' && Object.keys(nextCfg.tacticalModes).length === 1) {
         patch({ notice: nextCfg.tacticalModes.intervention ? '⚡ 已开启「主动强介入」模式' : '已关闭「主动强介入」模式' })
       } else {
         patch({ notice: '✦ 已更新参谋长战术驾驶舱开关' })
       }
+    } else if (typeof nextCfg.runMode === 'string') {
+      const rmMap = {
+        off: '⏸ 已切至「关停模式」：后台 0 LLM 消耗、0 巡检、0 梦境漫游（仅显式发话/按钮生效）',
+        patrol: '🛡 已切至「巡检模式」：常规回合 0 Token，阻墙拦截/高危报错/断流时精准唤醒（支持 Auto continue）',
+        managed: '🤖 已开启「托管模式」：持续监工督导 + 🌙 梦境漫游轻拢卷宗织钩子 + 15 分钟闲置自动休眠',
+      }
+      patch({ notice: rmMap[nextCfg.runMode] || '已更新参谋长运行模式' })
+    } else if (typeof nextCfg.thinkingEffort === 'string') {
+      patch({ notice: `🧠 已切换参谋长思考强度为「${nextCfg.thinkingEffort === 'auto' ? '自适应换挡' : nextCfg.thinkingEffort}」` })
+    } else if (typeof nextCfg.teamEffortMode === 'string') {
+      patch({
+        notice: nextCfg.teamEffortMode === 'manual'
+          ? '✋ 团队思考强度已设为「手动」：参谋长不再自动调节主/子代理思考强度'
+          : '🪄 团队思考强度已设为「自动」：参谋长将按当前权限范围自动调节',
+      })
+    } else if (nextCfg.directSetAgentEffort && typeof nextCfg.directSetAgentEffort === 'object') {
+      const t = nextCfg.directSetAgentEffort.target || 'lead'
+      const e = nextCfg.directSetAgentEffort.reasoningEffort || nextCfg.directSetAgentEffort.effort || 'medium'
+      patch({ notice: `🧠 已调整 @${t} 模型思考强度为 ${e}` })
+    } else if (nextCfg.toggleLockAgentEffort && typeof nextCfg.toggleLockAgentEffort === 'object') {
+      const t = nextCfg.toggleLockAgentEffort.target || 'lead'
+      const l = Boolean(nextCfg.toggleLockAgentEffort.locked)
+      patch({ notice: l ? `🔒 已锁定 @${t} 思考挡位，参谋 L2/L3 无法自动覆写` : `🔓 已解除 @${t} 思考挡位锁定` })
     } else if (typeof nextCfg.paceMode === 'string') {
       const paceNotice = nextCfg.paceMode === 'stopped'
         ? '⏹ 已停止参谋长：后台强介入、空转监控与断线续跑全部暂停（可随时切回恢复）'
@@ -494,6 +584,13 @@ export async function decideSuggestion(sug, decision, editedText = '', boundFiel
       } else if (sug.kind === 'guard_wall') {
         const applied = value && value.wallApplied
         patch({ notice: '🧱 已落锁物理驻墙：' + ((applied && applied.title) || sug.title || '') })
+      } else if (sug.kind === 'wall_removal') {
+        const removed = value && value.wallRemoved
+        patch({
+          notice: removed && removed.action === 'remove'
+            ? `🧱 已批准拆除物理驻墙：${removed.title || sug.title || ''}`
+            : `⏸ 已批准暂挂物理驻墙：${(removed && removed.title) || sug.title || ''}`,
+        })
       } else if (sug.kind === 'advice') {
         patch({ notice: '💡 已采纳参谋长建议并递交 → @' + (sug.targetLabel || sug.target || '主对话') })
       } else {
@@ -679,6 +776,12 @@ export async function ingestSecImageFiles(fileList) {
 }
 
 function classifyChiefWorkFx(text, quickTag = '') {
+  if (quickTag === 'consult_chief') {
+    return { tone: 'neon', tab: 'chief', label: '💡 参谋长正在研判局势与拟定建议...' }
+  }
+  if (quickTag === 'dream_roam') {
+    return { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游 · 轻拢卷宗与织就钩子中...' }
+  }
   if (quickTag === 'craft_wall') {
     return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在手搓驻墙中...' }
   }
@@ -687,6 +790,15 @@ function classifyChiefWorkFx(text, quickTag = '') {
   }
   const clean = String(text || '').trim()
   const hits = []
+  if (/梦境漫游|dream.?roam/i.test(clean)) {
+    hits.push({ tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游 · 轻拢卷宗与织就钩子中...' })
+  }
+  if (/思考强度|思考挡位|推理强度|调挡|reasoningEffort|effortOps/i.test(clean)) {
+    hits.push({ tone: 'neon', tab: store.tab || 'chief', label: '🧠 参谋长正在调配模型思考强度中...' })
+  }
+  if (/置顶桌面|认知桌面|递送.*档案|拉阅.*钩子|archiveOps/i.test(clean)) {
+    hits.push({ tone: 'archive', tab: 'archive', label: '📌 参谋长正在调配认知桌面与卷宗钩子中...' })
+  }
   if (/手搓|驻墙|筑墙|物理墙|guard_?wall|wallProposals/i.test(clean)) {
     hits.push({ tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在手搓驻墙中...' })
   }
@@ -731,15 +843,24 @@ function resolveChiefSuggestionWorkFx(suggestions = []) {
   if (kinds.size === 1 && kinds.has('guard_wall')) {
     return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在落锁物理驻墙中...' }
   }
+  if (kinds.size === 1 && kinds.has('wall_removal')) {
+    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '⚠️ 正在按人工批准调整物理驻墙...' }
+  }
   if (kinds.size === 1 && kinds.has('bound')) {
     return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在注入红线边界中...' }
+  }
+  if (kinds.size === 1 && kinds.has('archive_op')) {
+    return { tone: 'archive', tab: 'archive', label: '📌 参谋长正在调配认知桌面与卷宗钩子中...' }
+  }
+  if (kinds.size === 1 && kinds.has('model_effort')) {
+    return { tone: 'neon', tab: 'chief', label: '🧠 参谋长正在调配模型思考强度中...' }
   }
   const allBoundsPage = [...kinds].every(k => k === 'guard_wall' || k === 'bound')
   return {
     tone: 'neon',
     tab: allBoundsPage ? 'boundaries' : (store.tab || 'chief'),
     ...(allBoundsPage ? { boundSubTab: 'rules' } : {}),
-    label: allBoundsPage ? '参谋长正在同步落锁驻墙与边界中...' : '参谋长正在统一落地参谋建议中...',
+    label: allBoundsPage ? '参谋长正在同步落锁驻墙与边界中...' : '🏁 参谋长正在一站式推进建议清单中...',
   }
 }
 
@@ -804,6 +925,7 @@ export async function submitChiefBar(overrideText = '', quickTag = '') {
           text,
           target,
           mode,
+          ...(quickTag ? { quickAction: quickTag } : {}),
           images: imgs.map(({ name, mediaType, data }) => ({ name, mediaType, data })),
         }),
       })
@@ -829,24 +951,35 @@ export async function submitChiefBar(overrideText = '', quickTag = '') {
         for (const wp of (value.wallProposals || [])) {
           if (wp && wp.title) pushAction('呈批驻墙：' + clampTitle(wp.title, 14))
         }
+        for (const wr of (value.wallRemovalProposals || [])) {
+          if (wr && wr.title) pushAction('⚠️ 请示拆墙：' + clampTitle(wr.title, 14))
+        }
         for (const bp of (value.boundProposals || [])) {
           if (bp && bp.draftText) pushAction('呈批边界：' + clampTitle(bp.draftText, 12))
         }
         if (value.view) applySecView(value.view)
         const createdSugCount = (Array.isArray(value.wallProposals) ? value.wallProposals.length : 0)
+          + (Array.isArray(value.wallRemovalProposals) ? value.wallRemovalProposals.length : 0)
           + (Array.isArray(value.boundProposals) ? value.boundProposals.length : 0)
+        const hasWallRemovalOnly = (Array.isArray(value.wallRemovalProposals) && value.wallRemovalProposals.length > 0)
+          && !(Array.isArray(value.wallProposals) && value.wallProposals.length > 0)
+          && !(Array.isArray(value.boundProposals) && value.boundProposals.length > 0)
         const autoDestTab = createdSugCount > 0
-          ? 'boundaries'
+          ? (hasWallRemovalOnly ? (store.tab || 'chief') : 'boundaries')
           : ((Array.isArray(value.archiveOps) && value.archiveOps.length > 0 && fxSpec.tab === 'chief') ? 'archive' : '')
         patch({
-          ...(autoDestTab ? { tab: autoDestTab, ...(autoDestTab === 'boundaries' ? { boundSubTab: 'rules' } : {}) } : {}),
+          ...(autoDestTab && autoDestTab !== store.tab ? { tab: autoDestTab, ...(autoDestTab === 'boundaries' ? { boundSubTab: 'rules' } : {}) } : {}),
           secLatestReply: {
             text: value.reply || '- 【已处理】已按吩咐执行完毕。',
             actions,
             at: Date.now(),
           },
           ...(createdSugCount > 0
-            ? { notice: `✨ 已生成 ${createdSugCount} 项待确认提案，请点面板顶部「▶ 执行建议」一键落锁生效` }
+            ? {
+                notice: hasWallRemovalOnly
+                  ? `⚠️ 参谋请示人工审批拆墙（${value.wallRemovalProposals.length} 项），请在建议栏拍板批准或忽略`
+                  : `✨ 已生成 ${createdSugCount} 项待确认提案，请点面板顶部「▶ 执行建议」一键落锁生效`,
+              }
             : {}),
         })
         if (createdSugCount > 0 && runtimeRefs.panelEl) {
@@ -957,6 +1090,10 @@ function applyArchiveHeaders(payload, invalidateIds = null, requestedScope = '')
       globalVaultFolders: folders,
       globalVaultItems: items,
       archivePrecipitated: precipitated,
+      ...(Array.isArray(payload.precipitatedFolders) ? { precipitatedFolders: payload.precipitatedFolders } : {}),
+      ...(payload.precipitatedViewerSummary ? { precipitatedViewerSummary: payload.precipitatedViewerSummary } : {}),
+      ...(payload.desktop && typeof payload.desktop === 'object' ? { archiveDesktop: payload.desktop } : {}),
+      ...(payload.viewerSummary && typeof payload.viewerSummary === 'object' ? { archiveViewerSummary: payload.viewerSummary } : {}),
       flippedPrecipitatedIds,
       archiveCounts: nextCounts,
       archiveDiffSummary: nextDiffSummary,
@@ -989,6 +1126,10 @@ function applyArchiveHeaders(payload, invalidateIds = null, requestedScope = '')
     archiveFolders: folders,
     archiveItems: items,
     archivePrecipitated: precipitated,
+    ...(Array.isArray(payload.precipitatedFolders) ? { precipitatedFolders: payload.precipitatedFolders } : {}),
+    ...(payload.precipitatedViewerSummary ? { precipitatedViewerSummary: payload.precipitatedViewerSummary } : {}),
+    ...(payload.desktop && typeof payload.desktop === 'object' ? { archiveDesktop: payload.desktop } : {}),
+    ...(payload.viewerSummary && typeof payload.viewerSummary === 'object' ? { archiveViewerSummary: payload.viewerSummary } : {}),
     flippedPrecipitatedIds,
     archiveCounts: nextCounts,
     archiveDiffSummary: nextDiffSummary,
@@ -1002,7 +1143,8 @@ function applyArchiveHeaders(payload, invalidateIds = null, requestedScope = '')
 /** Tier-1 Lazy Load: called ONLY when the user opens or switches scope in the `档案` tab */
 export async function loadArchives(force = false, cabinetIdOverride = '', scopeOverride = '') {
   if (store.archiveLoading) return null
-  const activeScope = scopeOverride || store.archiveTabScope || 'session'
+  const rawScope = scopeOverride || store.archiveTabScope || 'desktop'
+  const activeScope = rawScope === 'desktop' ? 'session' : rawScope
   const alreadyLoaded = activeScope === 'global'
     ? store.globalVaultLoaded
     : (activeScope === 'precipitated' ? store.archiveLoaded : store.archiveSessionLoaded)
@@ -1045,7 +1187,8 @@ export async function loadArchiveDetail(archiveId, force = false, opts = {}) {
   if (store.archiveDetailLoading && store.archiveDetailLoading[id]) return null
   patch({ archiveDetailLoading: { ...(store.archiveDetailLoading || {}), [id]: true } })
   try {
-    const activeScope = (opts && (opts.scope || opts.vaultScope)) || store.archiveTabScope || 'session'
+    const rawScope = (opts && (opts.scope || opts.vaultScope)) || store.archiveTabScope || 'session'
+    const activeScope = rawScope === 'desktop' ? 'session' : rawScope
     const qs = new URLSearchParams({ id })
     if (store.sessionId) qs.set('session', store.sessionId)
     if (activeScope === 'global') qs.set('scope', 'global')
@@ -1179,8 +1322,11 @@ export async function mutateArchiveApi(payload, toastLabel = '') {
 
 export async function requestOrganizeArchives(opts = {}) {
   if (store.archiveOrganizing) return null
+  const isDream = Boolean(opts.dream || opts.reasonKind === 'dream_roam')
   return await withChiefWorkFx(
-    { tone: 'archive', tab: 'archive', label: '参谋长正在整理档案中...' },
+    isDream
+      ? { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游 · 轻拢卷宗与织就钩子中...' }
+      : { tone: 'archive', tab: 'archive', label: '参谋长正在整理档案中...' },
     async () => {
       patch({ archiveOrganizing: true, error: '' })
       try {
@@ -1196,6 +1342,7 @@ export async function requestOrganizeArchives(opts = {}) {
             folder: opts.folder || '',
             scope: opts.scope || store.archiveOrganizeScope || 'unorganized',
             instruction: opts.instruction !== undefined ? opts.instruction : (store.archiveOrganizePrompt || ''),
+            ...(isDream ? { reasonKind: 'dream_roam' } : {}),
           }),
         })
         if (value && value.ok) {
@@ -2157,6 +2304,11 @@ function clearBoundSessionToBlank() {
     archiveDetails: {},
     archiveOpenFolders: {},
     archiveOpenFiles: {},
+    archiveSearchOpen: false,
+    archiveMoreMenuOpen: false,
+    archiveSelectMode: false,
+    chiefMoreMenuOpen: false,
+    boundMoreMenuOpen: false,
     qaCollapsedTurnIds: {},
     wallSelectedIds: [],
     wallMergeError: '',
@@ -2169,9 +2321,10 @@ function clearBoundSessionToBlank() {
 }
 
 export function adoptSession(source, sessionId, inputActions) {
-  if (sessionId) SESSION_SOURCES.set(source, sessionId)
+  const cleanSid = sessionId && isSubagentSessionId(sessionId) ? '' : sessionId
+  if (cleanSid) SESSION_SOURCES.set(source, cleanSid)
   else SESSION_SOURCES.delete(source)
-  if (inputActions && inputActions !== store.inputActions) store.inputActions = inputActions
+  if (cleanSid && inputActions && inputActions !== store.inputActions) store.inputActions = inputActions
 
   let next = ''
   for (const value of SESSION_SOURCES.values()) {
@@ -2268,9 +2421,16 @@ export function adoptSession(source, sessionId, inputActions) {
           archiveCabinets: [],
           archiveFolders: [],
           archiveItems: [],
+          archiveDesktop: { pinnedDocuments: [], usedTokens: 0, tokenBudget: 2400, maxItems: 6, usagePct: 0, recentlyUnpinnedWatch: [] },
+          archiveViewerSummary: null,
           archiveDetails: {},
           archiveOpenFolders: {},
           archiveOpenFiles: {},
+          archiveSearchOpen: false,
+          archiveMoreMenuOpen: false,
+          archiveSelectMode: false,
+          chiefMoreMenuOpen: false,
+          boundMoreMenuOpen: false,
           qaCollapsedTurnIds: {},
           wallSelectedIds: [],
           wallMergeError: '',

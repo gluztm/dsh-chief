@@ -1,11 +1,15 @@
 <div align="center">
 
-**Right-sidebar supervisor, anti-compaction vault, and approval gate for DeepSeek Harness (DSH)**  
-<sub>Saves paths and findings before `/compact` wipes context, tracks subagent DAGs in one view, and asks before editing files or running shell commands.</sub>
+**Right-sidebar supervisor, Cognitive Desktop, pre-execute Guard Walls & multi-agent gate for DeepSeek Harness (DSH)**  
+<sub>Saves paths and findings before `/compact` wipes context, tracks subagent DAGs in one view, and enforces Guard Walls + per-action approvals before file edits or commands run.</sub>
 
 <img src="assets/chief-10s-compare.gif" alt="Side-by-side comparison: plain long session loses context on compaction vs. dsh-chief saves findings to cold vaults, guards actions, and carries structured handoffs across windows" width="800" />
 
-<sub>Read-only by default · Per-action workspace approval · `dsh plugin --profile web add dsh-chief`</sub>
+<sub>Read-only by default · Per-action workspace approval · `dsh plugin --profile desktop add dsh-chief`</sub>
+
+<br />
+
+<img src="assets/v150-highlights.png" alt="dsh-chief v1.5.0 feature highlights: 180-degree fan effort gauge, click-through frosted Dream Roam keeping flowing neon border, Cognitive Desktop & stack-of-papers vaults, pre-execute Guard Walls" width="100%" />
 
 <br />
 
@@ -25,12 +29,21 @@
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-> **Current release `v1.4.0`**: Adds a 9-module safety kernel (`pkg/safety/`), `tools/pre-execute` guard walls (`guard-walls.json`), two-tier `role + capabilities` with persistent `TaskLedger` resume, main-chat-first lazy delegation (`[EXECUTION_REQUEST]`), quiet `[INQUIRY]` checks, and DSH `0.2.2-rc.5` support.  
+> **Current release `v1.5.0`**: Adds the **Cognitive Desktop (`2,400 Tokens / 6 items` sole prompt-injected vault)** + top-down stack-of-papers drawers with 3-tier hook isolation, **orthogonal runtime control (`⏸ Off | 🛡 Patrol | 🤖 Managed`)** with background `🌙 Dream Roam` (**click anywhere on the frosted overlay to dismiss the blur and regain panel control while the flowing neon border stays lit to signal background work**), 5-condition auto-sleep + `L3` One-Stop Report, **`180°` fan-shaped thinking effort gauge** + Team `Auto / Manual` toggle, plain-language Consult mode, mandatory Core Objective lock for Strong Intervention, blocker-gated wall removal requests, full DSH light-theme support, and subagent entry hiding on DSH `0.2.2-rc.5`.  
 > Shares the Router + Workers split from DeepSeek's **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** while keeping Chief state and prompts isolated from the main session.
 
 [简体中文 (`README.md`)](README.md) · **English** · [Changelog (`CHANGELOG.md`)](CHANGELOG.md)
 
 </div>
+
+---
+
+## What Changed in `v1.5.0`
+
+- **🗂️ Cognitive Desktop & Stack-of-Papers Hook Isolation**: Eliminates full-text archive leaks into the main prompt — only documents explicitly pinned to the **📌 Cognitive Desktop (`2,400 Tokens / 6 items` cap)** are injected per turn. Session / Global / Precipitated drawers use collapsible paper-dossier cards with lightweight `🪝` keyword hooks so agents pull dossiers on demand, while un-flipped Precipitated records remain `0-byte` double-blind to AI.
+- **🤖 Orthogonal Runtime Modes & Click-Through `🌙 Dream Roam`**: Header switches cleanly between `⏸ Off` (0 background calls), `🛡 Patrol` (0 idle cost; wakes only on guard blocks, errors, or stream interrupts), and `🤖 Managed` (active oversight + idle Dream Roam organization). Clicking anywhere on the frosted Dream Roam overlay immediately dismisses the blur/blocker so you can keep using the sidebar while the animated outer neon border continues to indicate background work. Auto-sleeps back to `Off` after all 5 idle checks clear.
+- **🧠 `180°` Fan Thinking Effort Gauge & Team Control**: Drag along the 180° rainbow arc (`Off / Low / Medium / High / Max`) or tap the center hub for `🪄 Auto` (lowers effort on summaries/roam, raises effort for diagnostics & wall crafting), paired with a clean `Team Thinking Effort: Auto / Manual` toggle and per-reply effort badges.
+- **🛡️ Sharpened Guardrails & Theme Fixes**: Strong Intervention now enforces locking a Core Objective before activation; `💡 Consult` answers honestly without forcing synthetic action buttons; blocker-only `wall_removal` requests require human approval across every L0–L3 tier; solid popover contrast fixes dark-mode transparency overlap; and `SidebarChiefTab` hides cleanly inside subagent threads alongside full DSH light-theme styling.
 
 ---
 
@@ -45,45 +58,43 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 
 ### 2. Agents stop halfway ("I edited the file, please test it")
 - **What goes wrong**: Left unattended or overnight, an agent updates one file and marks the task done without running checks or builds.
-- **How `dsh-chief` handles it**: Locks the Core Objective under Strong Intervention (`0 = ∞` turns with stall breakers) and checks your `allowed` must-do list until you explicitly click `✅ 批准结项`.
+- **How `dsh-chief` handles it**: Requires locking a Core Objective before enabling Strong Intervention (`0 = ∞` turns with 3-strike identical-error circuit breakers), wakes cleanly across `🛡 Patrol` and `🤖 Managed` on stream interruptions, executes safe L3 steps into a merged `🏁 One-Stop Report`, and holds final completion until your `allowed` checks pass and you approve.
 - Hit the red `⏹ 急停` button at any time to stop background drives and take back manual control.
 
 ### 3. Always-on memory plugins bloat prompts and burn tokens
 - **What goes wrong**: Injecting kilobytes of old notes on every turn wastes context window and distracts the model from the current file.
-- **How `dsh-chief` handles it**: Stores sealed dossiers in three local vaults (Session, System Global, Precipitated). **While sealed, they add 0 bytes and 0 tokens to the main chat.**
-- Click `📌 摆上桌面` or `📤 取出` only when a specific note is needed, and put it back as soon as you finish that step.
+- **How `dsh-chief` handles it**: Archives live in top-down stack-of-papers folders across three vaults (Session, System Global, Precipitated). **Only items pinned to the Cognitive Desktop (`2,400 Tokens / 6 items`) enter the prompt automatically; unpinned dossiers add 0 full-text tokens**, exposing only lightweight `🪝` keyword hooks for on-demand `archive.pull` retrieval while keeping Precipitated secrets double-blind.
 
 ### 4. Full autonomy feels unsafe, but chat-only mode leaves Chief idle (or bossy)
 - **What goes wrong**: Clicking "allow everything" risks `git push --force`, destructive deletes, or reading `.env`, while high-tier supervisors often try to edit files themselves instead of letting your main agent work.
-- **How `dsh-chief` handles it**: Uses four permission tiers (`advisor` read-only default, `assistant`, `strategist` per-action approval, `chief` high autonomy) plus a pre-execution firewall.
+- **How `dsh-chief` handles it**: Separates permission tiers (`L0 advisor` read-only default / `L1 assistant` / `L2 strategist` per-action approval / `L3 chief`) from header runtime modes (`⏸ Off / 🛡 Patrol / 🤖 Managed`), backed by a pre-execution firewall.
   - **Every new session starts read-only**: Observes code, answers questions, and updates the board without touching your workspace.
-  - **Pre-execution guard walls (`tools/pre-execute`)**: Before the main agent, any subagent, or Chief writes a file or runs a command, calls pass through `~/.dsh/chief/guard-walls.json`. Walls can be scoped as `global` (follow every new session like preferences), `workspace` (project-only), or `paused`, merged in-place when they share a rule type, or crafted in plain language by Chief for you to approve. High-risk command rules can prompt DSH's native one-time approval dialog.
-  - **Lazy intervention & background check-ins**: Unless you explicitly ask Chief to edit files directly, it sends structured `[EXECUTION_REQUEST]` items to the main conversation instead of taking over or speaking as you. In a blank new chat, it instructs `@lead` to read the repo and build a plan first, asks clarifying questions quietly in the background without pausing `@lead`, and updates the top summary after chats.
-  - **Auto-resume after approval & restrict-only policies**: `TaskLedger` picks up unfinished steps once you click Allow, hard rules (compound shells, `node -e`/`python -c`, quote-backslash `.env` tricks, symlinks, NTFS ADS) hold in every tier with logs written to `~/.dsh/chief/chief-audit.jsonl`, and optional JSON `policyPlugins` can tighten permissions without ever weakening built-in hard guards.
+  - **Pre-execution guard walls (`tools/pre-execute`)**: Before the main agent, any subagent, or Chief writes a file or runs a command, calls pass through `~/.dsh/chief/guard-walls.json`. Walls switch between `🌐 Global`, `📁 Workspace`, and `⏸ Paused`, merge same-type rules, or get drafted from plain language for your approval. Models in any L0–L3 tier can never mute or remove locked walls — genuine dead-end blockers can only submit a human-approved removal request.
+  - **Lazy intervention & background check-ins**: Unless you explicitly ask Chief to edit files directly, it sends structured `[EXECUTION_REQUEST]` items to the main conversation instead of taking over or speaking as you. In a blank new chat, it guides `@lead` to inspect the repo and plan first, and asks clarifying `[INQUIRY]` questions quietly without pausing `@lead`.
+  - **Auto-resume after approval & restrict-only policies**: `TaskLedger` picks up unfinished steps once you click Allow; hard rules (compound shells, `node -e`/`python -c`, quote-backslash `.env` tricks, symlinks, NTFS ADS) hold in every tier with logs written to `~/.dsh/chief/chief-audit.jsonl`, alongside optional restrict-only JSON `policyPlugins`.
 
 ### 5. Dozens of subagents run out of sight and ignore verbal rules
 - **What goes wrong**: Workers live across scattered tabs, and rules mentioned in chat scroll out of context after ten turns.
-- **How `dsh-chief` handles it**: Shows the main coordinator and subagents in one tree view with status controls, step Q&A, and one-click `分屏` live output streams. Pin rules with `📌` in Boundaries so every new task inherits them.
+- **How `dsh-chief` handles it**: Shows the main coordinator and subagents in one pyramid tree with status controls, `@agent` direct steering pills along the bottom bar, plain-language step explanations, and one-click `分屏` live streams. Pin rules with `📌` in Boundaries so every new task inherits them.
 
 ### 6. Long threads slow down, but opening a new window resets everything
 - **What goes wrong**: After 100 turns you want a clean window without re-explaining workspace paths and task progress, and you do not want a background plugin quietly calling paid APIs every turn.
-- **How `dsh-chief` handles it**: Defaults to `⏸ On-Demand` (0 background LLM calls) and mirrors your active session's provider/model. Edit or freeze handoff notes with `📌 定住防改`, then deploy a linked window carrying only the vault scope you pick.
+- **How `dsh-chief` handles it**: Defaults to `⏸ Off` / `🛡 Patrol` (0 idle LLM calls), mirrors your active session's provider/model, and exposes a `180°` fan effort gauge with `🪄 Auto` adaptive depth. Click `解释` on any plan step for plain-language explanations, freeze handoff notes with `📌 定住防改`, and deploy a linked window carrying only the archive scope you pick.
 
 ---
 
 ## Inside the Sidebar
 
-### 01 · Chief Cockpit (`参谋` Tab)
-- Send tasks in plain language from the bottom input box (with action buttons cleanly aligned at bottom-right). Status pills above show `⚡ 强介入`, `✦ 智选压缩`, `🛡 红线哨兵` (turning red with a colored shield when active), permission tier, and `⏹ 急停`.
-- Enabling Strong Intervention opens a confirmation modal listing both active Physical Guard Walls and Forbidden Redlines side by side (`管理边界` + expand/collapse controls).
-- Filter the feed by `全部 / 💬 问答 / 📋 回执`. User prompts and Chief receipts sit inside high-contrast grouped frames that collapse individually or all at once, multi-step suggestions merge into one top `▶ 执行建议` button, and background Chief work switches to the active tab with a frosted overlay and sweeping light-beam border.
+### 01 · Chief Cockpit & Click-Through FX Stage (`参谋` Tab)
+- Send tasks in plain language from the bottom input box, toggle `⚡ 强介入`, `✦ 智选压缩`, `🛡 红线哨兵`, `L0–L3` tiers, and `⏹ 急停`, or adjust `⏸ Off / 🛡 Patrol / 🤖 Managed` and the `180°` fan thinking effort gauge.
+- When Dream Roam or auto-review raises the frosted working stage overlay, **a single click dismisses the blur so you keep full control while the glowing outer border continues to show Chief is active**.
 
 ![01 - Chief Cockpit Overview](assets/screenshots/01-chief-cockpit-overview.png)
 
 ---
 
-### 02 · Coordinator & Subagent Task Tree (`任务` Tab)
-- Displays the root coordinator and active subagent lanes in a single layout instead of tiny nested lists, with inline status toggles, plain-language step explanations, and `分屏` live stream panes.
+### 02 · Coordinator & Subagent Pyramid Tree (`任务` Tab)
+- Displays the root coordinator and active subagent lanes with dedicated coordinator/worker icons, inline status toggles, bottom `@steer` pills, and `分屏` live stream panes.
 
 <div align="center">
   <img src="assets/screenshots/02-full-spread-pyramid-dag.png" alt="02 - Subagent DAG View" width="76%" />
@@ -91,18 +102,17 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 
 ---
 
-### 03 · 3-Tier Local Archive Vaults (`档案` Tab)
-- Separates **💬 Session Cabinet** (strictly isolated per `rootSessionId`, with multi-cabinet support and one-click `一键收纳入柜` for temporary notes), **🌐 System Global Vault** (tracks `Synced` / `Local Modified` / `Local Only` diffs), and **🏛️ Precipitated Vault** (double-blind by default).
-- Dossiers stay out of prompts until you click `📌 摆上桌面`.
+### 03 · Cognitive Desktop & Stack-of-Papers Vaults (`档案` Tab)
+- Features the pinned **📌 Cognitive Desktop** (`2,400 Tokens / 6 items` bar — sole per-turn prompt injection source) above Session, System Global, and Precipitated drawers with top-down stack-of-papers cards and `🪝` keyword hooks.
 
 <div align="center">
-  <img src="assets/screenshots/03-cold-archive-cabinet.png" alt="03 - Three-Tier Cold Vaults and Diff Tracking" width="68%" />
+  <img src="assets/screenshots/03-cold-archive-cabinet.png" alt="03 - Three-Tier Cold Vaults and Cognitive Desktop" width="68%" />
 </div>
 
 ---
 
-### 04 · Core Objective Lock & Step Q&A (`规划` Top)
-- Click `🎯 设为目标` to track long tasks, or click any step in the plan list to ask why that step exists without interrupting the main agent.
+### 04 · Objective Lock & Step Q&A (`规划` Top)
+- Click `🎯 设为目标` to lock your Core Objective before Strong Intervention, or click `解释` on any step to get a plain-language breakdown without interrupting `@lead`.
 
 <div align="center">
   <img src="assets/screenshots/04-dual-tier-goal-and-step-qa.png" alt="04 - Goal Supervision and Step Q&A" width="68%" />
@@ -111,8 +121,8 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 ---
 
 ### 05 · Cross-Window Peer Linking & Mailbox (`协同` Tab)
-- Connect multiple open DSH windows to share live progress, with automatic cache and mailbox purge on detach.
-- Screenshots pasted into the cockpit are saved under `<cwd>/.dsh-chief/uploads/` so models can inspect real files instead of guessing.
+- Connect multiple open DSH windows to share live progress and coordinate ports/contracts, with automatic cache and mailbox purge on detach.
+- Screenshots pasted into the cockpit are saved under `<cwd>/.dsh-chief/uploads/` so models inspect real files instead of guessing.
 
 <div align="center">
   <img src="assets/screenshots/05-cross-session-collab-bus.png" alt="05 - Cross-Window Linking and Mailbox" width="68%" />
@@ -121,8 +131,8 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 ---
 
 ### 06 · Guard Walls, Pinned Redlines & Must-Do Checks (`边界` Tab)
-- The top **🧱 Physical Guard Walls** section blocks dangerous commands or paths before execution: add rules manually (`+ 手动驻墙`) or let Chief draft them from plain text (`✨ 参谋手搓墙`), toggle `🌐 Global`, `📁 Workspace`, or `⏸ Paused`, and merge multiple walls of the same type cleanly (cross-type merges are blocked).
-- Below that, `allowed` (verification gates), `forbidden` (hard blockers), and `notes` separate global `📌` rules from session-only ones and list boundary proposals from blocked workers. Models cannot delete or mute locked walls or redlines on their own.
+- The top **🧱 Physical Guard Walls** section blocks dangerous commands or paths before execution: add rules manually or let Chief draft them from plain text, switch `🌐 Global`, `📁 Workspace`, or `⏸ Paused`, and merge same-type walls.
+- Below that, `allowed`, `forbidden`, and `notes` separate global `📌` rules from session-only ones. No L0–L3 model can delete locked walls without an approved blocker removal ticket.
 
 <div align="center">
   <img src="assets/screenshots/06-pinned-bounds-and-handoff.png" alt="06 - Pinned Global Redlines and Proposals" width="68%" />
@@ -131,7 +141,7 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 ---
 
 ### 07 · Session Handoff & Deployment (`规划` Bottom)
-- Edit the Markdown handoff packet directly and lock it via `📌 定住防改` so later summaries do not overwrite your edits.
+- Edit the Markdown handoff packet directly and freeze it via `📌 定住防改`.
 - Choose which archive scope follows into a new session (`None`, `Spotlight Only`, `Entire Drawer`, or `Full Session Cabinet`), while Strong Intervention safely resets to off.
 
 <div align="center">
@@ -146,32 +156,32 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 > Keep these two constraints in mind when using Wishing Box tools, `⚡ Strong Intervention`, or `✦ 智选压缩`:
 >
 > 1. **Guardrails set the safety floor; your LLM sets the ceiling**  
->    The plugin guarantees 0-token vault isolation, permission gating, verified pre-compact saves, loop breakers, and `⏹ 急停`. Planning accuracy and code judgment still depend on the model assigned to Chief. Use a strong reasoning model for real engineering work.
+>    The plugin guarantees 0-token vault isolation, permission gating, verified pre-compact saves, loop breakers, guard walls, and `⏹ 急停`. Planning accuracy and code judgment still depend on the model assigned to Chief. Use a strong reasoning model for real engineering work.
 > 2. **Avoid stacking heavy external prompt injections**  
->    Skip stacking hundreds of conflicting global rule lines or always-on memory plugins alongside `dsh-chief`. Extra prompt noise competes with active work and causes unnecessary loops or early trips. Keep prompts lean and store reference notes in the cold archive instead.
+>    Skip stacking hundreds of conflicting global rule lines or always-on memory plugins alongside `dsh-chief`. Keep only essentials on the **Cognitive Desktop** and store reference notes in the hooked drawers instead.
 
 ---
 
-## Modular Architecture (`v1.4.0`)
+## Modular Architecture (`v1.5.0`)
 
-`v1.4.0` spans **38 backend modules (including 9 isolated modules under `pkg/safety/`) and 16 frontend modules** with zero `export let` bindings and zero circular imports. See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and module contracts.
+`v1.5.0` spans **38 backend modules (including 9 isolated modules under `pkg/safety/`) and 16 frontend modules** with zero `export let` bindings and zero circular imports. See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and module contracts.
 
 ```mermaid
 flowchart TB
   subgraph UI["DSH Right Sidebar (client.js <- 16 source modules)"]
-    T1["Chief Tab (Grouped Q&A + Red Shield + FX Border)"]
-    T2["Tasks Tab (Coordinator + Subagent Lanes + Split Stream)"]
+    T1["Chief Tab (180° Effort Gauge · Click-Through FX · Grouped Q&A)"]
+    T2["Tasks Tab (Coordinator Pyramid · Split Stream · @steer)"]
     T3["Peers Tab (Cross-Window Link + Mailbox)"]
-    T4["Plan Tab (Objective Lock + Pinned Handoff + Deploy)"]
-    T5["Archives Tab (3-Tier Vaults + Sweep Notes)"]
-    T6["Boundaries Tab (Dynamic Guard Walls + 📌 Redlines)"]
+    T4["Plan Tab (Core Objective Lock · Step Explain · Pinned Handoff)"]
+    T5["Archives Tab (2400T Cognitive Desktop · Hooked Stack-of-Papers)"]
+    T6["Boundaries Tab (Guard Walls · Blocker Removal · 📌 Redlines)"]
   end
 
   subgraph Core["Local Backend & Safety Kernel (Zero External Deps · 38 modules)"]
     Hot["Hot Boards: ~/.dsh/chief/board.json & boards/<sid>.json\nCross-process/worker_threads O_EXCL spin locks"]
     Walls["Guard Walls: ~/.dsh/chief/guard-walls.json\nGlobal / Workspace / Paused"]
-    Cold["3-Tier Vaults: cabinets/ + global-vault/ + precipitated/"]
-    Bus["Safety & Resume: safety/*.js + chief-executor.js + taskLedger + chief-audit.jsonl"]
+    Cold["3-Tier Vaults: 2400T Cognitive Desktop + Hooked Drawers + 0-byte Blind Vault"]
+    Bus["Runtime & Safety: safety/*.js + Off/Patrol/Managed(5-Cond Sleep) + Audit"]
   end
 
   subgraph Agents["Host Execution Agents (tools/pre-execute gate)"]
@@ -185,7 +195,7 @@ flowchart TB
   Hot -->|"Compact Hot State"| Subs
   Walls -->|"Pre-Execution Block or Ask Prompt"| Lead
   Walls -->|"Pre-Execution Block or Ask Prompt"| Subs
-  Cold -.->|"0 Tokens While Sealed\nInjected Only When Pinned to Desk"| Lead
+  Cold -.->|"Cognitive Desktop Full Text · Hooked Pull on Demand"| Lead
   Bus <-->|"chief_board / chief_memory\nchief_boundaries / chief_handoff"| Agents
 ```
 
@@ -196,21 +206,21 @@ flowchart TB
 Search **`dsh-chief`** inside [dshmarket](https://github.com/dsh-market/dsh-market) / DSH Plugin Market, or install via CLI (replace `desktop` with `web` for the web profile):
 
 ```bash
-# Option 1: Install latest release (v1.4.0) from npm
+# Option 1: Install latest release (v1.5.0) from npm
 dsh plugin --profile desktop add dsh-chief
 
 # Option 2: Install directly from GitHub main branch
 dsh plugin --profile desktop add github:gluztm/dsh-chief
 
-# Option 3: Install prebuilt GitHub Release tarball (v1.4.0)
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.4.0/dsh-chief-1.4.0.tgz
+# Option 3: Install prebuilt GitHub Release tarball (v1.5.0)
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.5.0/dsh-chief-1.5.0.tgz
 ```
 
 ### Host Version Compatibility
 
 | DeepSeek Harness (DSH) Version | Panel / Board / Vaults / Pre-Execute Walls | Named Subagent Tree (`task.dispatch` / `team.*`) | Notes |
 | :--- | :---: | :---: | :--- |
-| **`>= 0.2.2-rc.5` (current desktop target)** | Full support | Full support | Matches `dsh-tool-fs` (`read`/`read_image`/`write`/`edit`/`apply_patch`), `str_replace_editor`, and native `{ kind: 'ask' }` approval dialogs |
+| **`>= 0.2.2-rc.5` (current desktop target)** | Full support | Full support | Matches `dsh-tool-fs`, `str_replace_editor`, dynamic `reasoningEffort` switching, and native `{ kind: 'ask' }` dialogs |
 | `0.2.2-rc.2 ~ 0.2.2-rc.4` | Full support | Full support | Provides native `subagents.resolveName`, `rootOf`, `namesOf`, and `tools/pre-execute` |
 | `0.2.0 ~ 0.2.2-rc.1` | Panel works | Upgrade notice | Blocks unsafe `team.*` dispatch and prompts host upgrade |
 
@@ -220,7 +230,7 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 
 | Tool Name | Purpose | Common Actions |
 | :--- | :--- | :--- |
-| **`chief_board`** | Task DAG updates, cold archive queries, peer & chief requests, inquiry replies, wall listing, elevations, compaction | `graph.plan`, `task.add`, `task.update`, `plan.set`, `cursor.set`, `mail.send`, `chief.request`, `inquiry.reply`, `wall.list`, `archive.save`, `archive.search`, `bounds.propose`, `permission.request`, `context.compact` |
+| **`chief_board`** | Task DAG updates, cold archive queries/pulls, peer & chief requests, inquiry replies, wall listing, effort tuning, compaction | `graph.plan`, `task.add`, `task.update`, `plan.set`, `cursor.set`, `mail.send`, `chief.request`, `inquiry.reply`, `wall.list`, `archive.save`, `archive.search`, `archive.pull`, `model.effort`, `bounds.propose`, `permission.request`, `context.compact` |
 | **`chief_memory`** | Session-scoped hot items (`decisions`, `progress`, `verify`, `risks`) | `list`, `get`, `add`, `update`, `remove` |
 | **`chief_boundaries`** | Global `📌` redlines, must-do checks (`allowed`), and notes | `get`, `set`, `add`, `pin`, `remove` |
 | **`chief_handoff`** | Preview and render self-contained Markdown handoff packets | `preview` / session handoff |
@@ -241,7 +251,7 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 | Contributor | Role |
 | --- | --- |
 | [gluztm](https://github.com/gluztm) | Creator, product design, and maintainer |
-| [Gemini](https://github.com/gemini-code-assist) | Feature development, `pkg/safety/` kernel, pre-execute guard walls, lazy intervention, and CI gates |
+| [Gemini](https://github.com/gemini-code-assist) | Feature development, `pkg/safety/` kernel, Cognitive Desktop, orthogonal runtime modes, fan gauge & CI gates |
 | [Codex](https://github.com/codex) | Modular architecture design, concurrency stress tests, and red-team boundary audits |
 | [deepseek-ai](https://github.com/deepseek-ai) | DeepSeek Harness host runtime and SuperAgent workflow alignment |
 

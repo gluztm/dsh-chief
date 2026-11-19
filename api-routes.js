@@ -34,7 +34,17 @@ import {
   handleApprovalDecision,
   handleElevationDecision,
 } from './chief.js'
-import { getChiefActiveWork } from './chief-state.js'
+import {
+  getChiefActiveWork,
+  mutateChiefState,
+  ensureWorkspace,
+  queueChiefApproval,
+  normalizeSuggestion,
+  hasValidChiefRiskAck,
+  SUGGESTIONS_CAP,
+  CHAT_CAP,
+  nextId,
+} from './chief-state.js'
 import {
   resolveProjectKey,
   getArchiveMeta,
@@ -53,6 +63,9 @@ import {
   DEFAULT_CHIEF_PERMISSION_MODE,
   HUMAN_BOUNDS_CONFIRM_TOKEN,
   listGuardWalls,
+  normalizePermissionMode,
+  permissionRank,
+  buildCapabilityScope,
 } from './chief-executor.js'
 import {
   API,
@@ -267,6 +280,11 @@ export function createApiRoutes(deps) {
                 backendBuild: BACKEND_BUILD,
                 hostCompat,
                 paceMode: effCfg.paceMode || 'manual',
+                runMode: effCfg.runMode || 'off',
+                managedIdleTimeoutMs: effCfg.managedIdleTimeoutMs || 15 * 60 * 1000,
+                thinkingEffort: effCfg.thinkingEffort || 'auto',
+                teamEffortMode: effCfg.teamEffortMode || 'auto',
+                lockedModelEfforts: effCfg.lockedModelEfforts || {},
                 stopped: Boolean(effCfg.stopped || effCfg.paceMode === 'stopped'),
                 permissionMode: effCfg.permissionMode || DEFAULT_CHIEF_PERMISSION_MODE,
                 capabilities: effCfg.capabilities || {},
@@ -320,7 +338,8 @@ export function createApiRoutes(deps) {
                 agentIdentity,
                 teamTasks: sessionId ? fetchTeamTasks(runtime, { id: sessionId }) : undefined,
                 takenOutArchives: archCtx.takenOutArchives,
-                sessionArchiveBriefs: archCtx.sessionArchiveBriefs,
+                sessionHookedArchives: archCtx.sessionHookedArchives,
+                desktopUsedTokens: archCtx.desktopUsedTokens,
                 smartCompactActive: archCtx.smartCompactActive,
                 chiefPermissionMode: archCtx.chiefPermissionMode,
                 linkedPeersCount: linked.linkedPeersCount,
@@ -543,6 +562,7 @@ export function createApiRoutes(deps) {
               text: typeof body.text === 'string' ? body.text : '',
               forcedTarget: typeof body.target === 'string' ? body.target : '',
               forcedMode: typeof body.mode === 'string' ? body.mode : 'steer',
+              quickAction: typeof body.quickAction === 'string' ? body.quickAction.trim().slice(0, 40) : '',
               images: Array.isArray(body.images) ? body.images : [],
             })
             const board = out.ok && sessionId ? boardForSession(boardFileFor(sessionId)) : undefined
@@ -620,7 +640,46 @@ export function createApiRoutes(deps) {
             const body = await readBody(req)
             const sessionId = typeof body?.session === 'string' ? body.session : ''
             const rootSid = resolveRootSessionId(sessionId) || sessionId || 'global'
-            const updated = updateChiefConfig({ ...(body || {}), sessionId: rootSid })
+            const cleanBody = (body && typeof body === 'object') ? { ...body } : {}
+            delete cleanBody._fromUiPanel
+            if (cleanBody.toggleLockAgentEffort && typeof cleanBody.toggleLockAgentEffort === 'object') {
+              const lkTarget = String(cleanBody.toggleLockAgentEffort.target || 'lead').trim().slice(0, 64)
+              const lkVal = Boolean(cleanBody.toggleLockAgentEffort.locked)
+              const rawAliases = Array.isArray(cleanBody.toggleLockAgentEffort.aliases)
+                ? cleanBody.toggleLockAgentEffort.aliases.map(x => String(x || '').trim().slice(0, 64)).filter(Boolean)
+                : []
+              const shortT = lkTarget.includes('/') ? lkTarget.split('/').pop() : ''
+              const allKeys = Array.from(new Set([lkTarget, shortT, ...rawAliases].filter(Boolean)))
+              if (allKeys.length) {
+                const nextLocks = {
+                  ...((cleanBody.lockedModelEfforts && typeof cleanBody.lockedModelEfforts === 'object') ? cleanBody.lockedModelEfforts : {}),
+                }
+                for (const k of allKeys) nextLocks[k] = lkVal
+                cleanBody.lockedModelEfforts = nextLocks
+              }
+            }
+            const updated = updateChiefConfig({
+              ...cleanBody,
+              sessionId: rootSid,
+              _fromUiPanel: true,
+              byUser: true,
+              by: 'operator',
+            })
+            let effortRes = null
+            if (updated && updated.ok !== false && body && body.directSetAgentEffort && typeof body.directSetAgentEffort === 'object') {
+              const chiefDeps = makeChiefDeps(runtime)
+              if (typeof chiefDeps.controlMainAgent === 'function') {
+                effortRes = await chiefDeps.controlMainAgent({
+                  rootId: rootSid,
+                  sessionId: sessionId || rootSid,
+                  op: 'set_effort',
+                  target: body.directSetAgentEffort.target || 'lead',
+                  reasoningEffort: body.directSetAgentEffort.effort || 'medium',
+                  reason: '用户从参谋面板手动调节模型思考强度',
+                  byUser: true,
+                }).catch(err => ({ ok: false, error: String(err && err.message || err) }))
+              }
+            }
             const wantsInterventionOn = Boolean(body && body.tacticalModes && body.tacticalModes.intervention === true)
             const coreObjDraft = typeof body?.coreObjective === 'string' ? body.coreObjective.trim() : ''
             const targetSessionForBoard = sessionId || (rootSid !== 'global' ? rootSid : '')
@@ -639,10 +698,112 @@ export function createApiRoutes(deps) {
                 if (rootSid && rootSid !== sessionId) deps.hostState.activeAutoContinue.cancelSession(rootSid, 'chief stopped')
               }
             }
+            let immediateKickoff = null
+            if (updated && updated.ok !== false && wantsInterventionOn && targetSessionForBoard && body && body.startImmediately === true) {
+              const boardNow = boardForSession(boardFileFor(targetSessionForBoard))
+              const lockedGoal = coreObjDraft || String((boardNow && boardNow.objective) || '').trim()
+              const stateNow = loadChiefState()
+              const ownWsNow = stateNow.workspaces && stateNow.workspaces[rootSid]
+              const cfgNow = resolveWorkspaceConfig(stateNow, rootSid)
+              const effectivePerm = normalizePermissionMode(cfgNow.permissionMode || DEFAULT_CHIEF_PERMISSION_MODE, {
+                requireAck: true,
+                hasChiefRiskAck: hasValidChiefRiskAck(ownWsNow),
+              })
+              const permRk = permissionRank(effectivePerm)
+              const agentsSvc = runtime && typeof runtime.get === 'function' ? runtime.get('agents') : null
+              const leadAg = agentsSvc && typeof agentsSvc.get === 'function' ? agentsSvc.get(targetSessionForBoard) : null
+              const leadRunning = Boolean(leadAg && leadAg.status === 'running')
+              if (lockedGoal && !cfgNow.stopped) {
+                const kickoffText = [
+                  '【强介入已开启并锁定核心总目标 — 立即开始推进】',
+                  `🎯 锁定核心总目标：${lockedGoal}`,
+                  '请立即围绕上述已锁定的核心总目标核对当前看板任务与未完成项并直接推进执行（若已有待办先继续推进并在收尾时提交实测验证），无需等待用户再次手动输入“继续”。',
+                ].join('\n')
+                if (leadRunning) {
+                  immediateKickoff = { triggered: false, alreadyRunning: true, mode: effectivePerm }
+                } else if (permRk >= 3) {
+                  const chiefDeps = makeChiefDeps(runtime)
+                  const delivRes = await deliverCrossMessage(chiefDeps, {
+                    fromSession: rootSid,
+                    fromLabel: 'DSH 参谋长 (强介入锁定目标立即推进)',
+                    target: 'lead',
+                    subject: '强介入已开启 · 立即围绕总目标推进',
+                    text: kickoffText,
+                    mode: 'followup',
+                    envelopeKind: 'execution_request',
+                  }).catch(err => ({ ok: false, error: String(err && err.message || err) }))
+                  mutateChiefState((st) => {
+                    const ws = ensureWorkspace(st, rootSid)
+                    ws.chat.push({
+                      id: nextId('chat'),
+                      role: 'chief',
+                      kind: 'receipt',
+                      text: `- 【⚡ 强介入已锁定目标并立即推进】已自动向 \`@lead\` 下发首轮推进请求\n- 【🎯 锁定总目标】${lockedGoal.slice(0, 180)}`,
+                      actions: [delivRes && delivRes.ok ? '⚡ 已立即唤醒推进' : '⚠️ 唤醒未送达'],
+                      at: Date.now(),
+                    })
+                    if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+                  })
+                  immediateKickoff = { triggered: Boolean(delivRes && delivRes.ok), mode: effectivePerm }
+                } else if (permRk === 2) {
+                  queueChiefApproval(rootSid, {
+                    category: 'main_workflow',
+                    operationLabel: '强介入开启 · 立即唤醒主对话推进',
+                    targetLabel: '主对话 (@lead)',
+                    reason: '强介入已锁定核心总目标，按 L2 参谋模式请您一键放行首轮推进执行请求（之后无需手动发“继续”）',
+                    impact: '允许后立即向 @lead 投递首轮强介入推进指令',
+                    preview: lockedGoal.slice(0, 220),
+                    kind: 'relay',
+                    capabilityScope: buildCapabilityScope({ kind: 'relay', tool: 'relay', target: 'lead' }),
+                    payload: {
+                      fromSession: rootSid,
+                      fromLabel: 'DSH 参谋 (强介入锁定目标立即推进)',
+                      target: 'lead',
+                      subject: '强介入已开启 · 立即推进',
+                      text: kickoffText,
+                      mode: 'followup',
+                      envelopeKind: 'execution_request',
+                    },
+                    by: 'chief',
+                  })
+                  immediateKickoff = { triggered: false, queuedApproval: true, mode: effectivePerm }
+                } else {
+                  mutateChiefState((st) => {
+                    const ws = ensureWorkspace(st, rootSid)
+                    const sug = normalizeSuggestion({
+                      kind: 'relay',
+                      fromAgent: '⚡ 强介入首轮就绪',
+                      title: '立即向主对话发首轮强介入推进指令',
+                      reason: `已锁定核心总目标并开启强介入（当前 ${effectivePerm === 'assistant' ? 'L1 助手档' : 'L0 顾问档'}，无权直改主对话工作流；升至 L2/L3 即可全自动推跑）。`,
+                      target: 'lead',
+                      targetLabel: '主对话 (@lead)',
+                      mode: 'followup',
+                      draftText: kickoffText,
+                    })
+                    if (sug) {
+                      ws.suggestions.push(sug)
+                      if (ws.suggestions.length > SUGGESTIONS_CAP) ws.suggestions = ws.suggestions.slice(-SUGGESTIONS_CAP)
+                    }
+                    ws.chat.push({
+                      id: nextId('chat'),
+                      role: 'chief',
+                      kind: 'receipt',
+                      text: `- 【⚡ 强介入已锁定核心总目标（当前 ${effectivePerm === 'assistant' ? 'L1' : 'L0'} 仅监督待命）】已生成首轮推进建议，升至 L2/L3 即可直接自动推动 \`@lead\`。\n- 【🎯 锁定总目标】${lockedGoal.slice(0, 180)}`,
+                      actions: ['🎯 目标已锁定'],
+                      at: Date.now(),
+                    })
+                    if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+                  })
+                  immediateKickoff = { triggered: false, queuedSuggestion: true, mode: effectivePerm }
+                }
+              }
+            }
             const view = await getChiefView(makeChiefDeps(runtime), sessionId, { autoSummarize: false })
             const latestBoard = targetSessionForBoard ? boardForSession(boardFileFor(targetSessionForBoard)) : null
             sendJson(res, updated && updated.ok === false ? 400 : 200, {
               ...updated,
+              ...(effortRes ? { effortRes } : {}),
+              ...(immediateKickoff ? { immediateKickoff } : {}),
               ...(latestBoard ? { board: latestBoard } : {}),
               view,
             })
@@ -1159,6 +1320,7 @@ export function createApiRoutes(deps) {
               folder: typeof body.folder === 'string' ? body.folder : '',
               scope: typeof body.scope === 'string' ? body.scope : 'unorganized',
               instruction: typeof body.instruction === 'string' ? body.instruction : '',
+              ...(typeof body.reasonKind === 'string' && body.reasonKind ? { reasonKind: body.reasonKind } : {}),
             })
             const stNow = loadChiefState()
             const wsNow = rootSid && stNow.workspaces ? stNow.workspaces[rootSid] : null
