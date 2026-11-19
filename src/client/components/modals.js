@@ -265,6 +265,15 @@ function describeSuggestionMeta(sug) {
       bg: 'rgba(48, 209, 88, 0.12)',
     }
   }
+  if (sug.kind === 'guard_wall') {
+    return {
+      typeLabel: '🧱 物理驻墙提案',
+      impact: `影响：${sug.targetLabel || '🌐 全局随身驻墙'}（事前物理硬拦截）`,
+      expect: '预期：确认后写入 guard-walls.json，所有代理触线即刻物理阻断',
+      tone: '#f87171',
+      bg: 'rgba(239, 68, 68, 0.13)',
+    }
+  }
   if (sug.kind === 'bound') {
     const colLabel = sug.boundField === 'allowed' ? '必做事项' : (sug.boundField === 'notes' ? '注意事项' : '禁止红线')
     const repCount = Array.isArray(sug.replaces) ? sug.replaces.filter(Boolean).length : 0
@@ -298,7 +307,7 @@ export function SuggestionBanner({ view }) {
   const rawSuggestions = (view.secView && Array.isArray(view.secView.suggestions))
     ? view.secView.suggestions.filter(s => s && s.status === 'pending')
     : []
-  const rankSug = s => (s.kind === 'goal_approval' ? 0 : s.kind === 'bound' ? 1 : 2)
+  const rankSug = s => (s.kind === 'goal_approval' ? 0 : (s.kind === 'bound' || s.kind === 'guard_wall') ? 1 : 2)
   const suggestions = [...rawSuggestions].sort((a, b) => rankSug(a) - rankSug(b))
   const [expandedId, setExpandedId] = React.useState('')
   const [unselectedIds, setUnselectedIds] = React.useState({})
@@ -452,6 +461,14 @@ export function SuggestionBanner({ view }) {
   )
 }
 
+const MODAL_WALL_TYPE_TAG = {
+  forbid_cmd: '🚫 禁跑命令',
+  forbid_path: '🚧 禁碰路径',
+  restrict_write: '🔐 仅限目录可写',
+  require_approval_cmd: '🛡️ 高危命令先请示',
+  deny_tool: '⛔ 禁用工具',
+}
+
 export function InterventionConfirmModal({ view, board }) {
   const meta = view.chiefMeta || {}
   const tm = meta.tacticalModes || {}
@@ -460,6 +477,9 @@ export function InterventionConfirmModal({ view, board }) {
   const forbiddenList = (Array.isArray(rawBounds.forbidden) ? rawBounds.forbidden : [])
     .map(f => (typeof f === 'string' ? f.trim() : String((f && f.text) || '').trim()))
     .filter(Boolean)
+  const allWalls = Array.isArray(view.guardWalls) ? view.guardWalls : []
+  const activeWalls = allWalls.filter(w => w && w.scope !== 'paused' && w.activeNow !== false)
+  const pausedWallsCount = allWalls.filter(w => w && w.scope === 'paused').length
 
   const [objDraft, setObjDraft] = React.useState(savedBoardObj)
   const [objLocked, setObjLocked] = React.useState(false)
@@ -469,6 +489,8 @@ export function InterventionConfirmModal({ view, board }) {
   const [lastWasAiGuess, setLastWasAiGuess] = React.useState(false)
   const [suggestRationale, setSuggestRationale] = React.useState('')
   const [confirmBusy, setConfirmBusy] = React.useState(false)
+  const [wallsSecCollapsed, setWallsSecCollapsed] = React.useState(false)
+  const [redlinesSecCollapsed, setRedlinesSecCollapsed] = React.useState(false)
 
   React.useEffect(() => {
     if (!view.interventionModalOpen) return
@@ -480,12 +502,20 @@ export function InterventionConfirmModal({ view, board }) {
     setLastWasAiGuess(false)
     setSuggestRationale('')
     setConfirmBusy(false)
+    setWallsSecCollapsed(false)
+    setRedlinesSecCollapsed(false)
   }, [view.interventionModalOpen])
 
   if (!view.interventionModalOpen) return null
   const permMode = ['advisor', 'assistant', 'strategist', 'chief'].includes(meta.permissionMode) ? meta.permissionMode : 'advisor'
   const trimmedDraft = String(objDraft || '').trim()
-  const missingPrerequisite = !trimmedDraft || forbiddenList.length === 0
+  const noDefenseRules = activeWalls.length === 0 && forbiddenList.length === 0
+  const allDefenseCollapsed = wallsSecCollapsed && redlinesSecCollapsed
+  const toggleAllDefense = () => {
+    const next = !allDefenseCollapsed
+    setWallsSecCollapsed(next)
+    setRedlinesSecCollapsed(next)
+  }
 
   const handleSuggestObjective = async () => {
     if (suggestBusy) return
@@ -623,68 +653,185 @@ export function InterventionConfirmModal({ view, board }) {
             ? h('span', { style: { color: '#ff6961', fontWeight: 600 } }, '⚠ 尚未填写核心目标：建议直接点右上「✦ 建议」自动填充（可反复点猜意图），或自行填写。')
             : '后续参谋长每次介入都会对照此核心目标与「必做事项」核查完成度；开启强介入后将锁定本目标直到关闭。'),
       ),
-      // Live Redline Readback
+      // Live Boundaries & Guard Walls Readback (Physical Guard Walls + Forbidden Redlines)
       h(
         'div',
         {
           style: {
             borderRadius: 9,
             padding: '8px 10px',
-            border: forbiddenList.length === 0 ? '1px solid rgba(255, 69, 58, 0.45)' : '1px solid var(--dnb-border)',
-            background: forbiddenList.length === 0 ? 'rgba(255, 69, 58, 0.08)' : 'var(--dnb-card)',
+            border: noDefenseRules ? '1px solid rgba(255, 69, 58, 0.48)' : '1px solid var(--dnb-border)',
+            background: noDefenseRules ? 'rgba(255, 69, 58, 0.08)' : 'var(--dnb-card)',
             display: 'flex',
             flexDirection: 'column',
-            gap: 5,
+            gap: 6,
             fontSize: 11.5,
           },
         },
-        forbiddenList.length === 0
-          ? h('div', null,
-              h('strong', null, '已设禁止红线：'),
-              h('span', { style: { color: '#ff453a', fontWeight: 600 } }, '未设定（缺少禁止红线时强介入风险较高）'),
-            )
-          : h(
-              'div',
-              { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
-              h('div', null,
-                h('strong', null, '已设禁止红线：'),
-                h('span', { style: { color: '#34d399', fontWeight: 700 } }, `已生效 ${forbiddenList.length} 条`),
-              ),
-              h('button', {
-                type: 'button',
-                className: 'dnb-mini-btn',
-                'data-tone': 'blue',
-                onClick: () => patch({ interventionModalOpen: false, tab: 'boundaries', boundSubTab: 'rules' }),
-              }, '管理红线'),
-            ),
-        forbiddenList.length > 0
-          ? h(
-              'div',
-              { style: { display: 'flex', flexDirection: 'column', gap: 3, paddingTop: 2 } },
-              forbiddenList.slice(0, 3).map((item, idx) =>
-                h('div', {
-                  key: idx,
-                  style: { fontSize: 11, color: 'var(--dnb-text-2)', lineHeight: 1.45, wordBreak: 'break-word' },
-                }, '• ' + (item.length > 88 ? item.slice(0, 88) + '…' : item)),
-              ),
-              forbiddenList.length > 3
-                ? h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
-                    `…另有 ${forbiddenList.length - 3} 条禁止红线共同生效中`)
-                : null,
-            )
-          : null,
-        forbiddenList.length === 0
-          ? h(
-              'div',
-              { style: { display: 'flex', gap: 6, marginTop: 3 } },
-              h('button', {
-                type: 'button',
-                className: 'dnb-mini-btn',
-                'data-tone': 'amber',
-                onClick: () => patch({ interventionModalOpen: false, tab: 'boundaries', boundSubTab: 'rules' }),
-              }, '前往设定红线'),
-            )
-          : null,
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 } },
+            h('strong', null, '🛡️ 已设防线核对：'),
+            noDefenseRules
+              ? h('span', { style: { color: '#ff453a', fontWeight: 600 } }, '未设物理驻墙与禁止红线（强介入风险较高）')
+              : h(
+                  React.Fragment,
+                  null,
+                  h('span', { style: { color: activeWalls.length > 0 ? '#f87171' : 'var(--dnb-text-3)', fontWeight: 700 } },
+                    `🧱 物理驻墙 ${activeWalls.length} 堵`),
+                  h('span', { style: { color: 'var(--dnb-text-3)' } }, '·'),
+                  h('span', { style: { color: forbiddenList.length > 0 ? '#34d399' : 'var(--dnb-text-3)', fontWeight: 700 } },
+                    `🚫 禁止红线 ${forbiddenList.length} 条`),
+                ),
+          ),
+          h(
+            'div',
+            { style: { display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
+            !noDefenseRules
+              ? h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  title: allDefenseCollapsed ? '一键拉开物理驻墙与禁止红线详情' : '一键收起物理驻墙与禁止红线详情',
+                  onClick: toggleAllDefense,
+                }, allDefenseCollapsed ? '↕ 一键拉开' : '↕ 一键收起')
+              : null,
+            h('button', {
+              type: 'button',
+              className: 'dnb-mini-btn',
+              'data-tone': noDefenseRules ? 'amber' : 'blue',
+              onClick: () => patch({ interventionModalOpen: false, tab: 'boundaries', boundSubTab: 'rules' }),
+            }, '管理边界'),
+          ),
+        ),
+        // Sub-section 1: Physical Guard Walls
+        h(
+          'div',
+          {
+            style: {
+              borderRadius: 7,
+              border: '1px solid rgba(248, 113, 113, 0.28)',
+              background: 'rgba(239, 68, 68, 0.05)',
+              overflow: 'hidden',
+            },
+          },
+          h(
+            'div',
+            {
+              style: {
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 6,
+                padding: '5px 8px',
+                cursor: 'pointer',
+                userSelect: 'none',
+              },
+              onClick: () => setWallsSecCollapsed(v => !v),
+            },
+            h('span', { style: { fontSize: 11, fontWeight: 700, color: '#f87171' } },
+              `🧱 物理驻墙（事前硬拦截 · 已生效 ${activeWalls.length} 堵${pausedWallsCount > 0 ? ` · ${pausedWallsCount} 暂挂` : ''}）`),
+            h(Icon, {
+              name: 'chevron',
+              size: 12,
+              style: {
+                color: 'var(--dnb-text-3)',
+                transform: wallsSecCollapsed ? 'none' : 'rotate(90deg)',
+                transition: 'transform 0.16s ease',
+              },
+            }),
+          ),
+          !wallsSecCollapsed
+            ? h(
+                'div',
+                { style: { padding: '0 8px 6px', display: 'flex', flexDirection: 'column', gap: 3.5 } },
+                activeWalls.length > 0
+                  ? [
+                      ...activeWalls.slice(0, 4).map(w => {
+                        const scopeTag = w.scope === 'workspace' ? '📁本工程' : '🌐全局'
+                        const typeTag = MODAL_WALL_TYPE_TAG[w.ruleType] || w.ruleType
+                        const patStr = Array.isArray(w.patterns) ? w.patterns.join(', ') : ''
+                        const previewPat = patStr.length > 52 ? patStr.slice(0, 52) + '…' : patStr
+                        return h(
+                          'div',
+                          { key: w.id, style: { fontSize: 11, color: 'var(--dnb-text-2)', lineHeight: 1.45, wordBreak: 'break-word' } },
+                          h('span', { style: { color: '#fca5a5', fontWeight: 600 } }, `• [${scopeTag} · ${typeTag}] `),
+                          h('span', { style: { color: 'var(--dnb-text)', fontWeight: 600 } }, w.title || ''),
+                          previewPat
+                            ? h('span', { style: { color: 'var(--dnb-text-3)', fontFamily: 'ui-monospace, Menlo, Consolas, monospace', fontSize: 10.5 } }, ` — ${previewPat}`)
+                            : null,
+                        )
+                      }),
+                      activeWalls.length > 4
+                        ? h('div', { key: 'more-walls', style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
+                            `…另有 ${activeWalls.length - 4} 堵物理驻墙共同生效中`)
+                        : null,
+                    ]
+                  : h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
+                      '暂未启用物理驻墙（可点右上「管理边界」手搓或手动驻防）'),
+              )
+            : null,
+        ),
+        // Sub-section 2: Forbidden Redlines
+        h(
+          'div',
+          {
+            style: {
+              borderRadius: 7,
+              border: '1px solid var(--dnb-border)',
+              background: 'rgba(148, 163, 184, 0.05)',
+              overflow: 'hidden',
+            },
+          },
+          h(
+            'div',
+            {
+              style: {
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'space-between',
+                gap: 6,
+                padding: '5px 8px',
+                cursor: 'pointer',
+                userSelect: 'none',
+              },
+              onClick: () => setRedlinesSecCollapsed(v => !v),
+            },
+            h('span', { style: { fontSize: 11, fontWeight: 700, color: forbiddenList.length > 0 ? '#34d399' : 'var(--dnb-text-2)' } },
+              `🚫 禁止红线（全局与本局边界 · 已生效 ${forbiddenList.length} 条）`),
+            h(Icon, {
+              name: 'chevron',
+              size: 12,
+              style: {
+                color: 'var(--dnb-text-3)',
+                transform: redlinesSecCollapsed ? 'none' : 'rotate(90deg)',
+                transition: 'transform 0.16s ease',
+              },
+            }),
+          ),
+          !redlinesSecCollapsed
+            ? h(
+                'div',
+                { style: { padding: '0 8px 6px', display: 'flex', flexDirection: 'column', gap: 3 } },
+                forbiddenList.length > 0
+                  ? [
+                      ...forbiddenList.slice(0, 4).map((item, idx) =>
+                        h('div', {
+                          key: idx,
+                          style: { fontSize: 11, color: 'var(--dnb-text-2)', lineHeight: 1.45, wordBreak: 'break-word' },
+                        }, '• ' + (item.length > 88 ? item.slice(0, 88) + '…' : item)),
+                      ),
+                      forbiddenList.length > 4
+                        ? h('div', { key: 'more-redlines', style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
+                            `…另有 ${forbiddenList.length - 4} 条禁止红线共同生效中`)
+                        : null,
+                    ]
+                  : h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, '暂未设定禁止红线'),
+              )
+            : null,
+        ),
       ),
       // 3 Concrete Operational Risks + 4-Tier Permission Behavior
       h(
@@ -720,7 +867,7 @@ export function InterventionConfirmModal({ view, board }) {
           style: { marginTop: 2 },
           onChange: e => patch({ interventionAgreed: Boolean(e.target.checked) }),
         }),
-        '我已核对当前目标与红线，理解底层模型与宿主提示词规则冲突可能带来偏离，并确认启用主动强介入。',
+        '我已核对当前目标、物理驻墙与禁止红线，理解底层模型与宿主提示词规则冲突可能带来偏离，并确认启用主动强介入。',
       ),
       h(
         'div',
@@ -1924,9 +2071,13 @@ export function AuditLogModal({ view }) {
             'div',
             { style: { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflowY: 'auto' } },
             logs.map(entry => {
-              const decisionColor = entry.decision === 'allow' || entry.decision === 'approved'
-                ? '#34d399'
-                : (entry.decision === 'prompt' ? '#60a5fa' : '#ff6961')
+              const dec = String(entry.decision || '').toLowerCase()
+              const isGreen = ['allow', 'approved', 'approved_by_user', 'executed', 'executed_approved', 'elevation_approved', 'mode_changed', 'reset_to_l0'].includes(dec)
+              const isBlue = ['prompt', 'pending_approval', 'elevation_requested', 'pending'].includes(dec)
+              const decisionColor = isGreen ? '#34d399' : (isBlue ? '#60a5fa' : '#ff6961')
+              const ruleTag = entry.rule ? ` [${entry.rule}]` : ''
+              const durTag = entry.durationMs > 0 ? `${entry.durationMs}ms · ` : ''
+              const detailText = entry.summary || entry.reason || entry.outcome || ''
               return h(
                 'div',
                 { key: entry.id, className: 'dnb-audit-row' },
@@ -1934,14 +2085,14 @@ export function AuditLogModal({ view }) {
                   'div',
                   { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
                   h('span', { style: { fontWeight: 700, color: decisionColor } },
-                    `${entry.stage || 'gate'} · ${entry.decision || ''} (${CHIEF_PERMISSION_LABELS[entry.mode] || entry.mode || 'advisor'})`),
+                    `${entry.stage || 'gate'} · ${entry.decision || ''}${ruleTag} (${CHIEF_PERMISSION_LABELS[entry.mode] || entry.mode || 'advisor'})`),
                   h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } },
-                    entry.at ? new Date(entry.at).toLocaleTimeString() : ''),
+                    `${durTag}${entry.at ? new Date(entry.at).toLocaleTimeString() : ''}`),
                 ),
                 h('div', { style: { color: 'var(--dnb-text)' } },
                   `${entry.operation || ''}${entry.target ? ' · ' + entry.target : ''}`),
-                entry.outcome || entry.reason
-                  ? h('div', { style: { color: 'var(--dnb-text-2)', wordBreak: 'break-word' } }, entry.outcome || entry.reason)
+                detailText
+                  ? h('div', { style: { color: 'var(--dnb-text-2)', wordBreak: 'break-word' } }, detailText)
                   : null,
               )
             }),

@@ -149,6 +149,15 @@ export function Icon({ name, size = 14, style }) {
         h('path', { d: 'm8 11 4 4 4-4' }),
         h('path', { d: 'M4 15v3a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-3' }),
       )
+    case 'shieldSentinel':
+      return h('svg', props,
+        h('path', {
+          d: 'M12 2.8 4.6 5.9v5.6c0 4.9 3.2 9.1 7.4 10.7 4.2-1.6 7.4-5.8 7.4-10.7V5.9L12 2.8z',
+          fill: 'currentColor',
+          fillOpacity: 0.24,
+        }),
+        h('path', { d: 'M12 7.5v8.2M8.8 11.4h6.4' }),
+      )
     default:
       return null
   }
@@ -190,7 +199,7 @@ export class ChiefErrorBoundary extends React.Component {
 
 /* ----------------------------------------------------- iOS Micro-Flat CSS */
 
-export function Switch({ checked, onChange, disabled = false, title = '', small = false }) {
+export function Switch({ checked, onChange, disabled = false, title = '', small = false, tone = '' }) {
   return h(
     'button',
     {
@@ -200,6 +209,7 @@ export function Switch({ checked, onChange, disabled = false, title = '', small 
       'aria-checked': checked ? 'true' : 'false',
       'aria-disabled': disabled ? 'true' : 'false',
       'data-disabled': disabled ? '1' : '0',
+      'data-tone': tone || undefined,
       title: title || undefined,
       className: 'dnb-switch',
       'data-on': checked ? '1' : '0',
@@ -871,4 +881,40 @@ export function orderChatHistoryNewestFirst(rawList) {
   }
   groups.reverse()
   return groups.flat()
+}
+
+export function groupChatHistoryTurnsNewestFirst(rawList) {
+  const items = Array.isArray(rawList) ? rawList.filter(Boolean) : []
+  const turns = []
+  let activeTurn = null
+  let activeSys = null
+  for (const item of items) {
+    if (item.role === 'user') {
+      activeSys = null
+      activeTurn = {
+        id: 'turn-' + (item.id || turns.length),
+        kind: 'turn',
+        question: item,
+        replies: [],
+        at: item.at || 0,
+      }
+      turns.push(activeTurn)
+    } else if (activeTurn) {
+      activeTurn.replies.push(item)
+    } else {
+      if (!activeSys) {
+        activeSys = {
+          id: 'sys-' + (item.id || turns.length),
+          kind: 'system',
+          question: null,
+          replies: [],
+          at: item.at || 0,
+        }
+        turns.push(activeSys)
+      }
+      activeSys.replies.push(item)
+    }
+  }
+  turns.reverse()
+  return turns
 }

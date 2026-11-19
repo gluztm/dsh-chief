@@ -9,6 +9,8 @@ import {
   MAIL_CAP,
   CHIEF_UPDATE_SOURCE,
   CHIEF_RELAY_SOURCE,
+  CHIEF_INQUIRY_SOURCE,
+  CHIEF_EXEC_REQ_SOURCE,
   persistChiefImagesToWorkspace,
   admitChiefImages,
   nextId,
@@ -17,6 +19,7 @@ import {
   normalizeMail,
   loadChiefState,
   mutateChiefState,
+  answerChiefInquiry,
   getLinkedCluster,
   ensureWorkspace,
   clusterView,
@@ -24,6 +27,12 @@ import {
   isInternalCheckpointNoise,
 } from './chief-state.js'
 import { loadDshLlm } from './chief-models.js'
+
+let chiefDirectRequestHook = null
+
+export function registerChiefDirectRequestHook(fn) {
+  chiefDirectRequestHook = typeof fn === 'function' ? fn : null
+}
 
 export async function buildMessageEnvelope(text, sourceKind = CHIEF_RELAY_SOURCE, extraSource = {}, imageBlocks = []) {
   const dshLlm = await loadDshLlm()
@@ -244,6 +253,9 @@ export async function deliverCrossMessage(deps, {
   text = '',
   subject = '',
   mode = 'steer',
+  envelopeKind = 'relay',
+  taskId = '',
+  inquiryId = '',
   images = [],
   imageBlocks: preAdmittedBlocks = null,
   savedImagePaths: preSavedPaths = null,
@@ -280,9 +292,100 @@ export async function deliverCrossMessage(deps, {
   const imgTag = totalImgCount > 0 ? ` [附图 ×${totalImgCount}]` : ''
 
   const rootId = (deps.resolveRootSessionId && deps.resolveRootSessionId(fromSession)) || String(fromSession || directoryRootFallback(fromSession))
+  const rawTargetPre = String(target || 'lead').trim().replace(/^@/, '')
+  if (/^(?:chief|dsh-chief|参谋长|参谋)$/i.test(rawTargetPre)) {
+    const cleanChiefBody = cleanMultiline(text, 2400)
+    if (envelopeKind === 'inquiry_reply') {
+      if (!cleanChiefBody) return { ok: false, error: 'inquiry.reply 必须提供非空答复文本 (text)' }
+      const effInqId = String(inquiryId || taskId || '').trim()
+      const ansRes = answerChiefInquiry(rootId || 'global', {
+        inquiryId: effInqId,
+        answer: cleanChiefBody,
+        by: fromLabel,
+      })
+      if (recordBoardLog && rootId && typeof deps.appendBoardLog === 'function' && ansRes && ansRes.ok && ansRes.inquiry) {
+        deps.appendBoardLog(rootId, `⚡ ${fromLabel} 已原路回传问询 #${ansRes.inquiry.inquiryId}`, fromLabel)
+      }
+      return {
+        ok: Boolean(ansRes && ansRes.ok),
+        target: 'DSH 参谋长',
+        targetId: 'chief',
+        deliveryMode: 'inquiry-reply',
+        inquiryAnswered: ansRes && ansRes.inquiry ? ansRes.inquiry : null,
+        continueOwnWork: true,
+        ...(ansRes && !ansRes.ok ? { error: ansRes.error } : {}),
+      }
+    }
+    if (!cleanChiefBody) return { ok: false, error: '传话给参谋长的内容不能为空' }
+    const chiefMail = normalizeMail({
+      id: nextId('mail'),
+      from: fromLabel,
+      fromSession,
+      fromRootId: rootId,
+      to: 'chief',
+      toSession: 'chief',
+      toRootId: rootId,
+      participantRoots: rootId ? [rootId] : [],
+      channelType: 'internal',
+      subject: subject || '主对话求助与协同请求',
+      text: cleanChiefBody,
+      mode: mode || 'followup',
+      deliveredPhysical: true,
+      readBy: ['chief'],
+      at: Date.now(),
+    })
+    mutateChiefState((state) => {
+      const ws = ensureWorkspace(state, rootId || 'global')
+      if (chiefMail) {
+        ws.mailbox.push(chiefMail)
+        if (ws.mailbox.length > MAIL_CAP) ws.mailbox = ws.mailbox.slice(-MAIL_CAP)
+      }
+    })
+    if (recordBoardLog && rootId && typeof deps.appendBoardLog === 'function') {
+      deps.appendBoardLog(rootId, `📨 ${fromLabel} → @参谋长：${clamp(cleanChiefBody, 56)}`, fromLabel)
+    }
+    if (chiefDirectRequestHook) {
+      try {
+        const hookRes = await chiefDirectRequestHook(deps, {
+          fromSession: rootId || fromSession,
+          fromLabel,
+          subject,
+          text: cleanChiefBody,
+          mail: chiefMail,
+        })
+        if (hookRes && typeof hookRes === 'object') {
+          return {
+            ok: hookRes.ok !== false,
+            target: 'DSH 参谋长',
+            targetId: 'chief',
+            deliveryMode: 'chief-direct-request',
+            deliveredPhysical: true,
+            mail: chiefMail,
+            ...hookRes,
+          }
+        }
+      } catch (err) {
+        return {
+          ok: false,
+          target: 'DSH 参谋长',
+          mail: chiefMail,
+          error: String(err && err.message ? err.message : err),
+        }
+      }
+    }
+    return {
+      ok: true,
+      target: 'DSH 参谋长',
+      targetId: 'chief',
+      deliveryMode: 'chief-mailbox',
+      deliveredPhysical: true,
+      mail: chiefMail,
+    }
+  }
+
   const directory = await listPeerDirectory(deps, rootId || fromSession)
   const senderRootId = rootId || directory.rootId || ''
-  const rawTarget = String(target || 'lead').trim().replace(/^@/, '')
+  const rawTarget = rawTargetPre
 
   // Broadcast support: 'all' / '全体' / 'team' (deduplicated single mailbox record for clean drawer UI)
   if (['all', 'team', '全体', '所有人'].includes(rawTarget.toLowerCase())) {
@@ -430,6 +533,8 @@ export async function deliverCrossMessage(deps, {
     text: effectiveText,
     subject,
     mode,
+    envelopeKind,
+    taskId,
     imageBlocks: admittedBlocks,
     savedImagePaths: savedPaths,
     recordBoardLog,
@@ -448,6 +553,8 @@ async function deliverSinglePeer(deps, directory, peer, {
   text,
   subject,
   mode,
+  envelopeKind = 'relay',
+  taskId = '',
   imageBlocks = [],
   savedImagePaths = [],
   recordBoardLog,
@@ -462,10 +569,17 @@ async function deliverSinglePeer(deps, directory, peer, {
   const imgSuffix = imgCount > 0 ? ` [附图 ×${imgCount}]` : ''
   const imgNoticeBlock = buildSavedImageNotice(safePaths)
   const textWithImagePaths = imgNoticeBlock ? `${text}\n${imgNoticeBlock}` : text
-  const headerTag = mode === 'steer'
-    ? `[DSH 参谋长插话 · 来自 ${fromLabel}]`
-    : `[DSH 参谋长递话 · 来自 ${fromLabel}]`
-  const formatted = `${headerTag}${subject ? ' ' + subject : ''}\n${textWithImagePaths}\n\n（如需回信或同步进展，可调用参谋看板 chief_board({ action: "mail.send", target: "${fromLabel === 'DSH 参谋长' ? 'lead' : fromLabel}", text: "…" })）`
+  const headerTag = envelopeKind === 'execution_request'
+    ? `[EXECUTION_REQUEST${taskId ? ' #' + taskId : ''} · 来自 ${fromLabel}]`
+    : (envelopeKind === 'inquiry'
+        ? `[INQUIRY${taskId ? ' #' + taskId : ''} · DSH 参谋长优先问询]`
+        : (mode === 'steer'
+            ? `[DSH 参谋长插话 · 来自 ${fromLabel}]`
+            : `[DSH 参谋长递话 · 来自 ${fromLabel}]`))
+  const footerGuide = envelopeKind === 'inquiry'
+    ? '（请顺手调用 chief_board({ action: "inquiry.reply", text: "…" }) 原路作答，无需中断手头当前任务！）'
+    : `（如遇到需要参谋长协调、建议、或提权执行的需求，可调用 chief_board({ action: "chief.request", text: "…" }) 或 mail.send({ target: "chief", text: "…" })）`
+  const formatted = `${headerTag}${subject ? ' ' + subject : ''}\n${textWithImagePaths}\n\n${footerGuide}`
 
   let deliveredPhysical = false
   let deliveryMode = 'mailbox-queued'
@@ -507,10 +621,16 @@ async function deliverSinglePeer(deps, directory, peer, {
         } catch {}
       }
       if (targetAgent) {
-        const envelope = await buildMessageEnvelope(formatted, CHIEF_RELAY_SOURCE, {
+        const envelopeSourceKind = envelopeKind === 'execution_request'
+          ? CHIEF_EXEC_REQ_SOURCE
+          : (envelopeKind === 'inquiry' ? CHIEF_INQUIRY_SOURCE : CHIEF_RELAY_SOURCE)
+        const envelope = await buildMessageEnvelope(formatted, envelopeSourceKind, {
           senderName: fromLabel,
           senderSessionId: fromSession || undefined,
-          role: mode === 'steer' ? 'steer' : 'relay',
+          role: envelopeKind === 'execution_request'
+            ? 'execution_request'
+            : (envelopeKind === 'inquiry' ? 'inquiry' : (mode === 'steer' ? 'steer' : 'relay')),
+          ...(taskId ? { taskId } : {}),
         }, safeBlocks)
         try {
           if (mode === 'steer' && targetAgent.status === 'running' && typeof targetAgent.steer === 'function') {
@@ -618,9 +738,34 @@ export async function consumePreStepDelta(deps, agent) {
   )
 
   const deltaLines = []
+  let hasPriorityInquiry = false
   mutateChiefState((state) => {
     const view = clusterView(state, rootId)
     const ownWs = ensureWorkspace(state, rootId)
+
+    // 0. Highest priority: DSH Chief Inquiry Channel (answer without interrupting own task!)
+    if (Array.isArray(ownWs.inquiries)) {
+      const nowInq = Date.now()
+      for (const inq of ownWs.inquiries) {
+        if (!inq || inq.status !== 'pending') continue
+        if (inq.expiresAt && nowInq > inq.expiresAt) {
+          inq.status = 'expired'
+          continue
+        }
+        const tLower = String(inq.target || 'lead').toLowerCase()
+        const matchesMe = myHandles.has(tLower) || (!identity?.isChild && tLower === 'lead')
+        if (!matchesMe) continue
+        inq.status = 'delivered'
+        inq.deliveredAt = nowInq
+        hasPriorityInquiry = true
+        deltaLines.push(
+          `⚡ [INQUIRY #${inq.inquiryId}${inq.taskId ? ' / ' + inq.taskId : ''} · DSH 参谋长优先问询 · 答复后继续原动作勿中断]`
+          + `\n  问题：${inq.question}`
+          + (inq.context ? `\n  背景：${inq.context}` : '')
+          + `\n  ↳ 请在当前回合顺手调用 chief_board({ action: "inquiry.reply", inquiryId: "${inq.inquiryId}", text: "基于真实代码与状态的准确答复" }) 原路回传，然后立即继续你刚才的工作，切勿打断当前计划！`,
+        )
+      }
+    }
 
     // 1. Unread mailbox messages addressed to this session/handle (STRICT cluster isolation: ignore detached external peers!)
     for (const mail of view.mailbox) {
@@ -675,7 +820,11 @@ export async function consumePreStepDelta(deps, agent) {
     ...deltaLines,
   ].join('\n')
 
-  return buildMessageEnvelope(text, CHIEF_UPDATE_SOURCE, { form: 'snapshot' })
+  return buildMessageEnvelope(
+    text,
+    hasPriorityInquiry ? CHIEF_INQUIRY_SOURCE : CHIEF_UPDATE_SOURCE,
+    { form: hasPriorityInquiry ? 'priority_inquiry' : 'snapshot' },
+  )
 }
 
 /* -------------------------------------------------------------------------- */

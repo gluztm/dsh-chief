@@ -22,7 +22,13 @@ import {
   CHIEF_PERMISSION_META,
   normalizePermissionMode,
   permissionRank,
-} from './chief-executor.js'
+  auditJsonlPath as safetyAuditJsonlPath,
+  normalizeAuditRecord,
+  appendAuditJsonlRecord,
+  resolveRoleCapabilities,
+  buildCapabilityScope,
+  validatePolicyPluginList,
+} from './safety/index.js'
 
 const APPROVALS_CAP = 30
 
@@ -30,9 +36,23 @@ const AUDIT_LOG_CAP = 80
 
 const RESUME_TASKS_CAP = 20
 
+const TASK_LEDGER_CAP = 30
+
 const DEFAULT_RESUME_TTL_MS = 30 * 60 * 1000
 
 const STATE_VERSION = 1
+
+const activeResumingTaskIds = new Set()
+
+export function markTaskResumingActive(taskId) {
+  const id = String(taskId || '').trim()
+  if (id) activeResumingTaskIds.add(id)
+}
+
+export function unmarkTaskResumingActive(taskId) {
+  const id = String(taskId || '').trim()
+  if (id) activeResumingTaskIds.delete(id)
+}
 
 export const FACTS_CAP = 120
 
@@ -65,6 +85,12 @@ export const SUMMARY_RETRY_MAX_TOKENS = 32_768
 export const CHIEF_UPDATE_SOURCE = 'dsh-chief-update'
 
 export const CHIEF_RELAY_SOURCE = 'dsh-chief-relay'
+
+export const CHIEF_INQUIRY_SOURCE = 'dsh-chief-inquiry'
+
+export const CHIEF_EXEC_REQ_SOURCE = 'dsh-chief-execution-request'
+
+export const CHAT_OPPORTUNISTIC_SUMMARY_COOLDOWN_MS = 60_000
 
 const SECRET_PATTERN = /(?:sk-[a-zA-Z0-9_-]{16,}|ghp_[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|Bearer\s+[A-Za-z0-9._~+/=-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/
 
@@ -309,15 +335,7 @@ function stateFilePath() {
 }
 
 export function auditJsonlPath() {
-  return path.join(chiefDir(), 'chief-audit.jsonl')
-}
-
-function appendAuditJsonlLine(record) {
-  try {
-    const file = auditJsonlPath()
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.appendFileSync(file, JSON.stringify(record) + '\n', 'utf8')
-  } catch {}
+  return safetyAuditJsonlPath()
 }
 
 function canonicalSortJsonValue(val) {
@@ -362,7 +380,7 @@ function normalizePendingApproval(raw) {
   if (!raw || typeof raw !== 'object') return null
   const opLabel = clamp(raw.operationLabel || raw.operation || '', 80)
   if (!opLabel) return null
-  const validStatuses = ['pending', 'approved', 'rejected', 'executed', 'failed']
+  const validStatuses = ['pending', 'approved', 'rejected', 'executed', 'failed', 'expired']
   const status = validStatuses.includes(raw.status) ? raw.status : 'pending'
   const validKinds = ['tool', 'relay', 'compact', 'auto_continue']
   const kind = validKinds.includes(raw.kind) ? raw.kind : 'tool'
@@ -372,6 +390,16 @@ function normalizePendingApproval(raw) {
   const payloadHash = typeof raw.payloadHash === 'string' && raw.payloadHash.trim()
     ? raw.payloadHash.trim()
     : computeApprovalPayloadHash(kind, payload)
+  const taskId = clamp(raw.taskId || raw.resumeTaskId || '', 80)
+  const capabilityScope = raw.capabilityScope && typeof raw.capabilityScope === 'object'
+    ? raw.capabilityScope
+    : buildCapabilityScope({
+        kind,
+        tool: payload.tool || kind,
+        args: payload.args || {},
+        cwd: payload.cwd || '',
+        target: payload.target || '',
+      })
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : nextId('apr'),
     status,
@@ -384,7 +412,9 @@ function normalizePendingApproval(raw) {
     kind,
     payload,
     payloadHash,
-    resumeTaskId: clamp(raw.resumeTaskId || '', 80),
+    capabilityScope,
+    taskId,
+    resumeTaskId: taskId,
     expiresAt: Math.max(0, Number(raw.expiresAt) || 0),
     dedupeKey: clamp(raw.dedupeKey || '', 120),
     by: clamp(raw.by || 'chief', 40),
@@ -401,6 +431,7 @@ function normalizePendingElevation(raw) {
   const targetMode = normalizePermissionMode(raw.targetMode)
   if (targetMode === 'advisor') return null
   const createdAt = Number(raw.createdAt) || Date.now()
+  const taskId = clamp(raw.taskId || raw.resumeTaskId || '', 80)
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : nextId('elv'),
     status: 'pending',
@@ -408,65 +439,137 @@ function normalizePendingElevation(raw) {
     targetMode,
     reason: clamp(raw.reason || '当前任务需要更高参谋权限才能继续执行', 260),
     requestedActionSummary: clamp(raw.requestedActionSummary || '', 220),
-    resumeTaskId: clamp(raw.resumeTaskId || '', 80),
+    requestedCapabilities: Array.isArray(raw.requestedCapabilities)
+      ? raw.requestedCapabilities.map(c => clamp(c, 60)).filter(Boolean).slice(0, 12)
+      : [],
+    taskId,
+    resumeTaskId: taskId,
     expiresAt: Math.max(0, Number(raw.expiresAt) || (createdAt + DEFAULT_RESUME_TTL_MS)),
     by: clamp(raw.by || 'chief', 40),
     createdAt,
   }
 }
 
-function normalizeResumeTask(raw) {
+const VALID_TASK_LEDGER_STATUSES = [
+  'proposed',
+  'awaiting_elevation',
+  'awaiting_approval',
+  'awaiting_inquiry',
+  'dispatched',
+  'running',
+  'resuming',
+  'verifying',
+  'completed',
+  'interrupted',
+  'rejected',
+  'cancelled',
+  'expired',
+  'failed',
+]
+
+function normalizeTaskLedgerEntry(raw) {
   if (!raw || typeof raw !== 'object') return null
-  const originalText = cleanMultiline(raw.originalText || '', 2000)
+  const spec = raw.resumeSpec && typeof raw.resumeSpec === 'object' ? raw.resumeSpec : {}
+  const originalText = cleanMultiline(spec.originalText || raw.originalText || '', 2000)
   if (!originalText) return null
-  const validStatuses = ['awaiting_elevation', 'awaiting_approval', 'resuming', 'completed', 'cancelled', 'expired', 'failed']
-  const status = validStatuses.includes(raw.status) ? raw.status : 'awaiting_approval'
+  const status = VALID_TASK_LEDGER_STATUSES.includes(raw.status) ? raw.status : 'awaiting_approval'
   const createdAt = Number(raw.createdAt) || Date.now()
+  const updatedAt = Number(raw.updatedAt) || createdAt
+  const taskId = typeof (raw.taskId || raw.id) === 'string' && (raw.taskId || raw.id)
+    ? String(raw.taskId || raw.id)
+    : nextId('rtask')
+  const validKinds = ['approval_resume', 'elevation_resume', 'tool_execution', 'inquiry', 'auto_continue']
+  const kind = validKinds.includes(raw.kind)
+    ? raw.kind
+    : (raw.elevationId || status === 'awaiting_elevation' ? 'elevation_resume' : 'approval_resume')
+  const forcedTarget = clamp(spec.forcedTarget !== undefined ? spec.forcedTarget : (raw.forcedTarget || ''), 64)
+  const forcedModeRaw = spec.forcedMode !== undefined ? spec.forcedMode : raw.forcedMode
+  const forcedMode = ['steer', 'followup', 'silent'].includes(forcedModeRaw) ? forcedModeRaw : 'steer'
+  const rawImages = Array.isArray(spec.savedImagePaths) ? spec.savedImagePaths : raw.savedImagePaths
+  const savedImagePaths = Array.isArray(rawImages)
+    ? rawImages.slice(0, 4).filter(p => p && typeof p.path === 'string').map(p => ({
+        index: Number(p.index) || 1,
+        path: String(p.path),
+        name: clamp(p.name || '', 80),
+        mediaType: clamp(p.mediaType || '', 40),
+        bytes: Math.max(0, Number(p.bytes) || 0),
+      }))
+    : []
+  const rawCompleted = Array.isArray(spec.completedActions) ? spec.completedActions : raw.completedActions
+  const completedActions = Array.isArray(rawCompleted)
+    ? rawCompleted.map(x => clamp(x, 220)).filter(Boolean).slice(-12)
+    : []
+  const retryCount = Math.max(0, Math.min(4, Math.round(Number(raw.retryCount !== undefined ? raw.retryCount : raw.resumeDepth) || 0)))
+  const capabilityScope = raw.capabilityScope && typeof raw.capabilityScope === 'object' ? raw.capabilityScope : null
+  const payloadHash = typeof raw.payloadHash === 'string' ? raw.payloadHash.trim() : ''
   return {
-    id: typeof raw.id === 'string' && raw.id ? raw.id : nextId('rtask'),
+    id: taskId,
+    taskId,
+    kind,
     status,
+    capabilityScope,
+    payloadHash,
+    resumeSpec: {
+      originalText,
+      forcedTarget,
+      forcedMode,
+      savedImagePaths,
+      completedActions,
+    },
     originalText,
-    forcedTarget: clamp(raw.forcedTarget || '', 64),
-    forcedMode: ['steer', 'followup', 'silent'].includes(raw.forcedMode) ? raw.forcedMode : 'steer',
-    savedImagePaths: Array.isArray(raw.savedImagePaths)
-      ? raw.savedImagePaths.slice(0, 4).filter(p => p && typeof p.path === 'string').map(p => ({
-          index: Number(p.index) || 1,
-          path: String(p.path),
-          name: clamp(p.name || '', 80),
-          mediaType: clamp(p.mediaType || '', 40),
-          bytes: Math.max(0, Number(p.bytes) || 0),
-        }))
-      : [],
-    completedActions: Array.isArray(raw.completedActions)
-      ? raw.completedActions.map(x => clamp(x, 220)).filter(Boolean).slice(-12)
-      : [],
+    forcedTarget,
+    forcedMode,
+    savedImagePaths,
+    completedActions,
     pendingApprovalIds: Array.isArray(raw.pendingApprovalIds)
       ? [...new Set(raw.pendingApprovalIds.map(x => String(x || '').trim()).filter(Boolean))].slice(0, 12)
       : [],
     elevationId: clamp(raw.elevationId || '', 80),
-    resumeDepth: Math.max(0, Math.min(4, Math.round(Number(raw.resumeDepth) || 0))),
+    inquiryId: clamp(raw.inquiryId || '', 80),
+    lastReceipt: cleanMultiline(raw.lastReceipt || '', 300),
+    retryCount,
+    resumeDepth: retryCount,
     createdAt,
+    updatedAt,
     expiresAt: Math.max(0, Number(raw.expiresAt) || (createdAt + DEFAULT_RESUME_TTL_MS)),
     resolvedAt: Math.max(0, Number(raw.resolvedAt) || 0),
   }
 }
 
+export function recoverTaskLedgerEntriesOnDiskLoad(entries, now = Date.now()) {
+  if (!Array.isArray(entries)) return []
+  return entries.map((entry) => {
+    if (!entry || typeof entry !== 'object') return entry
+    const tid = entry.taskId || entry.id
+    if (
+      (entry.status === 'running' || entry.status === 'resuming' || entry.status === 'verifying')
+      && !activeResumingTaskIds.has(tid)
+    ) {
+      return {
+        ...entry,
+        status: 'interrupted',
+        updatedAt: now,
+        lastReceipt: entry.lastReceipt || '检测到上次运行中断，已安全降级为 interrupted 等待人工确认续跑',
+      }
+    }
+    if (
+      (entry.status === 'proposed' || entry.status === 'awaiting_approval' || entry.status === 'awaiting_elevation' || entry.status === 'awaiting_inquiry')
+      && entry.expiresAt > 0
+      && now > entry.expiresAt
+    ) {
+      return {
+        ...entry,
+        status: 'expired',
+        updatedAt: now,
+        resolvedAt: entry.resolvedAt || now,
+      }
+    }
+    return entry
+  })
+}
+
 function normalizeAuditEntry(raw) {
-  if (!raw || typeof raw !== 'object') return null
-  const op = clamp(raw.operation || raw.tool || '', 80)
-  if (!op) return null
-  return {
-    id: typeof raw.id === 'string' && raw.id ? raw.id : nextId('aud'),
-    at: Number(raw.at) || Date.now(),
-    mode: normalizePermissionMode(raw.mode || DEFAULT_CHIEF_PERMISSION_MODE),
-    stage: clamp(raw.stage || 'executor', 40),
-    decision: clamp(raw.decision || 'executed', 40),
-    operation: op,
-    target: clamp(raw.target || '', 140),
-    reason: clamp(raw.reason || '', 220),
-    outcome: clamp(raw.outcome || 'ok', 40),
-    by: clamp(raw.by || 'chief', 40),
-  }
+  return normalizeAuditRecord(raw, DEFAULT_CHIEF_PERMISSION_MODE)
 }
 
 export function pushAuditToWs(ws, entry = {}, sessionId = '') {
@@ -476,24 +579,24 @@ export function pushAuditToWs(ws, entry = {}, sessionId = '') {
   if (!norm) return null
   ws.auditLog.push(norm)
   if (ws.auditLog.length > AUDIT_LOG_CAP) ws.auditLog = ws.auditLog.slice(-AUDIT_LOG_CAP)
-  appendAuditJsonlLine({
-    ...(sessionId ? { sessionId: String(sessionId) } : {}),
-    ...norm,
-  })
+  appendAuditJsonlRecord(norm, sessionId)
   return norm
 }
 
 function emptyWorkspace() {
+  const sharedLedger = []
   return {
     config: null,
     chiefRiskAck: null,
     pendingApprovals: [],
     pendingElevation: null,
-    resumeTasks: [],
+    taskLedger: sharedLedger,
+    resumeTasks: sharedLedger,
     auditLog: [],
     facts: [],
     narrative: { hash: '', text: '', at: 0, byModel: '', clusterSig: '' },
     suggestions: [],
+    inquiries: [],
     chat: [],
     mailbox: [],
     seenMailAt: {},
@@ -545,22 +648,24 @@ export function normalizeSuggestion(raw) {
   if (!raw || typeof raw !== 'object') return null
   const title = clamp(raw.title, 90)
   if (!title) return null
-  const kind = ['bound', 'board', 'goal_approval', 'relay', 'advice'].includes(raw.kind) ? raw.kind : 'relay'
+  const kind = ['bound', 'board', 'goal_approval', 'relay', 'advice', 'guard_wall'].includes(raw.kind) ? raw.kind : 'relay'
   const boundField = ['forbidden', 'allowed', 'notes'].includes(raw.boundField) ? raw.boundField : 'forbidden'
   const replaces = Array.isArray(raw.replaces)
     ? raw.replaces.map(x => String(x || '').trim()).filter(Boolean).slice(0, 20)
     : []
+  const wallSpec = raw.wallSpec && typeof raw.wallSpec === 'object' ? { ...raw.wallSpec } : null
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : nextId('sug'),
     kind,
     boundField,
     replaces,
     pinGlobal: Boolean(raw.pinGlobal),
+    ...(wallSpec ? { wallSpec } : {}),
     fromAgent: clamp(raw.fromAgent || '', 48),
     title,
     reason: clamp(raw.reason || '', 220),
-    target: clamp(raw.target || (kind === 'bound' ? 'bounds' : kind === 'goal_approval' ? 'board' : 'lead'), 64),
-    targetLabel: clamp(raw.targetLabel || raw.target || (kind === 'bound' ? '工作边界' : kind === 'goal_approval' ? '目标结项批示' : kind === 'advice' ? '参谋进言' : '主对话'), 40),
+    target: clamp(raw.target || (kind === 'bound' ? 'bounds' : kind === 'guard_wall' ? 'guard_walls' : kind === 'goal_approval' ? 'board' : 'lead'), 64),
+    targetLabel: clamp(raw.targetLabel || raw.target || (kind === 'bound' ? '工作边界' : kind === 'guard_wall' ? '物理驻墙' : kind === 'goal_approval' ? '目标结项批示' : kind === 'advice' ? '参谋进言' : '主对话'), 40),
     mode: ['steer', 'followup', 'silent'].includes(raw.mode) ? raw.mode : (kind === 'advice' ? 'followup' : 'steer'),
     draftText: cleanMultiline(raw.draftText || '', 600),
     evidence: cleanMultiline(raw.evidence || '', 600),
@@ -570,6 +675,32 @@ export function normalizeSuggestion(raw) {
     urgency: ['normal', 'high'].includes(raw.urgency) ? raw.urgency : 'normal',
     status: ['pending', 'applied', 'dismissed'].includes(raw.status) ? raw.status : 'pending',
     createdAt: Number(raw.createdAt) || Date.now(),
+  }
+}
+
+export function normalizeInquiryItem(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const question = cleanMultiline(raw.question || raw.text || '', 600)
+  if (!question) return null
+  const status = ['pending', 'delivered', 'answered', 'expired'].includes(raw.status) ? raw.status : 'pending'
+  const inquiryId = typeof (raw.inquiryId || raw.id) === 'string' && (raw.inquiryId || raw.id)
+    ? String(raw.inquiryId || raw.id)
+    : nextId('inq')
+  return {
+    id: inquiryId,
+    inquiryId,
+    taskId: clamp(raw.taskId || '', 80),
+    target: clamp(raw.target || 'lead', 64),
+    question,
+    context: clamp(raw.context || '', 220),
+    answer: cleanMultiline(raw.answer || '', 1200),
+    status,
+    by: clamp(raw.by || 'chief', 40),
+    answeredBy: clamp(raw.answeredBy || '', 40),
+    createdAt: Number(raw.createdAt) || Date.now(),
+    deliveredAt: Number(raw.deliveredAt) || 0,
+    answeredAt: Number(raw.answeredAt) || 0,
+    expiresAt: Number(raw.expiresAt) || ((Number(raw.createdAt) || Date.now()) + DEFAULT_RESUME_TTL_MS),
   }
 }
 
@@ -621,6 +752,10 @@ function normalizeWorkspace(raw) {
     .map(normalizeSuggestion)
     .filter(Boolean)
     .slice(-SUGGESTIONS_CAP * 2)
+  base.inquiries = (Array.isArray(src.inquiries) ? src.inquiries : [])
+    .map(normalizeInquiryItem)
+    .filter(Boolean)
+    .slice(-24)
   base.chat = (Array.isArray(src.chat) ? src.chat : [])
     .filter(item => item && typeof item === 'object' && typeof item.text === 'string')
     .slice(-CHAT_CAP)
@@ -683,10 +818,15 @@ function normalizeWorkspace(raw) {
     .filter(Boolean)
     .slice(-APPROVALS_CAP)
   base.pendingElevation = normalizePendingElevation(src.pendingElevation)
-  base.resumeTasks = (Array.isArray(src.resumeTasks) ? src.resumeTasks : [])
-    .map(normalizeResumeTask)
+  const rawLedgerSrc = Array.isArray(src.taskLedger) && src.taskLedger.length > 0
+    ? src.taskLedger
+    : (Array.isArray(src.resumeTasks) ? src.resumeTasks : [])
+  const normalizedLedger = rawLedgerSrc
+    .map(normalizeTaskLedgerEntry)
     .filter(Boolean)
-    .slice(-RESUME_TASKS_CAP)
+    .slice(-TASK_LEDGER_CAP)
+  base.taskLedger = normalizedLedger
+  base.resumeTasks = normalizedLedger
   base.auditLog = (Array.isArray(src.auditLog) ? src.auditLog : [])
     .map(normalizeAuditEntry)
     .filter(Boolean)
@@ -699,11 +839,14 @@ function normalizeWorkspace(raw) {
     const rawPerm = typeof src.config.permissionMode === 'string'
       ? normalizePermissionMode(src.config.permissionMode, { requireAck: true, hasChiefRiskAck: ackOk })
       : DEFAULT_CHIEF_PERMISSION_MODE
+    const plugCheck = validatePolicyPluginList(src.config.policyPlugins)
+    const policyPlugins = plugCheck.ok ? plugCheck.plugins : []
     base.config = {
       ...(typeof src.config.modelRef === 'string' ? { modelRef: src.config.modelRef.trim() } : {}),
       permissionMode: rawPerm,
       ...(typeof src.config.stopped === 'boolean' || pm === 'stopped' ? { stopped: rawStopped } : {}),
       ...(pm ? { paceMode: pm, autoPilot: !rawStopped && pm === 'auto', autoReview: !rawStopped && pm !== 'manual' } : {}),
+      ...(policyPlugins.length > 0 ? { policyPlugins } : {}),
       ...(src.config.tacticalModes && typeof src.config.tacticalModes === 'object'
         ? { tacticalModes: normalizeTacticalModes(src.config.tacticalModes) }
         : {}),
@@ -800,16 +943,25 @@ export function resolveWorkspaceConfig(state, sessionId = '') {
   const rawPerm = (wsCfg && typeof wsCfg.permissionMode === 'string')
     ? wsCfg.permissionMode
     : DEFAULT_CHIEF_PERMISSION_MODE
-  const permissionMode = normalizePermissionMode(rawPerm, {
-    requireAck: true,
+  const globalPlugCheck = validatePolicyPluginList(base.policyPlugins)
+  const wsPlugCheck = validatePolicyPluginList(wsCfg && wsCfg.policyPlugins)
+  const policyPlugins = [
+    ...(globalPlugCheck.ok ? globalPlugCheck.plugins : []),
+    ...(wsPlugCheck.ok ? wsPlugCheck.plugins : []),
+  ]
+  const resolvedRoleCaps = resolveRoleCapabilities(rawPerm, {
     hasChiefRiskAck: ackOk,
+    policyPlugins,
   })
+  const permissionMode = resolvedRoleCaps.role
   const chiefRiskVerified = permissionMode === 'chief' ? ackOk : false
   return {
     modelRef,
     paceMode,
     stopped,
     permissionMode,
+    capabilities: resolvedRoleCaps.capabilities,
+    policyPlugins,
     chiefRiskVerified,
     autoPilot: !stopped && paceMode === 'auto',
     autoReview: !stopped && paceMode !== 'manual',
@@ -883,6 +1035,7 @@ function normalizeState(raw) {
   const rawPace = validPaces.includes(cfg.paceMode) ? cfg.paceMode : 'manual'
   const stopped = rawPace === 'stopped' || Boolean(cfg.stopped)
   const paceMode = stopped ? 'stopped' : rawPace
+  const globalPlugRes = validatePolicyPluginList(cfg.policyPlugins)
   return {
     version: STATE_VERSION,
     config: {
@@ -892,6 +1045,7 @@ function normalizeState(raw) {
       permissionMode: DEFAULT_CHIEF_PERMISSION_MODE,
       autoPilot: !stopped && paceMode === 'auto',
       autoReview: !stopped && paceMode !== 'manual',
+      ...(globalPlugRes.ok && globalPlugRes.plugins.length > 0 ? { policyPlugins: globalPlugRes.plugins } : {}),
       tacticalModes: normalizeTacticalModes(cfg.tacticalModes),
     },
     links,
@@ -982,30 +1136,116 @@ export function requestChiefElevation(sessionId = 'global', req = {}) {
   })
 }
 
-export function upsertResumeTaskOnWs(ws, rawTask = {}) {
+export function upsertTaskLedgerOnWs(ws, rawTask = {}) {
   if (!ws || typeof ws !== 'object') return null
-  if (!Array.isArray(ws.resumeTasks)) ws.resumeTasks = []
-  const existingIdx = rawTask.id ? ws.resumeTasks.findIndex(t => t && t.id === rawTask.id) : -1
+  if (!Array.isArray(ws.taskLedger)) {
+    ws.taskLedger = Array.isArray(ws.resumeTasks) ? ws.resumeTasks : []
+  }
+  ws.resumeTasks = ws.taskLedger
+  const lookupId = rawTask.taskId || rawTask.id
+  const existingIdx = lookupId ? ws.taskLedger.findIndex(t => t && (t.taskId === lookupId || t.id === lookupId)) : -1
   if (existingIdx >= 0) {
-    const prev = ws.resumeTasks[existingIdx]
-    const merged = normalizeResumeTask({
+    const prev = ws.taskLedger[existingIdx]
+    const merged = normalizeTaskLedgerEntry({
       ...prev,
       ...rawTask,
+      updatedAt: Date.now(),
       completedActions: rawTask.appendCompletedAction
         ? [...(prev.completedActions || []), rawTask.appendCompletedAction]
         : (rawTask.completedActions || prev.completedActions),
       pendingApprovalIds: rawTask.pendingApprovalIds || prev.pendingApprovalIds,
     })
-    if (merged) ws.resumeTasks[existingIdx] = merged
+    if (merged) ws.taskLedger[existingIdx] = merged
     return merged
   }
-  const created = normalizeResumeTask(rawTask)
+  const created = normalizeTaskLedgerEntry(rawTask)
   if (!created) return null
-  ws.resumeTasks.push(created)
-  if (ws.resumeTasks.length > RESUME_TASKS_CAP) {
-    ws.resumeTasks = ws.resumeTasks.slice(-RESUME_TASKS_CAP)
+  ws.taskLedger.push(created)
+  if (ws.taskLedger.length > TASK_LEDGER_CAP) {
+    ws.taskLedger = ws.taskLedger.slice(-TASK_LEDGER_CAP)
+    ws.resumeTasks = ws.taskLedger
   }
   return created
+}
+
+export function upsertResumeTaskOnWs(ws, rawTask = {}) {
+  return upsertTaskLedgerOnWs(ws, rawTask)
+}
+
+export function enqueueChiefInquiryOnWs(ws, raw = {}) {
+  if (!ws || typeof ws !== 'object') return null
+  if (!Array.isArray(ws.inquiries)) ws.inquiries = []
+  const norm = normalizeInquiryItem(raw)
+  if (!norm) return null
+  const dup = ws.inquiries.find(
+    q => q && (q.status === 'pending' || q.status === 'delivered') && q.question === norm.question && q.target === norm.target,
+  )
+  if (dup) return dup
+  ws.inquiries.push(norm)
+  if (ws.inquiries.length > 24) ws.inquiries = ws.inquiries.slice(-24)
+  return norm
+}
+
+export function answerChiefInquiry(sessionId = 'global', { inquiryId = '', answer = '', by = 'lead' } = {}) {
+  const rootId = String(sessionId || 'global').trim() || 'global'
+  const cleanAns = cleanMultiline(answer || '', 1200)
+  if (!cleanAns) return { ok: false, error: 'inquiry.reply 需要非空答复文本 (text)' }
+  return mutateChiefState((state) => {
+    const ws = ensureWorkspace(state, rootId)
+    if (!Array.isArray(ws.inquiries)) ws.inquiries = []
+    let idx = inquiryId
+      ? ws.inquiries.findIndex(q => q && (q.inquiryId === inquiryId || q.id === inquiryId))
+      : -1
+    if (idx < 0 && !inquiryId) {
+      for (let i = ws.inquiries.length - 1; i >= 0; i -= 1) {
+        if (ws.inquiries[i] && (ws.inquiries[i].status === 'pending' || ws.inquiries[i].status === 'delivered')) {
+          idx = i
+          break
+        }
+      }
+    }
+    if (idx < 0) return { ok: false, error: `未找到待回复问询：${inquiryId || '最近未答问询'}` }
+    const now = Date.now()
+    const item = {
+      ...ws.inquiries[idx],
+      status: 'answered',
+      answer: cleanAns,
+      answeredBy: clamp(by || 'lead', 40),
+      answeredAt: now,
+    }
+    ws.inquiries[idx] = item
+    if (item.taskId) {
+      upsertTaskLedgerOnWs(ws, {
+        taskId: item.taskId,
+        kind: 'inquiry',
+        status: 'completed',
+        inquiryId: item.inquiryId,
+        lastReceipt: `已收到 ${item.answeredBy} 原路答复：${clamp(cleanAns, 120)}`,
+        resolvedAt: now,
+      })
+    }
+    ws.chat.push({
+      id: nextId('chat'),
+      role: 'chief',
+      kind: 'receipt',
+      text: `- 【⚡ 优先问询回执 #${item.inquiryId}】已收到 \`${item.answeredBy}\` 不中断原路回复：\n- 【问】${item.question}\n- 【答】${cleanAns}`,
+      actions: [`问询已回执 #${item.inquiryId}`],
+      at: now,
+    })
+    if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+    pushAuditToWs(ws, {
+      mode: resolveWorkspaceConfig(state, rootId).permissionMode,
+      stage: 'inquiry_channel',
+      rule: 'inquiry_reply',
+      decision: 'answered',
+      operation: '优先问询原路回复',
+      target: item.inquiryId,
+      reason: clamp(cleanAns, 140),
+      outcome: 'ok',
+      by: item.answeredBy,
+    }, rootId)
+    return { ok: true, inquiry: item }
+  })
 }
 
 const STATE_LOCK_WAIT_MS = 10000
@@ -1094,13 +1334,34 @@ let cachedState = null
 
 let cachedMtime = 0
 
+function applyColdLoadLedgerRecovery(state) {
+  if (!state || !state.workspaces || typeof state.workspaces !== 'object') return false
+  let changed = false
+  const now = Date.now()
+  for (const ws of Object.values(state.workspaces)) {
+    if (!ws || !Array.isArray(ws.taskLedger) || ws.taskLedger.length === 0) continue
+    const beforeStatuses = ws.taskLedger.map(t => t && t.status)
+    const recovered = recoverTaskLedgerEntriesOnDiskLoad(ws.taskLedger, now)
+    ws.taskLedger = recovered
+    ws.resumeTasks = recovered
+    for (let i = 0; i < recovered.length; i += 1) {
+      if (recovered[i] && recovered[i].status !== beforeStatuses[i]) {
+        changed = true
+      }
+    }
+  }
+  return changed
+}
+
 export function loadChiefState({ forceDisk = false } = {}) {
   const file = stateFilePath()
   try {
     const stat = fs.statSync(file)
     if (!forceDisk && cachedState && stat.mtimeMs === cachedMtime) return cachedState
     const parsed = JSON.parse(fs.readFileSync(file, 'utf8'))
-    cachedState = normalizeState(parsed)
+    const nextState = normalizeState(parsed)
+    applyColdLoadLedgerRecovery(nextState)
+    cachedState = nextState
     cachedMtime = stat.mtimeMs
     return cachedState
   } catch {
@@ -1112,6 +1373,10 @@ export function loadChiefState({ forceDisk = false } = {}) {
     if (!cachedState) cachedState = normalizeState({})
     return cachedState
   }
+}
+
+export function reconcileChiefStateOnBoot() {
+  return mutateChiefState((state) => applyColdLoadLedgerRecovery(state))
 }
 
 export function saveChiefState(state) {
@@ -1499,6 +1764,31 @@ export function updateChiefConfig(patch) {
       }
     }
 
+    // Check explicit Policy Plugin list (restrict-only) BEFORE applying any changes
+    let validatedPlugins = null
+    if (safePatch.policyPlugins !== undefined) {
+      const plugCheck = validatePolicyPluginList(safePatch.policyPlugins)
+      if (!plugCheck.ok) {
+        pushAuditToWs(ws, {
+          mode: effBefore.permissionMode,
+          stage: 'policy_plugin',
+          rule: plugCheck.code || 'policy_plugin_rejected',
+          decision: 'rejected',
+          operation: '配置只紧不松策略插件',
+          target: sid,
+          reason: plugCheck.error,
+          outcome: 'rejected',
+          by: clamp(safePatch.by || 'operator', 40),
+        }, sid)
+        return {
+          ok: false,
+          code: plugCheck.code || 'POLICY_PLUGIN_WEAKENING_FORBIDDEN',
+          error: plugCheck.error,
+        }
+      }
+      validatedPlugins = plugCheck.plugins
+    }
+
     // Check explicit permission mode transition BEFORE applying any changes
     let normalizedReqPerm = ''
     if (typeof safePatch.permissionMode === 'string' && safePatch.permissionMode.trim()) {
@@ -1642,8 +1932,33 @@ export function updateChiefConfig(patch) {
       }
     }
 
-    if (!ws.config || typeof ws.config !== 'object') ws.config = { ...effBefore }
+    if (!ws.config || typeof ws.config !== 'object') {
+      ws.config = {
+        modelRef: effBefore.modelRef || '',
+        paceMode: effBefore.paceMode || 'manual',
+        permissionMode: effBefore.permissionMode || DEFAULT_CHIEF_PERMISSION_MODE,
+        tacticalModes: { ...effBefore.tacticalModes },
+      }
+    }
     applyPatchTo(ws.config, true, true, true)
+    if (validatedPlugins !== null) {
+      if (safePatch.policyPluginsScope === 'global') {
+        state.config.policyPlugins = validatedPlugins
+      } else {
+        ws.config.policyPlugins = validatedPlugins
+      }
+      pushAuditToWs(ws, {
+        mode: resolveWorkspaceConfig(state, sid).permissionMode,
+        stage: 'policy_plugin',
+        rule: 'policy_plugin_updated',
+        decision: 'executed',
+        operation: '更新安全策略插件',
+        target: `${safePatch.policyPluginsScope === 'global' ? 'global' : sid} (${validatedPlugins.length} 个)`,
+        reason: `已加载 ${validatedPlugins.length} 个只紧不松安全策略插件`,
+        outcome: 'ok',
+        by: clamp(safePatch.by || 'operator', 40),
+      }, sid)
+    }
     // Session permissionMode, intervention, and autoPilot NEVER leak globally across new sessions!
     state.config.permissionMode = DEFAULT_CHIEF_PERMISSION_MODE
     applyPatchTo(state.config, false, false, false)
@@ -1757,21 +2072,122 @@ export function isInternalCheckpointNoise(text) {
   return false
 }
 
+function repairJsonInvalidEscapes(jsonStr) {
+  let out = ''
+  let inString = false
+  for (let i = 0; i < jsonStr.length; i += 1) {
+    const ch = jsonStr[i]
+    if (!inString) {
+      if (ch === '"') inString = true
+      out += ch
+      continue
+    }
+    if (ch === '"') {
+      inString = false
+      out += ch
+      continue
+    }
+    if (ch === '\\') {
+      const next = jsonStr[i + 1]
+      if (next === undefined) {
+        out += '\\\\'
+        continue
+      }
+      if (next === 'u' && /^[0-9a-fA-F]{4}$/.test(jsonStr.slice(i + 2, i + 6))) {
+        out += jsonStr.slice(i, i + 6)
+        i += 5
+        continue
+      }
+      if ('"\\/bfnrt'.includes(next)) {
+        out += '\\' + next
+        i += 1
+        continue
+      }
+      // Escape invalid bare backslash (e.g. regex \s, \., Windows D:\path) inside JSON strings
+      out += '\\\\'
+      continue
+    }
+    out += ch
+  }
+  return out
+}
+
+function tryParseJsonRobust(candidate) {
+  if (!candidate) return null
+  try {
+    const parsed = JSON.parse(candidate)
+    if (parsed && typeof parsed === 'object') return parsed
+  } catch {}
+  try {
+    const repaired = repairJsonInvalidEscapes(candidate)
+    const parsed = JSON.parse(repaired)
+    if (parsed && typeof parsed === 'object') return parsed
+  } catch {}
+  return null
+}
+
 export function extractJsonObject(raw) {
   const text = String(raw || '').trim()
   if (!text) return null
   const stripped = text.replace(/^```(?:json)?\s*/i, '').replace(/\s*```$/i, '').trim()
-  try {
-    const direct = JSON.parse(stripped)
-    if (direct && typeof direct === 'object') return direct
-  } catch {}
+  const direct = tryParseJsonRobust(stripped)
+  if (direct) return direct
   const first = text.indexOf('{')
   const last = text.lastIndexOf('}')
   if (first !== -1 && last > first) {
-    try {
-      const sliced = JSON.parse(text.slice(first, last + 1))
-      if (sliced && typeof sliced === 'object') return sliced
-    } catch {}
+    const sliced = tryParseJsonRobust(text.slice(first, last + 1))
+    if (sliced) return sliced
   }
   return null
+}
+
+const activeChiefWorkMap = new Map()
+const ACTIVE_CHIEF_WORK_TTL_MS = 90_000
+
+export function beginChiefActiveWork(rootSessionId, spec = {}) {
+  const key = String(rootSessionId || 'global').trim() || 'global'
+  const id = 'cwork-' + Date.now().toString(36) + '-' + Math.random().toString(36).slice(2, 6)
+  activeChiefWorkMap.set(key, {
+    id,
+    tone: String(spec.tone || 'neon'),
+    tab: String(spec.tab || ''),
+    boundSubTab: String(spec.boundSubTab || ''),
+    label: String(spec.label || '参谋长正在自动维护中...'),
+    startedAt: Date.now(),
+  })
+  return id
+}
+
+export function updateChiefActiveWork(rootSessionId, workId, patchSpec = {}) {
+  const key = String(rootSessionId || 'global').trim() || 'global'
+  const cur = activeChiefWorkMap.get(key)
+  if (!cur || (workId && cur.id !== workId)) return false
+  activeChiefWorkMap.set(key, {
+    ...cur,
+    ...(patchSpec.tone ? { tone: String(patchSpec.tone) } : {}),
+    ...(patchSpec.tab !== undefined ? { tab: String(patchSpec.tab || '') } : {}),
+    ...(patchSpec.boundSubTab !== undefined ? { boundSubTab: String(patchSpec.boundSubTab || '') } : {}),
+    ...(patchSpec.label ? { label: String(patchSpec.label) } : {}),
+  })
+  return true
+}
+
+export function endChiefActiveWork(rootSessionId, workId = '') {
+  const key = String(rootSessionId || 'global').trim() || 'global'
+  const cur = activeChiefWorkMap.get(key)
+  if (!cur) return false
+  if (workId && cur.id !== workId) return false
+  activeChiefWorkMap.delete(key)
+  return true
+}
+
+export function getChiefActiveWork(rootSessionId) {
+  const key = String(rootSessionId || 'global').trim() || 'global'
+  const cur = activeChiefWorkMap.get(key)
+  if (!cur) return null
+  if (Date.now() - Number(cur.startedAt || 0) > ACTIVE_CHIEF_WORK_TTL_MS) {
+    activeChiefWorkMap.delete(key)
+    return null
+  }
+  return { ...cur }
 }

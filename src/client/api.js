@@ -33,6 +33,39 @@ import {
   truncationNotice,
 } from './utils.js'
 
+function syncBackendActiveWork(activeWork) {
+  const cleanWork = activeWork && activeWork.id ? activeWork : null
+  const prevWork = store.chiefMeta && store.chiefMeta.activeWork
+  if (cleanWork) {
+    const seen = store.seenBackendWorkIds || {}
+    if (!store.chiefWorkFx && cleanWork.tab && !seen[cleanWork.id]) {
+      patch({
+        tab: cleanWork.tab,
+        ...(cleanWork.boundSubTab ? { boundSubTab: cleanWork.boundSubTab } : {}),
+        seenBackendWorkIds: { ...seen, [cleanWork.id]: true },
+      })
+      if (cleanWork.tab === 'archive' && !store.archiveLoaded) void loadArchives(false)
+    } else if (cleanWork.id && !seen[cleanWork.id]) {
+      patch({ seenBackendWorkIds: { ...seen, [cleanWork.id]: true } })
+    }
+    if (!runtimeRefs.fastWorkPollTimer && typeof setTimeout === 'function') {
+      runtimeRefs.fastWorkPollTimer = setTimeout(() => {
+        runtimeRefs.fastWorkPollTimer = null
+        if (store.chiefMeta && store.chiefMeta.activeWork) {
+          void refresh()
+        }
+      }, 1200)
+    }
+  } else if (prevWork && prevWork.id) {
+    if (runtimeRefs.fastWorkPollTimer) {
+      clearTimeout(runtimeRefs.fastWorkPollTimer)
+      runtimeRefs.fastWorkPollTimer = null
+    }
+    if (prevWork.tab === 'archive') void loadArchives(true)
+    void loadChiefView(false)
+  }
+}
+
 function applySecView(viewData) {
   if (!viewData || typeof viewData !== 'object') return
   const pendingSuggestions = Array.isArray(viewData.suggestions)
@@ -63,6 +96,7 @@ function applySecView(viewData) {
   const patchObj = {
     secView: viewData,
     ...(viewData.models ? { secModelsCatalog: viewData.models } : {}),
+    ...(Array.isArray(viewData.guardWalls) ? { guardWalls: viewData.guardWalls } : {}),
     chiefMeta: {
       ...prevMeta,
       paceMode: cfg.paceMode || 'manual',
@@ -88,6 +122,7 @@ function applySecView(viewData) {
       factsCount,
       mailboxCount,
       linkedPeersCount,
+      activeWork: viewData.activeWork !== undefined ? viewData.activeWork : (prevMeta.activeWork || null),
     },
   }
   const nextHazard = viewData.runtimeGuard && viewData.runtimeGuard.hazardAlert
@@ -96,7 +131,9 @@ function applySecView(viewData) {
     patchObj.seenHazardAlertIds = { ...seenHazards, [nextHazard.id]: true }
     patchObj.hazardHaltModal = nextHazard
   }
+  const nextWorkVal = patchObj.chiefMeta.activeWork
   patch(patchObj)
+  syncBackendActiveWork(nextWorkVal)
 }
 
 export async function call(path, init) {
@@ -117,6 +154,7 @@ export async function call(path, init) {
   if (value && Array.isArray(value.subagents)) patch({ subagents: value.subagents })
   if (value && value.agentIdentity) patch({ agentIdentity: value.agentIdentity })
   if (value && value.boundaries) patch({ boundaries: value.boundaries })
+  if (value && Array.isArray(value.guardWalls)) patch({ guardWalls: value.guardWalls })
   if (value && (value.chiefMeta || value.hostCompat)) {
     const patchObj = {}
     if (value.chiefMeta) {
@@ -137,6 +175,9 @@ export async function call(path, init) {
     const compat = value.hostCompat || (value.chiefMeta && value.chiefMeta.hostCompat)
     if (compat) patchObj.hostCompat = compat
     patch(patchObj)
+    if (value.chiefMeta && Object.prototype.hasOwnProperty.call(value.chiefMeta, 'activeWork')) {
+      syncBackendActiveWork(value.chiefMeta.activeWork)
+    }
   }
   if (value && value.archiveMeta) {
     const nextMeta = { ...store.archiveMeta, ...value.archiveMeta }
@@ -450,6 +491,9 @@ export async function decideSuggestion(sug, decision, editedText = '', boundFiel
         } else {
           patch({ notice: `${isPinned ? '📌 已批准并定住全局' : '已批准注入本任务'}【${label}】` })
         }
+      } else if (sug.kind === 'guard_wall') {
+        const applied = value && value.wallApplied
+        patch({ notice: '🧱 已落锁物理驻墙：' + ((applied && applied.title) || sug.title || '') })
       } else if (sug.kind === 'advice') {
         patch({ notice: '💡 已采纳参谋长建议并递交 → @' + (sug.targetLabel || sug.target || '主对话') })
       } else {
@@ -467,35 +511,44 @@ export async function decideSuggestion(sug, decision, editedText = '', boundFiel
 }
 
 export async function executePendingSuggestions(opts = {}) {
-  patch({ secBusy: true, error: '' })
-  try {
-    const value = await call('chief/suggestion', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        session: store.sessionId,
-        decision: 'execute_batch',
-        batch: true,
-        ...(Array.isArray(opts.ids) && opts.ids.length ? { ids: opts.ids } : {}),
-        ...(typeof opts.includeGoalApproval === 'boolean' ? { includeGoalApproval: opts.includeGoalApproval } : {}),
-        ...(typeof opts.pinGlobalDefault === 'boolean' ? { pinGlobalDefault: opts.pinGlobalDefault } : {}),
-      }),
-    })
-    const execCount = Number(value && value.executedCount) || 0
-    const blockedCount = Number(value && value.blockedCount) || 0
-    const skippedGoals = Number(value && value.skippedGoalCount) || 0
-    const parts = [`✓ 已执行 ${execCount} 项参谋建议`]
-    if (blockedCount > 0) parts.push(`拦截 ${blockedCount} 项越界建议`)
-    if (skippedGoals > 0) parts.push(`保留 ${skippedGoals} 项结项请示单独拍板`)
-    patch({ notice: parts.join(' · ') })
-    void refresh()
-    return value
-  } catch (error) {
-    patch({ error: String((error && error.message) || error) })
-    return null
-  } finally {
-    patch({ secBusy: false })
-  }
+  const allPending = (store.secView && Array.isArray(store.secView.suggestions))
+    ? store.secView.suggestions.filter(s => s && s.status === 'pending')
+    : []
+  const targetList = (Array.isArray(opts.ids) && opts.ids.length)
+    ? allPending.filter(s => opts.ids.includes(s.id))
+    : allPending
+  const fxSpec = resolveChiefSuggestionWorkFx(targetList)
+  return await withChiefWorkFx({ ...fxSpec, minMs: 480 }, async () => {
+    patch({ secBusy: true, error: '' })
+    try {
+      const value = await call('chief/suggestion', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          session: store.sessionId,
+          decision: 'execute_batch',
+          batch: true,
+          ...(Array.isArray(opts.ids) && opts.ids.length ? { ids: opts.ids } : {}),
+          ...(typeof opts.includeGoalApproval === 'boolean' ? { includeGoalApproval: opts.includeGoalApproval } : {}),
+          ...(typeof opts.pinGlobalDefault === 'boolean' ? { pinGlobalDefault: opts.pinGlobalDefault } : {}),
+        }),
+      })
+      const execCount = Number(value && value.executedCount) || 0
+      const blockedCount = Number(value && value.blockedCount) || 0
+      const skippedGoals = Number(value && value.skippedGoalCount) || 0
+      const parts = [`✓ 已执行 ${execCount} 项参谋建议`]
+      if (blockedCount > 0) parts.push(`拦截 ${blockedCount} 项越界建议`)
+      if (skippedGoals > 0) parts.push(`保留 ${skippedGoals} 项结项请示单独拍板`)
+      patch({ notice: parts.join(' · ') })
+      void refresh()
+      return value
+    } catch (error) {
+      patch({ error: String((error && error.message) || error) })
+      return null
+    } finally {
+      patch({ secBusy: false })
+    }
+  })
 }
 
 export async function dismissPendingSuggestions(list = []) {
@@ -524,38 +577,43 @@ export async function dismissPendingSuggestions(list = []) {
 export async function requestConsolidateBounds(field = '', items = []) {
   if (store.secBusy || store.boundConsolidating) return null
   const tag = field || 'all'
-  patch({ boundConsolidating: tag, secBusy: true, error: '' })
-  try {
-    const cleanItems = Array.isArray(items) ? items.filter(Boolean) : []
-    const value = await call('chief/consolidate-bounds', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        session: store.sessionId,
-        field,
-        items: cleanItems,
-      }),
-    })
-    if (value && value.ok) {
-      const nextSel = { ...(store.boundSelected || { allowed: [], forbidden: [], notes: [] }) }
-      if (field && nextSel[field]) nextSel[field] = []
-      else {
-        nextSel.allowed = []
-        nextSel.forbidden = []
-        nextSel.notes = []
+  return await withChiefWorkFx(
+    { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在浓缩边界中...' },
+    async () => {
+      patch({ boundConsolidating: tag, secBusy: true, error: '' })
+      try {
+        const cleanItems = Array.isArray(items) ? items.filter(Boolean) : []
+        const value = await call('chief/consolidate-bounds', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId,
+            field,
+            items: cleanItems,
+          }),
+        })
+        if (value && value.ok) {
+          const nextSel = { ...(store.boundSelected || { allowed: [], forbidden: [], notes: [] }) }
+          if (field && nextSel[field]) nextSel[field] = []
+          else {
+            nextSel.allowed = []
+            nextSel.forbidden = []
+            nextSel.notes = []
+          }
+          patch({
+            boundSelected: nextSel,
+            notice: '🏛 参谋长已将零散边界浓缩为 1 条，请在上方请示卡拍板',
+          })
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ boundConsolidating: '', secBusy: false })
       }
-      patch({
-        boundSelected: nextSel,
-        notice: '🏛 参谋长已将零散边界浓缩为 1 条，请在上方请示卡拍板',
-      })
-    }
-    return value
-  } catch (error) {
-    patch({ error: String((error && error.message) || error) })
-    return null
-  } finally {
-    patch({ boundConsolidating: '', secBusy: false })
-  }
+    },
+  )
 }
 
 export function prefillSuggestion(sug) {
@@ -620,68 +678,201 @@ export async function ingestSecImageFiles(fileList) {
   }
 }
 
-export async function submitChiefBar(overrideText = '') {
+function classifyChiefWorkFx(text, quickTag = '') {
+  if (quickTag === 'craft_wall') {
+    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在手搓驻墙中...' }
+  }
+  if (quickTag === 'extract_bounds') {
+    return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在提炼边界中...' }
+  }
+  const clean = String(text || '').trim()
+  const hits = []
+  if (/手搓|驻墙|筑墙|物理墙|guard_?wall|wallProposals/i.test(clean)) {
+    hits.push({ tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在手搓驻墙中...' })
+  }
+  if (/提炼.{0,4}边界|工作边界|红线|必做项|注意事项|boundProposals/i.test(clean)) {
+    hits.push({ tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在调配红线边界中...' })
+  }
+  if (/整理档案|档案柜|卷宗|归档|收纳入柜|桌面档案|抽屉|archive/i.test(clean)) {
+    hits.push({ tone: 'archive', tab: 'archive', label: '参谋长正在整理档案中...' })
+  }
+  if (/任务看板|拆解任务|金字塔|子任务|graph\.plan/i.test(clean)) {
+    hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在编排任务看板中...' })
+  }
+  if (/执行计划|规划步骤|交接单|handoff/i.test(clean)) {
+    hits.push({ tone: 'tasks', tab: 'plan', label: '参谋长正在推演执行计划中...' })
+  }
+  if (/协同网络|跨窗|关联会话|子代理|广播/i.test(clean)) {
+    hits.push({ tone: 'peers', tab: 'peers', label: '参谋长正在协调团队网络中...' })
+  }
+  if (hits.length === 1) return hits[0]
+  if (hits.length >= 2) {
+    const allBoundaries = hits.every(x => x.tab === 'boundaries')
+    return {
+      tone: 'neon',
+      tab: allBoundaries ? 'boundaries' : (store.tab || 'chief'),
+      ...(allBoundaries ? { boundSubTab: 'rules' } : {}),
+      label: allBoundaries ? '参谋长正在手搓驻墙与边界中...' : '参谋长正在统筹操作参谋系统中...',
+    }
+  }
+  return {
+    tone: 'neon',
+    tab: store.tab || 'chief',
+    label: '参谋长正在推演研判中...',
+  }
+}
+
+function resolveChiefSuggestionWorkFx(suggestions = []) {
+  const list = Array.isArray(suggestions) ? suggestions.filter(Boolean) : []
+  if (!list.length) {
+    return { tone: 'neon', tab: store.tab || 'chief', label: '参谋长正在统一落地参谋建议中...' }
+  }
+  const kinds = new Set(list.map(s => String(s.kind || '').trim()))
+  if (kinds.size === 1 && kinds.has('guard_wall')) {
+    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在落锁物理驻墙中...' }
+  }
+  if (kinds.size === 1 && kinds.has('bound')) {
+    return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在注入红线边界中...' }
+  }
+  const allBoundsPage = [...kinds].every(k => k === 'guard_wall' || k === 'bound')
+  return {
+    tone: 'neon',
+    tab: allBoundsPage ? 'boundaries' : (store.tab || 'chief'),
+    ...(allBoundsPage ? { boundSubTab: 'rules' } : {}),
+    label: allBoundsPage ? '参谋长正在同步落锁驻墙与边界中...' : '参谋长正在统一落地参谋建议中...',
+  }
+}
+
+async function withChiefWorkFx(fxSpec = {}, fn) {
+  const spec = fxSpec && typeof fxSpec === 'object' ? fxSpec : {}
+  const token = 'fx-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)
+  const targetTab = spec.tab || store.tab || 'chief'
+  const minMs = Number(spec.minMs) || 0
+  const startedAt = Date.now()
+  patch({
+    ...(spec.tab ? { tab: spec.tab } : {}),
+    ...(spec.boundSubTab ? { boundSubTab: spec.boundSubTab } : {}),
+    chiefWorkFx: {
+      token,
+      tone: spec.tone || 'neon',
+      tab: targetTab,
+      label: spec.label || '参谋长正在工作中...',
+    },
+  })
+  if (targetTab === 'archive' && !store.archiveLoaded) {
+    void loadArchives(false)
+  }
+  let hadError = false
+  try {
+    return await fn()
+  } catch (err) {
+    hadError = true
+    throw err
+  } finally {
+    if (!hadError && minMs > 0 && typeof window !== 'undefined') {
+      const waitMs = minMs - (Date.now() - startedAt)
+      if (waitMs > 24) {
+        await new Promise(resolve => setTimeout(resolve, waitMs))
+      }
+    }
+    if (store.chiefWorkFx && store.chiefWorkFx.token === token) {
+      patch({ chiefWorkFx: null })
+    }
+  }
+}
+
+export async function submitChiefBar(overrideText = '', quickTag = '') {
   const text = String(overrideText || store.secInput || '').trim()
   const imgs = overrideText ? [] : (Array.isArray(store.secImages) ? store.secImages : [])
   if ((!text && !imgs.length) || store.secBusy) return
   const target = overrideText ? 'auto' : (store.secTarget || 'auto')
   const mode = store.secMode || 'steer'
-  patch({ secBusy: true, ...(overrideText ? {} : { secInput: '', secImages: [] }), error: '' })
-  try {
-    const value = await call('chief/ask', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        session: store.sessionId,
-        text,
-        target,
-        mode,
-        images: imgs.map(({ name, mediaType, data }) => ({ name, mediaType, data })),
-      }),
-    })
-    if (value) {
-      const actions = []
-      const seenActions = new Set()
-      const pushAction = (label) => {
-        const clean = typeof label === 'string' ? label.trim() : ''
-        if (!clean || seenActions.has(clean)) return
-        seenActions.add(clean)
-        actions.push(clean)
-      }
-      for (const b of (value.actionBadges || [])) pushAction(b)
-      for (const r of (value.relays || [])) {
-        if (r && r.ok) pushAction('→ ' + (r.target || target))
-      }
-      for (const b of (value.boardOps || [])) pushAction(b)
-      for (const a of (value.archiveOps || [])) pushAction(a)
-      for (const n of (value.networkOps || [])) pushAction(n)
-      for (const m of (value.memoryChanges || [])) {
-        if (m && m.text) pushAction((m.op === 'remove' ? '移除：' : '记入：') + clampTitle(m.text, 14))
-      }
-      for (const bp of (value.boundProposals || [])) {
-        if (bp && bp.draftText) pushAction('呈批边界：' + clampTitle(bp.draftText, 12))
-      }
-      if (value.view) applySecView(value.view)
-      patch({
-        secLatestReply: {
-          text: value.reply || '- 【已处理】已按吩咐执行完毕。',
-          actions,
-          at: Date.now(),
-        },
-      })
-      if (Array.isArray(value.archiveOps) && value.archiveOps.length > 0) {
-        void loadArchives(true)
-      }
-      if (actions.length) void refresh()
-    }
-  } catch (error) {
+  const fxSpec = classifyChiefWorkFx(text, quickTag)
+  await withChiefWorkFx(fxSpec, async () => {
     patch({
-      ...(overrideText ? {} : { secInput: text, secImages: imgs }),
-      error: String((error && error.message) || error),
+      secBusy: true,
+      chiefQuickAction: quickTag || '',
+      ...(overrideText ? {} : { secInput: '', secImages: [] }),
+      error: '',
     })
-  } finally {
-    patch({ secBusy: false })
-  }
+    try {
+      const value = await call('chief/ask', {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          session: store.sessionId,
+          text,
+          target,
+          mode,
+          images: imgs.map(({ name, mediaType, data }) => ({ name, mediaType, data })),
+        }),
+      })
+      if (value) {
+        const actions = []
+        const seenActions = new Set()
+        const pushAction = (label) => {
+          const clean = typeof label === 'string' ? label.trim() : ''
+          if (!clean || seenActions.has(clean)) return
+          seenActions.add(clean)
+          actions.push(clean)
+        }
+        for (const b of (value.actionBadges || [])) pushAction(b)
+        for (const r of (value.relays || [])) {
+          if (r && r.ok) pushAction('→ ' + (r.target || target))
+        }
+        for (const b of (value.boardOps || [])) pushAction(b)
+        for (const a of (value.archiveOps || [])) pushAction(a)
+        for (const n of (value.networkOps || [])) pushAction(n)
+        for (const m of (value.memoryChanges || [])) {
+          if (m && m.text) pushAction((m.op === 'remove' ? '移除：' : '记入：') + clampTitle(m.text, 14))
+        }
+        for (const wp of (value.wallProposals || [])) {
+          if (wp && wp.title) pushAction('呈批驻墙：' + clampTitle(wp.title, 14))
+        }
+        for (const bp of (value.boundProposals || [])) {
+          if (bp && bp.draftText) pushAction('呈批边界：' + clampTitle(bp.draftText, 12))
+        }
+        if (value.view) applySecView(value.view)
+        const createdSugCount = (Array.isArray(value.wallProposals) ? value.wallProposals.length : 0)
+          + (Array.isArray(value.boundProposals) ? value.boundProposals.length : 0)
+        const autoDestTab = createdSugCount > 0
+          ? 'boundaries'
+          : ((Array.isArray(value.archiveOps) && value.archiveOps.length > 0 && fxSpec.tab === 'chief') ? 'archive' : '')
+        patch({
+          ...(autoDestTab ? { tab: autoDestTab, ...(autoDestTab === 'boundaries' ? { boundSubTab: 'rules' } : {}) } : {}),
+          secLatestReply: {
+            text: value.reply || '- 【已处理】已按吩咐执行完毕。',
+            actions,
+            at: Date.now(),
+          },
+          ...(createdSugCount > 0
+            ? { notice: `✨ 已生成 ${createdSugCount} 项待确认提案，请点面板顶部「▶ 执行建议」一键落锁生效` }
+            : {}),
+        })
+        if (createdSugCount > 0 && runtimeRefs.panelEl) {
+          try {
+            const scroller = runtimeRefs.panelEl.querySelector('.dnb-body')
+            if (scroller && typeof scroller.scrollTo === 'function') {
+              scroller.scrollTo({ top: 0, behavior: 'smooth' })
+            } else if (typeof runtimeRefs.panelEl.scrollTo === 'function') {
+              runtimeRefs.panelEl.scrollTo({ top: 0, behavior: 'smooth' })
+            }
+          } catch {}
+        }
+        if (Array.isArray(value.archiveOps) && value.archiveOps.length > 0) {
+          void loadArchives(true)
+        }
+        if (actions.length) void refresh()
+      }
+    } catch (error) {
+      patch({
+        ...(overrideText ? {} : { secInput: text, secImages: imgs }),
+        error: String((error && error.message) || error),
+      })
+    } finally {
+      patch({ secBusy: false, chiefQuickAction: '' })
+    }
+  })
 }
 
 function applyArchiveHeaders(payload, invalidateIds = null, requestedScope = '') {
@@ -988,114 +1179,129 @@ export async function mutateArchiveApi(payload, toastLabel = '') {
 
 export async function requestOrganizeArchives(opts = {}) {
   if (store.archiveOrganizing) return null
-  patch({ archiveOrganizing: true, error: '' })
-  try {
-    const vaultScope = opts.vaultScope || (store.archiveTabScope === 'global' ? 'global' : 'session')
-    const value = await call('archives/organize', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        session: store.sessionId || sessionIdFromUrl(),
-        vaultScope,
-        cabinetId: vaultScope === 'global' ? '' : (opts.cabinetId !== undefined ? opts.cabinetId : (store.archiveCabinetId || '')),
-        ids: Array.isArray(opts.ids) ? opts.ids : [],
-        folder: opts.folder || '',
-        scope: opts.scope || store.archiveOrganizeScope || 'unorganized',
-        instruction: opts.instruction !== undefined ? opts.instruction : (store.archiveOrganizePrompt || ''),
-      }),
-    })
-    if (value && value.ok) {
-      const openIds = Object.keys(store.archiveOpenFiles || {}).filter(k => store.archiveOpenFiles[k])
-      const nextDetails = { ...(store.archiveDetails || {}) }
-      for (const k of openIds) delete nextDetails[k]
-      patch({
-        archiveDetails: nextDetails,
-        archiveOrganizeOpen: false,
-        archiveOrganizePrompt: '',
-        notice: value.updatedCount > 0
-          ? `✦ 参谋长已按层次整理收纳 ${value.updatedCount} 份工程卷宗（原文 100% 无损保留）`
-          : '✦ 当前卷宗已分门别类，无需重复拆整',
-      })
-      void loadArchives(true, '', vaultScope)
-      for (const k of openIds) {
-        void loadArchiveDetail(k, true, { scope: vaultScope })
+  return await withChiefWorkFx(
+    { tone: 'archive', tab: 'archive', label: '参谋长正在整理档案中...' },
+    async () => {
+      patch({ archiveOrganizing: true, error: '' })
+      try {
+        const vaultScope = opts.vaultScope || (store.archiveTabScope === 'global' ? 'global' : 'session')
+        const value = await call('archives/organize', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId || sessionIdFromUrl(),
+            vaultScope,
+            cabinetId: vaultScope === 'global' ? '' : (opts.cabinetId !== undefined ? opts.cabinetId : (store.archiveCabinetId || '')),
+            ids: Array.isArray(opts.ids) ? opts.ids : [],
+            folder: opts.folder || '',
+            scope: opts.scope || store.archiveOrganizeScope || 'unorganized',
+            instruction: opts.instruction !== undefined ? opts.instruction : (store.archiveOrganizePrompt || ''),
+          }),
+        })
+        if (value && value.ok) {
+          const openIds = Object.keys(store.archiveOpenFiles || {}).filter(k => store.archiveOpenFiles[k])
+          const nextDetails = { ...(store.archiveDetails || {}) }
+          for (const k of openIds) delete nextDetails[k]
+          patch({
+            archiveDetails: nextDetails,
+            archiveOrganizeOpen: false,
+            archiveOrganizePrompt: '',
+            notice: value.updatedCount > 0
+              ? `✦ 参谋长已按层次整理收纳 ${value.updatedCount} 份工程卷宗（原文 100% 无损保留）`
+              : '✦ 当前卷宗已分门别类，无需重复拆整',
+          })
+          void loadArchives(true, '', vaultScope)
+          for (const k of openIds) {
+            void loadArchiveDetail(k, true, { scope: vaultScope })
+          }
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ archiveOrganizing: false })
       }
-    }
-    return value
-  } catch (error) {
-    patch({ error: String((error && error.message) || error) })
-    return null
-  } finally {
-    patch({ archiveOrganizing: false })
-  }
+    },
+  )
 }
 
 export async function harvestArchivesApi(focusHint = '', opts = {}) {
   if (store.archiveHarvesting) return null
-  patch({ archiveHarvesting: true, error: '' })
-  try {
-    const vaultScope = (opts && opts.vaultScope) || (store.archiveTabScope === 'global' ? 'global' : 'session')
-    const value = await call('archives/harvest', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        session: store.sessionId || sessionIdFromUrl(),
-        vaultScope,
-        cabinetId: (opts && opts.cabinetId !== undefined) ? opts.cabinetId : (store.archiveCabinetId || ''),
-        focusHint,
-      }),
-    })
-    if (value && value.ok) {
-      patch({
-        notice: value.count > 0
-          ? `📥 已抢救 ${value.count} 份本轮对话工程细节入柜（防压缩失忆）`
-          : '📥 当前对话暂无新增重要工程细节',
-      })
-      void loadArchives(true)
-    }
-    return value
-  } catch (error) {
-    patch({ error: String((error && error.message) || error) })
-    return null
-  } finally {
-    patch({ archiveHarvesting: false })
-  }
+  return await withChiefWorkFx(
+    { tone: 'archive', tab: 'archive', label: '参谋长正在抢救归档中...' },
+    async () => {
+      patch({ archiveHarvesting: true, error: '' })
+      try {
+        const vaultScope = (opts && opts.vaultScope) || (store.archiveTabScope === 'global' ? 'global' : 'session')
+        const value = await call('archives/harvest', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId || sessionIdFromUrl(),
+            vaultScope,
+            cabinetId: (opts && opts.cabinetId !== undefined) ? opts.cabinetId : (store.archiveCabinetId || ''),
+            focusHint,
+          }),
+        })
+        if (value && value.ok) {
+          patch({
+            notice: value.count > 0
+              ? `📥 已抢救 ${value.count} 份本轮对话工程细节入柜（防压缩失忆）`
+              : '📥 当前对话暂无新增重要工程细节',
+          })
+          void loadArchives(true)
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ archiveHarvesting: false })
+      }
+    },
+  )
 }
 
 export async function precipitateArchivesApi(opts = {}) {
   if (store.archivePrecipitating) return null
-  patch({ archivePrecipitating: true, error: '' })
-  try {
-    const vaultScope = opts.vaultScope || 'global'
-    const value = await call('archives/precipitate', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        session: store.sessionId || sessionIdFromUrl(),
-        vaultScope,
-        op: opts.op || 'cabinet',
-        cabinetId: '',
-        folder: opts.folder || '',
-        ...(Array.isArray(opts.ids) && opts.ids.length > 0 ? { ids: opts.ids } : {}),
-        clearSource: Boolean(opts.clearSource),
-      }),
-    })
-    if (value && value.ok) {
-      patch({
-        precipitateModal: null,
-        notice: value.count > 0
-          ? `⏬ 已提炼 ${value.count} 条可复用经验封入冷库（默认 0 Token 隔离）`
-          : '⏬ 当前卷宗暂无更多可沉淀经验',
-      })
-      void loadArchives(true, '', vaultScope)
-    }
-    return value
-  } catch (error) {
-    patch({ error: String((error && error.message) || error) })
-    return null
-  } finally {
-    patch({ archivePrecipitating: false })
-  }
+  return await withChiefWorkFx(
+    { tone: 'archive', tab: 'archive', label: '参谋长正在沉淀经验入库中...' },
+    async () => {
+      patch({ archivePrecipitating: true, error: '' })
+      try {
+        const vaultScope = opts.vaultScope || 'global'
+        const value = await call('archives/precipitate', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId || sessionIdFromUrl(),
+            vaultScope,
+            op: opts.op || 'cabinet',
+            cabinetId: '',
+            folder: opts.folder || '',
+            ...(Array.isArray(opts.ids) && opts.ids.length > 0 ? { ids: opts.ids } : {}),
+            clearSource: Boolean(opts.clearSource),
+          }),
+        })
+        if (value && value.ok) {
+          patch({
+            precipitateModal: null,
+            notice: value.count > 0
+              ? `⏬ 已提炼 ${value.count} 条可复用经验封入冷库（默认 0 Token 隔离）`
+              : '⏬ 当前卷宗暂无更多可沉淀经验',
+          })
+          void loadArchives(true, '', vaultScope)
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ archivePrecipitating: false })
+      }
+    },
+  )
 }
 
 export function toggleSelectArchive(id, vaultScope = 'session', title = '') {
@@ -1134,87 +1340,97 @@ export async function relayArchivesWithChiefApi(modalState) {
   if (store.relayArchivesBusy) return null
   const items = Array.isArray(modalState && modalState.items) ? modalState.items : []
   if (!items.length) return null
-  patch({ relayArchivesBusy: true, error: '' })
-  try {
-    const value = await call('chief/relay-archives', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        session: store.sessionId || sessionIdFromUrl(),
-        cabinetId: store.archiveCabinetId || '',
-        items: items.map(it => ({
-          id: it.id,
-          scope: it.vaultScope || it.scope || 'session',
-          vaultScope: it.vaultScope || it.scope || 'session',
-          title: it.title || it.id,
-        })),
-        instruction: String((modalState && modalState.instruction) || '').trim(),
-        target: (modalState && modalState.target) || 'lead',
-        mode: (modalState && modalState.mode) || 'followup',
-      }),
-    })
-    if (value && value.ok) {
-      patch({
-        archiveRelayModal: null,
-        selectedArchiveMap: {},
-        notice: `📨 参谋长已带要求整合 ${items.length} 条档案并递交给 @${modalState.target === 'lead' || !modalState.target ? '主对话' : shortAgentName(modalState.target, true)}`,
-      })
-      void refresh()
-    }
-    return value
-  } catch (error) {
-    patch({ error: String((error && error.message) || error) })
-    return null
-  } finally {
-    patch({ relayArchivesBusy: false })
-  }
+  return await withChiefWorkFx(
+    { tone: 'archive', tab: 'archive', label: '参谋长正在整合递交档案中...' },
+    async () => {
+      patch({ relayArchivesBusy: true, error: '' })
+      try {
+        const value = await call('chief/relay-archives', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId || sessionIdFromUrl(),
+            cabinetId: store.archiveCabinetId || '',
+            items: items.map(it => ({
+              id: it.id,
+              scope: it.vaultScope || it.scope || 'session',
+              vaultScope: it.vaultScope || it.scope || 'session',
+              title: it.title || it.id,
+            })),
+            instruction: String((modalState && modalState.instruction) || '').trim(),
+            target: (modalState && modalState.target) || 'lead',
+            mode: (modalState && modalState.mode) || 'followup',
+          }),
+        })
+        if (value && value.ok) {
+          patch({
+            archiveRelayModal: null,
+            selectedArchiveMap: {},
+            notice: `📨 参谋长已带要求整合 ${items.length} 条档案并递交给 @${modalState.target === 'lead' || !modalState.target ? '主对话' : shortAgentName(modalState.target, true)}`,
+          })
+          void refresh()
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ relayArchivesBusy: false })
+      }
+    },
+  )
 }
 
 export async function distillToGlobalApi(modalState) {
   if (store.distillBusy) return null
-  patch({ distillBusy: true, error: '' })
-  try {
-    const ids = Array.isArray(modalState && modalState.ids) && modalState.ids.length > 0
-      ? modalState.ids
-      : null
-    const value = await call('archives/distill-to-global', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        session: store.sessionId || sessionIdFromUrl(),
-        cabinetId: store.archiveCabinetId || '',
-        ids,
-        clearSource: Boolean(modalState && modalState.clearSource),
-        instruction: String((modalState && modalState.instruction) || '').trim(),
-      }),
-    })
-    if (value && value.ok) {
-      const nextPatch = {
-        distillGlobalModal: null,
-        selectedArchiveMap: {},
-        globalVaultLoaded: false,
-        notice: value.createdCount > 0
-          ? `✦ 已从本局提炼 ${value.createdCount} 份可复用工程档案存入「🌐 全局档案柜」`
-          : '✦ 当前本局暂无更多待提炼的新增可复用经验',
+  return await withChiefWorkFx(
+    { tone: 'archive', tab: 'archive', label: '参谋长正在提炼全局档案中...' },
+    async () => {
+      patch({ distillBusy: true, error: '' })
+      try {
+        const ids = Array.isArray(modalState && modalState.ids) && modalState.ids.length > 0
+          ? modalState.ids
+          : null
+        const value = await call('archives/distill-to-global', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId || sessionIdFromUrl(),
+            cabinetId: store.archiveCabinetId || '',
+            ids,
+            clearSource: Boolean(modalState && modalState.clearSource),
+            instruction: String((modalState && modalState.instruction) || '').trim(),
+          }),
+        })
+        if (value && value.ok) {
+          const nextPatch = {
+            distillGlobalModal: null,
+            selectedArchiveMap: {},
+            globalVaultLoaded: false,
+            notice: value.createdCount > 0
+              ? `✦ 已从本局提炼 ${value.createdCount} 份可复用工程档案存入「🌐 全局档案柜」`
+              : '✦ 当前本局暂无更多待提炼的新增可复用经验',
+          }
+          if (value.globalArchives && Array.isArray(value.globalArchives.items)) {
+            nextPatch.globalVaultItems = value.globalArchives.items
+            nextPatch.globalVaultLoaded = true
+          }
+          if (Array.isArray(value.deskItems)) {
+            nextPatch.archiveDeskItems = value.deskItems
+            nextPatch.archiveDeskLoaded = true
+          }
+          patch(nextPatch)
+          if (ids && modalState && modalState.clearSource) void loadArchives(true, '', 'session')
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ distillBusy: false })
       }
-      if (value.globalArchives && Array.isArray(value.globalArchives.items)) {
-        nextPatch.globalVaultItems = value.globalArchives.items
-        nextPatch.globalVaultLoaded = true
-      }
-      if (Array.isArray(value.deskItems)) {
-        nextPatch.archiveDeskItems = value.deskItems
-        nextPatch.archiveDeskLoaded = true
-      }
-      patch(nextPatch)
-      if (ids && modalState && modalState.clearSource) void loadArchives(true, '', 'session')
-    }
-    return value
-  } catch (error) {
-    patch({ error: String((error && error.message) || error) })
-    return null
-  } finally {
-    patch({ distillBusy: false })
-  }
+    },
+  )
 }
 
 export async function approveGoalApi() {
@@ -1743,6 +1959,112 @@ export function toggleBoundSelect(field, item) {
   patch({ boundSelected: { ...curMap, [field]: next } })
 }
 
+export async function saveGuardWallApi({ title, ruleType = 'forbid_cmd', pattern = '', patterns = null, scope = 'global', reason = '', writeOnly = false }) {
+  const cleanTitle = String(title || '').trim()
+  const cleanPattern = String(pattern || '').trim()
+  const patList = Array.isArray(patterns) && patterns.length > 0
+    ? patterns
+    : (cleanPattern ? cleanPattern.split(/[\r\n,;，；]+/).map(s => s.trim()).filter(Boolean) : [])
+  if (!cleanTitle || !patList.length) {
+    patch({ error: '物理驻墙需要填写规则名称与至少 1 条匹配规则' })
+    return null
+  }
+  const res = await act({
+    action: 'wall.save',
+    wall: {
+      title: cleanTitle,
+      ruleType,
+      patterns: patList,
+      scope,
+      reason: String(reason || '').trim(),
+      writeOnly: Boolean(writeOnly),
+      source: 'manual',
+    },
+  })
+  if (res && res.ok) {
+    patch({
+      wallFormOpen: false,
+      wallDraftTitle: '',
+      wallDraftPattern: '',
+      notice: `🧱 已落锁物理驻墙「${cleanTitle}」（${scope === 'workspace' ? '仅本工程' : '🌐 全局随身'}）`,
+    })
+  }
+  return res
+}
+
+export async function setGuardWallScopeApi(wallId, scope) {
+  if (!wallId || !scope) return null
+  const res = await act({ action: 'wall.setScope', wallId, scope })
+  if (res && res.ok) {
+    const labelMap = { global: '🌐 全局随身', workspace: '📁 仅本工程', paused: '⏸ 暂挂停用' }
+    patch({ notice: `🧱 已切换物理墙作用域 → ${labelMap[scope] || scope}` })
+  }
+  return res
+}
+
+export async function removeGuardWallApi(wallId) {
+  if (!wallId) return null
+  const res = await act({ action: 'wall.remove', wallId })
+  if (res && res.ok) {
+    const curSel = Array.isArray(store.wallSelectedIds) ? store.wallSelectedIds : []
+    patch({
+      wallSelectedIds: curSel.filter(id => id !== wallId),
+      wallMergeError: '',
+      notice: '🧱 已拆除该条物理驻墙',
+    })
+  }
+  return res
+}
+
+export function toggleGuardWallSelect(wallId) {
+  const id = String(wallId || '').trim()
+  if (!id) return
+  const prev = Array.isArray(store.wallSelectedIds) ? store.wallSelectedIds : []
+  const next = prev.includes(id) ? prev.filter(x => x !== id) : prev.concat(id)
+  patch({ wallSelectedIds: next, wallMergeError: '', error: '' })
+}
+
+export async function mergeGuardWallsApi({ wallIds = [], autoGroup = false } = {}) {
+  const walls = Array.isArray(store.guardWalls) ? store.guardWalls : []
+  if (!autoGroup) {
+    const cleanIds = [...new Set((Array.isArray(wallIds) ? wallIds : []).filter(id => walls.some(w => w && w.id === id)))]
+    if (cleanIds.length < 2) {
+      const msg = '请至少勾选 2 条相同类型的物理驻墙后再合并'
+      patch({ wallMergeError: msg, error: msg })
+      return { ok: false, code: 'MERGE_MIN_TWO', error: msg }
+    }
+    const picked = walls.filter(w => cleanIds.includes(w.id))
+    const ruleTypes = new Set(picked.map(w => w.ruleType))
+    if (ruleTypes.size > 1) {
+      const msg = '⛔ 禁止跨类型合并物理驻墙：仅允许相同拦截类型的物理驻墙合并（如「禁碰路径」只能与「禁碰路径」合并），请取消异类勾选！'
+      patch({ wallMergeError: msg, error: msg })
+      return { ok: false, code: 'CROSS_TYPE_MERGE_FORBIDDEN', error: msg }
+    }
+  }
+  patch({ wallMergeError: '', error: '' })
+  return await withChiefWorkFx(
+    { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在合并同类驻墙中...', minMs: 520 },
+    async () => {
+      const res = await act({
+        action: 'wall.merge',
+        wallIds: Array.isArray(wallIds) ? wallIds : [],
+        autoGroup: Boolean(autoGroup),
+      })
+      if (!res || !res.ok) {
+        const msg = (res && res.error) || store.error || '合并物理驻墙失败'
+        patch({ wallMergeError: msg, error: msg })
+        return res || { ok: false, error: msg }
+      }
+      patch({
+        wallSelectedIds: [],
+        wallMergeError: '',
+        notice: `🧱 已将 ${res.mergedCount || 2} 条同类物理驻墙合并为 ${res.createdCount || 1} 条`,
+      })
+      return res
+    },
+  )
+}
+
 export function openTaskEditor(task) {
   if (!task) return
   patch({
@@ -1835,6 +2157,11 @@ function clearBoundSessionToBlank() {
     archiveDetails: {},
     archiveOpenFolders: {},
     archiveOpenFiles: {},
+    qaCollapsedTurnIds: {},
+    wallSelectedIds: [],
+    wallMergeError: '',
+    chiefWorkFx: null,
+    seenBackendWorkIds: {},
     archiveUnboundSession: true,
   })
   void refresh()
@@ -1944,6 +2271,11 @@ export function adoptSession(source, sessionId, inputActions) {
           archiveDetails: {},
           archiveOpenFolders: {},
           archiveOpenFiles: {},
+          qaCollapsedTurnIds: {},
+          wallSelectedIds: [],
+          wallMergeError: '',
+          chiefWorkFx: null,
+          seenBackendWorkIds: {},
           archiveUnboundSession: !next,
         }
       : {}),

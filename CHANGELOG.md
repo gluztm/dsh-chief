@@ -5,6 +5,35 @@ All notable changes to **`dsh-chief`** (**DSH 参谋长**) will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.4.0] - 2026-11-19
+
+### Added
+
+#### 🧱 全会话事前物理驻墙与独立安全内核 (`pkg/safety/` + `tools/pre-execute`)
+- **事前物理硬拦截**：主对话、子代理与参谋调用文件或命令落地前统一经过 `tools/pre-execute` 门禁，撞墙直接拒止并写入 `chief-audit.jsonl`。
+- **随身复用的动态物理墙**：边界页新增「🧱 物理驻墙」（持久化于 `~/.dsh/chief/guard-walls.json`），支持 `global`（跨窗口自动跟随）/ `workspace`（仅本工程）/ `paused`（暂挂备用）一键切换。
+- **大白话手搓与同类合并**：对参谋说白话即可生成 `wallProposals` 草案（人工确认后落锁），支持多选或一键合并相同 `ruleType` 的物理墙（跨类型混选自动拦截）。
+- **9 模块独立安全内核**：将硬守卫、命令拆解、路径穿透检测、能力引擎与审计拆为 `pkg/safety/` 9 个零业务依赖模块，与 `chief-executor.js` 全集 MD5 锁定。
+
+#### 🤝 参谋懒介入协同、无感问询与自动续跑 (`chief-commands.js` + `chief-state.js`)
+- **主对话优先（懒介入）**：高权限下只要未点名让参谋亲自操刀，工作区改动与命令统一发 `[EXECUTION_REQUEST]` 委派 `@lead` 动手，绝不冒充用户发言。
+- **空白新窗口先探路定计划**：新开空白会话直接找参谋时，默认先引导 `@lead` 只读看代码 → `graph.plan` 排计划 → `chief.request` 汇报结论。
+- **后台优先问询零打断**：参谋缺细节时经 `agent/pre-step` 递出 `[INQUIRY #id]`，主对话顺手调 `inquiry.reply` 秒回后继续原工作，不打断当前步骤。
+- **审批/提权后自动续跑 (`TaskLedger`)**：点完「允许」后按持久化账本自动接上未走完的步骤；异常重启时自动将半途任务安全置为 `interrupted`，不偷偷重跑。
+
+#### 🔒 细粒度能力模型与只紧不松策略 (`policy-engine.js` + `policy-plugin.js`)
+- **`role + capabilities` 双层解耦**：界面保持 `advisor / assistant / strategist / chief` 四档，底层放开 `assistant` 低风险看板与档案整理免弹窗，依然严锁文件写入。
+- **单次授权防复用与只紧不松插件**：逐项授权绑定目标路径/命令 `capabilityScope`；可选 `policyPlugins` 仅允许收紧规则，试图关闭硬守卫的配置直接拒绝。
+
+### Changed
+- **前后台流光舞台提示 (`activeWork`)**：参谋在前台或后台自动巡检、收档、维护边界或刷摘要时，面板自动切页并点亮流动渐变 + 双束光线边框与毛玻璃跃动字提示。
+- **强介入双防线核对窗 (`InterventionConfirmModal`)**：开启前并排核对当前生效的「🧱 物理驻墙」与「🚫 禁止红线」，右上角改为「管理边界」并支持一键收起/拉开。
+- **问答分组框、红盾哨兵与顺势刷摘要**：每轮提问与回执包进高对比分组外框并支持一键折展，按钮统一靠右下对齐；「🛡 红线哨兵」开启时变红并点亮双层红盾图标；每次聊完按 60 秒节流后台顺势刷新顶部摘要。
+
+### Fixed
+- **适配 DSH `0.2.2-rc.5` 原生工具与弹窗审批**：对齐 `dsh-tool-fs`（`read` / `read_image` / `write` / `edit` / `apply_patch`），修复仅禁写路径墙误拦 `str_replace_editor` 只读 `view` 模式的问题，接入 `tools/pre-execute` 原生 `{ kind: 'ask' }` 单次审批弹窗，并兼容多代际 `session(.vN).jsonl(.zstd)` 日志检索。
+- **封堵复合管道、内联脚本与多反斜杠凭据变形**：补齐 `&& / || / | / ;`、嵌套 Shell、`node -e / python -c / pwsh / iex`（含 Base64）及引号多反斜杠绕过（如 `copy x ".\\"env`），对 `node .\env\setup.js`、`process.env.NODE_ENV` 与 `$env:TEMP` 保持 0 误杀；`bounds.*` 与驻墙删改强制校验 `HUMAN_BOUNDS_CONFIRM_TOKEN`。
+
 ## [1.3.0] - 2026-11-18
 
 ### Added

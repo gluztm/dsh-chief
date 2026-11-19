@@ -22,11 +22,11 @@ jobs:
         with:
           node-version: '24'
 
-      - name: Verify syntax and package manifest
+      - name: Run CI verification gates and check tarball
         run: |
           node --version
           npm --version
-          for f in *.js; do node --check "$f"; done
+          npm run test:ci
           npm pack --dry-run
 
       - name: Publish to npm via OIDC Trusted Publishing

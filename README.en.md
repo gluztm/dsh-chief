@@ -25,8 +25,8 @@
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-> **Current release `v1.3.0`**: Keeps long sessions on track without filling your main prompt with old logs.  
-> Shares the Router + Workers split used in DeepSeek's **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)**, while keeping Chief isolated in its own sidebar until you ask it to step in.
+> **Current release `v1.4.0`**: Adds a 9-module safety kernel (`pkg/safety/`), `tools/pre-execute` guard walls (`guard-walls.json`), two-tier `role + capabilities` with persistent `TaskLedger` resume, main-chat-first lazy delegation (`[EXECUTION_REQUEST]`), quiet `[INQUIRY]` checks, and DSH `0.2.2-rc.5` support.  
+> Shares the Router + Workers split from DeepSeek's **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** while keeping Chief state and prompts isolated from the main session.
 
 [简体中文 (`README.md`)](README.md) · **English** · [Changelog (`CHANGELOG.md`)](CHANGELOG.md)
 
@@ -53,12 +53,13 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 - **How `dsh-chief` handles it**: Stores sealed dossiers in three local vaults (Session, System Global, Precipitated). **While sealed, they add 0 bytes and 0 tokens to the main chat.**
 - Click `📌 摆上桌面` or `📤 取出` only when a specific note is needed, and put it back as soon as you finish that step.
 
-### 4. Full autonomy feels unsafe, but chat-only mode cannot help
-- **What goes wrong**: Clicking "allow everything" risks `git push --force`, destructive `rm`/`del`, or reading `.env`, while read-only assistants cannot even run a test.
-- **How `dsh-chief` handles it**: Uses four explicit permission tiers: `advisor` (read-only default), `assistant`, `strategist` (per-action approval), and `chief` (high autonomy after risk sign-off).
+### 4. Full autonomy feels unsafe, but chat-only mode leaves Chief idle (or bossy)
+- **What goes wrong**: Clicking "allow everything" risks `git push --force`, destructive deletes, or reading `.env`, while high-tier supervisors often try to edit files themselves instead of letting your main agent work.
+- **How `dsh-chief` handles it**: Uses four permission tiers (`advisor` read-only default, `assistant`, `strategist` per-action approval, `chief` high autonomy) plus a pre-execution firewall.
   - **Every new session starts read-only**: Observes code, answers questions, and updates the board without touching your workspace.
-  - **Per-action approval modal**: File writes, shell commands, and subagent steers pause for one-click approval, verified on disk with a SHA-256 `payloadHash` to stop payload tampering or replay.
-  - **Hard rules hold in every tier**: Destructive shell commands, `.env` and private-key access (including quote/backslash obfuscation, PowerShell `-EncodedCommand`, symlinks, and NTFS ADS streams), and user `forbidden` redlines stay blocked even at the highest tier, with every decision logged to `~/.dsh/chief/chief-audit.jsonl`.
+  - **Pre-execution guard walls (`tools/pre-execute`)**: Before the main agent, any subagent, or Chief writes a file or runs a command, calls pass through `~/.dsh/chief/guard-walls.json`. Walls can be scoped as `global` (follow every new session like preferences), `workspace` (project-only), or `paused`, merged in-place when they share a rule type, or crafted in plain language by Chief for you to approve. High-risk command rules can prompt DSH's native one-time approval dialog.
+  - **Lazy intervention & background check-ins**: Unless you explicitly ask Chief to edit files directly, it sends structured `[EXECUTION_REQUEST]` items to the main conversation instead of taking over or speaking as you. In a blank new chat, it instructs `@lead` to read the repo and build a plan first, asks clarifying questions quietly in the background without pausing `@lead`, and updates the top summary after chats.
+  - **Auto-resume after approval & restrict-only policies**: `TaskLedger` picks up unfinished steps once you click Allow, hard rules (compound shells, `node -e`/`python -c`, quote-backslash `.env` tricks, symlinks, NTFS ADS) hold in every tier with logs written to `~/.dsh/chief/chief-audit.jsonl`, and optional JSON `policyPlugins` can tighten permissions without ever weakening built-in hard guards.
 
 ### 5. Dozens of subagents run out of sight and ignore verbal rules
 - **What goes wrong**: Workers live across scattered tabs, and rules mentioned in chat scroll out of context after ten turns.
@@ -73,8 +74,9 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 ## Inside the Sidebar
 
 ### 01 · Chief Cockpit (`参谋` Tab)
-- Send tasks in plain language from the bottom input box, with status pills above (`⚡ 强介入`, `✦ 智选压缩`, `🛡 红线哨兵`, permission tier, and `⏹ 急停`).
-- Filter the feed by `全部 / 💬 问答 / 📋 回执`. Multi-step suggestions collapse into one top `▶ 执行建议` button so you can review and run them together.
+- Send tasks in plain language from the bottom input box (with action buttons cleanly aligned at bottom-right). Status pills above show `⚡ 强介入`, `✦ 智选压缩`, `🛡 红线哨兵` (turning red with a colored shield when active), permission tier, and `⏹ 急停`.
+- Enabling Strong Intervention opens a confirmation modal listing both active Physical Guard Walls and Forbidden Redlines side by side (`管理边界` + expand/collapse controls).
+- Filter the feed by `全部 / 💬 问答 / 📋 回执`. User prompts and Chief receipts sit inside high-contrast grouped frames that collapse individually or all at once, multi-step suggestions merge into one top `▶ 执行建议` button, and background Chief work switches to the active tab with a frosted overlay and sweeping light-beam border.
 
 ![01 - Chief Cockpit Overview](assets/screenshots/01-chief-cockpit-overview.png)
 
@@ -118,9 +120,9 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 
 ---
 
-### 06 · Pinned Global Redlines & Must-Do Checks (`边界` Tab)
-- Click `📌` to apply a rule across every workspace session, or leave it unpinned for the active session only.
-- Separates `allowed` (verification gates), `forbidden` (hard blockers), and `notes`, and surfaces boundary proposals raised by blocked workers.
+### 06 · Guard Walls, Pinned Redlines & Must-Do Checks (`边界` Tab)
+- The top **🧱 Physical Guard Walls** section blocks dangerous commands or paths before execution: add rules manually (`+ 手动驻墙`) or let Chief draft them from plain text (`✨ 参谋手搓墙`), toggle `🌐 Global`, `📁 Workspace`, or `⏸ Paused`, and merge multiple walls of the same type cleanly (cross-type merges are blocked).
+- Below that, `allowed` (verification gates), `forbidden` (hard blockers), and `notes` separate global `📌` rules from session-only ones and list boundary proposals from blocked workers. Models cannot delete or mute locked walls or redlines on their own.
 
 <div align="center">
   <img src="assets/screenshots/06-pinned-bounds-and-handoff.png" alt="06 - Pinned Global Redlines and Proposals" width="68%" />
@@ -150,28 +152,29 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 
 ---
 
-## Modular Architecture (`v1.3.0`)
+## Modular Architecture (`v1.4.0`)
 
-`v1.3.0` splits the four largest files into **29 backend modules and 16 frontend modules** with zero `export let` bindings and zero circular imports. See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and module contracts.
+`v1.4.0` spans **38 backend modules (including 9 isolated modules under `pkg/safety/`) and 16 frontend modules** with zero `export let` bindings and zero circular imports. See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and module contracts.
 
 ```mermaid
 flowchart TB
   subgraph UI["DSH Right Sidebar (client.js <- 16 source modules)"]
-    T1["Chief Tab (Input + Approvals + Emergency Stop + Filter)"]
+    T1["Chief Tab (Grouped Q&A + Red Shield + FX Border)"]
     T2["Tasks Tab (Coordinator + Subagent Lanes + Split Stream)"]
     T3["Peers Tab (Cross-Window Link + Mailbox)"]
     T4["Plan Tab (Objective Lock + Pinned Handoff + Deploy)"]
     T5["Archives Tab (3-Tier Vaults + Sweep Notes)"]
-    T6["Boundaries Tab (📌 Global Redlines + Allowed Checks)"]
+    T6["Boundaries Tab (Dynamic Guard Walls + 📌 Redlines)"]
   end
 
-  subgraph Core["Local Backend & Storage (Zero External Deps · 29 modules)"]
+  subgraph Core["Local Backend & Safety Kernel (Zero External Deps · 38 modules)"]
     Hot["Hot Boards: ~/.dsh/chief/board.json & boards/<sid>.json\nCross-process/worker_threads O_EXCL spin locks"]
+    Walls["Guard Walls: ~/.dsh/chief/guard-walls.json\nGlobal / Workspace / Paused"]
     Cold["3-Tier Vaults: cabinets/ + global-vault/ + precipitated/"]
-    Bus["Safety & Resume: chief-executor.js + resumeTasks + chief-audit.jsonl"]
+    Bus["Safety & Resume: safety/*.js + chief-executor.js + taskLedger + chief-audit.jsonl"]
   end
 
-  subgraph Agents["Host Execution Agents"]
+  subgraph Agents["Host Execution Agents (tools/pre-execute gate)"]
     Lead["Main Coordinator (@lead)"]
     Subs["Subagents (@arch / @dev / @bench)"]
     Peers["Linked DSH Windows"]
@@ -180,6 +183,8 @@ flowchart TB
   UI <-->|"27 Same-Origin Routes (/api/dsh-chief/*, fail-closed 403)"| Core
   Hot -->|"Compact Hot State"| Lead
   Hot -->|"Compact Hot State"| Subs
+  Walls -->|"Pre-Execution Block or Ask Prompt"| Lead
+  Walls -->|"Pre-Execution Block or Ask Prompt"| Subs
   Cold -.->|"0 Tokens While Sealed\nInjected Only When Pinned to Desk"| Lead
   Bus <-->|"chief_board / chief_memory\nchief_boundaries / chief_handoff"| Agents
 ```
@@ -191,21 +196,22 @@ flowchart TB
 Search **`dsh-chief`** inside [dshmarket](https://github.com/dsh-market/dsh-market) / DSH Plugin Market, or install via CLI (replace `desktop` with `web` for the web profile):
 
 ```bash
-# Option 1: Install latest release (v1.3.0) from npm
+# Option 1: Install latest release (v1.4.0) from npm
 dsh plugin --profile desktop add dsh-chief
 
 # Option 2: Install directly from GitHub main branch
 dsh plugin --profile desktop add github:gluztm/dsh-chief
 
-# Option 3: Install prebuilt GitHub Release tarball (v1.3.0)
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.3.0/dsh-chief-1.3.0.tgz
+# Option 3: Install prebuilt GitHub Release tarball (v1.4.0)
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.4.0/dsh-chief-1.4.0.tgz
 ```
 
 ### Host Version Compatibility
 
-| DeepSeek Harness (DSH) Version | Panel / Board / Vaults / Executor | Named Subagent Tree (`task.dispatch` / `team.*`) | Notes |
+| DeepSeek Harness (DSH) Version | Panel / Board / Vaults / Pre-Execute Walls | Named Subagent Tree (`task.dispatch` / `team.*`) | Notes |
 | :--- | :---: | :---: | :--- |
-| **`>= 0.2.2-rc.2` (`rc.3+` recommended)** | Full support | Full support | Provides native `subagents.resolveName`, `rootOf`, and `namesOf` |
+| **`>= 0.2.2-rc.5` (current desktop target)** | Full support | Full support | Matches `dsh-tool-fs` (`read`/`read_image`/`write`/`edit`/`apply_patch`), `str_replace_editor`, and native `{ kind: 'ask' }` approval dialogs |
+| `0.2.2-rc.2 ~ 0.2.2-rc.4` | Full support | Full support | Provides native `subagents.resolveName`, `rootOf`, `namesOf`, and `tools/pre-execute` |
 | `0.2.0 ~ 0.2.2-rc.1` | Panel works | Upgrade notice | Blocks unsafe `team.*` dispatch and prompts host upgrade |
 
 ---
@@ -214,7 +220,7 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 
 | Tool Name | Purpose | Common Actions |
 | :--- | :--- | :--- |
-| **`chief_board`** | Task DAG updates, cold archive queries, peer mail, elevation requests, compaction | `graph.plan`, `task.add`, `task.update`, `plan.set`, `cursor.set`, `mail.send`, `archive.save`, `archive.search`, `bounds.propose`, `permission.request`, `context.compact` |
+| **`chief_board`** | Task DAG updates, cold archive queries, peer & chief requests, inquiry replies, wall listing, elevations, compaction | `graph.plan`, `task.add`, `task.update`, `plan.set`, `cursor.set`, `mail.send`, `chief.request`, `inquiry.reply`, `wall.list`, `archive.save`, `archive.search`, `bounds.propose`, `permission.request`, `context.compact` |
 | **`chief_memory`** | Session-scoped hot items (`decisions`, `progress`, `verify`, `risks`) | `list`, `get`, `add`, `update`, `remove` |
 | **`chief_boundaries`** | Global `📌` redlines, must-do checks (`allowed`), and notes | `get`, `set`, `add`, `pin`, `remove` |
 | **`chief_handoff`** | Preview and render self-contained Markdown handoff packets | `preview` / session handoff |
@@ -223,9 +229,10 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 
 ## Local Storage & Security Guarantees
 
-- **Process & Worker-Thread Lock Safety**: `board-store.js`, `chief-state.js`, and `archive-core.js` serialize mutations with `O_EXCL` spin locks (handling transient Windows NTFS `EPERM`/`EACCES`/`EBUSY` retries) and `threadId`-scoped temporary files before atomic rename.
+- **Process & Worker-Thread Lock Safety**: `board-store.js`, `chief-state.js`, `archive-core.js`, and `safety/guard-walls.js` serialize writes with `O_EXCL` spin locks (handling transient Windows NTFS `EPERM`/`EACCES`/`EBUSY` retries) and `threadId`-scoped temporary files before atomic rename.
+- **Isolated Safety Kernel & De-obfuscation**: `pkg/safety/` (9 modules) and `chief-executor.js` are checksum-locked and catch compound shells, inline scripts (`node -e` / `python -c` / `pwsh` / `iex` + Base64), quote-backslash credential obfuscation (zero false positives on `process.env.NODE_ENV` or `node .\env\setup.js`), `bounds.*` / wall human confirmation tokens, and single-use `capabilityScope` checks.
 - **27 Loopback-Guarded HTTP Routes**: All `/api/dsh-chief/*` endpoints validate local origin/host headers and fail closed (`403`) if connection checks throw.
-- **Secret Protection & Zero Telemetry**: Refuses to persist `sk-*`, `ghp_*`, Bearer tokens, `AIza*`, `AKIA*`, or private keys (auto-redacting to `[REDACTED]` when sweeping temporary notes). All boards, archives, and `chief-audit.jsonl` stay locally under `~/.dsh/chief/`.
+- **Secret Protection & Zero Telemetry**: Refuses to persist `sk-*`, `ghp_*`, Bearer tokens, `AIza*`, `AKIA*`, or private keys (auto-redacting to `[REDACTED]` when sweeping temporary notes). All boards, archives, guard walls, and `chief-audit.jsonl` stay locally under `~/.dsh/chief/`.
 
 ---
 
@@ -234,9 +241,8 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 | Contributor | Role |
 | --- | --- |
 | [gluztm](https://github.com/gluztm) | Creator, product design, and maintainer |
-| [Gemini](https://github.com/gemini-code-assist) | Feature development, `v1.3.0` modular split, safety executor, and CI gates |
+| [Gemini](https://github.com/gemini-code-assist) | Feature development, `pkg/safety/` kernel, pre-execute guard walls, lazy intervention, and CI gates |
 | [Codex](https://github.com/codex) | Modular architecture design, concurrency stress tests, and red-team boundary audits |
-| ChatGPT | Roadmap review and architecture structuring |
 | [deepseek-ai](https://github.com/deepseek-ai) | DeepSeek Harness host runtime and SuperAgent workflow alignment |
 
 ---

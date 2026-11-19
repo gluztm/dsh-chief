@@ -69,6 +69,41 @@ import { BoundariesTab } from '../tabs/boundaries.js'
 import { ChiefTab, ChiefComposerBar } from '../tabs/chief.js'
 import { PeersTab } from '../tabs/peers.js'
 
+function ChiefWorkStageOverlay({ fx }) {
+  if (!fx || !fx.label) return null
+  const tone = fx.tone || 'neon'
+  const chars = Array.from(String(fx.label))
+  return h(
+    React.Fragment,
+    null,
+    h('div', { className: 'dnb-chief-fx-border', 'data-tone': tone, 'aria-hidden': true }),
+    h(
+      'div',
+      { className: 'dnb-chief-fx-stage', 'data-tone': tone, role: 'status', 'aria-live': 'polite' },
+      h(
+        'div',
+        { className: 'dnb-chief-fx-pill' },
+        h('span', { className: 'dnb-chief-fx-ring', 'aria-hidden': true }),
+        h(
+          'div',
+          { className: 'dnb-chief-fx-text' },
+          chars.map((ch, idx) =>
+            h(
+              'span',
+              {
+                key: idx,
+                className: 'dnb-wave-char',
+                style: { '--char-i': idx },
+              },
+              ch === ' ' ? '\u00A0' : ch,
+            ),
+          ),
+        ),
+      ),
+    ),
+  )
+}
+
 function PanelInner(props) {
   const view = useStore()
   const isPage = !!(props && props.variant === 'main')
@@ -416,6 +451,9 @@ function PanelInner(props) {
 
       // Persistent Bottom Chief Input & Relay Bar
       h(ChiefComposerBar, { view, barRef: secBarRef }),
+
+      // Chief System Active Working Stage FX Overlay (Frontend action OR Backend auto-maintenance)
+      h(ChiefWorkStageOverlay, { fx: view.chiefWorkFx || (meta && meta.activeWork) || null }),
 
       // Scoped Modal Overlays (Strictly bounded inside .dnb-panel)
       h(ChiefRiskConfirmModal, { view }),

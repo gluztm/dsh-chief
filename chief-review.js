@@ -30,6 +30,9 @@ import {
   clusterView,
   isInternalCheckpointNoise,
   extractJsonObject,
+  beginChiefActiveWork,
+  updateChiefActiveWork,
+  endChiefActiveWork,
 } from './chief-state.js'
 import { listChiefModels, callChiefLlm } from './chief-models.js'
 import { listPeerDirectory, deliverCrossMessage } from './chief-network.js'
@@ -332,6 +335,13 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   }
 
   lastReviewAtByRoot.set(rootId, now)
+  const isAutoPilotActiveNow = Boolean(paceMode === 'auto' && effCfgBefore.autoPilot && !effCfgBefore.stopped)
+  const reviewWorkId = beginChiefActiveWork(rootId, {
+    tone: 'neon',
+    tab: '',
+    label: isAutoPilotActiveNow ? '参谋长正在自动托管巡检中...' : '参谋长正在后台巡检研判中...',
+  })
+  try {
   const speaker = identity && identity.isChild ? `子代理 @${identity.self}` : '主对话 (@lead)'
   const view = clusterView(stateBefore, rootId)
   const numberedFacts = view.facts.slice()
@@ -406,7 +416,10 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     parsedBoardOps.unshift({ op: 'plan.resetForGoal' })
   }
   const executedOps = permRankNow >= 1 && parsedBoardOps.length > 0 && deps.runAction
-    ? applyBoardOps(deps, rootId, parsedBoardOps, { forceSessionOnly: autoPilot })
+    ? (() => {
+        updateChiefActiveWork(rootId, reviewWorkId, { tone: 'tasks', tab: 'tasks', label: '参谋长正在自动同步看板与计划中...' })
+        return applyBoardOps(deps, rootId, parsedBoardOps, { forceSessionOnly: autoPilot })
+      })()
     : []
 
   const unmetMustDo = Array.isArray(parsed.unmetMustDo)
@@ -763,6 +776,11 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
           const totalTokens = Number(liveUsage && liveUsage.totalTokens) || 0
           const seq = Math.max(0, Math.round(Number(liveUsage && liveUsage.seq) || digest.stamp || 0))
           const ratioPct = totalTokens > 0 ? (totalTokens / contextWindow) * 100 : 0
+          updateChiefActiveWork(rootId, reviewWorkId, {
+            tone: 'archive',
+            tab: 'archive',
+            label: '参谋长正在自动抢救归档与压缩中...',
+          })
           const cRes = await executeHarvestAndCompact(deps, {
             sid,
             rootId,
@@ -834,6 +852,12 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   }
 
   if (permRankNow >= 1 && autoBoundUpdates.length > 0 && deps.runAction) {
+    updateChiefActiveWork(rootId, reviewWorkId, {
+      tone: 'bounds',
+      tab: 'boundaries',
+      boundSubTab: 'rules',
+      label: '参谋长正在自动维护本局边界中...',
+    })
     for (const b of autoBoundUpdates) {
       deps.runAction({
         action: 'bounds.add',
@@ -855,6 +879,11 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
         it => it.folder === 'inbox' || it.organizedBy !== 'chief' || (it.points || []).length <= 1,
       ).length
       if (unorgCount >= 3) {
+        updateChiefActiveWork(rootId, reviewWorkId, {
+          tone: 'archive',
+          tab: 'archive',
+          label: '参谋长正在自动整理本局档案中...',
+        })
         mutateChiefState((s) => {
           const ws = ensureWorkspace(s, rootId)
           ws.runtimeGuard.lastAutoArchiveOrgAt = Date.now()
@@ -927,6 +956,9 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     circuitTripped,
     circuitReason,
     ...(autoPilotStopRes ? { autoPilotStopped: Boolean(autoPilotStopRes.stopped) } : {}),
+  }
+  } finally {
+    endChiefActiveWork(rootId, reviewWorkId)
   }
 }
 

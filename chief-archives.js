@@ -30,6 +30,9 @@ import {
   stripCheckpointNoise,
   isInternalCheckpointNoise,
   extractJsonObject,
+  beginChiefActiveWork,
+  endChiefActiveWork,
+  getChiefActiveWork,
 } from './chief-state.js'
 import { callChiefLlm } from './chief-models.js'
 import { deliverCrossMessage } from './chief-network.js'
@@ -131,6 +134,10 @@ export async function organizeArchivesWithChief(deps, {
   const selected = candidates.slice(0, MAX_ITEMS_PER_RUN)
   const remainingCount = Math.max(0, candidates.length - selected.length)
 
+  const orgWorkId = getChiefActiveWork(rootId)
+    ? ''
+    : beginChiefActiveWork(rootId, { tone: 'archive', tab: 'archive', label: '参谋长正在整理档案中...' })
+  try {
   const folderLines = store.folders.map(f => `- "${f.id}": ${f.label}（${f.hint || ''}）`)
   const allCurations = []
   const allNewFolders = []
@@ -247,6 +254,9 @@ export async function organizeArchivesWithChief(deps, {
     archives: refreshedList,
     view: await getChiefView(deps, rootId, { autoSummarize: false }),
   }
+  } finally {
+    if (orgWorkId) endChiefActiveWork(rootId, orgWorkId)
+  }
 }
 
 const HARVEST_ARCHIVE_SYSTEM = [
@@ -358,6 +368,14 @@ export async function harvestTurnDetailsToArchive(deps, {
     return { ok: false, error: '当前为空白新对话（未绑定会话 ID），请先发送一条消息或切至「🌐 全局档案柜」再抢救归档' }
   }
   const targetOpt = archiveTargetForRoot(deps, rootId, { cabinetId, vaultScope: effScope })
+  const harvWorkId = getChiefActiveWork(rootId)
+    ? ''
+    : beginChiefActiveWork(rootId, {
+        tone: 'archive',
+        tab: 'archive',
+        label: trigger === 'pre-compaction' ? '参谋长正在压缩前抢救归档中...' : '参谋长正在抢救归档中...',
+      })
+  try {
   const evidence = collectRawSessionEvidence(deps, { sessionId: sessionId || rootId, rootId, agent })
   const bodySource = [
     focusHint ? `【抢救焦点提示】${cleanMultiline(focusHint, 240)}` : '',
@@ -435,6 +453,9 @@ export async function harvestTurnDetailsToArchive(deps, {
     cabinetId: targetOpt.cabinetId || verify.cabinetId || '',
     archives: listArchiveHeaders(rootId, { includePrecipitated: trigger === 'manual' }, targetOpt),
   }
+  } finally {
+    if (harvWorkId) endChiefActiveWork(rootId, harvWorkId)
+  }
 }
 
 const PRECIPITATE_EXPERIENCE_SYSTEM = [
@@ -492,6 +513,10 @@ export async function precipitateExperienceWithChief(deps, {
     return { ok: false, error: '当前选定范围暂无工作档案可沉淀' }
   }
 
+  const precWorkId = getChiefActiveWork(rootId)
+    ? ''
+    : beginChiefActiveWork(rootId, { tone: 'archive', tab: 'archive', label: '参谋长正在沉淀经验入库中...' })
+  try {
   const promptBody = selectedItems.slice(0, 12).map((it, idx) => [
     `--- 工作档案 #${idx + 1}: 《${it.title}》 (drawer=${it.folder}, clip=${it.paperclip}) ---`,
     `提要: ${it.summary || '无'}`,
@@ -589,6 +614,9 @@ export async function precipitateExperienceWithChief(deps, {
     clearedSource,
     archives: listArchiveHeaders(rootId, { includePrecipitated: true }, targetOpt),
   }
+  } finally {
+    if (precWorkId) endChiefActiveWork(rootId, precWorkId)
+  }
 }
 
 const DISTILL_TO_GLOBAL_SYSTEM = [
@@ -644,6 +672,10 @@ export async function distillSessionArchivesToGlobal(deps, {
     return { ok: false, error: '当前本会话档案柜暂无可供提炼的档案条目' }
   }
 
+  const distWorkId = getChiefActiveWork(rootId)
+    ? ''
+    : beginChiefActiveWork(rootId, { tone: 'archive', tab: 'archive', label: '参谋长正在提炼全局档案中...' })
+  try {
   // Prioritize reusable engineering anchors/clips first
   const clipRank = { gold: 0, silver: 1, copper: 2 }
   selected = [...selected].sort((a, b) => (clipRank[a.paperclip] ?? 1) - (clipRank[b.paperclip] ?? 1))
@@ -778,6 +810,9 @@ export async function distillSessionArchivesToGlobal(deps, {
     archives: listArchiveHeaders(rootId, { vaultScope: 'session', includePrecipitated: true, flippedIds }, sessionOpt),
     globalArchives: listArchiveHeaders(rootId, { vaultScope: 'global', includePrecipitated: true, flippedIds }, globalOpt),
     view: await getChiefView(deps, rootId, { autoSummarize: false }),
+  }
+  } finally {
+    if (distWorkId) endChiefActiveWork(rootId, distWorkId)
   }
 }
 

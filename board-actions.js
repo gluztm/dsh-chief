@@ -24,7 +24,13 @@ import {
   getTakenOutGlobalForSession,
   getFlippedOutPrecipitatedForSession,
 } from './archives.js'
-import { DEFAULT_CHIEF_PERMISSION_MODE, normalizePermissionMode } from './chief-executor.js'
+import {
+  DEFAULT_CHIEF_PERMISSION_MODE,
+  normalizePermissionMode,
+  verifyBoundsWriteAuth,
+  listGuardWalls,
+  mutateGuardWalls,
+} from './chief-executor.js'
 import {
   enforceAnchorCap,
   STATUSES,
@@ -675,6 +681,15 @@ export function createBoardActions(deps) {
     }
 
     if (action === 'bounds.set') {
+      const auth = verifyBoundsWriteAuth({
+        action,
+        field: args.field,
+        callerOrigin: args._callerOrigin || '',
+        humanConfirmToken: args._humanConfirmToken || null,
+      })
+      if (!auth.ok) {
+        return { ok: false, blockedBySafetyGuard: true, rule: auth.rule, error: auth.error }
+      }
       const current = board.bounds || { allowed: [], forbidden: [], notes: [] }
       // A partial list that looks complete is the worst of the three options: the
       // caller walks away believing it imposed 25 restrictions while the board
@@ -719,6 +734,15 @@ export function createBoardActions(deps) {
     }
 
     if (action === 'bounds.add' || action === 'bounds.pin' || action === 'bounds.remove' || action === 'bounds.edit' || action === 'bounds.consolidate') {
+      const auth = verifyBoundsWriteAuth({
+        action,
+        field: args.field,
+        callerOrigin: args._callerOrigin || '',
+        humanConfirmToken: args._humanConfirmToken || null,
+      })
+      if (!auth.ok) {
+        return { ok: false, blockedBySafetyGuard: true, rule: auth.rule, error: auth.error }
+      }
       const col = normalizeBoundFieldName(args.field)
       if (!col) {
         return { ok: false, error: 'bounds operation requires field: allowed (必做) | forbidden (禁止) | notes (注意)' }
@@ -933,6 +957,53 @@ export function createBoardActions(deps) {
       const head = current.next || current.step || current.blocked || '（已清空）'
       pushLog(board, '断点：' + head.slice(0, 100), by, session)
       return clipped({ ok: true, cursor: current, board: saveBoard(board, file) }, clips)
+    }
+
+    if (action === 'wall.list') {
+      const targetCwd = session ? getSessionCwd(deps.hostState && deps.hostState.activeRuntime, session) : process.cwd()
+      return {
+        ok: true,
+        guardWalls: listGuardWalls({ cwd: targetCwd }),
+        board: loadBoard(file),
+      }
+    }
+
+    if (action === 'wall.save' || action === 'wall.setScope' || action === 'wall.remove' || action === 'wall.merge') {
+      const targetCwd = session ? getSessionCwd(deps.hostState && deps.hostState.activeRuntime, session) : process.cwd()
+      const op = action === 'wall.save'
+        ? 'save'
+        : (action === 'wall.setScope'
+            ? 'set_scope'
+            : (action === 'wall.merge' ? 'merge' : 'remove'))
+      const res = mutateGuardWalls({
+        op,
+        wall: (args.wall && typeof args.wall === 'object') ? args.wall : args,
+        wallId: args.wallId !== undefined ? args.wallId : args.id,
+        wallIds: Array.isArray(args.wallIds) ? args.wallIds : [],
+        autoGroup: Boolean(args.autoGroup),
+        title: typeof args.title === 'string' ? args.title : '',
+        scope: args.scope,
+        cwd: targetCwd,
+        callerOrigin: args._callerOrigin || '',
+        humanConfirmToken: args._humanConfirmToken || null,
+      })
+      if (!res.ok) return res
+      const actionLabel = op === 'remove'
+        ? `移除物理驻墙 ${args.wallId || args.id || ''}`
+        : (op === 'merge'
+            ? `合并同类物理驻墙（${res.mergedCount || 0} 条合为 ${res.createdCount || 1} 条）`
+            : (op === 'set_scope'
+                ? `切换物理驻墙「${(res.wall && res.wall.title) || ''}」状态为 ${args.scope}`
+                : `驻防物理墙「${(res.wall && res.wall.title) || ''}」(${res.wall && res.wall.scope === 'workspace' ? '本工程' : (res.wall && res.wall.scope === 'paused' ? '暂挂' : '全局常驻')})`))
+      pushLog(board, '🧱 ' + actionLabel, by, session)
+      return {
+        ok: true,
+        mergedCount: res.mergedCount || 0,
+        createdCount: res.createdCount || 0,
+        wall: res.wall,
+        guardWalls: res.walls,
+        board: saveBoard(board, file),
+      }
     }
 
     if (action === 'note.unpin') {

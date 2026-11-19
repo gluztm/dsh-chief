@@ -34,6 +34,7 @@ import {
   handleApprovalDecision,
   handleElevationDecision,
 } from './chief.js'
+import { getChiefActiveWork } from './chief-state.js'
 import {
   resolveProjectKey,
   getArchiveMeta,
@@ -48,7 +49,11 @@ import {
   mutatePrecipitated,
   copyPrecipitatedToVault,
 } from './archives.js'
-import { DEFAULT_CHIEF_PERMISSION_MODE } from './chief-executor.js'
+import {
+  DEFAULT_CHIEF_PERMISSION_MODE,
+  HUMAN_BOUNDS_CONFIRM_TOKEN,
+  listGuardWalls,
+} from './chief-executor.js'
 import {
   API,
   BACKEND_BUILD,
@@ -264,9 +269,12 @@ export function createApiRoutes(deps) {
                 paceMode: effCfg.paceMode || 'manual',
                 stopped: Boolean(effCfg.stopped || effCfg.paceMode === 'stopped'),
                 permissionMode: effCfg.permissionMode || DEFAULT_CHIEF_PERMISSION_MODE,
+                capabilities: effCfg.capabilities || {},
+                policyPluginsCount: Array.isArray(effCfg.policyPlugins) ? effCfg.policyPlugins.length : 0,
                 chiefRiskAcknowledged: Boolean(effCfg.chiefRiskVerified),
                 pendingApprovalsCount: ((rootWs && Array.isArray(rootWs.pendingApprovals)) ? rootWs.pendingApprovals : []).filter(a => a && a.status === 'pending').length,
                 hasPendingElevation: Boolean(rootWs && rootWs.pendingElevation && rootWs.pendingElevation.status === 'pending'),
+                auditLog: ((rootWs && Array.isArray(rootWs.auditLog)) ? rootWs.auditLog : []).slice(-50).reverse(),
                 autoPilot: Boolean(effCfg.autoPilot),
                 tacticalModes,
                 runtimeGuard: (rootWs && rootWs.runtimeGuard) || {},
@@ -278,9 +286,11 @@ export function createApiRoutes(deps) {
                 factsCount,
                 mailboxCount,
                 linkedPeersCount: Math.max(0, cluster.length - 1),
+                activeWork: getChiefActiveWork(rootSid),
                 contextUsage: sessionId ? getSessionContextBreakdown(runtime, sessionId) : null,
               },
               archiveMeta,
+              guardWalls: listGuardWalls({ cwd: sessionArchOpt.cwd }),
             })
           } catch (error) {
             sendJson(res, 500, { ok: false, error: String(error && error.message ? error.message : error) })
@@ -471,14 +481,21 @@ export function createApiRoutes(deps) {
               })
               return
             }
-            const result = runAction(body)
+            const result = runAction({
+              ...(body && typeof body === 'object' ? body : {}),
+              _callerOrigin: 'human_ui',
+              _humanConfirmToken: HUMAN_BOUNDS_CONFIRM_TOKEN,
+            })
             const mergedBoard = result.ok && result.board && sessionId
               ? boardForSession(boardFileFor(sessionId))
               : result.board
             const subagents = sessionId && mergedBoard ? await refreshSubagentTree(runtime, sessionId, mergedBoard) : []
+            let actionCwd = process.cwd()
+            try { actionCwd = archiveTarget(runtime, sessionId, { vaultScope: 'session' }).cwd || actionCwd } catch {}
             sendJson(res, result.ok ? 200 : 400, {
               ...result,
               ...(mergedBoard ? { board: mergedBoard } : {}),
+              ...(Array.isArray(result.guardWalls) ? {} : { guardWalls: listGuardWalls({ cwd: actionCwd }) }),
               subagents,
               boundaries: boundaries(runtime, sessionId),
             })

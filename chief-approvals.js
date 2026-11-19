@@ -11,6 +11,10 @@ import {
   permissionRank,
   evaluateSafetyGuardHardRules,
   executeChiefToolCall,
+  HUMAN_BOUNDS_CONFIRM_TOKEN,
+  buildCapabilityScope,
+  verifyCapabilityScope,
+  mutateGuardWalls,
 } from './chief-executor.js'
 import {
   CHAT_CAP,
@@ -21,7 +25,9 @@ import {
   cleanMultiline,
   hasValidChiefRiskAck,
   computeApprovalPayloadHash,
-  upsertResumeTaskOnWs,
+  upsertTaskLedgerOnWs,
+  markTaskResumingActive,
+  unmarkTaskResumingActive,
   pushAuditToWs,
   normalizeMail,
   resolveWorkspaceConfig,
@@ -38,7 +44,7 @@ import { buildChiefArchiveUpsertFn } from './chief-archives.js'
 import { buildChiefCompactFn, recordSmartCompactionChatReceipt } from './chief-compaction.js'
 import { askOrCommandChief } from './chief-commands.js'
 
-export async function handleSuggestionDecision(deps, { sessionId, suggestionId, decision, editedText, boundField, pinGlobal }) {
+export async function handleSuggestionDecision(deps, { sessionId, suggestionId, decision, editedText, boundField, pinGlobal, _suppressChatReceipt = false }) {
   const rootId = deps.resolveRootSessionId(sessionId) || String(sessionId || 'global')
   let found = null
   mutateChiefState((state) => {
@@ -76,6 +82,8 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
               pinned: shouldPin,
               session: rootId === 'global' ? '' : rootId,
               by: 'DSH 参谋长',
+              _callerOrigin: 'human_approval',
+              _humanConfirmToken: HUMAN_BOUNDS_CONFIRM_TOKEN,
             })
           : deps.runAction({
               action: 'bounds.add',
@@ -84,6 +92,8 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
               pinned: shouldPin,
               session: rootId === 'global' ? '' : rootId,
               by: 'DSH 参谋长',
+              _callerOrigin: 'human_approval',
+              _humanConfirmToken: HUMAN_BOUNDS_CONFIRM_TOKEN,
             }))
       : { ok: false, error: 'runAction unavailable' }
     if (!writeRes || !writeRes.ok) {
@@ -120,6 +130,59 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
       ok: true,
       boundApplied: { field: col, label: colLabel, item: ruleText, pinned: shouldPin, replacedCount: replaces.length },
       view: await getChiefView(deps, rootId, { autoSummarize: true }),
+    }
+  }
+
+  if (decision === 'approve' && found.kind === 'guard_wall') {
+    const cwdNow = resolveSessionWorkspaceCwd(deps, rootId)
+    const spec = found.wallSpec && typeof found.wallSpec === 'object' ? found.wallSpec : {
+      title: String(found.title || '参谋长手搓物理墙').replace(/^🧱\s*驻防物理墙[:：]\s*/, ''),
+      scope: found.pinGlobal === false ? 'workspace' : 'global',
+      ruleType: 'forbid_path',
+      patterns: String(found.draftText || '').split(/[,，;\n]+/).map(s => s.trim()).filter(Boolean),
+      reason: found.reason || '',
+      source: 'chief_crafted',
+    }
+    const wallRes = mutateGuardWalls({
+      op: 'save',
+      wall: { ...spec, source: 'chief_crafted' },
+      cwd: cwdNow,
+      callerOrigin: 'human_approval',
+      humanConfirmToken: HUMAN_BOUNDS_CONFIRM_TOKEN,
+    })
+    if (!wallRes || !wallRes.ok) {
+      return { ok: false, error: (wallRes && wallRes.error) || '驻防物理墙落锁失败' }
+    }
+    mutateChiefState((state) => {
+      const ws = ensureWorkspace(state, rootId)
+      if (!_suppressChatReceipt) {
+        ws.chat.push({
+          id: nextId('chat'),
+          role: 'chief',
+          kind: 'receipt',
+          text: `- 【🧱 物理驻墙已确认落锁】${wallRes.wall.title}\n- 【拦截范围】${wallRes.wall.scope === 'workspace' ? '仅绑定当前工程' : '🌐 全局随身常驻'} | 规则：\`${wallRes.wall.patterns.join(', ')}\``,
+          actions: ['确认驻防物理墙'],
+          at: Date.now(),
+        })
+        if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+      }
+      pushAuditToWs(ws, {
+        mode: resolveWorkspaceConfig(state, rootId).permissionMode,
+        stage: 'guard_wall',
+        rule: 'guard_wall_approved',
+        decision: 'executed',
+        operation: '落锁物理驻墙',
+        target: wallRes.wall.title,
+        reason: wallRes.wall.patterns.join(', '),
+        outcome: 'ok',
+        by: 'operator',
+      }, rootId)
+    })
+    return {
+      ok: true,
+      wallApplied: wallRes.wall,
+      guardWalls: wallRes.walls,
+      view: await getChiefView(deps, rootId, { autoSummarize: false }),
     }
   }
 
@@ -229,7 +292,7 @@ export async function executeBatchSuggestions(deps, {
       continue
     }
 
-    if (sug.kind !== 'bound' && sug.kind !== 'goal_approval') {
+    if (sug.kind !== 'bound' && sug.kind !== 'goal_approval' && sug.kind !== 'guard_wall') {
       const cmdSample = `${sug.draftText || ''}\n${sug.title || ''}`.trim()
       const guardRes = evaluateSafetyGuardHardRules({
         tool: 'relay',
@@ -265,12 +328,18 @@ export async function executeBatchSuggestions(deps, {
       suggestionId: sug.id,
       decision: 'approve',
       pinGlobal: sug.kind === 'bound' && typeof pinGlobalDefault === 'boolean' ? pinGlobalDefault : undefined,
+      _suppressChatReceipt: true,
     })
 
     if (res && res.ok) {
       executed.push({ id: sug.id, kind: sug.kind, title: sug.title, target: sug.targetLabel || sug.target })
       if (res.boundApplied) {
         summaries.push(`✅ 已应用边界「${res.boundApplied.label}」：${clamp(res.boundApplied.item, 44)}`)
+      } else if (res.wallApplied) {
+        const w = res.wallApplied
+        const scopeLabel = w.scope === 'workspace' ? '仅本工程' : '🌐全局随身'
+        const patPreview = Array.isArray(w.patterns) ? clamp(w.patterns.join(', '), 60) : ''
+        summaries.push(`🧱 已落锁物理驻墙「${clamp(w.title, 36)}」（${scopeLabel}${patPreview ? ` · \`${patPreview}\`` : ''}）`)
       } else if (res.goalApproved) {
         summaries.push('✅ 已批准并结项当前核心目标')
       } else if (res.delivery && res.delivery.target) {
@@ -337,6 +406,7 @@ export async function handleApprovalDecision(deps, {
   const rootId = (deps && typeof deps.resolveRootSessionId === 'function' ? deps.resolveRootSessionId(sessionId) : '') || String(sessionId || 'global')
   let found = null
   let currentMode = DEFAULT_CHIEF_PERMISSION_MODE
+  let effPolicyPlugins = []
   let existingNonPending = false
   let hashMismatch = false
 
@@ -345,12 +415,14 @@ export async function handleApprovalDecision(deps, {
     const ackOk = hasValidChiefRiskAck(ws)
     const eff = resolveWorkspaceConfig(state, rootId)
     currentMode = normalizePermissionMode(eff.permissionMode, { requireAck: true, hasChiefRiskAck: ackOk })
+    effPolicyPlugins = Array.isArray(eff.policyPlugins) ? eff.policyPlugins : []
     const item = (ws.pendingApprovals || []).find(a => a && a.id === approvalId && a.status === 'pending')
     if (!item) {
       existingNonPending = (ws.pendingApprovals || []).some(a => a && a.id === approvalId)
       pushAuditToWs(ws, {
         mode: currentMode,
         stage: 'permission_gate',
+        rule: existingNonPending ? 'replayed_approval' : 'invalid_approval_id',
         decision: existingNonPending ? 'replayed_approval' : 'invalid_approval_id',
         operation: '伪造或重放审批拦截',
         target: clamp(approvalId || '(empty)', 100),
@@ -361,6 +433,7 @@ export async function handleApprovalDecision(deps, {
       return
     }
 
+    const linkedTaskId = item.taskId || item.resumeTaskId || ''
     const expectedHash = computeApprovalPayloadHash(item.kind, item.payload || {})
     if (decision === 'approve' && item.payloadHash && item.payloadHash !== expectedHash) {
       hashMismatch = true
@@ -369,16 +442,20 @@ export async function handleApprovalDecision(deps, {
       item.resolvedAt = Date.now()
       item.resolvedBy = 'safety_guard'
       item.resultMessage = '审批载荷哈希校验失败（疑似载荷被篡改）'
-      if (item.resumeTaskId && Array.isArray(ws.resumeTasks)) {
-        const linkedTask = ws.resumeTasks.find(t => t && t.id === item.resumeTaskId)
+      const ledgerList = Array.isArray(ws.taskLedger) ? ws.taskLedger : (Array.isArray(ws.resumeTasks) ? ws.resumeTasks : [])
+      if (linkedTaskId) {
+        const linkedTask = ledgerList.find(t => t && (t.taskId === linkedTaskId || t.id === linkedTaskId))
         if (linkedTask) {
           linkedTask.status = 'failed'
+          linkedTask.updatedAt = Date.now()
           linkedTask.resolvedAt = Date.now()
+          linkedTask.lastReceipt = '审批载荷哈希校验失败，事务中止'
         }
       }
       pushAuditToWs(ws, {
         mode: currentMode,
         stage: 'safety_guard',
+        rule: 'tampered_approval_payload',
         decision: 'tampered_approval_payload',
         operation: item.operationLabel,
         target: item.targetLabel,
@@ -404,16 +481,20 @@ export async function handleApprovalDecision(deps, {
       item.resolvedAt = Date.now()
       item.resolvedBy = 'operator'
       item.resultMessage = '用户拒绝执行本次操作'
-      if (item.resumeTaskId && Array.isArray(ws.resumeTasks)) {
-        const linkedTask = ws.resumeTasks.find(t => t && t.id === item.resumeTaskId)
+      const ledgerList = Array.isArray(ws.taskLedger) ? ws.taskLedger : (Array.isArray(ws.resumeTasks) ? ws.resumeTasks : [])
+      if (linkedTaskId) {
+        const linkedTask = ledgerList.find(t => t && (t.taskId === linkedTaskId || t.id === linkedTaskId))
         if (linkedTask) {
           linkedTask.status = 'cancelled'
+          linkedTask.updatedAt = Date.now()
           linkedTask.resolvedAt = Date.now()
+          linkedTask.lastReceipt = '用户拒绝本次操作授权'
         }
       }
       pushAuditToWs(ws, {
         mode: currentMode,
         stage: 'permission_gate',
+        rule: 'rejected_by_user',
         decision: 'rejected_by_user',
         operation: item.operationLabel,
         target: item.targetLabel,
@@ -437,6 +518,7 @@ export async function handleApprovalDecision(deps, {
       pushAuditToWs(ws, {
         mode: currentMode,
         stage: 'permission_gate',
+        rule: 'approved_by_user',
         decision: 'approved_by_user',
         operation: item.operationLabel,
         target: item.targetLabel,
@@ -462,6 +544,13 @@ export async function handleApprovalDecision(deps, {
     ? deps.boardForSession(deps.boardFileFor(rootId))
     : null
   const payload = found.payload || {}
+  const resolvedScope = found.capabilityScope || buildCapabilityScope({
+    kind: found.kind,
+    tool: payload.tool || found.kind,
+    args: payload.args || {},
+    cwd: payload.cwd || resolveSessionWorkspaceCwd(deps, rootId),
+    target: payload.target || '',
+  })
   let execOk = false
   let execRes = null
   let resultMsg = ''
@@ -474,6 +563,8 @@ export async function handleApprovalDecision(deps, {
         cwd: payload.cwd || resolveSessionWorkspaceCwd(deps, rootId),
         permissionMode: currentMode === 'chief' ? 'chief' : 'strategist',
         hasChiefRiskAck: currentMode === 'chief',
+        policyPlugins: effPolicyPlugins,
+        capabilityScope: resolvedScope,
         approvedOnce: true,
         board,
         upsertArchiveFn: buildChiefArchiveUpsertFn(deps, rootId),
@@ -486,45 +577,55 @@ export async function handleApprovalDecision(deps, {
         ? `已执行 ${found.operationLabel}（${found.targetLabel}）`
         : (execRes && execRes.error) || '执行未成功'
     } else if (found.kind === 'relay') {
-      const guardRes = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: payload.text || '', board })
-      if (guardRes.blocked) {
+      const scopeCheck = verifyCapabilityScope(resolvedScope, { kind: 'relay', tool: 'relay', target: payload.target || '' })
+      if (!scopeCheck.ok) {
         execOk = false
-        execRes = { ok: false, blockedBySafetyGuard: true, error: guardRes.reason }
-        resultMsg = guardRes.reason
-        appendChiefAuditLog(rootId, { mode: currentMode, stage: 'safety_guard', decision: 'blocked', operation: found.operationLabel, target: found.targetLabel, reason: guardRes.reason, outcome: 'blocked', by: 'operator' })
+        execRes = { ok: false, deniedByScopeMismatch: true, error: scopeCheck.error }
+        resultMsg = scopeCheck.error
+        appendChiefAuditLog(rootId, { mode: currentMode, stage: 'scope_guard', rule: scopeCheck.rule, decision: 'rejected', operation: found.operationLabel, target: found.targetLabel, reason: scopeCheck.error, outcome: 'rejected', by: 'operator' })
       } else {
-        const deliv = await deliverCrossMessage(deps, {
-          fromSession: rootId,
-          fromLabel: payload.fromLabel || 'DSH 参谋 (逐项授权)',
-          target: payload.target || 'lead',
-          subject: payload.subject || '',
-          text: payload.text || '',
-          mode: payload.mode || 'steer',
-          imageBlocks: Array.isArray(payload.imageBlocks) ? payload.imageBlocks : [],
-          savedImagePaths: Array.isArray(payload.savedImagePaths) ? payload.savedImagePaths : [],
-        })
-        const isLeadTarget = /^(?:lead|main|主对话)$/i.test(String(payload.target || 'lead').trim())
-        if (isLeadTarget && (!deliv.ok || (payload.isBlankContext && !deliv.deliveredPhysical)) && deps && typeof deps.stagePendingTransfer === 'function') {
-          const staged = deps.stagePendingTransfer(
-            `[DSH 参谋预派发指令${payload.subject ? ' · ' + payload.subject : ''}]\n${payload.text || ''}`,
-            rootId,
-            { by: 'chief', subject: payload.subject || '' },
-          )
-          if (staged) {
-            execOk = true
-            execRes = { ...deliv, ok: true, stagedPending: true, target: '主对话(待领)' }
-            resultMsg = '已暂存主对话待领交接指令'
+        const guardRes = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: payload.text || '', board })
+        if (guardRes.blocked) {
+          execOk = false
+          execRes = { ok: false, blockedBySafetyGuard: true, error: guardRes.reason }
+          resultMsg = guardRes.reason
+          appendChiefAuditLog(rootId, { mode: currentMode, stage: 'safety_guard', rule: guardRes.rule || 'hard_guard', decision: 'blocked', operation: found.operationLabel, target: found.targetLabel, reason: guardRes.reason, outcome: 'blocked', by: 'operator' })
+        } else {
+          const deliv = await deliverCrossMessage(deps, {
+            fromSession: rootId,
+            fromLabel: payload.fromLabel || 'DSH 参谋 (逐项授权)',
+            target: payload.target || 'lead',
+            subject: payload.subject || '',
+            text: payload.text || '',
+            mode: payload.mode || 'steer',
+            envelopeKind: payload.envelopeKind || 'execution_request',
+            taskId: payload.taskId || '',
+            imageBlocks: Array.isArray(payload.imageBlocks) ? payload.imageBlocks : [],
+            savedImagePaths: Array.isArray(payload.savedImagePaths) ? payload.savedImagePaths : [],
+          })
+          const isLeadTarget = /^(?:lead|main|主对话)$/i.test(String(payload.target || 'lead').trim())
+          if (isLeadTarget && (!deliv.ok || (payload.isBlankContext && !deliv.deliveredPhysical)) && deps && typeof deps.stagePendingTransfer === 'function') {
+            const staged = deps.stagePendingTransfer(
+              `[DSH 参谋预派发指令${payload.subject ? ' · ' + payload.subject : ''}]\n${payload.text || ''}`,
+              rootId,
+              { by: 'chief', subject: payload.subject || '' },
+            )
+            if (staged) {
+              execOk = true
+              execRes = { ...deliv, ok: true, stagedPending: true, target: '主对话(待领)' }
+              resultMsg = '已暂存主对话待领交接指令'
+            } else {
+              execOk = Boolean(deliv && deliv.ok)
+              execRes = deliv
+              resultMsg = execOk ? `已投递给 ${deliv.target || found.targetLabel}` : ((deliv && deliv.error) || '投递失败')
+            }
           } else {
             execOk = Boolean(deliv && deliv.ok)
             execRes = deliv
             resultMsg = execOk ? `已投递给 ${deliv.target || found.targetLabel}` : ((deliv && deliv.error) || '投递失败')
           }
-        } else {
-          execOk = Boolean(deliv && deliv.ok)
-          execRes = deliv
-          resultMsg = execOk ? `已投递给 ${deliv.target || found.targetLabel}` : ((deliv && deliv.error) || '投递失败')
+          appendChiefAuditLog(rootId, { mode: currentMode, stage: 'executor', rule: 'approved_once', decision: 'executed_approved', operation: found.operationLabel, target: found.targetLabel, reason: clamp(resultMsg, 120), outcome: execOk ? 'ok' : 'error', by: 'operator' })
         }
-        appendChiefAuditLog(rootId, { mode: currentMode, stage: 'executor', decision: 'executed_approved', operation: found.operationLabel, target: found.targetLabel, reason: clamp(resultMsg, 120), outcome: execOk ? 'ok' : 'error', by: 'operator' })
       }
     } else if (found.kind === 'compact') {
       const guardRes = evaluateSafetyGuardHardRules({ tool: 'session_compact', opClass: 'workflow', board })
@@ -545,7 +646,7 @@ export async function handleApprovalDecision(deps, {
         resultMsg = execOk
           ? (execRes.noop ? '已抢救细节入本会话档案柜（当前历史免压）' : '已抢救细节并完成主对话上下文静默压缩')
           : ((execRes && execRes.error) || '压缩未完成')
-        appendChiefAuditLog(rootId, { mode: currentMode, stage: 'executor', decision: 'executed_approved', operation: found.operationLabel, target: found.targetLabel, reason: clamp(resultMsg, 120), outcome: execOk ? 'ok' : 'error', by: 'operator' })
+        appendChiefAuditLog(rootId, { mode: currentMode, stage: 'executor', rule: 'approved_once', decision: 'executed_approved', operation: found.operationLabel, target: found.targetLabel, reason: clamp(resultMsg, 120), outcome: execOk ? 'ok' : 'error', by: 'operator' })
       }
     } else if (found.kind === 'auto_continue') {
       if (deps && typeof deps.triggerAutoContinueNow === 'function') {
@@ -556,7 +657,7 @@ export async function handleApprovalDecision(deps, {
         execOk = false
         resultMsg = '当前宿主未提供续跑回调接口'
       }
-      appendChiefAuditLog(rootId, { mode: currentMode, stage: 'executor', decision: 'executed_approved', operation: found.operationLabel, target: found.targetLabel, reason: clamp(resultMsg, 120), outcome: execOk ? 'ok' : 'error', by: 'operator' })
+      appendChiefAuditLog(rootId, { mode: currentMode, stage: 'executor', rule: 'approved_once', decision: 'executed_approved', operation: found.operationLabel, target: found.targetLabel, reason: clamp(resultMsg, 120), outcome: execOk ? 'ok' : 'error', by: 'operator' })
     }
   } catch (err) {
     execOk = false
@@ -566,6 +667,7 @@ export async function handleApprovalDecision(deps, {
 
   let updatedApproval = { ...found, status: execOk ? 'executed' : 'failed', resultMessage: resultMsg }
   let resumeTaskToRun = null
+  const linkedTaskId = found.taskId || found.resumeTaskId || ''
   mutateChiefState((state) => {
     const ws = ensureWorkspace(state, rootId)
     const item = (ws.pendingApprovals || []).find(a => a && a.id === approvalId)
@@ -578,7 +680,7 @@ export async function handleApprovalDecision(deps, {
       id: nextId('chat'),
       role: 'chief',
       kind: 'receipt',
-      ...(found.resumeTaskId ? { resumeTaskId: found.resumeTaskId } : {}),
+      ...(linkedTaskId ? { resumeTaskId: linkedTaskId } : {}),
       text: execOk
         ? `- 【✅ 已允许并执行】${found.operationLabel} · \`${found.targetLabel}\`\n  结果：${clamp(resultMsg, 240)}`
         : `- 【⚠️ 授权操作未完成】${found.operationLabel} · \`${found.targetLabel}\`\n  说明：${clamp(resultMsg, 240)}`,
@@ -587,31 +689,39 @@ export async function handleApprovalDecision(deps, {
     })
     if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
 
-    if (found.resumeTaskId && Array.isArray(ws.resumeTasks)) {
-      const task = ws.resumeTasks.find(t => t && t.id === found.resumeTaskId)
+    const ledgerList = Array.isArray(ws.taskLedger) ? ws.taskLedger : (Array.isArray(ws.resumeTasks) ? ws.resumeTasks : [])
+    if (linkedTaskId) {
+      const task = ledgerList.find(t => t && (t.taskId === linkedTaskId || t.id === linkedTaskId))
       if (task) {
         const doneSummary = `${found.operationLabel} (${found.targetLabel}): ${clamp(resultMsg, 140)}`
-        const updatedTask = upsertResumeTaskOnWs(ws, {
-          id: task.id,
+        const updatedTask = upsertTaskLedgerOnWs(ws, {
+          taskId: task.taskId || task.id,
+          id: task.taskId || task.id,
           appendCompletedAction: doneSummary,
+          lastReceipt: clamp(resultMsg, 240),
         })
         const siblingPending = (ws.pendingApprovals || []).some(
-          a => a && a.id !== approvalId && a.resumeTaskId === task.id && a.status === 'pending',
+          a => a && a.id !== approvalId && (a.taskId === (task.taskId || task.id) || a.resumeTaskId === (task.taskId || task.id)) && a.status === 'pending',
         )
         if (!execOk) {
           if (updatedTask) {
             updatedTask.status = 'failed'
+            updatedTask.updatedAt = Date.now()
             updatedTask.resolvedAt = Date.now()
           }
         } else if (!siblingPending && updatedTask) {
           if (updatedTask.expiresAt && Date.now() > updatedTask.expiresAt) {
             updatedTask.status = 'expired'
+            updatedTask.updatedAt = Date.now()
             updatedTask.resolvedAt = Date.now()
-          } else if (found.kind === 'tool' && (updatedTask.resumeDepth || 0) < 2 && updatedTask.status !== 'resuming') {
+          } else if (found.kind === 'tool' && (updatedTask.retryCount || updatedTask.resumeDepth || 0) < 2 && updatedTask.status !== 'resuming') {
+            markTaskResumingActive(updatedTask.taskId || updatedTask.id)
             updatedTask.status = 'resuming'
+            updatedTask.updatedAt = Date.now()
             resumeTaskToRun = { ...updatedTask }
           } else if (updatedTask.status === 'awaiting_approval') {
             updatedTask.status = 'completed'
+            updatedTask.updatedAt = Date.now()
             updatedTask.resolvedAt = Date.now()
           }
         }
@@ -621,34 +731,54 @@ export async function handleApprovalDecision(deps, {
 
   let resumeOut = null
   if (resumeTaskToRun) {
+    const rTaskId = resumeTaskToRun.taskId || resumeTaskToRun.id
     const execSummaryJson = (() => {
       try { return JSON.stringify(execRes || {}).slice(0, 1000) } catch { return clamp(resultMsg, 400) }
     })()
     try {
+      const spec = resumeTaskToRun.resumeSpec || resumeTaskToRun
       resumeOut = await askOrCommandChief(deps, {
         sessionId: rootId,
-        text: resumeTaskToRun.originalText,
-        forcedTarget: resumeTaskToRun.forcedTarget || '',
-        forcedMode: resumeTaskToRun.forcedMode || 'steer',
+        text: spec.originalText || resumeTaskToRun.originalText,
+        forcedTarget: spec.forcedTarget || resumeTaskToRun.forcedTarget || '',
+        forcedMode: spec.forcedMode || resumeTaskToRun.forcedMode || 'steer',
         _resumeCtx: {
-          resumeTaskId: resumeTaskToRun.id,
-          resumeDepth: (resumeTaskToRun.resumeDepth || 0) + 1,
+          resumeTaskId: rTaskId,
+          resumeDepth: (resumeTaskToRun.retryCount || resumeTaskToRun.resumeDepth || 0) + 1,
           triggerKind: 'approval',
           executedSummary: `${found.operationLabel} (${found.targetLabel}) => ${execSummaryJson}`,
-          savedImagePaths: resumeTaskToRun.savedImagePaths || [],
+          savedImagePaths: spec.savedImagePaths || resumeTaskToRun.savedImagePaths || [],
         },
+      })
+      mutateChiefState((st) => {
+        const ws = ensureWorkspace(st, rootId)
+        const ledgerList = Array.isArray(ws.taskLedger) ? ws.taskLedger : (ws.resumeTasks || [])
+        const task = ledgerList.find(t => t && (t.taskId === rTaskId || t.id === rTaskId))
+        if (task && (task.status === 'resuming' || task.status === 'verifying')) {
+          task.status = 'verifying'
+          task.updatedAt = Date.now()
+          const verifiedOk = Boolean(resumeOut && resumeOut.ok !== false)
+          task.status = verifiedOk ? 'completed' : 'failed'
+          task.lastReceipt = clamp((resumeOut && (resumeOut.reply || resumeOut.error)) || resultMsg, 260)
+          task.resolvedAt = Date.now()
+        }
       })
     } catch (err) {
       resumeOut = { ok: false, error: (err && err.message) || String(err || 'resume failed') }
+      mutateChiefState((st) => {
+        const ws = ensureWorkspace(st, rootId)
+        const ledgerList = Array.isArray(ws.taskLedger) ? ws.taskLedger : (ws.resumeTasks || [])
+        const task = ledgerList.find(t => t && (t.taskId === rTaskId || t.id === rTaskId))
+        if (task && (task.status === 'resuming' || task.status === 'verifying')) {
+          task.status = 'failed'
+          task.updatedAt = Date.now()
+          task.lastReceipt = clamp(resumeOut.error, 260)
+          task.resolvedAt = Date.now()
+        }
+      })
+    } finally {
+      unmarkTaskResumingActive(rTaskId)
     }
-    mutateChiefState((st) => {
-      const ws = ensureWorkspace(st, rootId)
-      const task = (ws.resumeTasks || []).find(t => t && t.id === resumeTaskToRun.id)
-      if (task && task.status === 'resuming') {
-        task.status = resumeOut && resumeOut.ok !== false ? 'completed' : 'failed'
-        task.resolvedAt = Date.now()
-      }
-    })
   }
 
   const latestBoard = (resumeOut && resumeOut.board)
@@ -697,16 +827,21 @@ export async function handleElevationDecision(deps, {
     mutateChiefState((s) => {
       const ws = ensureWorkspace(s, rootId)
       ws.pendingElevation = null
-      if (elev.resumeTaskId && Array.isArray(ws.resumeTasks)) {
-        const linkedTask = ws.resumeTasks.find(t => t && t.id === elev.resumeTaskId)
+      const elevTaskId = elev.taskId || elev.resumeTaskId || ''
+      const ledgerList = Array.isArray(ws.taskLedger) ? ws.taskLedger : (ws.resumeTasks || [])
+      if (elevTaskId) {
+        const linkedTask = ledgerList.find(t => t && (t.taskId === elevTaskId || t.id === elevTaskId))
         if (linkedTask) {
           linkedTask.status = 'cancelled'
+          linkedTask.updatedAt = Date.now()
           linkedTask.resolvedAt = Date.now()
+          linkedTask.lastReceipt = '用户拒绝提权申请'
         }
       }
       pushAuditToWs(ws, {
         mode: resolveWorkspaceConfig(s, rootId).permissionMode,
         stage: 'permission_gate',
+        rule: 'elevation_rejected',
         decision: 'elevation_rejected',
         operation: '拒绝提权申请',
         target: `${elev.fromMode} -> ${elev.targetMode}`,
@@ -760,12 +895,14 @@ export async function handleElevationDecision(deps, {
   }
 
   let resumeTaskToRun = null
+  const elevTaskId = elev.taskId || elev.resumeTaskId || ''
   mutateChiefState((s) => {
     const ws = ensureWorkspace(s, rootId)
     ws.pendingElevation = null
     pushAuditToWs(ws, {
       mode: chosenMode,
       stage: 'permission_gate',
+      rule: 'elevation_approved',
       decision: 'elevation_approved',
       operation: '批准提权',
       target: `${CHIEF_PERMISSION_META[elev.fromMode]?.level || elev.fromMode} -> ${CHIEF_PERMISSION_META[chosenMode].level}`,
@@ -778,21 +915,25 @@ export async function handleElevationDecision(deps, {
       id: nextId('chat'),
       role: 'chief',
       kind: 'receipt',
-      ...(elev.resumeTaskId ? { resumeTaskId: elev.resumeTaskId } : {}),
+      ...(elevTaskId ? { resumeTaskId: elevTaskId } : {}),
       text: `- 【🔐 已批准提权】当前会话权限已升级为「**${meta.level} · ${meta.title}**」${chosenMode === 'chief' ? '（已完成高风险确认）' : ''}。`,
       actions: [`🔐 升至 ${meta.level}`],
       at: Date.now(),
     })
     if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
 
-    if (elev.resumeTaskId && Array.isArray(ws.resumeTasks)) {
-      const task = ws.resumeTasks.find(t => t && t.id === elev.resumeTaskId)
+    const ledgerList = Array.isArray(ws.taskLedger) ? ws.taskLedger : (ws.resumeTasks || [])
+    if (elevTaskId) {
+      const task = ledgerList.find(t => t && (t.taskId === elevTaskId || t.id === elevTaskId))
       if (task) {
         if (task.expiresAt && Date.now() > task.expiresAt) {
           task.status = 'expired'
+          task.updatedAt = Date.now()
           task.resolvedAt = Date.now()
-        } else if ((task.resumeDepth || 0) < 2 && task.status !== 'resuming') {
+        } else if ((task.retryCount || task.resumeDepth || 0) < 2 && task.status !== 'resuming') {
+          markTaskResumingActive(task.taskId || task.id)
           task.status = 'resuming'
+          task.updatedAt = Date.now()
           resumeTaskToRun = { ...task }
         }
       }
@@ -801,32 +942,51 @@ export async function handleElevationDecision(deps, {
 
   let resumeOut = null
   if (resumeTaskToRun) {
+    const rTaskId = resumeTaskToRun.taskId || resumeTaskToRun.id
     const meta = CHIEF_PERMISSION_META[chosenMode]
     try {
+      const spec = resumeTaskToRun.resumeSpec || resumeTaskToRun
       resumeOut = await askOrCommandChief(deps, {
         sessionId: rootId,
-        text: resumeTaskToRun.originalText,
-        forcedTarget: resumeTaskToRun.forcedTarget || '',
-        forcedMode: resumeTaskToRun.forcedMode || 'steer',
+        text: spec.originalText || resumeTaskToRun.originalText,
+        forcedTarget: spec.forcedTarget || resumeTaskToRun.forcedTarget || '',
+        forcedMode: spec.forcedMode || resumeTaskToRun.forcedMode || 'steer',
         _resumeCtx: {
-          resumeTaskId: resumeTaskToRun.id,
-          resumeDepth: (resumeTaskToRun.resumeDepth || 0) + 1,
+          resumeTaskId: rTaskId,
+          resumeDepth: (resumeTaskToRun.retryCount || resumeTaskToRun.resumeDepth || 0) + 1,
           triggerKind: 'elevation',
           executedSummary: `已批准提权至 ${meta.level} · ${meta.title}`,
-          savedImagePaths: resumeTaskToRun.savedImagePaths || [],
+          savedImagePaths: spec.savedImagePaths || resumeTaskToRun.savedImagePaths || [],
         },
+      })
+      mutateChiefState((st) => {
+        const ws = ensureWorkspace(st, rootId)
+        const ledgerList = Array.isArray(ws.taskLedger) ? ws.taskLedger : (ws.resumeTasks || [])
+        const task = ledgerList.find(t => t && (t.taskId === rTaskId || t.id === rTaskId))
+        if (task && (task.status === 'resuming' || task.status === 'verifying')) {
+          task.status = 'verifying'
+          task.updatedAt = Date.now()
+          task.status = resumeOut && resumeOut.ok !== false ? 'completed' : 'failed'
+          task.lastReceipt = clamp((resumeOut && (resumeOut.reply || resumeOut.error)) || `提权至 ${meta.level} 后已自动续跑`, 260)
+          task.resolvedAt = Date.now()
+        }
       })
     } catch (err) {
       resumeOut = { ok: false, error: (err && err.message) || String(err || 'elevation resume failed') }
+      mutateChiefState((st) => {
+        const ws = ensureWorkspace(st, rootId)
+        const ledgerList = Array.isArray(ws.taskLedger) ? ws.taskLedger : (ws.resumeTasks || [])
+        const task = ledgerList.find(t => t && (t.taskId === rTaskId || t.id === rTaskId))
+        if (task && (task.status === 'resuming' || task.status === 'verifying')) {
+          task.status = 'failed'
+          task.updatedAt = Date.now()
+          task.lastReceipt = clamp(resumeOut.error, 260)
+          task.resolvedAt = Date.now()
+        }
+      })
+    } finally {
+      unmarkTaskResumingActive(rTaskId)
     }
-    mutateChiefState((st) => {
-      const ws = ensureWorkspace(st, rootId)
-      const task = (ws.resumeTasks || []).find(t => t && t.id === resumeTaskToRun.id)
-      if (task && task.status === 'resuming') {
-        task.status = resumeOut && resumeOut.ok !== false ? 'completed' : 'failed'
-        task.resolvedAt = Date.now()
-      }
-    })
   }
 
   return {

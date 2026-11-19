@@ -5,11 +5,13 @@
  */
 
 import crypto from 'node:crypto'
-import { stripToolCallMarkup } from './chief-executor.js'
+import { stripToolCallMarkup, listGuardWalls } from './chief-executor.js'
 import {
   AUTO_SUMMARY_COOLDOWN_MS,
+  CHAT_OPPORTUNISTIC_SUMMARY_COOLDOWN_MS,
   SUMMARY_MAX_TOKENS,
   collectChiefVisibleArchives,
+  resolveSessionWorkspaceCwd,
   clamp,
   resolveWorkspaceConfig,
   loadChiefState,
@@ -20,6 +22,9 @@ import {
   shortAgentBriefName,
   stripCheckpointNoise,
   isInternalCheckpointNoise,
+  beginChiefActiveWork,
+  endChiefActiveWork,
+  getChiefActiveWork,
 } from './chief-state.js'
 import { listChiefModels, callChiefLlm } from './chief-models.js'
 import { collectClusterPeerProgress, listPeerDirectory } from './chief-network.js'
@@ -357,7 +362,7 @@ function buildFallbackNarrative({ board, facts, targets, peerProgress = [], conc
 
 export const summarizingLocks = new Map()
 
-export async function getChiefView(deps, sessionId, { regenerate = false, autoSummarize = false, syncHandoff = undefined, _skipAutoPilotCheck = false } = {}) {
+export async function getChiefView(deps, sessionId, { regenerate = false, autoSummarize = false, chatTriggered = false, syncHandoff = undefined, _skipAutoPilotCheck = false } = {}) {
   const rootId = deps.resolveRootSessionId(sessionId) || String(sessionId || 'global')
   const directory = await listPeerDirectory(deps, rootId)
   const board = deps.boardForSession(deps.boardFileFor(rootId))
@@ -396,11 +401,16 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
   const lastSummaryAt = Number((view.narrative && view.narrative.at) || 0)
   const isFresh = !rawInput || (hasSaved && view.narrative.hash === inputHash)
   const cooledForAuto = Date.now() - lastSummaryAt >= AUTO_SUMMARY_COOLDOWN_MS
+  const cooledForChat = Date.now() - lastSummaryAt >= CHAT_OPPORTUNISTIC_SUMMARY_COOLDOWN_MS
   const allowBackgroundSummary = paceMode === 'auto' && autoSummarize && !isFresh && cooledForAuto
+  const allowChatSummary = Boolean(chatTriggered) && !isFresh && cooledForChat
 
-  // Human-paced rule: ONLY call LLM when operator explicitly clicked Regenerate (`regenerate: true`),
-  // OR when operator explicitly chose `paceMode === 'auto'` AND the 5-minute cooldown has elapsed!
-  if (rawInput && (regenerate || allowBackgroundSummary) && modelsInfo.available && !summarizingLocks.has(rootId)) {
+  // Opportunistically refresh stale narrative in background after Chief chats (60s debounce),
+  // explicitly on Regenerate, or on autoSummarize cooldown.
+  if (rawInput && (regenerate || allowBackgroundSummary || allowChatSummary) && modelsInfo.available && !summarizingLocks.has(rootId)) {
+    const bgSummaryWorkId = getChiefActiveWork(rootId)
+      ? ''
+      : beginChiefActiveWork(rootId, { tone: 'neon', tab: 'chief', label: '参谋长正在自动提炼全局摘要中...' })
     const job = (async () => {
       const sysPrompt = isConciseBrief
         ? (NARRATIVE_SYSTEM + CONCISE_BRIEF_NARRATIVE_EXTRA)
@@ -428,6 +438,7 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
       }
     })().finally(() => {
       summarizingLocks.delete(rootId)
+      if (bgSummaryWorkId) endChiefActiveWork(rootId, bgSummaryWorkId)
     })
     summarizingLocks.set(rootId, job)
     if (regenerate) {
@@ -548,6 +559,10 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
     chiefRiskAck: ownWs.chiefRiskAck ? { ...ownWs.chiefRiskAck } : null,
     pendingApprovals: (Array.isArray(ownWs.pendingApprovals) ? ownWs.pendingApprovals : []).slice(-15).reverse(),
     pendingElevation: ownWs.pendingElevation ? { ...ownWs.pendingElevation } : null,
+    taskLedger: (Array.isArray(ownWs.taskLedger) ? ownWs.taskLedger : []).slice(-15).reverse(),
+    inquiries: (Array.isArray(ownWs.inquiries) ? ownWs.inquiries : []).slice(-12).reverse(),
+    guardWalls: listGuardWalls({ cwd: resolveSessionWorkspaceCwd(deps, rootId) }),
+    activeWork: getChiefActiveWork(rootId),
     auditLog: (Array.isArray(ownWs.auditLog) ? ownWs.auditLog : []).slice(-50).reverse(),
   }
 }

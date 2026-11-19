@@ -21,6 +21,7 @@ import {
 } from './idle-guard.js'
 import {
   loadChiefState,
+  mutateChiefState,
   resolveWorkspaceConfig,
   invalidateChiefModelCatalog,
   buildMessageEnvelope,
@@ -32,7 +33,7 @@ import {
 } from './chief.js'
 import { createAutoContinueEngine } from './auto-continue.js'
 import { bootstrapArchivesFromSharedBoard } from './archives.js'
-import { normalizePermissionMode } from './chief-executor.js'
+import { normalizePermissionMode, evaluatePreExecuteDefense } from './chief-executor.js'
 import {
   newId,
   nowMs,
@@ -605,10 +606,106 @@ export function createRuntimeHooks(deps) {
       }
     })
 
-    // Model tools: the cross-Session half of the same operations.
+    // Model tools: the cross-Session half of the same operations + whole-session pre-execute physical defense.
     ctx.inject(['tools'], toolCtx => {
       for (const tool of [boardTool(runtime), boundariesTool(runtime), handoffTool(runtime), memoryTool(runtime)]) {
         toolCtx.effect(() => toolCtx.tools.register(tool), 'dsh-chief: tool ' + tool.name)
+      }
+      const hookOn = typeof toolCtx.on === 'function'
+        ? toolCtx.on.bind(toolCtx)
+        : (typeof ctx.on === 'function' ? ctx.on.bind(ctx) : null)
+      if (hookOn) {
+        toolCtx.effect(() => hookOn('tools/pre-execute', async (exec, next) => {
+          try {
+            if (!exec || !exec.name) return next()
+            const caller = exec.agent || null
+            const sid = caller && caller.id ? String(caller.id) : ''
+            const rootId = resolveRootSessionId(sid, caller) || sid || 'global'
+            const cwd = (sid && getSessionCwd(runtime, sid)) || (rootId !== 'global' && getSessionCwd(runtime, rootId)) || process.cwd()
+            const board = rootId && rootId !== 'global' ? boardForSession(boardFileFor(rootId)) : loadBoard(boardFile())
+            const verdict = evaluatePreExecuteDefense({
+              tool: String(exec.name),
+              args: exec.arguments && typeof exec.arguments === 'object' ? exec.arguments : {},
+              cwd,
+              board,
+            })
+            if (verdict && verdict.decision === 'deny') {
+              const st = loadChiefState()
+              const effCfg = resolveWorkspaceConfig(st, rootId)
+              const ident = resolveAgentIdentity(runtime, sid, caller)
+              const actorName = (ident && ident.self) || 'lead'
+              const targetPreview = String(
+                (exec.arguments && (exec.arguments.path || exec.arguments.file_path || exec.arguments.command || exec.arguments.cmd))
+                || exec.name,
+              ).slice(0, 120)
+              appendChiefAuditLog(rootId, {
+                mode: effCfg.permissionMode || 'advisor',
+                stage: verdict.stage || 'guard_wall',
+                rule: verdict.rule || 'pre_execute_denied',
+                decision: 'blocked',
+                operation: String(exec.name),
+                target: targetPreview,
+                reason: verdict.reason,
+                outcome: 'blocked',
+                by: actorName,
+              })
+              try {
+                const bFile = rootId !== 'global' ? boardFileFor(rootId) : boardFile()
+                withBoardLock(bFile, () => {
+                  const b = loadBoard(bFile)
+                  pushLog(b, `🧱 事前物理防线已拦截 @${actorName} 调用 ${exec.name}：${String(verdict.reason || '').slice(0, 110)}`, 'guard', sid || rootId)
+                  saveBoard(b, bFile)
+                })
+              } catch {}
+              if (effCfg.tacticalModes && effCfg.tacticalModes.redlineSentinel) {
+                mutateChiefState((s) => {
+                  if (!s.workspaces || !s.workspaces[rootId]) return
+                  const ws = s.workspaces[rootId]
+                  if (!Array.isArray(ws.chat)) ws.chat = []
+                  ws.chat.push({
+                    id: 'chat-' + Date.now().toString(36),
+                    role: 'chief',
+                    kind: 'receipt',
+                    text: `- 【🧱 红线哨兵 · 事前物理拦截】已当场阻断 \`@${actorName}\` 的越界调用 \`${exec.name}\`\n- 【拦截原因】${verdict.reason}`,
+                    actions: [verdict.badge || '🧱 事前物理拦截'],
+                    at: Date.now(),
+                  })
+                })
+              }
+              return {
+                kind: 'deny',
+                reason: `[DSH 安全卫兵事前物理拦截] ${verdict.reason}`,
+                info: { stage: verdict.stage, rule: verdict.rule, wallId: verdict.wallId || '' },
+              }
+            } else if (verdict && verdict.decision === 'ask') {
+              const st = loadChiefState()
+              const effCfg = resolveWorkspaceConfig(st, rootId)
+              const ident = resolveAgentIdentity(runtime, sid, caller)
+              const actorName = (ident && ident.self) || 'lead'
+              const targetPreview = String(
+                (exec.arguments && (exec.arguments.path || exec.arguments.file_path || exec.arguments.command || exec.arguments.cmd))
+                || exec.name,
+              ).slice(0, 120)
+              appendChiefAuditLog(rootId, {
+                mode: effCfg.permissionMode || 'advisor',
+                stage: verdict.stage || 'guard_wall',
+                rule: verdict.rule || 'guard_wall_require_approval_cmd',
+                decision: 'pending_approval',
+                operation: String(exec.name),
+                target: targetPreview,
+                reason: verdict.reason,
+                outcome: 'pending',
+                by: actorName,
+              })
+              return {
+                kind: 'ask',
+                reason: `[DSH 物理驻墙审批] ${verdict.reason}`,
+                displayReason: verdict.displayReason || verdict.reason,
+              }
+            }
+          } catch {}
+          return next()
+        }), 'dsh-chief: pre-execute physical defense')
       }
     })
 
@@ -621,6 +718,15 @@ export function createRuntimeHooks(deps) {
         } catch {}
       }
     })
+
+    // Cold-start safety reconciliation for persistent TaskLedger (stale running/resuming -> interrupted; past TTL -> expired)
+    try {
+      const bootSt = loadChiefState({ forceDisk: true })
+      const hasNeedReconcile = Object.values((bootSt && bootSt.workspaces) || {}).some(
+        ws => Array.isArray(ws && ws.taskLedger) && ws.taskLedger.some(t => t && (t.status === 'interrupted' || t.status === 'expired')),
+      )
+      if (hasNeedReconcile) mutateChiefState(() => {})
+    } catch {}
   }
 
   return {

@@ -1,121 +1,98 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { spawn } from 'node:child_process'
+import { performance } from 'node:perf_hooks'
+import {
+  CHIEF_PERMISSION_MODES,
+  DEFAULT_CHIEF_PERMISSION_MODE,
+  CHIEF_PERMISSION_META,
+  normalizePermissionMode,
+  permissionRank,
+  getToolOpClass,
+  resolveRoleCapabilities,
+  buildCapabilityScope,
+  verifyCapabilityScope,
+  HUMAN_BOUNDS_CONFIRM_TOKEN,
+  safeRealpath,
+  isPathInsideWorkspace,
+  hasWindowsReservedDeviceName,
+  hasForbiddenNtfsAds,
+  isSensitiveCredentialPath,
+  validateWorkspacePath,
+  verifyBoundsWriteAuth,
+  decodeEncodedPowerShell,
+  normalizeCommandForSecurity,
+  splitCompoundCommand,
+  extractInlineScriptPayloads,
+  analyzeCommand,
+  HARD_GUARD_RULE_IDS,
+  isDestructiveShellCommand,
+  commandTouchesSensitiveCredential,
+  checkForbiddenBounds,
+  evaluateSafetyGuardHardRules,
+  FORBIDDEN_WEAKENING_KEYS,
+  validatePolicyPlugin,
+  validatePolicyPluginList,
+  evaluatePolicyPlugins,
+  evaluateChiefPermissionGate,
+  evaluateUnifiedToolGate,
+  GUARD_WALL_RULE_TYPES,
+  GUARD_WALL_SCOPES,
+  guardWallsFilePath,
+  validateGuardWallInput,
+  normalizeGuardWall,
+  isGuardWallActiveForCwd,
+  listGuardWalls,
+  mutateGuardWalls,
+  evaluateGuardWalls,
+  evaluatePreExecuteDefense,
+  redactAuditText,
+} from './safety/index.js'
 
-export const CHIEF_PERMISSION_MODES = ['advisor', 'assistant', 'strategist', 'chief']
-export const DEFAULT_CHIEF_PERMISSION_MODE = 'advisor'
-
-export const CHIEF_PERMISSION_META = {
-  advisor: {
-    key: 'advisor',
-    rank: 0,
-    level: 'L0',
-    icon: '👁',
-    shortLabel: 'L0 顾问',
-    title: '顾问模式',
-    enTitle: 'READ ONLY',
-    badge: '默认模式',
-    tagline: '只观察、只分析、只建议。',
-    desc: 'L0 默认只读档：仅读取看板与允许访问的项目状态，分析任务并提建议，绝不修改工作区或任何工作流。',
-    bullets: [
-      '读取看板和允许访问的项目状态',
-      '分析任务、提供建议',
-      '不修改工作区',
-      '不修改主代理和子代理工作流',
-    ],
-  },
-  assistant: {
-    key: 'assistant',
-    rank: 1,
-    level: 'L1',
-    icon: '🗂',
-    shortLabel: 'L1 助手',
-    title: '助手模式',
-    enTitle: 'ASSISTANT',
-    badge: '',
-    tagline: '允许自主维护参谋系统。',
-    desc: 'L1 参谋内务档：具备顾问全部能力，允许维护自身记忆、档案与看板配置，但不改工作区、不接管主子代理工作流。',
-    bullets: [
-      '顾问模式全部能力',
-      '管理自己的参谋系统',
-      '修改自己的记忆、档案和看板配置',
-      '不直接修改项目工作区',
-      '不接管主代理工作流',
-    ],
-  },
-  strategist: {
-    key: 'strategist',
-    rank: 2,
-    level: 'L2',
-    icon: '🛡️',
-    shortLabel: 'L2 参谋',
-    title: '参谋模式',
-    enTitle: 'ADVISOR WITH APPROVAL',
-    badge: '逐项授权',
-    tagline: 'Agent 提出操作，用户决定是否执行。',
-    desc: 'L2 逐项确认档：可申请修改工作区文件、运行系统命令及调整主对话/子代理工作流，每项受控操作执行前均弹窗由您逐项确认。',
-    bullets: [
-      '助手模式全部能力',
-      '可以申请修改工作区文件',
-      '可以申请修改主对话和子代理工作流',
-      '每项受控操作执行前弹窗',
-      '用户确认后才能执行',
-    ],
-  },
-  chief: {
-    key: 'chief',
-    rank: 3,
-    level: 'L3',
-    icon: '⚡',
-    shortLabel: 'L3 参谋长',
-    title: '参谋长模式',
-    enTitle: 'CHIEF OF STAFF',
-    badge: '主动风险知悉',
-    tagline: '用户明确接受更高自主权带来的操作风险。',
-    desc: 'L3 高权限自主档：可自主修改工作区、执行命令、切换主代理并协调子代理工作流；启用前必须阅读风险声明并主动勾选确认。',
-    bullets: [
-      '参谋模式全部能力',
-      '获得更高的自主执行权限',
-      '可以切换主代理',
-      '可以协调子代理及其工作流',
-      '启用前必须阅读风险声明并主动勾选确认',
-    ],
-  },
-}
-
-const PERM_ALIAS_MAP = {
-  advisor: 'advisor',
-  l0: 'advisor',
-  'read-only': 'advisor',
-  assistant: 'assistant',
-  l1: 'assistant',
-  strategist: 'strategist',
-  counselor: 'strategist',
-  l2: 'strategist',
-  'workspace-write': 'strategist',
-  'auto-review': 'strategist',
-  chief: 'chief',
-  'chief-of-staff': 'chief',
-  l3: 'chief',
-}
-
-export function normalizePermissionMode(raw, opts = {}) {
-  const v = String(raw || '').trim().toLowerCase()
-  const hasAck = Boolean(opts && opts.hasChiefRiskAck)
-  const requireAck = Boolean(opts && opts.requireAck)
-  if (v === 'danger-full-access') {
-    return hasAck ? 'chief' : DEFAULT_CHIEF_PERMISSION_MODE
-  }
-  const mapped = PERM_ALIAS_MAP[v] || DEFAULT_CHIEF_PERMISSION_MODE
-  if (mapped === 'chief' && requireAck && !hasAck) {
-    return DEFAULT_CHIEF_PERMISSION_MODE
-  }
-  return mapped
-}
-
-export function permissionRank(mode) {
-  const norm = normalizePermissionMode(mode)
-  return (CHIEF_PERMISSION_META[norm] && CHIEF_PERMISSION_META[norm].rank) ?? 0
+export {
+  CHIEF_PERMISSION_MODES,
+  DEFAULT_CHIEF_PERMISSION_MODE,
+  CHIEF_PERMISSION_META,
+  normalizePermissionMode,
+  permissionRank,
+  getToolOpClass,
+  resolveRoleCapabilities,
+  buildCapabilityScope,
+  verifyCapabilityScope,
+  HUMAN_BOUNDS_CONFIRM_TOKEN,
+  safeRealpath,
+  isPathInsideWorkspace,
+  hasWindowsReservedDeviceName,
+  hasForbiddenNtfsAds,
+  isSensitiveCredentialPath,
+  validateWorkspacePath,
+  verifyBoundsWriteAuth,
+  decodeEncodedPowerShell,
+  normalizeCommandForSecurity,
+  splitCompoundCommand,
+  extractInlineScriptPayloads,
+  analyzeCommand,
+  HARD_GUARD_RULE_IDS,
+  isDestructiveShellCommand,
+  commandTouchesSensitiveCredential,
+  checkForbiddenBounds,
+  evaluateSafetyGuardHardRules,
+  FORBIDDEN_WEAKENING_KEYS,
+  validatePolicyPlugin,
+  validatePolicyPluginList,
+  evaluatePolicyPlugins,
+  evaluateChiefPermissionGate,
+  evaluateUnifiedToolGate,
+  GUARD_WALL_RULE_TYPES,
+  GUARD_WALL_SCOPES,
+  guardWallsFilePath,
+  validateGuardWallInput,
+  normalizeGuardWall,
+  isGuardWallActiveForCwd,
+  listGuardWalls,
+  mutateGuardWalls,
+  evaluateGuardWalls,
+  evaluatePreExecuteDefense,
 }
 
 export const CHIEF_TOOLS_PROMPT_GUIDE = [
@@ -257,272 +234,6 @@ function truncateMiddle(text, maxBytes = 12_288) {
   const head = Math.floor(maxBytes * 0.65)
   const tail = maxBytes - head
   return s.slice(0, head) + `\n...[已截断 ${s.length - maxBytes} 字符]...\n` + s.slice(-tail)
-}
-
-function safeRealpath(targetPath) {
-  try {
-    return fs.realpathSync.native ? fs.realpathSync.native(targetPath) : fs.realpathSync(targetPath)
-  } catch {
-    return path.resolve(targetPath)
-  }
-}
-
-export function isPathInsideWorkspace(workspaceRoot, targetPath) {
-  if (!workspaceRoot || !targetPath) return false
-  const rootAbs = safeRealpath(workspaceRoot)
-  let probe = path.resolve(rootAbs, targetPath)
-  if (!fs.existsSync(probe)) {
-    const parent = path.dirname(probe)
-    probe = fs.existsSync(parent) ? path.join(safeRealpath(parent), path.basename(probe)) : path.resolve(probe)
-  } else {
-    probe = safeRealpath(probe)
-  }
-  const cmpRoot = process.platform === 'win32' ? rootAbs.toLowerCase() : rootAbs
-  const cmpTarget = process.platform === 'win32' ? probe.toLowerCase() : probe
-  const rel = path.relative(cmpRoot, cmpTarget)
-  return rel === '' || (!rel.startsWith('..') && !path.isAbsolute(rel))
-}
-
-const SENSITIVE_CREDENTIAL_BASENAMES = /^(?:\.+env(?:\.[a-z0-9_-]+)?|\.credentials(?:\.[a-z0-9_-]+)?|\.(?:git-credentials|npmrc|pypirc|netrc))$/i
-const SENSITIVE_CREDENTIAL_FULLPATH = /(?:id_rsa|id_ed25519|id_ecdsa|id_dsa|\.pem$|\.p12$|\.pfx$|credentials\.json$|secrets?\.(?:json|ya?ml)$)/i
-
-function isSensitiveNameOrStream(candidate) {
-  const s = String(candidate || '').trim()
-  if (!s || s === '$DATA') return false
-  const slashNorm = s.replace(/\\/g, '/').toLowerCase()
-  const base = path.basename(slashNorm)
-  if (SENSITIVE_CREDENTIAL_BASENAMES.test(base)) return true
-  if (SENSITIVE_CREDENTIAL_FULLPATH.test(slashNorm)) return true
-  return false
-}
-
-function resolveWithSymlinkTarget(filePath) {
-  const out = []
-  const raw = String(filePath || '').trim()
-  if (!raw) return out
-  out.push(raw)
-  try {
-    const abs = path.resolve(raw)
-    out.push(abs)
-    try {
-      const lst = fs.lstatSync(abs)
-      if (lst.isSymbolicLink()) {
-        const linkTarget = fs.readlinkSync(abs)
-        out.push(linkTarget)
-        out.push(path.resolve(path.dirname(abs), linkTarget))
-      }
-    } catch {}
-    out.push(safeRealpath(abs))
-    const parent = path.dirname(abs)
-    if (fs.existsSync(parent)) {
-      out.push(path.join(safeRealpath(parent), path.basename(abs)))
-    }
-  } catch {}
-  return out
-}
-
-function isSensitiveCredentialPath(filePath) {
-  const candidates = resolveWithSymlinkTarget(filePath)
-  for (const cand of candidates) {
-    if (isSensitiveNameOrStream(cand)) return true
-    // Strip Windows drive letter `C:` then inspect any NTFS Alternate Data Streams (`file.txt:.env:$DATA`)
-    const withoutDrive = String(cand || '').replace(/^[a-zA-Z]:(?=[\\/]|$)/, '')
-    if (withoutDrive.includes(':')) {
-      for (const streamPart of withoutDrive.split(':')) {
-        if (isSensitiveNameOrStream(streamPart)) return true
-      }
-    }
-  }
-  return false
-}
-
-function decodeEncodedPowerShell(command) {
-  const decodedParts = []
-  const raw = String(command || '')
-  const re = /(?:^|\s)-(?:e|ec|en|enc|enco|encod|encode|encoded|encodedc|encodedco|encodedcom|encodedcomm|encodedcomma|encodedcomman|encodedcommand)\s+([A-Za-z0-9+/=]{8,})/gi
-  let m
-  while ((m = re.exec(raw)) !== null) {
-    try {
-      const buf = Buffer.from(m[1], 'base64')
-      for (const enc of ['utf16le', 'utf8']) {
-        const rawTxt = buf.toString(enc)
-        if (/[\x00-\x08\x0e-\x1f\ufffd]/.test(rawTxt)) continue
-        const txt = rawTxt.trim()
-        if (txt.length >= 3 && /^[ -~\t\r\n\u4e00-\u9fff]+$/.test(txt)) {
-          decodedParts.push(txt)
-        }
-      }
-    } catch {}
-  }
-  return decodedParts.join(' ')
-}
-
-function extractCanonicalToolSubcommands(text) {
-  const extras = []
-  const s = String(text || '')
-  const gitValFlags = new Set(['-c', '--git-dir', '--work-tree', '--namespace', '--config-env', '--exec-path', '-p', '--paginate'])
-  const gitRe = /\bgit(?:\.exe)?\s+([^\n;|&`]+)/gi
-  let gm
-  while ((gm = gitRe.exec(s)) !== null) {
-    const tokens = gm[1].trim().split(/\s+/).filter(Boolean)
-    let i = 0
-    while (i < tokens.length) {
-      const tok = tokens[i]
-      if (tok === '-C' || gitValFlags.has(tok)) {
-        i += 2
-        continue
-      }
-      if (tok.startsWith('-')) {
-        i += 1
-        continue
-      }
-      break
-    }
-    if (i < tokens.length) {
-      const rest = tokens.slice(i).join(' ')
-      extras.push(`git ${tokens[i]}`, `git ${rest}`)
-    }
-  }
-  const npmRe = /\bnpm(?:\.cmd|\.exe)?\s+([^\n;|&`]+)/gi
-  let nm
-  while ((nm = npmRe.exec(s)) !== null) {
-    const tokens = nm[1].trim().split(/\s+/).filter(Boolean)
-    let i = 0
-    while (i < tokens.length && tokens[i].startsWith('-')) {
-      i += (tokens[i] === '--registry' || tokens[i] === '--tag' || tokens[i] === '--prefix') ? 2 : 1
-    }
-    if (i < tokens.length) {
-      extras.push(`npm ${tokens.slice(i).join(' ')}`)
-    }
-  }
-  return extras.join(' ')
-}
-
-export function normalizeCommandForSecurity(command) {
-  const nfkc = String(command || '').normalize('NFKC')
-  if (!nfkc) return ''
-  const psDecoded = decodeEncodedPowerShell(nfkc)
-  const base = psDecoded ? `${nfkc} ${psDecoded}` : nfkc
-  const concatCollapsed = base.replace(/(['"`])\s*\+\s*\1/g, '')
-  const escapedQuotesUnwrapped = concatCollapsed.replace(/\\(["'`])/g, '$1').replace(/["'`]/g, '')
-  const caretCollapsed = escapedQuotesUnwrapped.replace(/\^([a-zA-Z0-9_.-])/g, '$1')
-  const quoteStripped = concatCollapsed.replace(/["'`]/g, '')
-  const shellUnescaped = caretCollapsed.replace(/\\([ \t!$&()*,.;<>?@[\]^`{|}~])/g, '$1')
-  const spaceCollapsed = shellUnescaped.replace(/\s+/g, ' ').trim()
-  const canonicalTools = [
-    extractCanonicalToolSubcommands(spaceCollapsed),
-    extractCanonicalToolSubcommands(caretCollapsed.replace(/\s+/g, ' ').trim()),
-  ].filter(Boolean).join(' ')
-  return [nfkc, psDecoded, concatCollapsed, quoteStripped, escapedQuotesUnwrapped, caretCollapsed, spaceCollapsed, canonicalTools]
-    .filter(Boolean)
-    .join(' \n ')
-}
-
-const DESTRUCTIVE_COMMAND_PATTERNS = [
-  /\brm\s+-[a-z]*(?:r[a-z]*f|f[a-z]*r)[a-z]*\s+(?:\/(?:etc|usr|bin|sbin|var|lib|boot|dev|proc|sys|root|home|\*)?(?=$|[\s/])|~|\*|\.\.)/i,
-  /\bgit\s+(?:reset\s+--hard|clean\s+-[a-z]*f[a-z]*d|push\s+(?:--force|-f)\b)/i,
-  /\b(?:format|diskpart|cipher\s+\/w|bcdedit)\b/i,
-  /\bdel\s+\/[fqs][^\n]*[a-z]:\\/i,
-  /\bRemove-Item\b[^\n]*-Recurse[^\n]*-Force[^\n]*(?:[a-z]:\\|\*)/i,
-  /\b(?:shutdown(?:\.exe)?|restart-computer|stop-computer|mkfs|dd\s+if=.*of=\/dev\/)\b/i,
-  /\breg(?:\.exe)?\s+delete\s+(?:hklm|hkcr|hkcu\\software\\microsoft)\b/i,
-  /\bdrop\s+(?:database|schema)\b/i,
-]
-
-function isDestructiveShellCommand(command) {
-  const raw = String(command || '').trim()
-  if (!raw) return false
-  const norm = normalizeCommandForSecurity(raw)
-  return DESTRUCTIVE_COMMAND_PATTERNS.some(re => re.test(raw) || re.test(norm))
-}
-
-function commandTouchesSensitiveCredential(command) {
-  const raw = String(command || '')
-  if (!raw.trim()) return false
-  const norm = normalizeCommandForSecurity(raw)
-  const varExpanded = norm
-    .replace(/%[A-Za-z0-9_]+%/g, '/')
-    .replace(/\$env:[A-Za-z0-9_]+/gi, '/')
-    .replace(/\$\{[A-Za-z0-9_]+\}/g, '/')
-  const re = /(?:^|[\s"'=/\\:;>|&])(?:\.+env(?:\.[a-z0-9_-]+)?|\.credentials(?:\.[a-z0-9_-]+)?|\.(?:git-credentials|npmrc|pypirc|netrc)|id_rsa|id_ed25519|id_ecdsa|id_dsa|[a-z0-9_.-]+\.(?:pem|p12|pfx))(?:$|[\s"';&|><)\r\n])/i
-  return re.test(raw) || re.test(norm) || re.test(varExpanded)
-}
-
-/**
- * 无论当前处于何种权限级别（包括 danger-full-access），都坚决守住用户在看板中设定的禁止红线。
- */
-export function checkForbiddenBounds(board, actionDesc = '', commandOrPath = '', extraContent = '') {
-  const forbidden = [
-    ...((board && board.bounds && Array.isArray(board.bounds.forbidden)) ? board.bounds.forbidden : []),
-    ...((board && board.pinnedBounds && Array.isArray(board.pinnedBounds.forbidden)) ? board.pinnedBounds.forbidden : []),
-  ]
-  if (!forbidden.length) return { blocked: false }
-  const primary = String(commandOrPath || '')
-  const normCmd = normalizeCommandForSecurity(primary)
-  const contentSample = String(extraContent || '').slice(0, 8192).normalize('NFKC')
-  const haystack = [
-    String(actionDesc || ''),
-    primary,
-    primary.replace(/\\/g, '/'),
-    normCmd,
-    normCmd.replace(/\\/g, '/'),
-    contentSample,
-    contentSample.replace(/\\/g, '/'),
-  ].join(' \n ').toLowerCase()
-
-  for (const rule of forbidden) {
-    const rText = String(rule || '').trim()
-    if (!rText) continue
-    const ruleNorm = rText.replace(/\\/g, '/')
-    const ruleLower = ruleNorm.toLowerCase()
-
-    // 1. 提取反引号或引号内的受禁命令或路径字面量，如 `git push`、`npm publish`、"secret.env"
-    const quoted = [
-      ...[...ruleNorm.matchAll(/`([^`]{2,80})`/g)].map(m => m[1]),
-      ...[...ruleNorm.matchAll(/["'「『]([^"'」』]{2,80})["'」』]/g)].map(m => m[1]),
-    ].map(s => s.trim().toLowerCase())
-    for (const token of quoted) {
-      if (token && haystack.includes(token)) {
-        return { blocked: true, matchedRule: rText, trigger: token }
-      }
-    }
-
-    // 2. 提取不带反引号的文件名、路径片段、点文件或扩展名（如 secret.env、src/auth.js、package.json、.env）
-    const pathTokens = [...ruleLower.matchAll(/(?:[a-z0-9_.-]+\/[a-z0-9_.\-\/]+|\.[a-z0-9_-]{2,16}|[a-z0-9_-]{2,40}\.[a-z0-9]{1,10})/g)]
-      .map(m => m[0].trim())
-    for (const tok of pathTokens) {
-      if (tok && tok.length >= 3 && haystack.includes(tok)) {
-        return { blocked: true, matchedRule: rText, trigger: tok }
-      }
-    }
-
-    // 3. 匹配常见高危动词组合
-    const dangerousCmds = [
-      'git push',
-      'npm publish',
-      'git reset --hard',
-      'rm -rf',
-      'del /f',
-      'format ',
-      'drop table',
-      'drop database',
-    ]
-    for (const cmdTok of dangerousCmds) {
-      if (ruleLower.includes(cmdTok) && haystack.includes(cmdTok)) {
-        return { blocked: true, matchedRule: rText, trigger: cmdTok }
-      }
-    }
-
-    // 4. 若用户直接写了极短裸禁止词（去前缀后 >= 4 字符的命令行或目录标记）
-    const stripped = ruleLower
-      .replace(/^(?:严禁|禁止|不得|切勿|不要|不能|不可|不允许|勿|do\s+not|never|forbid)\s*/i, '')
-      .replace(/^(?:改动|修改|编辑|写入|删除|覆盖|执行|运行|推送|发布|触碰)\s*/i, '')
-      .trim()
-    if (stripped.length >= 4 && /^[a-z0-9_.\-\/:\s]{4,64}$/.test(stripped) && haystack.includes(stripped)) {
-      return { blocked: true, matchedRule: rText, trigger: stripped }
-    }
-  }
-  return { blocked: false }
 }
 
 function runSubprocess(command, cwd, timeoutMs = 20_000) {
@@ -672,174 +383,6 @@ function runRgSearch(rootDir, pattern, maxHits = 30) {
   })
 }
 
-export function getToolOpClass(tool) {
-  switch (String(tool || '').trim()) {
-    case 'read_file':
-    case 'list_dir':
-    case 'search_files':
-      return 'read'
-    case 'request_permission_elevation':
-      return 'elevation_request'
-    case 'archive_write':
-      return 'chief_system'
-    case 'write_file':
-    case 'edit_file':
-    case 'run_command':
-      return 'workspace'
-    case 'subagent_dispatch':
-    case 'subagent_steer':
-    case 'subagent_interrupt':
-    case 'main_agent_control':
-    case 'session_compact':
-      return 'workflow'
-    default:
-      return 'workflow'
-  }
-}
-
-/** 安全卫兵硬性规则：优先于四级权限判定，L3 与逐项放行均不可绕过。 */
-export function evaluateSafetyGuardHardRules({
-  tool = '',
-  opClass = '',
-  targetPath = '',
-  command = '',
-  content = '',
-  target = '',
-  replacement = '',
-  extraContent = '',
-  args = null,
-  board = null,
-} = {}) {
-  const argObj = args && typeof args === 'object' ? args : {}
-  const resolvedPath = targetPath || (typeof argObj.path === 'string' ? argObj.path : '')
-  const resolvedCommand = command || (typeof argObj.command === 'string' ? argObj.command : (typeof argObj.cmd === 'string' ? argObj.cmd : ''))
-
-  if (resolvedPath && isSensitiveCredentialPath(resolvedPath)) {
-    return {
-      blocked: true,
-      stage: 'safety_guard',
-      rule: 'sensitive_credential',
-      reason: `安全卫兵拦截访问敏感凭据文件：${path.basename(resolvedPath)}`,
-      badge: '🛡️ 卫兵拦凭据',
-    }
-  }
-  if (resolvedCommand && commandTouchesSensitiveCredential(resolvedCommand)) {
-    return {
-      blocked: true,
-      stage: 'safety_guard',
-      rule: 'sensitive_credential_cmd',
-      reason: '安全卫兵拦截触及敏感凭据路径（.env / .credentials / 私钥证书）的终端命令',
-      badge: '🛡️ 卫兵拦凭据命令',
-    }
-  }
-  if (resolvedCommand && isDestructiveShellCommand(resolvedCommand)) {
-    return {
-      blocked: true,
-      stage: 'safety_guard',
-      rule: 'destructive_command',
-      reason: `安全卫兵拦截高危毁灭性系统命令：${clamp(resolvedCommand, 80)}`,
-      badge: '🛡️ 卫兵拦高危命令',
-    }
-  }
-  if (opClass !== 'read' && opClass !== 'elevation_request') {
-    const checkInput = resolvedPath || resolvedCommand
-    const payloadParts = [
-      content,
-      target,
-      replacement,
-      extraContent,
-      argObj.content,
-      argObj.target,
-      argObj.replacement,
-      argObj.prompt,
-      argObj.message,
-      argObj.text,
-      argObj.body,
-    ]
-      .filter(v => v !== undefined && v !== null && String(v).trim())
-      .map(v => String(v).slice(0, 8192))
-    const mergedExtra = payloadParts.join('\n').slice(0, 12_288)
-    const boundCheck = checkForbiddenBounds(board, tool, checkInput, mergedExtra)
-    if (boundCheck.blocked) {
-      return {
-        blocked: true,
-        stage: 'safety_guard',
-        rule: 'forbidden_bound',
-        matchedRule: boundCheck.matchedRule,
-        reason: `安全卫兵命中禁止红线【${boundCheck.matchedRule}】，坚决拦截：${clamp(checkInput || tool, 80)}`,
-        badge: '🛡️ 卫兵拦红线',
-      }
-    }
-  }
-  return { blocked: false }
-}
-
-/** 四级权限门禁判定：advisor(L0) / assistant(L1) / strategist(L2) / chief(L3)。 */
-export function evaluateChiefPermissionGate({
-  permissionMode = DEFAULT_CHIEF_PERMISSION_MODE,
-  hasChiefRiskAck = false,
-  opClass = 'read',
-  tool = '',
-  approvedOnce = false,
-} = {}) {
-  const mode = normalizePermissionMode(permissionMode, { requireAck: true, hasChiefRiskAck })
-  const meta = CHIEF_PERMISSION_META[mode] || CHIEF_PERMISSION_META.advisor
-
-  if (opClass === 'read' || opClass === 'elevation_request') {
-    return { decision: 'allow', mode }
-  }
-
-  if (opClass === 'chief_system') {
-    if (mode === 'advisor') {
-      return {
-        decision: 'deny_mode',
-        mode,
-        requiredMode: 'assistant',
-        error: '当前处于「L0 · 顾问模式（只读）」，仅允许分析与建议，不能修改参谋记忆、档案或看板配置。可向用户申请提权至「L1 · 助手模式」。',
-        badge: '🔒 L0禁改参谋系统',
-      }
-    }
-    return { decision: 'allow', mode }
-  }
-
-  // 'workspace' or 'workflow'
-  if (mode === 'advisor' || mode === 'assistant') {
-    const targetDesc = opClass === 'workspace' ? '修改项目工作区或执行系统命令' : '调整主对话及子代理工作流'
-    return {
-      decision: 'deny_mode',
-      mode,
-      requiredMode: 'strategist',
-      error: `当前处于「${meta.level} · ${meta.title}」，禁止${targetDesc}（${tool}）。如需执行，请向用户申请提权至「L2 · 参谋模式（逐项授权）」或「L3 · 参谋长模式」。`,
-      badge: `🔒 ${meta.level}禁止操作`,
-    }
-  }
-
-  if (mode === 'strategist') {
-    if (approvedOnce) {
-      return { decision: 'allow_approved', mode }
-    }
-    return {
-      decision: 'require_approval',
-      mode,
-      requiredMode: 'strategist',
-      error: '「L2 · 参谋模式」要求先通过操作授权弹窗由用户逐项确认。',
-      badge: '🛡️ 待逐项确认',
-    }
-  }
-
-  // mode === 'chief'
-  if (!hasChiefRiskAck) {
-    return {
-      decision: 'deny_unacknowledged_l3',
-      mode: 'advisor',
-      requiredMode: 'chief',
-      error: '未检测到「L3 · 参谋长模式」风险知悉确认状态（chiefRiskAck），后端拒绝高权限自主执行。',
-      badge: '🛡️ L3未授权拦截',
-    }
-  }
-  return { decision: 'allow', mode: 'chief' }
-}
-
 function displayRelTarget(cwd, rawTarget) {
   const raw = String(rawTarget || '').trim()
   if (!raw) return '工作区'
@@ -968,22 +511,28 @@ export function describeControlledOperationMeta(tool, args = {}, cwd = '') {
  * 用户模式 -> 操作请求 -> 安全卫兵硬性规则 -> 权限判定 -> 执行器 -> 审计日志
  */
 export async function executeChiefToolCall(deps, call, execCtx = {}) {
+  const startedAt = performance.now()
   const tool = String(call && (call.tool || call.name) || '').trim()
   const args = (call && call.args && typeof call.args === 'object') ? call.args : (call && typeof call === 'object' ? call : {})
   const hasChiefRiskAck = Boolean(execCtx.hasChiefRiskAck)
+  const policyPlugins = Array.isArray(execCtx.policyPlugins) ? execCtx.policyPlugins : []
   const permissionMode = normalizePermissionMode(execCtx.permissionMode, { requireAck: true, hasChiefRiskAck })
   const cwd = String(execCtx.cwd || process.cwd())
   const rootId = String(execCtx.rootId || '')
   const board = execCtx.board || {}
   const readOnlyToolsOnly = Boolean(execCtx.readOnlyToolsOnly)
   const approvedOnce = Boolean(execCtx.approvedOnce)
+  const capabilityScope = execCtx.capabilityScope || null
 
   const writeAudit = (entry) => {
     if (typeof execCtx.recordAuditFn === 'function') {
       try {
+        const durationMs = Math.max(0, Math.round(performance.now() - startedAt))
         execCtx.recordAuditFn({
           mode: permissionMode,
           tool,
+          durationMs,
+          summary: redactAuditText(entry.summary || entry.reason || '', 220),
           by: execCtx.by || 'chief',
           ...entry,
         })
@@ -1004,7 +553,7 @@ export async function executeChiefToolCall(deps, call, execCtx = {}) {
 
   const opClass = getToolOpClass(tool)
   if (readOnlyToolsOnly && opClass !== 'read') {
-    writeAudit({ stage: 'read_only_guard', decision: 'denied', operation: tool, target: '', reason: '后台复盘仅允许只读核验', outcome: 'blocked' })
+    writeAudit({ stage: 'read_only_guard', rule: 'read_only_guard', decision: 'denied', operation: tool, target: '', reason: '后台复盘仅允许只读核验', outcome: 'blocked' })
     return deny(`后台复盘轮次仅允许只读核验工具（${tool} 已跳过）`)
   }
 
@@ -1014,7 +563,7 @@ export async function executeChiefToolCall(deps, call, execCtx = {}) {
   const resolvedAbsTarget = rawTargetPath ? path.resolve(cwd, rawTargetPath) : ''
   const rawCommand = tool === 'run_command' ? String(args.command || args.cmd || '').trim() : ''
 
-  // Stage 3: 安全卫兵硬性规则（优先于任何权限等级与逐项批准）
+  // Stage 3: 安全卫兵硬性规则（优先于任何权限等级、策略插件与逐项批准）
   const guardRes = evaluateSafetyGuardHardRules({
     tool,
     opClass,
@@ -1027,26 +576,128 @@ export async function executeChiefToolCall(deps, call, execCtx = {}) {
   if (guardRes.blocked) {
     writeAudit({
       stage: 'safety_guard',
+      rule: guardRes.rule || 'hard_guard',
       decision: 'blocked',
       operation: tool,
       target: displayRelTarget(cwd, resolvedAbsTarget) || clamp(rawCommand, 80) || tool,
       reason: guardRes.reason,
       outcome: 'blocked',
     })
-    return deny(guardRes.reason, guardRes.badge, { blockedBySafetyGuard: true })
+    return deny(guardRes.reason, guardRes.badge, { blockedBySafetyGuard: true, rule: guardRes.rule || 'hard_guard' })
   }
 
-  // Stage 4: 四级权限判定
+  // Stage 3.5: 动态物理驻墙检验（同样不受 L3 与逐项放行绕过，require_approval_cmd 转为弹窗确认）
+  const wallRes = evaluateGuardWalls({
+    tool,
+    opClass,
+    targetPath: resolvedAbsTarget,
+    command: rawCommand,
+    args,
+    cwd,
+  })
+  if (wallRes.decision === 'block') {
+    writeAudit({
+      stage: 'guard_wall',
+      rule: wallRes.rule || 'guard_wall_block',
+      decision: 'blocked',
+      operation: tool,
+      target: displayRelTarget(cwd, resolvedAbsTarget) || clamp(rawCommand, 80) || tool,
+      reason: wallRes.reason,
+      outcome: 'blocked',
+    })
+    return deny(wallRes.reason, wallRes.badge || '🧱 物理墙拦截', {
+      blockedByGuardWall: true,
+      blockedBySafetyGuard: true,
+      rule: wallRes.rule || 'guard_wall_block',
+      wallId: wallRes.wallId,
+    })
+  }
+  if (wallRes.decision === 'require_approval' && !approvedOnce) {
+    const meta = describeControlledOperationMeta(tool, args, cwd)
+    const computedScope = buildCapabilityScope({ kind: 'tool', tool, args, cwd })
+    const approvalObj = typeof execCtx.queueApprovalFn === 'function'
+      ? await execCtx.queueApprovalFn({
+          category: meta.category,
+          operationLabel: meta.operationLabel,
+          targetLabel: meta.targetLabel,
+          reason: wallRes.reason,
+          impact: meta.impact,
+          preview: meta.preview,
+          kind: 'tool',
+          capabilityScope: computedScope,
+          payload: { tool, args: { ...args }, cwd, rootId, sessionId: execCtx.sessionId || rootId },
+          by: execCtx.by || 'guard_wall',
+        })
+      : null
+    writeAudit({
+      stage: 'guard_wall',
+      rule: wallRes.rule || 'guard_wall_require_approval',
+      decision: 'pending_approval',
+      operation: meta.operationLabel,
+      target: meta.targetLabel,
+      reason: wallRes.reason,
+      outcome: 'pending',
+    })
+    return {
+      tool,
+      ok: false,
+      pendingApproval: true,
+      approvalId: (approvalObj && approvalObj.id) || '',
+      approval: approvalObj || null,
+      error: `${wallRes.reason}。已为您弹出「操作授权请求」弹窗，等待点击「允许本次操作」。`,
+      badge: wallRes.badge || '🧱 物理墙待确认',
+    }
+  }
+
+  // Stage 4: 四级权限 + capabilities + Policy Plugin + 单次作用域判定
   const gateRes = evaluateChiefPermissionGate({
     permissionMode,
     hasChiefRiskAck,
     opClass,
     tool,
     approvedOnce,
+    capabilityScope,
+    actualRequest: { kind: 'tool', tool, args, cwd },
+    policyPlugins,
+    targetPath: resolvedAbsTarget,
+    command: rawCommand,
+    cwd,
   })
+  if (gateRes.decision === 'deny_policy_plugin') {
+    writeAudit({
+      stage: 'policy_plugin',
+      rule: gateRes.rule || 'policy_plugin',
+      decision: 'blocked',
+      operation: tool,
+      target: rawTargetPath || clamp(rawCommand, 60) || tool,
+      reason: gateRes.error,
+      outcome: 'blocked',
+    })
+    return deny(gateRes.error, gateRes.badge, {
+      blockedByPolicyPlugin: true,
+      pluginId: gateRes.pluginId || '',
+      rule: gateRes.rule || 'policy_plugin',
+    })
+  }
+  if (gateRes.decision === 'deny_scope_mismatch') {
+    writeAudit({
+      stage: 'scope_guard',
+      rule: gateRes.rule || 'capability_scope_mismatch',
+      decision: 'rejected',
+      operation: tool,
+      target: rawTargetPath || clamp(rawCommand, 60) || tool,
+      reason: gateRes.error,
+      outcome: 'rejected',
+    })
+    return deny(gateRes.error, gateRes.badge, {
+      deniedByScopeMismatch: true,
+      rule: gateRes.rule || 'capability_scope_mismatch',
+    })
+  }
   if (gateRes.decision === 'deny_mode' || gateRes.decision === 'deny_unacknowledged_l3') {
     writeAudit({
       stage: 'permission_gate',
+      rule: gateRes.rule || gateRes.decision,
       decision: gateRes.decision,
       operation: tool,
       target: rawTargetPath || clamp(rawCommand, 60) || String(args.agent || args.op || tool),
@@ -1061,6 +712,7 @@ export async function executeChiefToolCall(deps, call, execCtx = {}) {
   }
   if (gateRes.decision === 'require_approval') {
     const meta = describeControlledOperationMeta(tool, args, cwd)
+    const computedScope = buildCapabilityScope({ kind: 'tool', tool, args, cwd })
     const approvalObj = typeof execCtx.queueApprovalFn === 'function'
       ? await execCtx.queueApprovalFn({
           category: meta.category,
@@ -1070,12 +722,14 @@ export async function executeChiefToolCall(deps, call, execCtx = {}) {
           impact: meta.impact,
           preview: meta.preview,
           kind: 'tool',
+          capabilityScope: computedScope,
           payload: { tool, args: { ...args }, cwd, rootId, sessionId: execCtx.sessionId || rootId },
           by: execCtx.by || 'chief',
         })
       : null
     writeAudit({
       stage: 'permission_gate',
+      rule: gateRes.rule || 'require_approval',
       decision: 'pending_approval',
       operation: meta.operationLabel,
       target: meta.targetLabel,
@@ -1088,15 +742,41 @@ export async function executeChiefToolCall(deps, call, execCtx = {}) {
       pendingApproval: true,
       approvalId: (approvalObj && approvalObj.id) || '',
       approval: approvalObj || null,
-      error: `当前处于「L2 · 参谋模式」，操作「${meta.operationLabel} → ${meta.targetLabel}」已提交操作授权弹窗，等待用户点击「允许本次操作」。`,
+      error: `当前处于「${CHIEF_PERMISSION_META[gateRes.mode]?.level || 'L2'} · ${CHIEF_PERMISSION_META[gateRes.mode]?.title || '参谋模式'}」，操作「${meta.operationLabel} → ${meta.targetLabel}」已提交操作授权弹窗，等待用户点击「允许本次操作」。`,
       badge: `🛡️ 待确认 ${clamp(meta.targetLabel, 18)}`,
     }
   }
 
-  // Stage 5: 执行器
+  // Stage 5: 执行器（包含写入路径能力前缀二次确认）
+  const allowedWritePrefixes = gateRes && gateRes.capabilities && Array.isArray(gateRes.capabilities.fsWritePrefixes)
+    ? gateRes.capabilities.fsWritePrefixes
+    : null
+  if ((tool === 'write_file' || tool === 'edit_file') && rawTargetPath) {
+    const writePathCheck = validateWorkspacePath(cwd, resolvedAbsTarget, {
+      mode: 'write',
+      allowedSubPrefixes: allowedWritePrefixes,
+    })
+    if (writePathCheck.blocked) {
+      writeAudit({
+        stage: writePathCheck.stage || 'safety_guard',
+        rule: writePathCheck.rule || 'workspace_write_denied',
+        decision: 'blocked',
+        operation: tool,
+        target: displayRelTarget(cwd, resolvedAbsTarget),
+        reason: writePathCheck.reason,
+        outcome: 'blocked',
+      })
+      return deny(writePathCheck.reason, writePathCheck.badge, {
+        blockedBySafetyGuard: writePathCheck.stage === 'safety_guard',
+        rule: writePathCheck.rule,
+      })
+    }
+  }
+
   const finish = (res, opLabel, targetLabel) => {
     writeAudit({
       stage: 'executor',
+      rule: approvedOnce ? 'approved_once' : 'role_allow',
       decision: approvedOnce ? 'executed_approved' : 'executed',
       operation: opLabel || tool,
       target: targetLabel || '',
@@ -1409,10 +1089,12 @@ export async function runChiefAgenticLoop(deps, {
   allowTextFallbackOnVisionMiss = false,
   permissionMode = DEFAULT_CHIEF_PERMISSION_MODE,
   hasChiefRiskAck = false,
+  policyPlugins = [],
   board = null,
   maxSteps = 4,
   readOnlyToolsOnly = false,
   disableTools = false,
+  lazyDeferWorkspaceWritesToLead = false,
   callLlmFn,
   extractJsonFn,
   upsertArchiveFn,
@@ -1490,12 +1172,54 @@ export async function runChiefAgenticLoop(deps, {
     ranToolsOnLastStep = true
     const stepOutputs = []
     for (const c of calls) {
+      const cToolName = String(c && (c.tool || c.name) || '').trim()
+      if (
+        lazyDeferWorkspaceWritesToLead
+        && (cToolName === 'write_file' || cToolName === 'edit_file' || cToolName === 'run_command')
+      ) {
+        const preDef = evaluatePreExecuteDefense({
+          tool: cToolName,
+          args: (c && c.args && typeof c.args === 'object') ? c.args : {},
+          cwd,
+          board,
+        })
+        if (!preDef || preDef.decision !== 'deny') {
+          if (typeof recordAuditFn === 'function') {
+            try {
+              recordAuditFn({
+                mode: perm,
+                stage: 'lazy_intervention',
+                rule: 'lead_first_defer',
+                decision: 'deferred_to_lead',
+                operation: cToolName,
+                target: clamp(String((c.args && (c.args.path || c.args.command || c.args.cmd)) || cToolName), 80),
+                reason: '懒介入机制生效：主对话在线且用户未指定参谋长亲自操作，改为派发 @lead 执行请求',
+                outcome: 'deferred',
+                by: 'chief',
+              })
+            } catch {}
+          }
+          const deferRes = {
+            tool: cToolName,
+            ok: false,
+            denied: true,
+            deferredByLazyIntervention: true,
+            badge: '🤝 懒介入转主对话',
+            error: '懒介入机制生效：当前主对话 (@lead) 在线可用且用户未指定参谋长亲自操刀，已遏制直接改动工作区或跑终端命令。请去掉工作区 toolCalls，改为在最终 JSON 的 relays 中向 target="lead" 下发结构化执行请求！',
+          }
+          toolRecords.push({ step: step + 1, call: c, result: deferRes })
+          if (!toolBadges.includes(deferRes.badge)) toolBadges.push(deferRes.badge)
+          stepOutputs.push({ tool: cToolName, args: c.args || {}, result: deferRes })
+          continue
+        }
+      }
       const execRes = await executeChiefToolCall(deps, c, {
         rootId,
         sessionId: sessionId || rootId,
         cwd,
         permissionMode: perm,
         hasChiefRiskAck,
+        policyPlugins,
         board,
         readOnlyToolsOnly,
         upsertArchiveFn,

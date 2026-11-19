@@ -1,8 +1,8 @@
 # `dsh-chief` 模块架构契约卡（AI 开发速查基准）
 
 > **全局依赖铁律**
-> 1. **依赖方向**：`index.js (DI Hub)` ──装配──▶ `{ board-store, subagent-runtime, board-actions, model-tools, api-routes, runtime-hooks }` ──跨域仅走门面──▶ `chief.js` / `archives.js` ──安全执行唯一通路──▶ `chief-executor.js`
-> 2. **三禁红线**：① 子模块严禁反向导入门面（`index.js` / `chief.js` / `archives.js`）；② 严禁循环依赖与跨模块 `export let` 可变绑定；③ 严禁修改 [chief-executor.js](file:///D:/Agents%20WorkSpace/DSH-Data/WorkShop/notebook-panel/pkg/chief-executor.js) 安全内核语义。
+> 1. **依赖方向**：`index.js (DI Hub)` ──装配──▶ `{ board-store, subagent-runtime, board-actions, model-tools, api-routes, runtime-hooks }` ──跨域仅走门面──▶ `chief.js` / `archives.js` ──安全执行唯一通路──▶ `chief-executor.js` ──安全内核──▶ `safety/*.js`
+> 2. **三禁红线**：① 子模块严禁反向导入门面（`index.js` / `chief.js` / `archives.js`）；② 严禁循环依赖与跨模块 `export let` 可变绑定；③ `pkg/safety/*.js` 严禁依赖业务层或引入 `child_process`，且 `chief-executor.js` + `pkg/safety/*.js` 全集受 MD5 锁保护。
 > 3. **构建同步**：改动 `pkg/src/client/` 下任何源码后，必须执行 `npm run build:client` 重新生成 [client.js](file:///D:/Agents%20WorkSpace/DSH-Data/WorkShop/notebook-panel/pkg/client.js)。
 
 ---
@@ -64,34 +64,40 @@
   - **安全边界**：27/27 条路由入口第一行强制执行 `if (!guard(req, res)) return`（绑定 `connection.requestRejection` 401/403，且异常处理严格 fail-closed 返回 `403`）；`readBody` 强制 `BODY_LIMIT` 防 DoS；`POST /chief/suggestion` 统一承接单条与批量建议执行。
 
 - **模块**：`model-tools.js` & `runtime-hooks.js`
-  - **职责**：`model-tools.js` 定义并注册 4 个模型工具（`chief_board` / `chief_memory` / `chief_boundaries` / `chief_handoff`）；`runtime-hooks.js` 注册 Cordis `apply(ctx)` 生命周期、旧版迁移、`auto-continue` 与 `agent/turn-stopping` 子代理自动完结钩子。
+  - **职责**：`model-tools.js` 定义并注册 4 个模型工具（`chief_board` / `chief_memory` / `chief_boundaries` / `chief_handoff`，含 `inquiry.reply` 优先问询零打断回传、`chief.request` 主对话直传参谋长请求与只读 `wall.list`）；`runtime-hooks.js` 注册 Cordis `apply(ctx)` 生命周期、旧版迁移、`tools/pre-execute` 全会话（主对话与子代理）事前物理硬防线拦截、`agent/pre-step`（优先注入 `[INQUIRY #...]`）、`auto-continue` 与 `agent/turn-stopping` 子代理自动完结钩子。
   - **允许依赖**：`./chief.js`, `./archives.js`, `./chief-executor.js`, `./board-schema.js`, `./idle-guard.js`, `./auto-continue.js`, `deps`
   - **禁止依赖**：`index.js`, `chief-*` 内部实现。
   - **公开 API**：`createModelTools(deps)` / `createRuntimeHooks(deps)`。
   - **持有状态**：经 `deps.hostState` 管理 `activeAutoContinue` 与 `autoSteeredTurns`。
-  - **副作用**：拦截会话启停、自动解锁下游 DAG `blockedBy` 任务、注入上下文与交接提示词。
-  - **安全边界**：`chief_board permission.request` 与模型工具不可跳过人工提权审批直接赋予 `chief` 权限；`autoContinue` 受当前权限档位门禁约束。
+  - **副作用**：拦截会话启停、在工具实际落地前阻断命中高危硬规则或动态物理驻墙（`guard-walls.json`）的调用（返回 `{ kind: 'deny' }`）、自动解锁下游 DAG `blockedBy` 任务、注入上下文与交接提示词。
+  - **安全边界**：`chief_board` 对 AI 严禁暴露 `wall.save` / `wall.setScope` / `wall.remove`，仅人机 UI `/action` 与人类拍板 `guard_wall` 提案可通过 `HUMAN_BOUNDS_CONFIRM_TOKEN` 改写物理驻墙与 `bounds.*`；`autoContinue` 受当前权限档位门禁约束。
 
 ---
 
-## 二、参谋长引擎与安全执行层（`chief.js` + 9 模块 + `chief-executor.js`）
+## 二、参谋长引擎与安全执行层（`chief.js` + 9 模块 + `chief-executor.js` + `safety/` 9 模块）
 
-- **模块**：`chief-executor.js` (**独立安全执行核，MD5 锁定**)
-  - **职责**：定义四档权限模型（`advisor` / `assistant` / `strategist` / `chief`）、安全卫兵硬规则（`evaluateSafetyGuardHardRules`）、工具门禁（`evaluateChiefPermissionGate`）、工具沙箱执行（`executeChiefToolCall`）与 `runChiefAgenticLoop`。
-  - **允许依赖**：仅 `node:fs`, `node:path`, `node:child_process`
-  - **禁止依赖**：任何业务逻辑模块（`chief-*.js`, `archives.js`, `index.js`）；严禁被拆散或与业务层合并！
-  - **公开 API**：权限常量与归一化、`CHIEF_TOOLS_PROMPT_GUIDE`、`evaluateSafetyGuardHardRules`、`evaluateChiefPermissionGate`、`executeChiefToolCall`、`runChiefAgenticLoop`。
-  - **持有状态**：无跨请求可变全局状态。
-  - **副作用**：受控读写工作区文件、执行只读搜索或批准后的命令。
-  - **安全边界**：唯一物理执行网关；硬规则对全部四档位强制生效；L2 `strategist` 写/执行工具必入审批队列而非当场执行；命令超时与输出截断兜底。
+- **安全内核与执行门面**：`pkg/safety/*.js`（9 模块）+ `chief-executor.js` (**安全核心全集 MD5 锁定**)
+  - **独立安全内核 (`pkg/safety/`)**：
+    - `safety/audit-log.js`：管理独立只追加审计日志 `chief-audit.jsonl`、`stage`/`rule`/`durationMs` 标准化及敏感凭据自动 `[REDACTED]` 脱敏。
+    - `safety/command-analyzer.js`：命令归一化、复合管道分段（`&&`/`||`/`|`/;`/`cmd /c`/`powershell -c` 嵌套）与内联脚本载荷提取（`node -e`/`python -c`/`pwsh`/`iex` 及 Base64 字面量解码）。
+    - `safety/guard-walls.js`：管理可跨会话随身复用的动态物理驻墙存储 `~/.dsh/chief/guard-walls.json`（`O_EXCL` `.lock` 互斥锁 + `mtimeMs` 缓存 + 原子重命名），支持 `global`（全工程随身）/ `workspace`（仅当前工程）/ `paused`（暂挂停用）三态与 5 类物理匹配（`forbid_path` / `restrict_write` / `forbid_cmd` / `require_approval_cmd` / `deny_tool`），提供人类专属认证写锁（`verifyBoundsWriteAuth`）及全会话 `evaluatePreExecuteDefense` 事前物理评估入口。
+    - `safety/path-guard.js`：工作区真实路径与多级未建目录祖先校验、Symlink/Junction 穿透检测、Windows 保留设备名（`CON`/`NUL`/`COM*`）/NTFS ADS 流阻断与 `bounds.*` 人类确认写入令牌校验（`HUMAN_BOUNDS_CONFIRM_TOKEN`）。
+    - `safety/invariant-guards.js`：不可被任何档位或插件覆盖的 `Hard Guard`（高危命令、凭据路径与内联访问、工作区越界、用户 `bounds.forbidden` 红线）。
+    - `safety/policy-plugin.js`：只紧不松 JSON 策略插件校验与评估，支持角色上限收紧、禁用工具/路径前缀/命令正则与强制逐项审批，直接拒绝任何试图削弱 `Hard Guard` 或携带函数回调的插件。
+    - `safety/policy-engine.js`：四档 `role + capabilities` 能力解析与单次授权作用域（`capabilityScope`）生成/防复用校验。
+    - `safety/tool-gate.js`：串联 `Hard Guard -> Guard Walls -> Policy Plugin -> Role+Capabilities -> CapabilityScope` 的统一门禁。
+    - `safety/index.js`：安全内核统一导出入口。
+  - **`chief-executor.js` 职责**：作为对外兼容门面与唯一物理沙箱执行器（唯一允许调用 `node:child_process`），承载工具描述、DSML/XML 清洗、耗时统计、Stage 3.5 动态物理驻墙检验、L2/L3 懒介入拦截（优先派发在线 `@lead` 执行工作区写改与终端命令，除非用户明确点名参谋长亲自上手）、工具执行与 `runChiefAgenticLoop`。
+  - **禁止依赖**：`pkg/safety/*.js` 严禁依赖任何业务模块或 `child_process`；`chief-executor.js` 严禁反向依赖业务子模块。
+  - **安全边界**：所有工具与命令执行必经统一门禁与沙箱；`L2 strategist` 与受插件降级操作进入带 `capabilityScope` 锁定的审批队列。
 
 - **模块**：`chief-state.js` (L1) & `chief-models.js` (L2)
-  - **职责**：`chief-state.js` 管理 `chief-state.json` 跨进程 `O_EXCL` `.lock` 互斥锁与原子写盘、工作区配置、`permissionMode` 校验与降档清零、`auditLog` 与独立只追加账本 `chief-audit.jsonl`、`approvalQueue`/`elevationQueue`（含 SHA-256 `payloadHash` 绑定）与轻量化恢复事务账本 `resumeTasks`、`pinned` 翻出索引；`chief-models.js` 管理可用模型目录缓存、失败冷却队列与 `ctx.llm` 调用。
-  - **允许依赖**：`node:*`, `./archives.js`, `./chief-executor.js`（L2 仅依赖 `./chief-state.js`）。
+  - **职责**：`chief-state.js` 管理 `chief-state.json` 跨进程 `O_EXCL` `.lock` 互斥锁与原子写盘、工作区配置、`permissionMode` + `capabilities` 解析、只紧不松 `policyPlugins` 配置持久化与校验、`auditLog` 联动 `safety/audit-log.js`、审批队列（`payloadHash` + `capabilityScope`）、持久化任务账本 `taskLedger`（兼容 `resumeTasks`，冷启动时自动将遗留 `running`/`resuming`/`verifying` 收敛为 `interrupted`，过期条目收敛为 `expired`）及 `pinned` 翻出索引；`chief-models.js` 管理可用模型目录缓存、失败冷却队列与 `ctx.llm` 调用。
+  - **允许依赖**：`node:*`, `./archives.js`, `./safety/index.js`（L2 仅依赖 `./chief-state.js`）。
   - **禁止依赖**：`chief.js`, `index.js`, L3–L9 上层模块。
-  - **持有状态**：`chief-state.js` 唯一持有 `cachedState` / `cachedMtime` / `idSeq` / `heldStateLocks`；`chief-models.js` 唯一持有 `modelCatalogCache` / `unusableRouteUntil`。
+  - **持有状态**：`chief-state.js` 唯一持有 `cachedState` / `cachedMtime` / `idSeq` / `heldStateLocks` / `activeResumingTaskIds`；`chief-models.js` 唯一持有 `modelCatalogCache` / `unusableRouteUntil`。
   - **副作用**：读写 `~/.dsh/chief/chief-state.json`（含 `.lock`）及独立只追加日志 `~/.dsh/chief/chief-audit.jsonl`；向工作区写入参谋暂存图片。
-  - **安全边界**：启用 `chief` 档位后端强校验 `hasValidChiefRiskAck`（`confirmedChiefRisk === true`）；降档自动清零确认戳；异常与拒批行为同步写入内存截断队列与永不截断的 `chief-audit.jsonl`。
+  - **安全边界**：启用 `chief` 档位后端强校验 `hasValidChiefRiskAck`；降档自动清零确认戳；非法 `policyPlugins` 配置写入审计并原样拒绝；崩溃遗留任务绝不无确认自动续跑。
 
 - **模块**：`chief-network.js` (L3) & `chief-view.js` (L4)
   - **职责**：`chief-network.js` 处理跨窗口集群信封 `buildMessageEnvelope`、同行进度与定向邮箱递话；`chief-view.js` 聚合六行态势报告与 `getChiefView`，并暴露单向 `registerIdleAutoPilotHook` 解耦 L8。
@@ -110,12 +116,12 @@
   - **安全边界**：尊重 `archives.js` 0-token 沉淀封存与凭据过滤；压缩前自动落盘防丢记忆。
 
 - **模块**：`chief-commands.js` (L7) & `chief-review.js` (L8) & `chief-approvals.js` (L9)
-  - **职责**：L7 处理自然语言指令编排（`askOrCommandChief`，支持 `_resumeCtx` 授权恢复上下文）、边界浓缩与目标建议；L8 处理防抖回合审查、`runTurnReview` 与自动驾驶防空转收工（启动时向 `chief-view.js` 注册 `checkAndStopIdleAutoPilot` 钩子）；L9 处理建议卡片与顶部统一批量执行（`executeBatchSuggestions`）、L2 审批单 `payloadHash` 核验/一次性放行（`handleApprovalDecision`）及提权裁决后自动续跑恢复（`handleElevationDecision`）。
+  - **职责**：L7 处理自然语言指令编排（`askOrCommandChief`，支持 `_resumeCtx` 授权恢复、`_fromLeadRequest` 主对话直传协办、空白新对话首轮勘探→计划→汇报策略、`inquiries` 优先问询与 `wallProposals` 手搓物理驻墙呈批）、边界浓缩与 `handleLeadDirectRequestToChief`（注册于 `chief-network` 钩子）；L8 处理防抖回合审查、`runTurnReview` 与自动驾驶防空转收工（启动时向 `chief-view.js` 注册 `checkAndStopIdleAutoPilot` 钩子）；L9 处理建议卡片与顶部统一批量执行（`executeBatchSuggestions`，含 `guard_wall` 物理墙落锁）、L2 审批单 `payloadHash` 核验/一次性放行（`handleApprovalDecision`）及提权裁决后自动续跑恢复（`handleElevationDecision`）。
   - **允许依赖**：遵循严格偏序 DAG（L7→L1..L6 + `./chief-executor.js`；L8→L1..L7；L9→L1..L7 + `./chief-executor.js`；门面 `chief.js` 共 67 项导出）。
   - **禁止依赖**：反向导入 `./chief.js` 或下层调用上层。
   - **持有状态**：`chief-review.js` 唯一持有 `reviewTimers`（Map）与 `lastReviewAtByRoot`（Map）。
-  - **副作用**：运行参谋工具循环、入队待审批/提权卡片、批准并核验 `payloadHash` 后触发单次执行与未超期恢复事务续跑。
-  - **安全边界**：所有工具与命令执行唯一通过 `chief-executor.js`（已加固反斜杠/引号/参数插入/`-EncodedCommand`/写内容体红线检查及 Symlink/NTFS ADS 凭据阻断）；L2 审批单一次性消费 + SHA-256 `payloadHash` 防篡改，拒绝与重放必入 `auditLog` 及 `chief-audit.jsonl`；自动续跑严格受 `resumeDepth < 2` 与 30 分钟 TTL 约束。
+  - **副作用**：运行参谋工具循环、入队待审批/提权/物理墙提案卡片、批准并核验 `payloadHash` 后触发单次执行与未超期恢复事务续跑。
+  - **安全边界**：所有工具与命令执行唯一通过 `chief-executor.js`；L2 审批单一次性消费 + SHA-256 `payloadHash` 防篡改，拒绝与重放必入 `auditLog` 及 `chief-audit.jsonl`；自动续跑严格受 `resumeDepth < 2` 与 30 分钟 TTL 约束；`chatTriggered` 触发对话后顺势背景更新摘要（60 秒节流防抖，不阻塞回复）。
 
 ---
 
@@ -135,4 +141,4 @@
 
 - **分层结构**：`react-runtime.js` / `constants.js` (L0 常量与宿主桥) → `store.js` (L1 **唯一可变状态所有者**：`store`, `listeners`, `SESSION_SOURCES`, `runtimeRefs`) → `utils.js` (L2 纯工具) → `api.js` (L3 HTTP 通信与会话切换状态清理) / `styles.js` (L3 CSS) → `components/common.js` / `modals.js` (L4 通用组件与 14 个安全弹窗) → `tabs/*.js` (L5 6 个业务页签) → `components/Panel.js` (L6 主面板与 8 插槽外壳) → `entry.js` (L7 `createClientPlugin()` 入口)。
 - **构建与禁忌**：由零依赖拓扑排序打包器 [build-client.mjs](file:///D:/Agents%20WorkSpace/DSH-Data/WorkShop/notebook-panel/pkg/scripts/build-client.mjs) 输出单文件 `pkg/client.js`（`window.__ModuleLoader__.load({ id: 'dsh-chief' })`）；严禁新增跨模块 `export let` 重新赋值，严禁跳过 `npm run build:client`。
-- **界面版本徽章与控制交互**：参谋长面板标题栏（`components/Panel.js` `.dnb-ver-chip`）常驻显示 `v1.3.0`；`SuggestionBanner` 顶部提供唯一「▶ 执行建议」入口并区隔问答/回执样式（`tabs/chief.js`）；右下角与输入栏触发按钮采用真 Toggle 与启动单次引导（`store.js`/`entry.js`），手动关闭后绝不自动弹回。发版前打包脚本将强校验 `package.json`、`board-schema.js`（`BACKEND_BUILD`）与 `src/client/constants.js`（`EXPECTED_BACKEND_BUILD`）三端一致。
+- **界面版本徽章与控制交互**：参谋长面板标题栏（`components/Panel.js` `.dnb-ver-chip`）常驻显示 `v1.4.0`；`SuggestionBanner` 顶部提供唯一「▶ 执行建议」入口并区隔问答/回执样式（`tabs/chief.js`）；右下角与输入栏触发按钮采用真 Toggle 与启动单次引导（`store.js`/`entry.js`），手动关闭后绝不自动弹回。发版前打包脚本将强校验 `package.json`、`board-schema.js`（`BACKEND_BUILD`）与 `src/client/constants.js`（`EXPECTED_BACKEND_BUILD`）三端一致。

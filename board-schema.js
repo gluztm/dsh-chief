@@ -8,7 +8,7 @@ import { normalizeMemory } from './memory.js'
 
 export const API = '/api/dsh-chief'
 
-export const BACKEND_BUILD = '1.3.0'
+export const BACKEND_BUILD = '1.4.0'
 
 export const BOARD_VERSION = 1
 

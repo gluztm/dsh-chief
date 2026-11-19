@@ -417,12 +417,19 @@ export function createSubagentRuntime(deps) {
       const dir = path.join(root, bucket)
       const names = safe(() => fs.readdirSync(dir), [])
       for (const name of names) {
-        const file = path.join(dir, name, 'session.v4.jsonl.zstd')
+        const dirPath = path.join(dir, name)
+        const file = path.join(dirPath, 'session.v4.jsonl.zstd')
         let at = 0
         try {
           at = fs.statSync(file).mtimeMs
         } catch {
-          continue
+          const entries = safe(() => fs.readdirSync(dirPath), [])
+          for (const entName of entries) {
+            if (!/^session(?:\.v\d+)?\.jsonl(?:\.zstd)?$/.test(entName)) continue
+            const mst = safe(() => fs.statSync(path.join(dirPath, entName)).mtimeMs, 0)
+            if (mst > at) at = mst
+          }
+          if (!at) continue
         }
         const key = name.indexOf('session-') === 0 ? name : 'session-' + name
         const previous = found.get(key) || 0

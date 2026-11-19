@@ -144,9 +144,9 @@ try {
   // -------------------------------------------------------------------------
   // G1. Facade Exports, Version Alignment, Zero Mutable Exports, Acyclic DAG
   // -------------------------------------------------------------------------
-  assert.equal(pkgJson.version, '1.3.0', 'package.json version must be 1.3.0')
-  assert.equal(schemaMod.BACKEND_BUILD, '1.3.0', 'BACKEND_BUILD must be 1.3.0')
-  assert.equal(constMod.EXPECTED_BACKEND_BUILD, '1.3.0', 'EXPECTED_BACKEND_BUILD must be 1.3.0')
+  assert.equal(pkgJson.version, '1.4.0', 'package.json version must be 1.4.0')
+  assert.equal(schemaMod.BACKEND_BUILD, '1.4.0', 'BACKEND_BUILD must be 1.4.0')
+  assert.equal(constMod.EXPECTED_BACKEND_BUILD, '1.4.0', 'EXPECTED_BACKEND_BUILD must be 1.4.0')
   assert.equal(Object.keys(indexMod).length, 6, 'index.js must export 6 symbols')
   assert.equal(Object.keys(chiefMod).length, 67, 'chief.js must export 67 symbols')
   assert.equal(Object.keys(archivesMod).length, 42, 'archives.js must export 42 symbols')
@@ -154,19 +154,26 @@ try {
     assert.equal(typeof chiefMod[sym], 'function', `Missing chief.js export: ${sym}`)
   }
 
-  const backendFiles = fs.readdirSync(PKG).filter(f => f.endsWith('.js') && f !== 'client.js').sort()
+  const safetyDir = path.join(PKG, 'safety')
+  const safetyFiles = fs.existsSync(safetyDir)
+    ? fs.readdirSync(safetyDir).filter(f => f.endsWith('.js')).sort().map(f => `safety/${f}`)
+    : []
+  const backendFiles = [
+    ...fs.readdirSync(PKG).filter(f => f.endsWith('.js') && f !== 'client.js').sort(),
+    ...safetyFiles,
+  ]
   const clientFiles = walkJs(SRC_CLIENT).sort()
   const backendGraph = new Map()
-  for (const f of backendFiles) {
-    const full = path.join(PKG, f)
+  for (const relF of backendFiles) {
+    const full = path.join(PKG, relF)
     const { src, deps } = parseLocalSpecs(full)
-    assert.equal(/^export\s+(?:let|var)\s+[A-Za-z0-9_$]+/m.test(src), false, `Forbidden mutable export in ${f}`)
+    assert.equal(/^export\s+(?:let|var)\s+[A-Za-z0-9_$]+/m.test(src), false, `Forbidden mutable export in ${relF}`)
     backendGraph.set(
-      f,
+      relF,
       deps
         .map(d => {
-          const clean = d.replace(/^\.\//, '')
-          return clean.endsWith('.js') ? clean : `${clean}.js`
+          const resolved = path.relative(PKG, path.resolve(path.dirname(full), d)).replace(/\\/g, '/')
+          return resolved.endsWith('.js') ? resolved : `${resolved}.js`
         })
         .filter(d => backendFiles.includes(d)),
     )
@@ -176,7 +183,7 @@ try {
     const src = fs.readFileSync(cf, 'utf8')
     assert.equal(/^export\s+(?:let|var)\s+[A-Za-z0-9_$]+/m.test(src), false, `Forbidden mutable export in ${path.relative(PKG, cf)}`)
   }
-  console.log('✓ G1 passed: facades (6/67/42), v1.3.0 version sync, zero mutable exports, 0 cycles')
+  console.log('✓ G1 passed: facades (6/67/42), v1.4.0 version sync, zero mutable exports, 0 cycles')
 
   // -------------------------------------------------------------------------
   // G2. E1 Cross-Process `chief-state.json` Lock & `chief-audit.jsonl` Log
@@ -308,6 +315,7 @@ try {
   const boardKey = { bounds: { forbidden: ['禁止触碰 secret.key'] } }
   const encPs = 'powershell -EncodedCommand ' + Buffer.from('git push origin main', 'utf16le').toString('base64')
   assert.equal(execMod.checkForbiddenBounds(boardPush, 'run_command', 'git\\ push origin main').blocked, true, 'A1 backslash must block')
+  assert.equal(execMod.checkForbiddenBounds(boardPush, 'run_command', 'git\\\\ push origin main').blocked, true, 'A1 double backslash must block')
   assert.equal(execMod.checkForbiddenBounds(boardPush, 'run_command', 'cmd /c git push origin main').blocked, true, 'A1 cmd /c must block')
   assert.equal(execMod.checkForbiddenBounds(boardPush, 'run_command', 'git -c http.proxy=x push origin main').blocked, true, 'A1 git flag insertion must block')
   assert.equal(execMod.checkForbiddenBounds(boardPush, 'run_command', encPs).blocked, true, 'A1 -EncodedCommand must block')
@@ -725,7 +733,22 @@ try {
   assert.equal(
     execMod.evaluateSafetyGuardHardRules({ command: String.raw`copy x ".\"env` }).blocked,
     true,
-    'R1 quote-backslash .env obfuscation MUST be blocked',
+    'R1 quote-backslash .env obfuscation (variant B) MUST be blocked',
+  )
+  assert.equal(
+    execMod.evaluateSafetyGuardHardRules({ command: String.raw`copy x ".\\"env` }).blocked,
+    true,
+    'R1 quote-double-backslash .env obfuscation (variant A) MUST be blocked',
+  )
+  assert.equal(
+    execMod.evaluateSafetyGuardHardRules({ command: String.raw`copy x '.\'env` }).blocked,
+    true,
+    'R1 single-quote backslash .env obfuscation MUST be blocked',
+  )
+  assert.equal(
+    execMod.evaluateSafetyGuardHardRules({ command: String.raw`copy x "."\env` }).blocked,
+    true,
+    'R1 post-quote backslash .env obfuscation MUST be blocked',
   )
   assert.equal(
     execMod.evaluateSafetyGuardHardRules({ command: 'copy x .^e^n^v' }).blocked,
@@ -736,6 +759,11 @@ try {
     execMod.evaluateSafetyGuardHardRules({ command: String.raw`node .\env\setup.js` }).blocked,
     false,
     'Legitimate .\\env\\ directory path MUST NOT false-positive',
+  )
+  assert.equal(
+    execMod.evaluateSafetyGuardHardRules({ command: 'echo %NODE_ENV% && echo $env:TEMP' }).blocked,
+    false,
+    'Legitimate %NODE_ENV% and $env:TEMP MUST NOT false-positive',
   )
   const r1Deps = makeTestDeps(path.join(tmpHome, 'boards-g8'))
   const r1L3Out = await execMod.executeChiefToolCall(r1Deps, {

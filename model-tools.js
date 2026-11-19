@@ -12,6 +12,7 @@ import {
   proposeBoundToChief,
   readMailboxForAgent,
   requestChiefElevation,
+  appendChiefAuditLog,
   CHIEF_PERMISSION_META,
 } from './chief.js'
 import { normalizePermissionMode } from './chief-executor.js'
@@ -94,6 +95,9 @@ export function createModelTools(deps) {
           'archive.save',
           'context.compact',
           'permission.request',
+          'inquiry.reply',
+          'chief.request',
+          'wall.list',
           'memory.add',
           'memory.remove',
           'memory.ask',
@@ -102,6 +106,9 @@ export function createModelTools(deps) {
           'Board operation (MUST be called whenever recording tasks/status/conclusions or relaying messages; plain text alone does NOT update the board or notify peers). '
           + 'Use "graph.plan" (or "task.batch") to plan a hierarchical/DAG task graph in one call (supports parentId, blockedBy, owner/subagent, intent, evidence). '
           + 'Use "task.dispatch" to spawn or message a subagent, "team.steer" to steer a subagent, and "mail.send" to relay messages across lead/subagents/sessions. '
+          + 'Use "inquiry.reply" (inquiryId, text) whenever you see a priority [INQUIRY #id] from DSH Chief — answer accurately and continue your current work immediately without stopping. '
+          + 'Use "chief.request" (subject, text) to ask DSH Chief for cross-session coordination, permission elevation, or to report exploration & planning results. '
+          + 'Use "wall.list" (read-only) to inspect currently active persistent guard walls defending high-risk paths/commands. '
           + 'Use "bounds.propose" (field: "forbidden"|"allowed"|"notes", item, reason) when hitting a permission/sandbox/environment wall or summarizing boundaries ("allowed" = 必做事项, "forbidden" = 禁止红线, "notes" = 注意事项) so DSH Chief can request user approval. '
           + 'Use "permission.request" (targetMode: "assistant"|"strategist"|"chief", reason) when requesting higher DSH Chief permission tier from the user. '
           + 'Session Engineering Archives ("archive.search", "archive.read", "archive.save") access ONLY the current conversation\'s Session Cabinet (never Global Cabinet or unflipped Precipitated cold vault). '
@@ -170,6 +177,7 @@ export function createModelTools(deps) {
         description: 'mode.set: how this board is run. plan = a list of steps being ticked off. goal = one persistent objective steered toward.',
       },
       id: { type: 'string', description: 'Task id for update/claim/release/remove/dispatch/verify, or archive id for archive.read / archive.save.' },
+      inquiryId: { type: 'string', description: 'Inquiry id (e.g. inq_xxx) when action is "inquiry.reply".' },
       noteId: { type: 'string', description: 'Note id for note.write / note.pin / note.unpin / note.remove; omit to create a new note.' },
       archiveId: { type: 'string', description: 'Archive dossier id for archive.read / archive.save (on-demand cold archive lookup/update).' },
       query: { type: 'string', description: 'Keyword query for archive.search (searched only on explicit user demand).' },
@@ -438,6 +446,55 @@ export function createModelTools(deps) {
           }
         }
 
+        if (passed.action === 'inquiry.reply') {
+          const replyBody = str(passed.text || passed.body || passed.message || passed.note, '').trim()
+          if (!replyBody) return { ok: false, error: 'inquiry.reply 需要非空 text 参数' }
+          const deliv = await deliverCrossMessage(makeChiefDeps(runtime), {
+            fromSession: rawSession || session,
+            fromLabel: byDefault,
+            target: 'chief',
+            subject: '优先问询答复',
+            text: replyBody,
+            envelopeKind: 'inquiry_reply',
+            inquiryId: str(passed.inquiryId || passed.id || passed.taskId, ''),
+          })
+          if (!deliv.ok) return { ok: false, error: deliv.error }
+          const board = session ? loadBoard(boardFileFor(session)) : emptyBoard()
+          const roster = session ? await refreshSubagentTree(runtime, session, board) : []
+          return {
+            ok: true,
+            inquiryAnswered: deliv.inquiryAnswered || null,
+            continueOwnWork: true,
+            ...summary(board, roster),
+          }
+        }
+
+        if (passed.action === 'chief.request') {
+          const reqBody = str(passed.text || passed.body || passed.message || passed.note, '').trim()
+          if (!reqBody) return { ok: false, error: 'chief.request 需要非空 text 参数' }
+          const deliv = await deliverCrossMessage(makeChiefDeps(runtime), {
+            fromSession: rawSession || session,
+            fromLabel: byDefault,
+            target: 'chief',
+            subject: str(passed.subject || passed.title, '') || '主对话协同请求',
+            text: reqBody,
+            mode: 'followup',
+          })
+          if (!deliv.ok) return { ok: false, error: deliv.error }
+          const board = session ? boardForSession(boardFileFor(session)) : emptyBoard()
+          const roster = session ? await refreshSubagentTree(runtime, session, board) : []
+          return {
+            ok: true,
+            chiefRequest: {
+              mode: deliv.mode || deliv.deliveryMode || 'handled',
+              actionTaken: deliv.actionTaken || '',
+              taskId: deliv.taskId || '',
+              reply: deliv.reply || '',
+            },
+            ...summary(board, roster),
+          }
+        }
+
         if (passed.action === 'mail.send') {
           const target = str(passed.target || passed.agent || passed.subagent, 'lead').trim() || 'lead'
           const msgText = str(passed.text || passed.message || passed.prompt || passed.body || passed.note, '').trim()
@@ -531,8 +588,26 @@ export function createModelTools(deps) {
           }
         }
 
-        const result = runAction(session ? { ...passed, by: byDefault, session } : { ...passed, by: byDefault })
-        if (!result.ok) return { ok: false, error: result.error }
+        const actionArgs = session
+          ? { ...passed, by: byDefault, session, _callerOrigin: 'model_tool' }
+          : { ...passed, by: byDefault, _callerOrigin: 'model_tool' }
+        const result = runAction(actionArgs)
+        if (!result.ok) {
+          if (result.blockedBySafetyGuard) {
+            appendChiefAuditLog(session || rawSession || 'global', {
+              mode: 'advisor',
+              stage: 'safety_guard',
+              rule: result.rule || 'bounds_human_only',
+              decision: 'blocked',
+              operation: String(passed.action || 'bounds'),
+              target: String(passed.field || 'bounds'),
+              reason: result.error,
+              outcome: 'blocked',
+              by: byDefault,
+            })
+          }
+          return { ok: false, error: result.error }
+        }
         const mergedBoard = session && result.board ? boardForSession(boardFileFor(session)) : result.board
         const roster = session ? await refreshSubagentTree(runtime, session, mergedBoard) : []
         return {
@@ -541,6 +616,7 @@ export function createModelTools(deps) {
           ...(result.archiveSearch ? { archiveSearch: result.archiveSearch } : {}),
           ...(result.archiveItem ? { archiveItem: result.archiveItem } : {}),
           ...(result.archiveSaved ? { archiveSaved: result.archiveSaved } : {}),
+          ...(result.walls ? { guardWalls: result.walls } : {}),
           ...(result.truncated ? { truncated: result.truncated } : {}),
         }
       },
