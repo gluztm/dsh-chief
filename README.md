@@ -260,8 +260,6 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 | 贡献者 | 主要工作 |
 | --- | --- |
 | [gluztm](https://github.com/gluztm) | 项目发起人、产品定义与长期维护 |
-| [@iridiumgit](https://github.com/iridiumgit) | 深度定位并贡献 DSH 浅色主题弹层修复方案（[#3](https://github.com/gluztm/dsh-chief/issues/3)）、子代理会话隐藏参谋入口定位（[#4](https://github.com/gluztm/dsh-chief/issues/4)）及交互建议（[#5](https://github.com/gluztm/dsh-chief/issues/5)） |
-| [@edz017](https://github.com/edz017) | 首日实测 DSH `0.2.2-rc.1~rc.3` 宿主兼容性、源码级定位命名子代理接口约束与 `preferNewPane` 参数修正（[#1](https://github.com/gluztm/dsh-chief/issues/1)） |
 | [Gemini](https://github.com/gemini-code-assist) | 功能研发、`pkg/safety/` 独立安全内核、认知桌面与三态总控、180° 扇形思考表盘及自动化门禁 |
 | [Codex](https://github.com/codex) | 模块化架构设计、高并发压测、红队穿透测试与边界审查 |
 | [deepseek-ai](https://github.com/deepseek-ai) | DeepSeek Harness 宿主运行时与 SuperAgent 协同机制支持 |

@@ -255,8 +255,6 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 | Contributor | Role |
 | --- | --- |
 | [gluztm](https://github.com/gluztm) | Creator, product design, and maintainer |
-| [@iridiumgit](https://github.com/iridiumgit) | Root-caused and contributed the DSH light-theme popover fix ([#3](https://github.com/gluztm/dsh-chief/issues/3)), subagent entry visibility diagnosis ([#4](https://github.com/gluztm/dsh-chief/issues/4)), and UX feedback ([#5](https://github.com/gluztm/dsh-chief/issues/5)) |
-| [@edz017](https://github.com/edz017) | Day-one DSH `0.2.2-rc.1~rc.3` host compatibility audit, `engines.dsh` constraint diagnosis, and `preferNewPane` fix ([#1](https://github.com/gluztm/dsh-chief/issues/1)) |
 | [Gemini](https://github.com/gemini-code-assist) | Feature development, `pkg/safety/` kernel, Cognitive Desktop, orthogonal runtime modes, fan gauge & CI gates |
 | [Codex](https://github.com/codex) | Modular architecture design, concurrency stress tests, and red-team boundary audits |
 | [deepseek-ai](https://github.com/deepseek-ai) | DeepSeek Harness host runtime and SuperAgent workflow alignment |
