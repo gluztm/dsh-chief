@@ -21,7 +21,9 @@
 ### DeepSeek Harness Right-Sidebar Supervisor, Zero-Token Archive Vault & Safety Gate
 
 [![DSH Compatibility](https://img.shields.io/badge/DSH-%3E%3D%200.2.2--rc.2-38bdf8?style=flat-square)](https://dsh.deepseek.com)
+[![GitHub Release](https://img.shields.io/github/v/release/gluztm/dsh-chief?color=2563eb&style=flat-square)](https://github.com/gluztm/dsh-chief/releases)
 [![npm version](https://img.shields.io/npm/v/dsh-chief?color=cb3837&style=flat-square)](https://www.npmjs.com/package/dsh-chief)
+[![CI](https://github.com/gluztm/dsh-chief/actions/workflows/ci.yml/badge.svg)](https://github.com/gluztm/dsh-chief/actions/workflows/ci.yml)
 [![DSH Market](https://img.shields.io/badge/DSH%20Market-Listed-f59e0b?style=flat-square)](https://awesome-dsh-plugin.com/p/gluztm/dsh-chief/)
 [![Bilibili Demo](https://img.shields.io/badge/Bilibili-Video%20Demo-fb7299?style=flat-square)](https://www.bilibili.com/video/BV1DqsV6QEGi)
 [![SuperAgent Ready](https://img.shields.io/badge/SuperAgent-Router--Worker%20Synergy-a855f7?style=flat-square)](https://github.com/deepseek-ai/dsh-superagent-prototype)
@@ -32,7 +34,9 @@
 > **Current release `v1.5.0`**: Adds the **Cognitive Desktop (`2,400 Tokens / 6 items` sole prompt-injected vault)** + top-down stack-of-papers drawers with 3-tier hook isolation, **orthogonal runtime control (`⏸ Off | 🛡 Patrol | 🤖 Managed`)** with background `🌙 Dream Roam` (**click anywhere on the frosted overlay to dismiss the blur and regain panel control while the flowing neon border stays lit to signal background work**), 5-condition auto-sleep + `L3` One-Stop Report, **`180°` fan-shaped thinking effort gauge** + Team `Auto / Manual` toggle, plain-language Consult mode, mandatory Core Objective lock for Strong Intervention, blocker-gated wall removal requests, full DSH light-theme support, and subagent entry hiding on DSH `0.2.2-rc.5`.  
 > Shares the Router + Workers split from DeepSeek's **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** while keeping Chief state and prompts isolated from the main session.
 
-[简体中文 (`README.md`)](README.md) · **English** · [Changelog (`CHANGELOG.md`)](CHANGELOG.md)
+[简体中文 (`README.md`)](README.md) · **English** · [Changelog (`CHANGELOG.md`)](CHANGELOG.md) · [Architecture (`ARCHITECTURE.md`)](ARCHITECTURE.md)
+
+[v1.5.0 Highlights](#what-changed-in-v150) · [Problems Fixed](#daily-friction-this-plugin-fixes) · [Inside the Sidebar](#inside-the-sidebar) · [Architecture](#modular-architecture-v150) · [Installation](#installation--host-compatibility) · [Security](#local-storage--security-guarantees) · [Contributors](#contributors)
 
 </div>
 
@@ -97,7 +101,7 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 - Displays the root coordinator and active subagent lanes with dedicated coordinator/worker icons, inline status toggles, bottom `@steer` pills, and `分屏` live stream panes.
 
 <div align="center">
-  <img src="assets/screenshots/02-full-spread-pyramid-dag.png" alt="02 - Subagent DAG View" width="76%" />
+  <img src="assets/screenshots/02-full-spread-pyramid-dag.png" alt="02 - Subagent DAG View" width="80%" />
 </div>
 
 ---
@@ -106,7 +110,7 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 - Features the pinned **📌 Cognitive Desktop** (`2,400 Tokens / 6 items` bar — sole per-turn prompt injection source) above Session, System Global, and Precipitated drawers with top-down stack-of-papers cards and `🪝` keyword hooks.
 
 <div align="center">
-  <img src="assets/screenshots/03-cold-archive-cabinet.png" alt="03 - Three-Tier Cold Vaults and Cognitive Desktop" width="68%" />
+  <img src="assets/screenshots/03-cold-archive-cabinet.png" alt="03 - Three-Tier Cold Vaults and Cognitive Desktop" width="90%" />
 </div>
 
 ---
@@ -251,6 +255,8 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 | Contributor | Role |
 | --- | --- |
 | [gluztm](https://github.com/gluztm) | Creator, product design, and maintainer |
+| [@iridiumgit](https://github.com/iridiumgit) | Root-caused and contributed the DSH light-theme popover fix ([#3](https://github.com/gluztm/dsh-chief/issues/3)), subagent entry visibility diagnosis ([#4](https://github.com/gluztm/dsh-chief/issues/4)), and UX feedback ([#5](https://github.com/gluztm/dsh-chief/issues/5)) |
+| [@edz017](https://github.com/edz017) | Day-one DSH `0.2.2-rc.1~rc.3` host compatibility audit, `engines.dsh` constraint diagnosis, and `preferNewPane` fix ([#1](https://github.com/gluztm/dsh-chief/issues/1)) |
 | [Gemini](https://github.com/gemini-code-assist) | Feature development, `pkg/safety/` kernel, Cognitive Desktop, orthogonal runtime modes, fan gauge & CI gates |
 | [Codex](https://github.com/codex) | Modular architecture design, concurrency stress tests, and red-team boundary audits |
 | [deepseek-ai](https://github.com/deepseek-ai) | DeepSeek Harness host runtime and SuperAgent workflow alignment |

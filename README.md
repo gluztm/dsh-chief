@@ -21,7 +21,9 @@
 ### DeepSeek Harness 右侧常驻多代理看护、0-Token 档案柜与安全审批面板
 
 [![DSH Compatibility](https://img.shields.io/badge/DSH-%3E%3D%200.2.2--rc.2-38bdf8?style=flat-square)](https://dsh.deepseek.com)
+[![GitHub Release](https://img.shields.io/github/v/release/gluztm/dsh-chief?color=2563eb&style=flat-square)](https://github.com/gluztm/dsh-chief/releases)
 [![npm version](https://img.shields.io/npm/v/dsh-chief?color=cb3837&style=flat-square)](https://www.npmjs.com/package/dsh-chief)
+[![CI](https://github.com/gluztm/dsh-chief/actions/workflows/ci.yml/badge.svg)](https://github.com/gluztm/dsh-chief/actions/workflows/ci.yml)
 [![DSH Market](https://img.shields.io/badge/DSH%20Market-Listed-f59e0b?style=flat-square)](https://awesome-dsh-plugin.com/p/gluztm/dsh-chief/)
 [![Bilibili Demo](https://img.shields.io/badge/Bilibili-%E5%AE%9E%E6%9C%BA%E6%95%99%E7%A8%8B-fb7299?style=flat-square)](https://www.bilibili.com/video/BV1DqsV6QEGi)
 [![SuperAgent Ready](https://img.shields.io/badge/SuperAgent-Router--Worker%20Synergy-a855f7?style=flat-square)](https://github.com/deepseek-ai/dsh-superagent-prototype)
@@ -32,7 +34,9 @@
 > **当前版本 `v1.5.0`**：新增**认知桌面（`2,400 Tokens / 6 份` 唯一全文注入）与三层织钩隔离 + 俯视角一沓纸档案柜**、**正交三态运行总控（`⏸ 关停 | 🛡 巡检 | 🤖 托管`）**与托管后台「🌙 **梦境漫游**」（支持**鼠标单击毛玻璃立即恢复操作，同时保留流光外框提示后台仍在运作**）、5 条件自动休眠与 `L3` 一站式战报、**`180°` 扇形思考强度表盘**与「团队思考强度：自动 / 手动」一键切换，以及「💡 咨询」、强介入先锁目标、请示拆墙审批与 DSH 浅色主题完整适配，已适配 DSH `0.2.2-rc.5`。  
 > 协同结构参考官方 **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** 的 Router + Workers 分工模型，保持侧边栏状态与主对话上下文相互隔离。
 
-**简体中文** · [English (`README.en.md`)](README.en.md) · [更新日志 (`CHANGELOG.md`)](CHANGELOG.md)
+**简体中文** · [English (`README.en.md`)](README.en.md) · [更新日志 (`CHANGELOG.md`)](CHANGELOG.md) · [架构设计 (`ARCHITECTURE.md`)](ARCHITECTURE.md)
+
+[v1.5.0 亮点](#v150-重点升级一览) · [核心痛点](#主要解决哪些日常麻烦) · [界面实机](#界面与功能说明) · [模块架构](#模块结构与数据流-v150) · [安装与兼容](#安装与宿主版本兼容) · [安全边界](#本地存储与安全边界) · [贡献者](#贡献者)
 
 </div>
 
@@ -97,7 +101,7 @@
 - 按根会话与子代理纵队展开可视化金字塔卡片（配主/子代理前置矢量图标），直接在卡片上调整状态、派发任务或点 `分屏` 看实时输出流。
 
 <div align="center">
-  <img src="assets/screenshots/02-full-spread-pyramid-dag.png" alt="02 - 任务树与子代理卡片" width="76%" />
+  <img src="assets/screenshots/02-full-spread-pyramid-dag.png" alt="02 - 任务树与子代理卡片" width="80%" />
 </div>
 
 ---
@@ -107,7 +111,7 @@
 - 三层抽屉采用俯视角「一沓纸」动态卡片：平时叠放仅露标题与关键词 `🪝` 钩子，点开才展开操作栏与详情，谁能看、谁已拉阅一目了然。
 
 <div align="center">
-  <img src="assets/screenshots/03-cold-archive-cabinet.png" alt="03 - 三层档案柜与认知桌面" width="68%" />
+  <img src="assets/screenshots/03-cold-archive-cabinet.png" alt="03 - 三层档案柜与认知桌面" width="90%" />
 </div>
 
 ---
@@ -256,6 +260,8 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 | 贡献者 | 主要工作 |
 | --- | --- |
 | [gluztm](https://github.com/gluztm) | 项目发起人、产品定义与长期维护 |
+| [@iridiumgit](https://github.com/iridiumgit) | 深度定位并贡献 DSH 浅色主题弹层修复方案（[#3](https://github.com/gluztm/dsh-chief/issues/3)）、子代理会话隐藏参谋入口定位（[#4](https://github.com/gluztm/dsh-chief/issues/4)）及交互建议（[#5](https://github.com/gluztm/dsh-chief/issues/5)） |
+| [@edz017](https://github.com/edz017) | 首日实测 DSH `0.2.2-rc.1~rc.3` 宿主兼容性、源码级定位命名子代理接口约束与 `preferNewPane` 参数修正（[#1](https://github.com/gluztm/dsh-chief/issues/1)） |
 | [Gemini](https://github.com/gemini-code-assist) | 功能研发、`pkg/safety/` 独立安全内核、认知桌面与三态总控、180° 扇形思考表盘及自动化门禁 |
 | [Codex](https://github.com/codex) | 模块化架构设计、高并发压测、红队穿透测试与边界审查 |
 | [deepseek-ai](https://github.com/deepseek-ai) | DeepSeek Harness 宿主运行时与 SuperAgent 协同机制支持 |

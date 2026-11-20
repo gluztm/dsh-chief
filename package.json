@@ -50,7 +50,12 @@
     "防死循环",
     "只读护栏",
     "ai-manager",
-    "superagent"
+    "superagent",
+    "cognitive-desktop",
+    "thinking-effort",
+    "dream-roam",
+    "认知桌面",
+    "物理驻墙"
   ],
   "engines": {
     "node": ">=22.13.0",

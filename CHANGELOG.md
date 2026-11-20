@@ -5,7 +5,7 @@ All notable changes to **`dsh-chief`** (**DSH 参谋长**) will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.5.0] - 2026-11-19
+## [1.5.0] - 2026-11-20
 
 ### Added
 
@@ -33,8 +33,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **加固模型思考锁挡 (`lockedModelEfforts`) 权限隔离与 `toggleLockAgentEffort` 落地 (`chief-state.js` / `api-routes.js`)**：封堵非人类调用方通过 `updateChiefConfig` 直接篡改 `lockedModelEfforts` 或已锁挡 `chief` 思考强度的旁路（Fail-Closed 拦截并写入 `model_effort_lock` 审计日志）；仅允许经宿主鉴权面板路由 (`/chief/config`) 或显式 `byUser: true` 人工操作修改。
 - **拦截 `inquiry.reply` 重复重放 (`chief-state.js`)**：`answerChiefInquiry` 校验问询当前状态，对已 `answered` 结案的 `inquiryId` 幂等拒绝并写入 `inquiry_reply_replay_rejected` 审计记录，杜绝覆盖原答案及重复写入聊天回执、审计日志与任务账本。
-- **修复 DSH 浅色主题下弹层仍为深色问题（Issue #3，`styles.js`）**：将 `--dnb-popover` 从固定深色的 `--dsw-alias-hovercard-bg` 切换为随主题变的 `--dsw-alias-bg-elevated`，并显式适配 `html[data-ds-theme-source="light"]` 与 `[data-ds-theme="light"]`（独立于系统 `prefers-color-scheme`，覆盖四级权限弹层、战术驾驶舱、更多菜单、流光毛玻璃与俯视角纸质卷宗，并防止系统浅色误染 DSH 深色主题）。
-- **子代理会话自动隐藏参谋长入口与防会话污染（Issue #4，`store.js` / `api.js` / `components/Panel.js`）**：新增 `isSubagentSessionId` 复用宿主 `sessions.subagentAddress` 与快照元信息识别子代理会话，在子代理对话框内自动隐藏输入框参谋长按钮（`ComposerEntry`）及主视口右下角悬浮入口（`CornerTrigger`），并阻止 `adoptSession` 被子代理窗格覆盖主会话焦点。
+- **修复 DSH 浅色主题下弹层仍为深色问题（Fixes [#3](https://github.com/gluztm/dsh-chief/issues/3), thanks `@iridiumgit`，`styles.js`）**：将 `--dnb-popover` 从固定深色的 `--dsw-alias-hovercard-bg` 切换为随主题变的 `--dsw-alias-bg-elevated`，并显式适配 `html[data-ds-theme-source="light"]` 与 `[data-ds-theme="light"]`（独立于系统 `prefers-color-scheme`，覆盖四级权限弹层、战术驾驶舱、更多菜单、流光毛玻璃与俯视角纸质卷宗，并防止系统浅色误染 DSH 深色主题）。
+- **子代理会话自动隐藏参谋长入口与防会话污染（Fixes [#4](https://github.com/gluztm/dsh-chief/issues/4), thanks `@iridiumgit`，`store.js` / `api.js` / `components/Panel.js`）**：新增 `isSubagentSessionId` 复用宿主 `sessions.subagentAddress` 与快照元信息识别子代理会话，在子代理对话框内自动隐藏输入框参谋长按钮（`ComposerEntry`）及主视口右下角悬浮入口（`CornerTrigger`），并阻止 `adoptSession` 被子代理窗格覆盖主会话焦点。
 - **自适应顶栏版本号、锁挡状态同步、强介入先锁目标即推与极低概率请示拆墙（`Panel.js` / `tasks.js` / `modals.js` / `chief.js` / `chief-commands.js` / `chief-approvals.js` / `api-routes.js`）**：
   - 使用 `@container dnb-head` 在宽敞面板展示版本号、窄面板自动隐藏（未同步警示始终亮显）；
   - 修复子代理/主对话思考强度 `🔒 锁挡` 按钮因 `effortLocked` 缓存及别名键导致的无法切换/解锁问题，并区分清晰锁定态图标文案；
