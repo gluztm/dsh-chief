@@ -23,6 +23,7 @@ import {
   toggleBubbleLock,
   emergencyStopBubble,
   dispatchBubbleHarness,
+  refreshBubbleDiscovery,
 } from '../api.js'
 import { Icon, Switch, AccCard } from '../components/common.js'
 
@@ -451,6 +452,18 @@ export function PeersTab({ view }) {
   const [lockShake, setLockShake] = React.useState(false)
   const [dragOverZone, setDragOverZone] = React.useState('')
   const [linkLayout, setLinkLayout] = React.useState({ w: 0, h: 0, links: [] })
+  const [refreshingDock, setRefreshingDock] = React.useState(false)
+
+  const handleRefreshDock = async (e) => {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation()
+    if (refreshingDock) return
+    setRefreshingDock(true)
+    try {
+      await refreshBubbleDiscovery()
+    } finally {
+      setRefreshingDock(false)
+    }
+  }
 
   const stageRef = React.useRef(null)
   const hubRef = React.useRef(null)
@@ -1202,11 +1215,30 @@ export function PeersTab({ view }) {
               bi('待命池 · 本机已检测可用', 'Standby · Local Ready'),
             ),
             h(
-              'span',
-              { className: 'dnb-dock-hint' },
-              hasStandby
-                ? bi('拖入水泡或点 + 入队', 'Drag up or tap + to join')
-                : bi('仅展示本机已配置的外部工具与独立窗口', 'Only locally configured tools & open sessions'),
+              'div',
+              { className: 'dnb-dock-head-right' },
+              h(
+                'span',
+                { className: 'dnb-dock-hint' },
+                hasStandby
+                  ? bi('拖入水泡或点 + 入队', 'Drag up or tap + to join')
+                  : bi('仅展示本机已配置的外部工具与独立窗口', 'Only locally configured tools & open sessions'),
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dnb-dock-refresh-btn',
+                  disabled: refreshingDock,
+                  title: bi(
+                    '重新扫描本机外部 Agent（Codex / Claude Code / DSH 插件）与未切出激活的历史会话，无需逐一点击会话',
+                    'Rescan local external Agents & dormant conversations without switching tabs',
+                  ),
+                  onClick: handleRefreshDock,
+                },
+                h(Icon, { name: 'refresh', size: 11, className: refreshingDock ? 'dnb-spin' : '' }),
+                h('span', null, bi(refreshingDock ? '扫描中…' : '刷新扫描', refreshingDock ? 'Scanning…' : 'Refresh')),
+              ),
             ),
           ),
           hasStandby
@@ -1248,7 +1280,9 @@ export function PeersTab({ view }) {
                 squad.standbySessions.map((sess) => {
                   const col = colorForRootSession(sess.id, selfRootId)
                   const sessTitle = sess.name || shortSession(sess.id)
-                  const desc = sess.objective || sess.progressSummary || bi('已打开的独立会话窗口，可拖拽或点击入队', 'Standalone window ready to join')
+                  const desc = sess.objective || sess.progressSummary || (sess.dormant
+                    ? bi('休眠历史会话，入队或发消息时将自动唤醒（无需逐个切换激活）', 'Dormant session; wakes automatically when linked or messaged')
+                    : bi('已打开的独立会话窗口，可拖拽或点击入队', 'Standalone window ready to join'))
                   return h(
                     'div',
                     {
@@ -1257,7 +1291,7 @@ export function PeersTab({ view }) {
                       'data-kind': 'standby-session',
                       'data-uid': 'standby-sess:' + sess.id,
                       draggable: true,
-                      title: `${sessTitle}\n${desc}`,
+                      title: `${sessTitle}${sess.dormant ? bi('（休眠 · 连线即唤醒）', ' (Dormant · auto-wakes)') : ''}\n${desc}`,
                       onDragStart: e => beginDragItem(e, { fromZone: 'outside', kind: 'standby-session', id: sess.id, item: sess }),
                       onDragEnd: endDragItem,
                       onClick: () => performJoin({ kind: 'standby-session', id: sess.id, item: sess }),

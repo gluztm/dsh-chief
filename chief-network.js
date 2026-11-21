@@ -154,7 +154,12 @@ export async function listPeerDirectory(deps, sessionId) {
     const board = deps.boardForSession(deps.boardFileFor(memberRootId))
     const roster = await deps.refreshSubagentTree(runtime, memberRootId, board)
     const rootAgent = agentsSvc && typeof agentsSvc.get === 'function' ? agentsSvc.get(memberRootId) : null
-    const rootTitle = deps.sessionName(runtime, rootAgent || memberRootId) || ('会话 ' + memberRootId.replace(/^session-/, '').slice(0, 8))
+    const dormantCached = deps && deps.hostState && deps.hostState.dormantTitleCache instanceof Map
+      ? deps.hostState.dormantTitleCache.get(memberRootId)
+      : null
+    const rootTitle = deps.sessionName(runtime, rootAgent || memberRootId)
+      || (dormantCached && dormantCached.title)
+      || ('会话 ' + memberRootId.replace(/^session-/, '').slice(0, 8))
     const memberProgressSummary = summarizeBoardProgress(board)
 
     for (const entry of roster) {
@@ -182,21 +187,131 @@ export async function listPeerDirectory(deps, sessionId) {
     }
   }
 
-  // Other top-level standalone sessions on this machine that can be linked into the federation
+  // Other top-level standalone sessions on this machine (live + dormant/unvisited) that can be linked into the federation
   const otherSessions = []
+  const seenOtherIds = new Set()
   for (const ag of liveAgents) {
     const sid = String(ag && ag.id ? ag.id : '')
     if (!sid || archived.has(sid)) continue
     const agRoot = deps.resolveRootSessionId(sid, ag) || sid
     if (agRoot !== sid) continue // skip child subagent sessions here
-    if (agRoot === rootId) continue
+    if (agRoot === rootId || seenOtherIds.has(agRoot)) continue
+    seenOtherIds.add(agRoot)
     const isLinked = cluster.includes(agRoot)
     const b = deps.loadBoard(deps.boardFileFor(agRoot))
     otherSessions.push({
       id: agRoot,
       name: deps.sessionName(runtime, ag) || ('会话 ' + agRoot.replace(/^session-/, '').slice(0, 8)),
       status: ag.status === 'running' ? 'running' : 'idle',
+      dormant: false,
       linked: isLinked,
+      objective: clamp(b && b.objective ? b.objective : '', 80),
+      openTasks: Array.isArray(b && b.tasks) ? b.tasks.filter(t => t.status !== 'done').length : 0,
+      progressSummary: summarizeBoardProgress(b),
+    })
+  }
+
+  // Also discover dormant / unvisited root sessions from workspaceRegistry, sessions, and sessionQuery
+  const hostState = deps && deps.hostState && typeof deps.hostState === 'object' ? deps.hostState : null
+  if (hostState && !(hostState.dormantTitleCache instanceof Map)) {
+    hostState.dormantTitleCache = new Map()
+  }
+  const titleCache = hostState ? hostState.dormantTitleCache : null
+
+  const dormantCandidates = []
+  const seenCandidates = new Set()
+  const wsTitleBySid = new Map()
+  const liveSessBySid = new Map()
+  const pushCandidate = (rawSid, headerHint = null) => {
+    const sid = String(rawSid || '').trim()
+    if (!sid || sid === rootId || archived.has(sid) || seenOtherIds.has(sid) || seenCandidates.has(sid)) return
+    if (headerHint && (headerHint.origin === 'subagent' || headerHint.parentSessionId)) return
+    const agRoot = deps.resolveRootSessionId(sid) || sid
+    if (agRoot !== sid) return
+    seenCandidates.add(sid)
+    dormantCandidates.push(sid)
+  }
+
+  try {
+    const wr = runtime && typeof runtime.get === 'function' ? runtime.get('workspaceRegistry') : null
+    const wsList = wr && typeof wr.list === 'function' ? wr.list() : []
+    for (const ws of Array.isArray(wsList) ? wsList : []) {
+      if (!ws) continue
+      const fallbackWsLabel = String(ws.title || (ws.path ? path.basename(ws.path) : '') || '').trim()
+      for (const sid of Array.isArray(ws.sessionIds) ? ws.sessionIds : []) {
+        if (fallbackWsLabel && !wsTitleBySid.has(String(sid))) wsTitleBySid.set(String(sid), fallbackWsLabel)
+        pushCandidate(sid)
+      }
+    }
+  } catch {}
+
+  try {
+    const sessSvc = runtime && typeof runtime.get === 'function' ? runtime.get('sessions') : null
+    const sList = sessSvc && typeof sessSvc.list === 'function' ? sessSvc.list() : []
+    for (const s of Array.isArray(sList) ? sList : []) {
+      if (!s || !s.id) continue
+      liveSessBySid.set(String(s.id), s)
+      pushCandidate(s.id, s.header || null)
+    }
+  } catch {}
+
+  const sessionQuery = runtime && typeof runtime.get === 'function' ? runtime.get('sessionQuery') : null
+  if (dormantCandidates.length < 40 && sessionQuery && typeof sessionQuery.listSessions === 'function') {
+    try {
+      const qSig = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(2000)
+        : undefined
+      const recs = await sessionQuery.listSessions(qSig)
+      for (const rec of Array.isArray(recs) ? recs : []) {
+        if (!rec || !rec.header || !rec.header.id) continue
+        pushCandidate(rec.header.id, rec.header)
+        if (dormantCandidates.length >= 40) break
+      }
+    } catch {}
+  }
+
+  const boundedDormant = dormantCandidates.slice(0, 40)
+  const uncachedIds = boundedDormant.filter(sid => !titleCache || !titleCache.has(sid))
+  if (uncachedIds.length > 0 && sessionQuery && typeof sessionQuery.readTitleSnapshots === 'function') {
+    try {
+      const tSig = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
+        ? AbortSignal.timeout(2500)
+        : undefined
+      const obsList = await sessionQuery.readTitleSnapshots(uncachedIds, tSig)
+      if (Array.isArray(obsList)) {
+        for (const obs of obsList) {
+          if (!obs || !obs.sessionId || obs.status !== 'fulfilled' || !obs.value) continue
+          const hdr = obs.value.session || null
+          const isSub = Boolean(hdr && (hdr.origin === 'subagent' || hdr.parentSessionId))
+          const folded = String((obs.value.title && obs.value.title.title) || '').trim()
+          if (titleCache) titleCache.set(String(obs.sessionId), { title: folded, isSubagent: isSub })
+        }
+      }
+    } catch {}
+  }
+
+  for (const sid of boundedDormant) {
+    const cachedMeta = titleCache ? titleCache.get(sid) : null
+    if (cachedMeta && cachedMeta.isSubagent) continue
+    if (!cachedMeta && titleCache) {
+      const liveS = liveSessBySid.get(sid)
+      const isSub = Boolean(liveS && liveS.header && (liveS.header.origin === 'subagent' || liveS.header.parentSessionId))
+      titleCache.set(sid, { title: '', isSubagent: isSub })
+      if (isSub) continue
+    }
+    const b = deps.loadBoard(deps.boardFileFor(sid))
+    const foldedTitle = cachedMeta && cachedMeta.title ? cachedMeta.title : ''
+    const resolvedName = foldedTitle
+      || deps.sessionName(runtime, sid)
+      || wsTitleBySid.get(sid)
+      || ('会话 ' + sid.replace(/^session-/, '').slice(0, 8))
+    seenOtherIds.add(sid)
+    otherSessions.push({
+      id: sid,
+      name: resolvedName,
+      status: 'idle',
+      dormant: true,
+      linked: cluster.includes(sid),
       objective: clamp(b && b.objective ? b.objective : '', 80),
       openTasks: Array.isArray(b && b.tasks) ? b.tasks.filter(t => t.status !== 'done').length : 0,
       progressSummary: summarizeBoardProgress(b),
@@ -1326,6 +1441,47 @@ export function discoverHarnessProviders(runtime, hostState = null) {
     }))
 
   return { available, catalog }
+}
+
+/** Force-refresh local external CLI probes, host subagent providers, and dormant session title cache. */
+export function refreshBubbleDiscovery(runtime, hostState = null) {
+  detectLocalHarnessBinaries({ force: true })
+  if (hostState && typeof hostState === 'object') {
+    hostState.dormantTitleCache = new Map()
+    const sub = runtime && typeof runtime.get === 'function' ? runtime.get('subagents') : null
+    if (sub) {
+      if (!(hostState.detectedHarnessProviders instanceof Map)) {
+        hostState.detectedHarnessProviders = new Map()
+      }
+      const addDetected = (pname, prov) => {
+        const clean = String(pname || '').trim()
+        if (!clean || clean === 'spawn' || clean === 'fork') return
+        if (prov && typeof prov.prepareContinuable === 'function') return
+        hostState.detectedHarnessProviders.set(clean, prov || { name: clean })
+      }
+      if (sub.providers instanceof Map) {
+        for (const [pname, prov] of sub.providers.entries()) addDetected(pname, prov)
+      }
+      if (typeof sub.listProviders === 'function') {
+        try {
+          for (const prov of sub.listProviders() || []) {
+            if (prov && (prov.name || prov.id)) addDetected(prov.name || prov.id, prov)
+          }
+        } catch {}
+      }
+      if (typeof sub.getProvider === 'function') {
+        for (const candidate of PROBE_EXTERNAL_PROVIDER_NAMES) {
+          try {
+            const prov = sub.getProvider(candidate)
+            if (prov) addDetected(prov.name || candidate, prov)
+          } catch {}
+        }
+      }
+    }
+  }
+  return {
+    localHarnesses: detectLocalHarnessBinaries({ force: false }).size,
+  }
 }
 
 /** Compute live Bubble squad membership, available Harnesses, and hard structural lock state. */

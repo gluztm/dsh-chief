@@ -2510,6 +2510,32 @@ window.__ModuleLoader__.load({
       }
     }
 
+    async function refreshBubbleDiscovery() {
+      try {
+        const value = await call('chief/link', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId,
+            op: 'bubble_refresh',
+          }),
+        })
+        const ref = (value && value.refreshed) || {}
+        const hCount = Number(ref.harnesses) || 0
+        const sCount = Number(ref.otherSessions) || 0
+        patch({
+          notice: bi(
+            `↻ 已刷新待命池：发现 ${hCount} 个外部工具 · ${sCount} 个其他对话窗口`,
+            `↻ Refreshed Standby: ${hCount} external tool(s) · ${sCount} conversation window(s)`,
+          ),
+        })
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      }
+    }
+
     function requestTogglePeerLink(sess, nextLinked) {
       if (!sess || !sess.id) return
       if (nextLinked) {
@@ -9977,6 +10003,51 @@ window.__ModuleLoader__.load({
       .dnb-dock-hint {
         font-size: 10px;
         color: var(--dnb-text-3);
+      }
+      .dnb-dock-head-right {
+        display: inline-flex;
+        align-items: center;
+        gap: 8px;
+        flex-shrink: 0;
+      }
+      .dnb-dock-refresh-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 22px;
+        padding: 0 8px;
+        border-radius: 999px;
+        corner-shape: round;
+        border: 1px solid var(--dnb-border-strong);
+        background: var(--dnb-card);
+        color: var(--dnb-text-2);
+        font: inherit;
+        font-size: 10.5px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+      }
+      .dnb-dock-refresh-btn:hover:not(:disabled) {
+        border-color: rgba(56, 189, 248, 0.56);
+        background: var(--dnb-card-hover);
+        color: var(--dnb-text);
+      }
+      .dnb-dock-refresh-btn:disabled {
+        opacity: 0.65;
+        cursor: progress;
+      }
+      html[data-ds-theme-source="light"] .dnb-dock-refresh-btn,
+      html[data-ds-theme="light"] .dnb-dock-refresh-btn {
+        background: #ffffff;
+        border-color: #cbd5e1;
+        color: #334155;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+      }
+      html[data-ds-theme-source="light"] .dnb-dock-refresh-btn:hover:not(:disabled),
+      html[data-ds-theme="light"] .dnb-dock-refresh-btn:hover:not(:disabled) {
+        background: #eff6ff;
+        border-color: rgba(2, 132, 199, 0.45);
+        color: #0369a1;
       }
       .dnb-dock-flow {
         display: flex;
@@ -25389,6 +25460,18 @@ window.__ModuleLoader__.load({
       const [lockShake, setLockShake] = React.useState(false)
       const [dragOverZone, setDragOverZone] = React.useState('')
       const [linkLayout, setLinkLayout] = React.useState({ w: 0, h: 0, links: [] })
+      const [refreshingDock, setRefreshingDock] = React.useState(false)
+
+      const handleRefreshDock = async (e) => {
+        if (e && typeof e.stopPropagation === 'function') e.stopPropagation()
+        if (refreshingDock) return
+        setRefreshingDock(true)
+        try {
+          await refreshBubbleDiscovery()
+        } finally {
+          setRefreshingDock(false)
+        }
+      }
 
       const stageRef = React.useRef(null)
       const hubRef = React.useRef(null)
@@ -26140,11 +26223,30 @@ window.__ModuleLoader__.load({
                   bi('待命池 · 本机已检测可用', 'Standby · Local Ready'),
                 ),
                 h(
-                  'span',
-                  { className: 'dnb-dock-hint' },
-                  hasStandby
-                    ? bi('拖入水泡或点 + 入队', 'Drag up or tap + to join')
-                    : bi('仅展示本机已配置的外部工具与独立窗口', 'Only locally configured tools & open sessions'),
+                  'div',
+                  { className: 'dnb-dock-head-right' },
+                  h(
+                    'span',
+                    { className: 'dnb-dock-hint' },
+                    hasStandby
+                      ? bi('拖入水泡或点 + 入队', 'Drag up or tap + to join')
+                      : bi('仅展示本机已配置的外部工具与独立窗口', 'Only locally configured tools & open sessions'),
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dnb-dock-refresh-btn',
+                      disabled: refreshingDock,
+                      title: bi(
+                        '重新扫描本机外部 Agent（Codex / Claude Code / DSH 插件）与未切出激活的历史会话，无需逐一点击会话',
+                        'Rescan local external Agents & dormant conversations without switching tabs',
+                      ),
+                      onClick: handleRefreshDock,
+                    },
+                    h(Icon, { name: 'refresh', size: 11, className: refreshingDock ? 'dnb-spin' : '' }),
+                    h('span', null, bi(refreshingDock ? '扫描中…' : '刷新扫描', refreshingDock ? 'Scanning…' : 'Refresh')),
+                  ),
                 ),
               ),
               hasStandby
@@ -26186,7 +26288,9 @@ window.__ModuleLoader__.load({
                     squad.standbySessions.map((sess) => {
                       const col = colorForRootSession(sess.id, selfRootId)
                       const sessTitle = sess.name || shortSession(sess.id)
-                      const desc = sess.objective || sess.progressSummary || bi('已打开的独立会话窗口，可拖拽或点击入队', 'Standalone window ready to join')
+                      const desc = sess.objective || sess.progressSummary || (sess.dormant
+                        ? bi('休眠历史会话，入队或发消息时将自动唤醒（无需逐个切换激活）', 'Dormant session; wakes automatically when linked or messaged')
+                        : bi('已打开的独立会话窗口，可拖拽或点击入队', 'Standalone window ready to join'))
                       return h(
                         'div',
                         {
@@ -26195,7 +26299,7 @@ window.__ModuleLoader__.load({
                           'data-kind': 'standby-session',
                           'data-uid': 'standby-sess:' + sess.id,
                           draggable: true,
-                          title: `${sessTitle}\n${desc}`,
+                          title: `${sessTitle}${sess.dormant ? bi('（休眠 · 连线即唤醒）', ' (Dormant · auto-wakes)') : ''}\n${desc}`,
                           onDragStart: e => beginDragItem(e, { fromZone: 'outside', kind: 'standby-session', id: sess.id, item: sess }),
                           onDragEnd: endDragItem,
                           onClick: () => performJoin({ kind: 'standby-session', id: sess.id, item: sess }),

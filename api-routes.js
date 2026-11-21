@@ -51,7 +51,7 @@ import {
   CHAT_CAP,
   nextId,
 } from './chief-state.js'
-import { listPeerDirectory, computeBubbleState, dispatchBubbleHarness } from './chief-network.js'
+import { listPeerDirectory, computeBubbleState, dispatchBubbleHarness, refreshBubbleDiscovery } from './chief-network.js'
 import {
   resolveProjectKey,
   getArchiveMeta,
@@ -939,6 +939,26 @@ export function createApiRoutes(deps) {
             const rootA = resolveRootSessionId(sessionId) || sessionId
             const op = typeof body.op === 'string' ? body.op.trim() : ''
             const chiefDeps = makeChiefDeps(runtime)
+
+            if (op === 'bubble_refresh') {
+              refreshBubbleDiscovery(runtime, deps.hostState)
+              const view = await getChiefView(chiefDeps, rootA, { autoSummarize: false })
+              const bNow = (view && view.bubble) || {}
+              const totalHarnesses = ((bNow.enrolledHarnesses || []).filter(h => h && h.installed !== false).length)
+                + ((bNow.availableHarnesses || []).length)
+              const otherList = Array.isArray(view && view.otherSessions) ? view.otherSessions : []
+              sendJson(res, 200, {
+                ok: true,
+                refreshed: {
+                  harnesses: totalHarnesses,
+                  otherSessions: otherList.length,
+                  dormantSessions: otherList.filter(s => s && s.dormant).length,
+                },
+                view,
+              })
+              return
+            }
+
             const dirNow = await listPeerDirectory(chiefDeps, rootA).catch(() => ({ targets: [], cluster: [] }))
             const bState = computeBubbleState(chiefDeps, rootA, loadChiefState(), dirNow)
             const LOCK_ERR = '🔒 协同水泡工作中已锁死结构，不允许中途拆解或改动编队；请等待全员收工或点击「⏹ 急停解体」'

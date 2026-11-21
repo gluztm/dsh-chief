@@ -5559,6 +5559,51 @@ const CSS = `
     font-size: 10px;
     color: var(--dnb-text-3);
   }
+  .dnb-dock-head-right {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    flex-shrink: 0;
+  }
+  .dnb-dock-refresh-btn {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 22px;
+    padding: 0 8px;
+    border-radius: 999px;
+    corner-shape: round;
+    border: 1px solid var(--dnb-border-strong);
+    background: var(--dnb-card);
+    color: var(--dnb-text-2);
+    font: inherit;
+    font-size: 10.5px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+  }
+  .dnb-dock-refresh-btn:hover:not(:disabled) {
+    border-color: rgba(56, 189, 248, 0.56);
+    background: var(--dnb-card-hover);
+    color: var(--dnb-text);
+  }
+  .dnb-dock-refresh-btn:disabled {
+    opacity: 0.65;
+    cursor: progress;
+  }
+  html[data-ds-theme-source="light"] .dnb-dock-refresh-btn,
+  html[data-ds-theme="light"] .dnb-dock-refresh-btn {
+    background: #ffffff;
+    border-color: #cbd5e1;
+    color: #334155;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+  }
+  html[data-ds-theme-source="light"] .dnb-dock-refresh-btn:hover:not(:disabled),
+  html[data-ds-theme="light"] .dnb-dock-refresh-btn:hover:not(:disabled) {
+    background: #eff6ff;
+    border-color: rgba(2, 132, 199, 0.45);
+    color: #0369a1;
+  }
   .dnb-dock-flow {
     display: flex;
     align-items: center;

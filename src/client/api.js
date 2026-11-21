@@ -718,6 +718,32 @@ export async function dispatchBubbleHarness(provider, text, label = '') {
   }
 }
 
+export async function refreshBubbleDiscovery() {
+  try {
+    const value = await call('chief/link', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId,
+        op: 'bubble_refresh',
+      }),
+    })
+    const ref = (value && value.refreshed) || {}
+    const hCount = Number(ref.harnesses) || 0
+    const sCount = Number(ref.otherSessions) || 0
+    patch({
+      notice: bi(
+        `↻ 已刷新待命池：发现 ${hCount} 个外部工具 · ${sCount} 个其他对话窗口`,
+        `↻ Refreshed Standby: ${hCount} external tool(s) · ${sCount} conversation window(s)`,
+      ),
+    })
+    return value
+  } catch (error) {
+    patch({ error: String((error && error.message) || error) })
+    return null
+  }
+}
+
 export function requestTogglePeerLink(sess, nextLinked) {
   if (!sess || !sess.id) return
   if (nextLinked) {
