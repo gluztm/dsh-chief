@@ -3,7 +3,7 @@
 **给 DeepSeek Harness（DSH）用的右侧栏任务看护、认知桌面、事前物理驻墙与多代理管控面板**  
 <sub>长对话 `/compact` 前先存参数再压缩，子代理金字塔一屏看完，改文件跑命令前先过物理墙与逐项审批。</sub>
 
-<img src="assets/chief-10s-compare.gif" alt="对比原生长会话与挂载 dsh-chief 后的效果：左边循环重读、压缩丢参数、跨窗失忆；右边先入柜再压缩、可随时熔断、带交接单换窗继续" width="800" />
+<img src="assets/chief-10s-compare.gif" alt="对比原生长会话与挂载 dsh-chief v1.6.0 后的工作态：左侧反复重读、压缩失忆、无事前拦截；右侧 5 页签统一督导、SVG 流程画布跨步回指、认知桌面 15%、30 次硬预算熔断与 0 字节物理墙守卫" width="840" />
 
 <sub>默认只读起手 · 越权操作前先确认 · `dsh plugin --profile desktop add dsh-chief`</sub>
 

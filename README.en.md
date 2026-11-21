@@ -3,7 +3,7 @@
 **Right-sidebar supervisor, Cognitive Desktop, pre-execute Guard Walls & multi-agent gate for DeepSeek Harness (DSH)**  
 <sub>Saves paths and findings before `/compact` wipes context, tracks subagent DAGs in one view, and enforces Guard Walls + per-action approvals before file edits or commands run.</sub>
 
-<img src="assets/chief-10s-compare.gif" alt="Side-by-side comparison: plain long session loses context on compaction vs. dsh-chief saves findings to cold vaults, guards actions, and carries structured handoffs across windows" width="800" />
+<img src="assets/chief-10s-compare.gif" alt="Side-by-side comparison of plain long sessions vs dsh-chief v1.6.0: context pressure and amnesia on the left vs consolidated 5-tab supervision, SVG Flow Canvas cross-step return arcs, 15% Cognitive Desktop, 30-call budget breaker, and pre-execute Guard Walls on the right" width="840" />
 
 <sub>Read-only by default · Per-action workspace approval · `dsh plugin --profile desktop add dsh-chief`</sub>
 
