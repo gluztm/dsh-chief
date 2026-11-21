@@ -5,13 +5,44 @@
  */
 
 import { React } from './react-runtime.js'
-import { SIDE_ID } from './constants.js'
+import { SIDE_ID, BRAND_NAME } from './constants.js'
 import { readSavedUiLang } from './i18n.js'
+
+const PLACEMENT_STORAGE_KEY = 'dsh-chief:placement-pref'
+
+const DEFAULT_PLACEMENT_PREF = {
+  placement: 'both',
+  showComposerEntry: true,
+  hideInSubagent: true,
+}
+
+export function normalizePlacementPref(raw) {
+  const src = raw && typeof raw === 'object' ? raw : {}
+  const placement = ['both', 'topTab', 'sidebar'].includes(src.placement)
+    ? src.placement
+    : DEFAULT_PLACEMENT_PREF.placement
+  return {
+    placement,
+    showComposerEntry: src.showComposerEntry !== false,
+    hideInSubagent: src.hideInSubagent !== false,
+  }
+}
+
+export function readSavedPlacementPref() {
+  try {
+    if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+      const raw = localStorage.getItem(PLACEMENT_STORAGE_KEY)
+      if (raw) return normalizePlacementPref(JSON.parse(raw))
+    }
+  } catch {}
+  return { ...DEFAULT_PLACEMENT_PREF }
+}
 
 export const store = {
   open: false,
   panel: '',
   dock: false,
+  convView: false,
   tab: 'chief',
   board: null,
   boundaries: null,
@@ -187,6 +218,7 @@ export const store = {
   awayPresetModalOpen: false,
   awayPresetAgreed: false,
   uiLangPref: readSavedUiLang(),
+  placementPref: readSavedPlacementPref(),
   seenAlertEventIds: {},
   ledgerExpanded: false,
   settingsOpen: false,
@@ -302,6 +334,7 @@ export const runtimeRefs = {
   layout: null,
   hostCtx: null,
   secInputEl: null,
+  convViewOpenView: null,
   dockMountCount: 0,
   sessionClearTimer: null,
   initialRightbarSeeded: false,
@@ -504,16 +537,153 @@ function whenUnplaced(recover) {
   })
 }
 
+function collapseRightbarIfOpen() {
+  if (!store.dock || !rightbarExpanded()) return false
+  const face = service('sidebarRight')
+  if (face && typeof face.toggleExpanded === 'function') {
+    try {
+      face.toggleExpanded()
+      return true
+    } catch {}
+  }
+  return false
+}
+
+function findConversationTabEl(targetViewId) {
+  if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return null
+  const tabs = Array.from(document.querySelectorAll('[role="tablist"] [role="tab"]'))
+  if (!tabs.length) return null
+  const isChiefTab = (el) => {
+    const txt = String(el.textContent || '').trim()
+    const key = el.getAttribute && (el.getAttribute('data-view') || el.getAttribute('data-id') || el.getAttribute('id') || '')
+    return key === SIDE_ID || txt === BRAND_NAME || txt === 'DSH Chief' || txt.includes('参谋')
+  }
+  if (targetViewId === SIDE_ID) {
+    return tabs.find(isChiefTab) || null
+  }
+  if (targetViewId === 'chat') {
+    return (
+      tabs.find((el) => {
+        const txt = String(el.textContent || '').trim()
+        return !isChiefTab(el) && (txt === '对话' || txt.toLowerCase() === 'chat')
+      })
+      || tabs.find(el => !isChiefTab(el))
+      || null
+    )
+  }
+  return tabs.find(el => String(el.textContent || '').trim() === String(targetViewId)) || null
+}
+
+export function switchConversationView(targetViewId) {
+  const target = String(targetViewId || '').trim()
+  if (!target) return false
+  if (target === 'chat' && typeof runtimeRefs.convViewOpenView === 'function') {
+    try {
+      runtimeRefs.convViewOpenView('chat', '')
+      return true
+    } catch {}
+  }
+  const uiConv = service('uiConversation')
+  const sid = store.sessionId
+  if (uiConv && sid && typeof uiConv.binding === 'function') {
+    try {
+      const binding = uiConv.binding(sid)
+      if (binding && typeof binding.activate === 'function') {
+        binding.activate(target)
+        return true
+      }
+    } catch {}
+  }
+  const tabEl = findConversationTabEl(target)
+  if (tabEl && typeof tabEl.click === 'function') {
+    try {
+      tabEl.click()
+      return true
+    } catch {}
+  }
+  return false
+}
+
+export function savePlacementPref(nextPartial) {
+  const cur = store.placementPref || DEFAULT_PLACEMENT_PREF
+  const next = normalizePlacementPref({ ...cur, ...(nextPartial || {}) })
+  try {
+    if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
+      localStorage.setItem(PLACEMENT_STORAGE_KEY, JSON.stringify(next))
+    }
+  } catch {}
+  patch({ placementPref: next })
+  if (next.placement === 'topTab') {
+    collapseRightbarIfOpen()
+  } else if (next.placement === 'sidebar') {
+    if (store.convView) switchConversationView('chat')
+    openTabInRightbar(SIDE_ID)
+  }
+  return next
+}
+
+export function openChiefInMainPage() {
+  runtimeRefs.userDismissedChief = false
+  const cur = (store.placementPref && store.placementPref.placement) || DEFAULT_PLACEMENT_PREF.placement
+  if (cur === 'sidebar') {
+    savePlacementPref({ placement: 'both' })
+  }
+  const tryActivate = () => {
+    if (switchConversationView(SIDE_ID)) {
+      collapseRightbarIfOpen()
+      patch({ open: false })
+      return true
+    }
+    if (selectPanel(SIDE_ID)) {
+      collapseRightbarIfOpen()
+      patch({ open: false })
+      return true
+    }
+    return false
+  }
+  if (tryActivate()) return true
+  if (typeof requestAnimationFrame === 'function') {
+    requestAnimationFrame(() => {
+      requestAnimationFrame(() => {
+        if (!tryActivate()) selectPanel(SIDE_ID)
+      })
+    })
+    return true
+  }
+  return selectPanel(SIDE_ID)
+}
+
+export function openChiefInRightbar() {
+  runtimeRefs.userDismissedChief = false
+  const cur = (store.placementPref && store.placementPref.placement) || DEFAULT_PLACEMENT_PREF.placement
+  if (cur === 'topTab') {
+    savePlacementPref({ placement: 'both' })
+  }
+  if (store.convView) switchConversationView('chat')
+  if (store.panel === SIDE_ID) {
+    selectPanel(null)
+    if (store.panel === SIDE_ID) patch({ panel: '' })
+  }
+  return openTabInRightbar(SIDE_ID)
+}
+
 export function openChief() {
   runtimeRefs.userDismissedChief = false
+  const placement = (store.placementPref && store.placementPref.placement) || DEFAULT_PLACEMENT_PREF.placement
+  if (placement === 'topTab') {
+    if (switchConversationView(SIDE_ID)) return 'conv-view'
+    if (selectPanel(SIDE_ID)) return 'page'
+  }
   if (openTabInRightbar(SIDE_ID)) {
     runtimeRefs.initialRightbarSeeded = true
     whenUnplaced(() => {
+      if (switchConversationView(SIDE_ID)) return
       if (selectPanel(SIDE_ID)) return
       patch({ open: true })
     })
     return 'dock'
   }
+  if (switchConversationView(SIDE_ID)) return 'conv-view'
   if (selectPanel(SIDE_ID)) return 'page'
   return ''
 }
@@ -524,14 +694,11 @@ export function closeChief() {
     patch({ open: false })
     return 'overlay'
   }
-  if (store.dock && rightbarExpanded()) {
-    const face = service('sidebarRight')
-    if (face && typeof face.toggleExpanded === 'function') {
-      try {
-        face.toggleExpanded()
-        return 'dock'
-      } catch {}
-    }
+  if (store.convView) {
+    if (switchConversationView('chat')) return 'conv-view'
+  }
+  if (collapseRightbarIfOpen()) {
+    return 'dock'
   }
   if (store.panel === SIDE_ID) {
     selectPanel(null)
@@ -543,7 +710,7 @@ export function closeChief() {
 
 export function toggleChief() {
   const dockShown = !!(store.dock && rightbarExpanded())
-  const showing = !!(store.open || store.panel === SIDE_ID || dockShown)
+  const showing = !!(store.open || store.convView || store.panel === SIDE_ID || dockShown)
   if (showing) {
     const closed = closeChief()
     if (closed) return closed
@@ -568,7 +735,11 @@ function tapAddTab(scope) {
 export function seedRightbarIfEmpty() {
   if (typeof document === 'undefined') return false
   if (runtimeRefs.initialRightbarSeeded || runtimeRefs.userDismissedChief) return false
-  if (store.open || store.dock || store.panel === SIDE_ID) {
+  if (store.placementPref && store.placementPref.placement === 'topTab') {
+    runtimeRefs.initialRightbarSeeded = true
+    return false
+  }
+  if (store.open || store.dock || store.convView || store.panel === SIDE_ID) {
     runtimeRefs.initialRightbarSeeded = true
     return false
   }

@@ -5,6 +5,23 @@ All notable changes to **`dsh-chief`** (**DSH 参谋长**) will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.0] - 2026-11-21
+
+> **Release Theme**: **主页面大屏模式 · 协同系统动效与外协跨窗归类** — `conversation.view` Main Page Tab & placement setting ([#5](https://github.com/gluztm/dsh-chief/issues/5)), "协同系统" rename with idle-static / active-breathing & SVG flow connectors, external Harness `"跨窗"` mailbox routing, full codebase modularization, and light-theme visual unification.
+
+### Added
+- **对话顶部主页面 (`conversation.view`) 与显示位置配置 (`entry.js` / `store.js` / `components/Panel.js` / `tabs/plan.js` / `styles/base.js`)**：
+  - 将 DSH 参谋长注册到主对话顶部 `conversation.view` 标签栏（`order: 1`，紧跟「对话」），支持大屏宽屏居中排版；
+  - 设置页新增「🖥️ 面板显示位置（主页面 / 右侧栏）」开关卡片（支持 `右侧栏 + 主页面` / `仅主页面` / `仅右侧栏`、保留输入框快捷按钮、子代理会话自动隐藏与引导），并在面板右上角提供一键切大屏/回右侧栏按钮。
+- **「协同系统」工作态呼吸光效与动态连接线 (`tabs/peers.js` / `styles/bubble.js` / `components/Panel.js`)**：
+  - 系统停止或成员空闲时保持 100% 静止；当参谋长、主对话、子代理、联动窗口或外部 Harness 处于工作态时，对应图标呈现柔和克制的主题色呼吸泛光，激活的 SVG 连线呈现方向性虚线流动与光点微粒特效，深浅主题双适配。
+
+### Changed & Fixed
+- **外部 Agent 协同消息统一归类至「跨窗」(`network-harness.js` / `chief-state.js` / `chief-network.js` / `tabs/peers.js`)**：
+  - 修复外部 Harness（`Codex` / `Claude Code` 等）派单与回执写入 `channelType: 'pair'` 与 `harness:<provider>` 虚拟根标记（豁免于断连集群隔离），并在前端对新版及历史落盘外部 Harness 记录统一展示在「跨窗 · 外协」分组下，不再混入「内部」；顺手修复双 `@@` 目标前缀。
+- **协同卡片去中二化与模块化精简 (`tabs/peers.js` / `tabs/chief.js` / `styles/*.js`)**：
+  - 将协同卡片标题重命名为「协同系统」（移除「水泡」「实验」标签与冗余开关卡片）；统一所有页签 8 色克制左强调线、`AccCard` 折叠条、卡片流协同消息记录以及 DSH 浅色主题规则；拆分所有 `>= 2,000` 行巨石文件，版本号对齐升至 `1.7.0`。
+
 ## [1.6.0] - 2026-11-21
 
 > **Release Theme**: **简明可视 · 节约注意力资源（Visual Clarity & Attention Conservation）** — consolidated 5-tab navigation, SVG Flow Canvas & click-to-expand Org Tree, top-bar rotating `⚙️` Settings page, Away Managed reliability loop, and live `zh / en` bilingual UI.

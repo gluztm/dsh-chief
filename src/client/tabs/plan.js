@@ -6,7 +6,7 @@
 
 import { React, h } from '../react-runtime.js'
 import { bi, getUiLangPref, presetList } from '../i18n.js'
-import { store, patch } from '../store.js'
+import { store, patch, savePlacementPref } from '../store.js'
 import { clampTitle, shortSession, timeLabel } from '../utils.js'
 import {
   call,
@@ -1295,6 +1295,7 @@ function NotesTab({ board }) {
 
 export function HandoffTab({ view }) {
   const [presetsOpen, setPresetsOpen] = React.useState(true)
+  const [placementOpen, setPlacementOpen] = React.useState(true)
   const [notifyOpen, setNotifyOpen] = React.useState(true)
   const [ledgerOpen, setLedgerOpen] = React.useState(true)
   const [langOpen, setLangOpen] = React.useState(true)
@@ -1348,6 +1349,12 @@ export function HandoffTab({ view }) {
     void updateSecConfig({ managedBudgetMaxCalls: val })
   }
 
+  const placementPref = (view && view.placementPref) || { placement: 'both', showComposerEntry: true, hideInSubagent: true }
+  const placementMode = placementPref.placement || 'both'
+  const placementLabel = placementMode === 'topTab'
+    ? bi('仅主页面', 'Main Tab Only')
+    : (placementMode === 'sidebar' ? bi('仅右侧栏', 'Sidebar Only') : bi('右侧栏 + 主页面', 'Sidebar + Main Tab'))
+
   return h(
     React.Fragment,
     null,
@@ -1386,6 +1393,64 @@ export function HandoffTab({ view }) {
             h('div', { className: 'dnb-preset-desc' }, p.desc),
           )
         }),
+      ),
+    ),
+
+    // 1.5 Panel Placement Mode (Main Page Tab / Right Sidebar — GitHub Issue #5)
+    h(
+      AccCard,
+      {
+        open: placementOpen,
+        onToggle: () => setPlacementOpen(v => !v),
+        tone: 'indigo',
+        title: bi('🖥️ 面板显示位置（主页面 / 右侧栏）', '🖥️ Panel Placement (Main Page / Sidebar)'),
+        badges: h('span', { className: 'dnb-acc-badge', 'data-tone': 'accent' }, placementLabel),
+        preview: bi('支持把参谋系统放到对话顶部主页面或右侧栏', 'Place Chief in main conversation tab or right sidebar'),
+        bodyStyle: { padding: '8px 11px 10px' },
+      },
+      h(
+        'div',
+        { className: 'dnb-seg', style: { padding: 2, marginBottom: 8 } },
+        [
+          { key: 'both', label: bi('右侧栏 + 主页面', 'Sidebar + Main Tab') },
+          { key: 'topTab', label: bi('仅主页面', 'Main Tab Only') },
+          { key: 'sidebar', label: bi('仅右侧栏', 'Sidebar Only') },
+        ].map(opt =>
+          h('button', {
+            key: opt.key,
+            type: 'button',
+            className: 'dnb-seg-btn',
+            style: { padding: '4px 8px', fontSize: 11.5 },
+            'data-active': placementMode === opt.key ? '1' : '0',
+            onClick: () => {
+              savePlacementPref({ placement: opt.key })
+              patch({ notice: bi('已切换显示位置：', 'Updated placement: ') + opt.label })
+            },
+          }, opt.label),
+        ),
+      ),
+      h(
+        'div',
+        { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '7px 2px' } },
+        h('span', { style: { fontSize: 12 } }, bi('输入框旁保留参谋长快捷按钮', 'Keep shortcut button next to composer')),
+        h(Switch, {
+          checked: placementPref.showComposerEntry !== false,
+          onChange: on => savePlacementPref({ showComposerEntry: on }),
+        }),
+      ),
+      h(
+        'div',
+        { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '7px 2px' } },
+        h('span', { style: { fontSize: 12 } }, bi('子代理窗口隐藏参谋长页面', 'Hide Chief view in subagent sessions')),
+        h(Switch, {
+          checked: placementPref.hideInSubagent !== false,
+          onChange: on => savePlacementPref({ hideInSubagent: on }),
+        }),
+      ),
+      h(
+        'div',
+        { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', lineHeight: 1.45, marginTop: 4 } },
+        bi('切到主页面后可在对话顶部直接大屏切换，修改立即生效无需重启。', 'Switching placement updates the conversation top tab and sidebar immediately without restart.'),
       ),
     ),
 

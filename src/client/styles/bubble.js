@@ -1,16 +1,17 @@
 /**
- * src/client/styles/bubble.js — Option A 液态融合协同水泡、官方徽标与待命池样式
+ * src/client/styles/bubble.js — 协同系统架构画布、工作态呼吸泛光与连线流光动效样式
  *
  * 【核心职责】
- *   承载液态玻璃融合协同水泡（VisionOS Glass）、总控胶囊、双叶融合布局、主核与次级子代理卫星胶囊、
- *   右侧外协自由悬浮胶囊、官方品牌 Logo 圆标、内联派单条、待命池与「↻ 刷新扫描」按钮及浅色主题全套覆盖。
+ *   承载统一协同画布（VisionOS Glass）、总控枢纽、主核与次级子代理卫星胶囊、
+ *   右侧外协自由悬浮胶囊、官方品牌 Logo 圆标、内联派单条、待命池与「↻ 刷新扫描」按钮、
+ *   停止静止 / 工作中微呼吸光效与流动连线动效、以及浅色主题全套覆盖。
  *
  * 【边界约定】
- *   - 排在 `STYLE_SHEETS` 靠后位置，仅服务于「协同」页签中的水泡协作面板与待命池。
+ *   - 排在 `STYLE_SHEETS` 靠后位置，仅服务于「协同」页签中的协同系统面板与待命池。
  */
 
 export const CSS_BUBBLE = `
-  /* Option A: Unified Liquid Fusion Bubble Canvas (VisionOS Glass Style) */
+  /* Unified Collaboration System Canvas (VisionOS Glass Style) */
   .dnb-liquid-canvas {
     position: relative;
     padding: 10px 14px 14px;
@@ -56,6 +57,9 @@ export const CSS_BUBBLE = `
     display: flex;
     flex-direction: column;
     gap: 26px;
+  }
+  .dnb-panel.dnb-main .dnb-liquid-core-frame {
+    max-width: 780px;
   }
   .dnb-liquid-membrane {
     position: relative;
@@ -1130,5 +1134,129 @@ export const CSS_BUBBLE = `
   }
   html[data-ds-theme-source="light"] .dnb-mail-body {
     color: #334155;
+  }
+
+  /* Idle = static; Active working = gentle theme-colored breathing glow & flowing links */
+  @keyframes dnb-icon-breathe {
+    0%, 100% {
+      filter: drop-shadow(0 0 2px var(--dnb-glow-soft, rgba(56, 189, 248, 0.20)));
+      box-shadow: var(--dnb-glow-ring-min, 0 0 0 0 rgba(56, 189, 248, 0.10));
+    }
+    50% {
+      filter: drop-shadow(0 0 6px var(--dnb-glow-strong, rgba(56, 189, 248, 0.56)));
+      box-shadow: var(--dnb-glow-ring-max, 0 0 12px 1px rgba(56, 189, 248, 0.28));
+    }
+  }
+  @keyframes dnb-link-dash-flow {
+    from { stroke-dashoffset: 24; }
+    to { stroke-dashoffset: 0; }
+  }
+
+  .dnb-bubble-status[data-working="0"] .dnb-bubble-status-dot,
+  .dnb-liquid-hub[data-working="0"],
+  .dnb-liquid-hub[data-working="0"] .dnb-liquid-hub-star,
+  .dnb-liquid-lead-orb[data-running="0"],
+  .dnb-liquid-lead-orb[data-running="0"] .dnb-tier-badge[data-tier="primary"],
+  .dnb-liquid-sat-pill[data-running="0"],
+  .dnb-liquid-ally-pill[data-running="0"] .dnb-brand-badge,
+  .dnb-liquid-ally-pill[data-running="0"] .dnb-squad-dot {
+    animation: none;
+  }
+
+  .dnb-bubble-status[data-working="1"] .dnb-bubble-status-dot {
+    --dnb-glow-soft: rgba(52, 211, 153, 0.26);
+    --dnb-glow-strong: rgba(52, 211, 153, 0.72);
+    --dnb-glow-ring-min: 0 0 0 0 rgba(52, 211, 153, 0.14);
+    --dnb-glow-ring-max: 0 0 8px 2px rgba(52, 211, 153, 0.36);
+    animation: dnb-icon-breathe 2.4s ease-in-out infinite;
+  }
+  .dnb-liquid-hub[data-working="1"] {
+    --dnb-glow-soft: rgba(56, 189, 248, 0.12);
+    --dnb-glow-strong: rgba(56, 189, 248, 0.34);
+    --dnb-glow-ring-min: 0 3px 10px rgba(14, 165, 233, 0.14);
+    --dnb-glow-ring-max: 0 0 14px rgba(56, 189, 248, 0.28);
+    animation: dnb-icon-breathe 2.6s ease-in-out infinite;
+  }
+  .dnb-liquid-hub[data-working="1"] .dnb-liquid-hub-star {
+    --dnb-glow-soft: rgba(56, 189, 248, 0.24);
+    --dnb-glow-strong: rgba(56, 189, 248, 0.72);
+    --dnb-glow-ring-min: none;
+    --dnb-glow-ring-max: none;
+    animation: dnb-icon-breathe 2.2s ease-in-out infinite;
+  }
+  .dnb-liquid-lead-orb[data-running="1"] .dnb-tier-badge[data-tier="primary"] {
+    --dnb-glow-soft: rgba(56, 189, 248, 0.22);
+    --dnb-glow-strong: rgba(56, 189, 248, 0.65);
+    --dnb-glow-ring-min: 0 0 0 0 rgba(56, 189, 248, 0.10);
+    --dnb-glow-ring-max: 0 0 10px 1px rgba(56, 189, 248, 0.34);
+    animation: dnb-icon-breathe 2.3s ease-in-out infinite;
+  }
+  .dnb-liquid-sat-pill[data-running="1"] {
+    --dnb-glow-soft: rgba(56, 189, 248, 0.16);
+    --dnb-glow-strong: rgba(56, 189, 248, 0.42);
+    --dnb-glow-ring-min: 0 0 0 0 rgba(56, 189, 248, 0.08);
+    --dnb-glow-ring-max: 0 0 8px 0 rgba(56, 189, 248, 0.24);
+    animation: dnb-icon-breathe 2.4s ease-in-out infinite;
+  }
+  .dnb-liquid-ally-pill[data-running="1"][data-tier="harness"] .dnb-brand-badge {
+    --dnb-glow-soft: rgba(56, 189, 248, 0.24);
+    --dnb-glow-strong: rgba(56, 189, 248, 0.64);
+    --dnb-glow-ring-min: 0 0 0 0 rgba(56, 189, 248, 0.14);
+    --dnb-glow-ring-max: 0 0 12px 1px rgba(56, 189, 248, 0.34);
+    animation: dnb-icon-breathe 2.3s ease-in-out infinite;
+  }
+  .dnb-liquid-ally-pill[data-running="1"][data-provider="claude-code"] .dnb-brand-badge {
+    --dnb-glow-soft: rgba(217, 119, 87, 0.26);
+    --dnb-glow-strong: rgba(217, 119, 87, 0.72);
+    --dnb-glow-ring-min: 0 0 0 0 rgba(217, 119, 87, 0.14);
+    --dnb-glow-ring-max: 0 0 12px 1px rgba(217, 119, 87, 0.38);
+  }
+  .dnb-liquid-ally-pill[data-running="1"][data-tier="peer"] .dnb-squad-dot {
+    --dnb-glow-soft: rgba(167, 139, 250, 0.24);
+    --dnb-glow-strong: rgba(167, 139, 250, 0.70);
+    --dnb-glow-ring-min: 0 0 0 0 rgba(167, 139, 250, 0.14);
+    --dnb-glow-ring-max: 0 0 10px 1px rgba(167, 139, 250, 0.36);
+    animation: dnb-icon-breathe 2.3s ease-in-out infinite;
+  }
+
+  .dnb-squad-link-path-active {
+    animation: dnb-link-dash-flow 1.4s linear infinite;
+  }
+  .dnb-squad-link-path-active[data-kind="collab-sync"] {
+    animation-duration: 1.9s;
+  }
+  .dnb-squad-link-glow {
+    pointer-events: none;
+  }
+  .dnb-squad-link-pulse {
+    filter: drop-shadow(0 0 3px currentColor);
+  }
+
+  html[data-ds-theme-source="light"] .dnb-liquid-hub[data-working="1"] {
+    --dnb-glow-ring-min: 0 3px 10px rgba(2, 132, 199, 0.10);
+    --dnb-glow-ring-max: 0 0 12px rgba(2, 132, 199, 0.22);
+  }
+  html[data-ds-theme-source="light"] .dnb-liquid-ally-pill[data-running="1"][data-tier="harness"][data-provider="codex"] .dnb-brand-badge {
+    --dnb-glow-soft: rgba(2, 132, 199, 0.18);
+    --dnb-glow-strong: rgba(2, 132, 199, 0.44);
+    --dnb-glow-ring-max: 0 0 10px 1px rgba(2, 132, 199, 0.24);
+  }
+  html[data-ds-theme-source="light"] .dnb-liquid-ally-pill[data-running="1"][data-provider="claude-code"] .dnb-brand-badge {
+    --dnb-glow-soft: rgba(217, 119, 87, 0.20);
+    --dnb-glow-strong: rgba(217, 119, 87, 0.48);
+    --dnb-glow-ring-max: 0 0 10px 1px rgba(217, 119, 87, 0.26);
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .dnb-bubble-status[data-working="1"] .dnb-bubble-status-dot,
+    .dnb-liquid-hub[data-working="1"],
+    .dnb-liquid-hub[data-working="1"] .dnb-liquid-hub-star,
+    .dnb-liquid-lead-orb[data-running="1"] .dnb-tier-badge[data-tier="primary"],
+    .dnb-liquid-sat-pill[data-running="1"],
+    .dnb-liquid-ally-pill[data-running="1"] .dnb-brand-badge,
+    .dnb-liquid-ally-pill[data-running="1"] .dnb-squad-dot,
+    .dnb-squad-link-path-active {
+      animation: none !important;
+    }
   }
 `

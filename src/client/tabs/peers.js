@@ -1,10 +1,10 @@
 /**
- * src/client/tabs/peers.js — 协同作战水泡、本机外协/待命池与协同消息记录流页签
+ * src/client/tabs/peers.js — 协同系统架构、本机外协/待命池与协同消息记录流页签
  *
  * 【核心职责】
- *   1. `PeersTab`：展示 VisionOS 玻璃态液态融合协同水泡（主代理 + 子代理卫星胶囊 + 外部 Harness + 待命会话入队）、
- *      内联外协快捷派单条与一键「↻ 刷新扫描」，以及分类折叠卡片流式「协同消息记录」。
- *   2. 已清理旧版冗余「连接其他对话窗口」开关卡片（统一由上方协同水泡与待命池承接）。
+ *   1. `PeersTab`：展示 VisionOS 玻璃态液态融合协同视图（主代理 + 子代理卫星胶囊 + 外部 Harness + 待命会话入队）、
+ *      停止静止 / 工作时图标微呼吸与连线流动光效、外协快捷派单条与一键「↻ 刷新扫描」，以及分类折叠卡片流式「协同消息记录」。
+ *   2. 外部 Harness 消息统一归类至「跨窗」（兼容新版 `harness:<provider>` 标记与历史落盘格式）。
  */
 
 import { React, h } from '../react-runtime.js'
@@ -217,7 +217,7 @@ function peersCountSafe(branches) {
   return n
 }
 
-function computeLiquidLinks(stageEl, hubEl, leadEl, allyElsMap, allies) {
+function computeLiquidLinks(stageEl, hubEl, leadEl, allyElsMap, allies, linkActivity = {}) {
   if (!stageEl || !hubEl || !leadEl) return { w: 0, h: 0, links: [] }
   const sRect = stageEl.getBoundingClientRect()
   const hRect = hubEl.getBoundingClientRect()
@@ -236,7 +236,7 @@ function computeLiquidLinks(stageEl, hubEl, leadEl, allyElsMap, allies) {
   }
 
   const links = []
-  const addCurve = (id, kind, p1, p2, color, dashed, label) => {
+  const addCurve = (id, kind, p1, p2, color, dashed, label, active = false) => {
     const dy = p2.y - p1.y
     const spread = Math.max(16, Math.abs(dy) * 0.52)
     const cx1 = p1.x
@@ -259,6 +259,7 @@ function computeLiquidLinks(stageEl, hubEl, leadEl, allyElsMap, allies) {
       color,
       dashed,
       label,
+      active: Boolean(active),
     })
   }
 
@@ -271,6 +272,7 @@ function computeLiquidLinks(stageEl, hubEl, leadEl, allyElsMap, allies) {
     '#38bdf8',
     false,
     hasAllies ? '主控' : '',
+    Boolean(linkActivity.hubLead),
   )
 
   const allyBoxes = []
@@ -305,6 +307,7 @@ function computeLiquidLinks(stageEl, hubEl, leadEl, allyElsMap, allies) {
       topAlly.color,
       topAlly.kind === 'harness',
       topAlly.label || (topAlly.kind === 'harness' ? '派单' : '联动'),
+      Boolean(linkActivity.hubAlly),
     )
     if (topAlly.left > leadBox.right + 18) {
       const syncY = Math.round((leadBox.cy + topAlly.cy) / 2)
@@ -323,6 +326,7 @@ function computeLiquidLinks(stageEl, hubEl, leadEl, allyElsMap, allies) {
         color: topAlly.color,
         dashed: true,
         label: '⇄协同',
+        active: Boolean(linkActivity.leadAlly),
       })
     }
   }
@@ -336,6 +340,7 @@ export function PeersTab({ view }) {
   }, [view.sessionId])
 
   const sec = view.secView || {}
+  const meta = view.chiefMeta || {}
   const selfRootId = view.sessionId || ''
   const rawPeers = Array.isArray(sec.peers) ? sec.peers : []
   const hiddenProbePeers = view.showInternalProbes
@@ -345,6 +350,62 @@ export function PeersTab({ view }) {
   const peers = rawPeers.filter(p => !hiddenProbeSet.has(p))
   const otherSessions = Array.isArray(sec.otherSessions) ? sec.otherSessions : []
   const mailbox = Array.isArray(sec.mailbox) ? sec.mailbox : []
+
+  const bubble = (sec.bubble && typeof sec.bubble === 'object') ? sec.bubble : {}
+  const bubbleLocked = Boolean(bubble.locked)
+  const bubbleAutoLocked = Boolean(bubble.autoLocked)
+  const bubbleLockReason = String(bubble.lockReason || '')
+  const enrolledHarnesses = Array.isArray(bubble.enrolledHarnesses) ? bubble.enrolledHarnesses : []
+  const availableHarnesses = Array.isArray(bubble.availableHarnesses) ? bubble.availableHarnesses : []
+  const standbySessions = otherSessions.filter(s => s && !s.linked)
+
+  // External Harness directory & colors (for both new harness: roots and legacy stored mailbox records)
+  const knownHarnessMap = new Map([
+    ['codex', 'Codex'],
+    ['claude-code', 'Claude Code'],
+    ['claude', 'Claude Code'],
+  ])
+  for (const hObj of [...enrolledHarnesses, ...availableHarnesses]) {
+    if (!hObj || !hObj.provider) continue
+    const pk = String(hObj.provider).trim().toLowerCase()
+    if (pk) knownHarnessMap.set(pk, String(hObj.label || hObj.provider))
+  }
+  const normalizeHarnessProvider = (raw) => {
+    const clean = String(raw || '').trim().replace(/^@+/, '').toLowerCase()
+    if (!clean) return ''
+    if (clean === 'claude') return 'claude-code'
+    return clean
+  }
+  const colorForHarness = (provider) => {
+    const pk = normalizeHarnessProvider(provider)
+    if (pk === 'claude-code') {
+      return { dot: '#D97757', bg: 'rgba(217,119,87,0.14)', border: 'rgba(217,119,87,0.40)', text: '#ea8c6e' }
+    }
+    if (pk === 'codex') {
+      return { dot: '#38bdf8', bg: 'rgba(56,189,248,0.14)', border: 'rgba(56,189,248,0.40)', text: '#7dd3fc' }
+    }
+    return { dot: '#f59e0b', bg: 'rgba(245,158,11,0.14)', border: 'rgba(245,158,11,0.40)', text: '#fbbf24' }
+  }
+  const formatHarnessLabel = (provider) => {
+    const pk = normalizeHarnessProvider(provider)
+    if (!pk) return 'Harness'
+    return knownHarnessMap.get(pk) || (pk.charAt(0).toUpperCase() + pk.slice(1))
+  }
+  const detectExternalHarnessProvider = (mail) => {
+    if (!mail || typeof mail !== 'object') return ''
+    const fRoot = String(mail.fromRootId || '').trim()
+    if (fRoot.startsWith('harness:')) return normalizeHarnessProvider(fRoot.slice(8))
+    const tRoot = String(mail.toRootId || '').trim()
+    if (tRoot.startsWith('harness:')) return normalizeHarnessProvider(tRoot.slice(8))
+    const subj = String(mail.subject || '')
+    const sm = subj.match(/外部\s*Harness\s*(?:派单|回执)\s*[·•:\-]\s*([a-z0-9._-]+)/i)
+    if (sm && sm[1]) return normalizeHarnessProvider(sm[1])
+    for (const cand of [mail.from, mail.to, mail.fromSession, mail.toSession]) {
+      const token = String(cand || '').trim().replace(/^@+/, '').toLowerCase()
+      if (token && knownHarnessMap.has(token)) return normalizeHarnessProvider(token)
+    }
+    return ''
+  }
 
   // Build human-readable session title lookup & color resolver across cluster
   const rootNameMap = new Map()
@@ -357,6 +418,9 @@ export function PeersTab({ view }) {
     if (s && s.id && !rootNameMap.has(s.id)) rootNameMap.set(s.id, s.name || shortSession(s.id))
   }
   const labelForRoot = (rid) => {
+    if (typeof rid === 'string' && rid.startsWith('harness:')) {
+      return formatHarnessLabel(rid.slice(8))
+    }
     if (!rid || (selfRootId && rid === selfRootId)) return '主对话'
     return clampTitle(rootNameMap.get(rid) || shortSession(rid), 14)
   }
@@ -365,8 +429,8 @@ export function PeersTab({ view }) {
   const mailFilter = view.mailChannelFilter || 'all'
   const openDrawers = (view.mailOpenDrawers && typeof view.mailOpenDrawers === 'object') ? view.mailOpenDrawers : {}
   const drawersMap = new Map()
-  const ensureDrawer = (key, meta) => {
-    if (!drawersMap.has(key)) drawersMap.set(key, { key, ...meta, items: [] })
+  const ensureDrawer = (key, metaObj) => {
+    if (!drawersMap.has(key)) drawersMap.set(key, { key, ...metaObj, items: [] })
     return drawersMap.get(key)
   }
 
@@ -403,15 +467,30 @@ export function PeersTab({ view }) {
       }).items.push(mail)
       continue
     }
+    const extProvider = detectExternalHarnessProvider(mail)
     const uniqueRoots = [...new Set([...participants, fromR, (toR && toR !== 'all' ? toR : '')].filter(Boolean))]
-    if (mail.channelType === 'multi' || uniqueRoots.length > 2) {
+    if (mail.channelType === 'multi' || (!extProvider && uniqueRoots.length > 2)) {
       const sorted = uniqueRoots.slice().sort()
       ensureDrawer('multi:' + sorted.join('|'), {
         kind: 'cross',
         channelTag: bi('多窗', 'Group'),
         title: `${sorted.slice(0, 3).map(labelForRoot).join(' · ')}${sorted.length > 3 ? bi(` 等${sorted.length}窗`, ` +${sorted.length}`) : ''}`,
-        colors: sorted.slice(0, 4).map(id => colorForRootSession(id, selfRootId)),
+        colors: sorted.slice(0, 4).map(id => (id.startsWith('harness:') ? colorForHarness(id.slice(8)) : colorForRootSession(id, selfRootId))),
         order: 1,
+        defaultOpen: true,
+      }).items.push(mail)
+      continue
+    }
+    if (extProvider) {
+      const localRoot = (fromR && !fromR.startsWith('harness:')
+        ? fromR
+        : (toR && !toR.startsWith('harness:') && toR !== 'all' ? toR : selfRootId)) || selfRootId || 'self'
+      ensureDrawer('harness:' + localRoot + '|' + extProvider, {
+        kind: 'cross',
+        channelTag: bi('跨窗 · 外协', 'External'),
+        title: `${labelForRoot(localRoot)} ↔ ${formatHarnessLabel(extProvider)}`,
+        colors: [colorForRootSession(localRoot, selfRootId), colorForHarness(extProvider)],
+        order: 2,
         defaultOpen: true,
       }).items.push(mail)
       continue
@@ -423,7 +502,7 @@ export function PeersTab({ view }) {
           kind: 'cross',
           channelTag: bi('跨窗', 'Cross'),
           title: `${labelForRoot(pair[0])} ↔ ${labelForRoot(pair[1])}`,
-          colors: pair.map(id => colorForRootSession(id, selfRootId)),
+          colors: pair.map(id => (id.startsWith('harness:') ? colorForHarness(id.slice(8)) : colorForRootSession(id, selfRootId))),
           order: 2,
           defaultOpen: true,
         }).items.push(mail)
@@ -447,13 +526,6 @@ export function PeersTab({ view }) {
     .sort((a, b) => a.order - b.order)
 
   const hasLinkedNetwork = peers.some(p => p && p.kind === 'peer-session')
-  const bubble = (sec.bubble && typeof sec.bubble === 'object') ? sec.bubble : {}
-  const bubbleLocked = Boolean(bubble.locked)
-  const bubbleAutoLocked = Boolean(bubble.autoLocked)
-  const bubbleLockReason = String(bubble.lockReason || '')
-  const enrolledHarnesses = Array.isArray(bubble.enrolledHarnesses) ? bubble.enrolledHarnesses : []
-  const availableHarnesses = Array.isArray(bubble.availableHarnesses) ? bubble.availableHarnesses : []
-  const standbySessions = otherSessions.filter(s => s && !s.linked)
 
   const [confirmStop, setConfirmStop] = React.useState(false)
   const [dispatchTarget, setDispatchTarget] = React.useState('')
@@ -526,11 +598,25 @@ export function PeersTab({ view }) {
     })
   }
 
+  const chiefActiveWork = Boolean(view.chiefWorkFx || (meta && meta.activeWork) || view.secBusy || view.secRegenerating)
+  const leadRunningNow = Boolean(primaryBranch && primaryBranch.raw && primaryBranch.raw.status === 'running')
+  const primarySubRunning = Boolean(primaryBranch && primaryBranch.children && primaryBranch.children.some(c => c && c.raw && c.raw.status === 'running'))
+  const rightAllyRunning = harnessWing.some(item => item && item.running)
+    || peerBranches.some(b => (b.raw && b.raw.status === 'running') || (b.children || []).some(c => c && c.raw && c.raw.status === 'running'))
+  const isWorking = Boolean(chiefActiveWork || counts.running > 0)
+  const linkActivity = {
+    hubLead: Boolean(chiefActiveWork || leadRunningNow || primarySubRunning),
+    hubAlly: Boolean(rightAllyRunning || (chiefActiveWork && hasRightAllies)),
+    leadAlly: Boolean(rightAllyRunning || (leadRunningNow && hasRightAllies)),
+  }
+
   const layoutSig = [
     view.peersNetCollapsed ? '1' : '0',
-    branches.map(b => `${b.uid}:${b.children.length}`).join(','),
+    branches.map(b => `${b.uid}:${b.children.length}:${b.raw && b.raw.status === 'running' ? 1 : 0}`).join(','),
     harnessWing.map(hItem => `${hItem.provider}:${hItem.running ? 1 : 0}`).join(','),
     bubbleLocked ? 'L' : 'U',
+    isWorking ? 'W1' : 'W0',
+    `${linkActivity.hubLead ? 1 : 0}${linkActivity.hubAlly ? 1 : 0}${linkActivity.leadAlly ? 1 : 0}`,
   ].join('|')
 
   React.useLayoutEffect(() => {
@@ -544,13 +630,19 @@ export function PeersTab({ view }) {
         leadRef.current,
         allyMap,
         rightAlliesList,
+        linkActivity,
       )
       setLinkLayout(prev => {
         if (
           prev.w === next.w
           && prev.h === next.h
           && prev.links.length === next.links.length
-          && prev.links.every((l, idx) => l.d === next.links[idx].d && l.color === next.links[idx].color && l.label === next.links[idx].label)
+          && prev.links.every((l, idx) =>
+            l.d === next.links[idx].d
+            && l.color === next.links[idx].color
+            && l.label === next.links[idx].label
+            && l.active === next.links[idx].active,
+          )
         ) {
           return prev
         }
@@ -572,8 +664,8 @@ export function PeersTab({ view }) {
     setLockShake(true)
     patch({
       notice: reasonHint || bi(
-        '🔒 协同水泡工作中已锁死结构，禁止拆解成员；请等待全员收工或点击「⏹ 急停解体」',
-        '🔒 Bubble locked while working; wait until settled or click Emergency Stop',
+        '🔒 协同系统工作中已锁定编队，禁止拆解成员；请等待全员收工或点击「⏹ 急停解体」',
+        '🔒 Collaboration locked while working; wait until settled or click Emergency Stop',
       ),
     })
   }
@@ -679,17 +771,18 @@ export function PeersTab({ view }) {
   return h(
     'div',
     { className: 'dnb-view' },
-    // Section 1: Bubble-Shaped Collaboration Squad Topology (Experimental)
+    // Section 1: Collaboration System Topology & Standby Dock
     h(
       AccCard,
       {
         open: !view.peersNetCollapsed,
         onToggle: () => patch({ peersNetCollapsed: !view.peersNetCollapsed }),
         tone: 'cyan',
-        title: bi('🫧 协同作战水泡（实验）', '🫧 Collab Bubble Squad (Exp)'),
+        icon: h(Icon, { name: 'network', size: 12.5, style: { color: 'var(--dnb-text-2)' } }),
+        title: bi('协同系统', 'Collaboration System'),
         headTitle: bubbleLocked
           ? bi('编队已锁定：运行期间禁止拆散会话或外部 Harness，仅可通过急停安全解体', 'Locked during work: structural edits blocked until settled or emergency stop')
-          : bi('水泡状编队清晰展示团队归属、主次层级与协作连线，支持拖入/点选组队', 'Organic bubble squad clearly shows membership, hierarchy, and collaboration links'),
+          : bi('清晰展示团队成员层级与实时协作连线，支持拖拽或点选编队', 'Shows squad hierarchy and live collaboration links; drag or click to enroll'),
         count: counts.total ? String(counts.total) : '',
         preview: bubbleLocked
           ? `🔒 ${bubbleLockReason || bi('工作中已锁死', 'Locked while active')}`
@@ -722,12 +815,13 @@ export function PeersTab({ view }) {
       h(
         'div',
         { className: 'dnb-bubble-stage' },
-        // Option A: Full-width Frosted Outer Canvas + Golden-Ratio Centered Liquid Bubble Frame
+        // Unified Collaboration System Canvas
         h(
           'div',
           {
             className: 'dnb-liquid-canvas',
             'data-locked': bubbleLocked ? '1' : '0',
+            'data-working': isWorking ? '1' : '0',
             'data-shake': lockShake ? '1' : '0',
             'data-dual': hasRightAllies ? '1' : '0',
             'data-dragover': dragOverZone === 'inside' ? '1' : '0',
@@ -741,14 +835,16 @@ export function PeersTab({ view }) {
             { className: 'dnb-liquid-topbar' },
             h(
               'div',
-              { className: 'dnb-bubble-status', 'data-locked': bubbleLocked ? '1' : '0' },
+              { className: 'dnb-bubble-status', 'data-locked': bubbleLocked ? '1' : '0', 'data-working': isWorking ? '1' : '0' },
               h('span', { className: 'dnb-bubble-status-dot' }),
               h(
                 'span',
                 { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
                 bubbleLocked
                   ? bi(`🔒 工作中已锁死${bubbleLockReason ? ' · ' + bubbleLockReason : ''}`, `🔒 Locked${bubbleLockReason ? ' · ' + bubbleLockReason : ''}`)
-                  : bi('整备协同中 · 拖或点入泡', 'Staging · Drag or click to join'),
+                  : (isWorking
+                      ? bi('协同工作中', 'Collaborating')
+                      : bi('协同待命 · 拖入或点选成员加入', 'Standby · Drag or click to add')),
               ),
             ),
             h(
@@ -779,7 +875,7 @@ export function PeersTab({ view }) {
                     className: 'dnb-pill dnb-bubble-estop-btn',
                     'data-confirm': confirmStop ? '1' : '0',
                     style: { height: 22, padding: '0 8px', fontSize: 10.5 },
-                    title: bi('安全急停所有在途子代理、跨窗与外部 Harness，并解锁水泡', 'Interrupt all running workers & Harnesses and unlock Bubble'),
+                    title: bi('安全急停所有在途子代理、跨窗与外部 Harness，并解锁编队', 'Interrupt all running workers & Harnesses and unlock squad'),
                     onClick: () => {
                       if (!confirmStop) {
                         setConfirmStop(true)
@@ -801,8 +897,9 @@ export function PeersTab({ view }) {
               ref: stageRef,
               className: 'dnb-liquid-core-frame',
               'data-dual': hasRightAllies ? '1' : '0',
+              'data-working': isWorking ? '1' : '0',
             },
-            // Layer 1: Adaptive Optical Filament Connectors (measured across hub + membrane nodes)
+            // Layer 1: Adaptive Optical Filament Connectors (idle = static, working = directional flow + light pulse)
             (linkLayout.w > 0 && linkLayout.h > 0 && linkLayout.links.length > 0)
               ? h(
                   'svg',
@@ -816,35 +913,87 @@ export function PeersTab({ view }) {
                   h(
                     'g',
                     { className: 'dnb-squad-links-paths' },
-                    linkLayout.links.map((lk) =>
-                      h(
+                    linkLayout.links.map((lk) => {
+                      const isLinkActive = Boolean(lk.active)
+                      return h(
                         'g',
-                        { key: 'p-' + lk.id, className: 'dnb-squad-link-group', 'data-kind': lk.kind },
-                        h('path', {
-                          className: 'dnb-squad-link-path',
+                        {
+                          key: 'p-' + lk.id,
+                          className: 'dnb-squad-link-group',
                           'data-kind': lk.kind,
+                          'data-active': isLinkActive ? '1' : '0',
+                        },
+                        isLinkActive
+                          ? h('path', {
+                              className: 'dnb-squad-link-glow',
+                              d: lk.d,
+                              fill: 'none',
+                              stroke: lk.color,
+                              strokeWidth: lk.kind === 'collab-sync' ? 4 : 4.4,
+                              strokeLinecap: 'round',
+                              opacity: 0.18,
+                            })
+                          : null,
+                        h('path', {
+                          className: isLinkActive ? 'dnb-squad-link-path dnb-squad-link-path-active' : 'dnb-squad-link-path',
+                          'data-kind': lk.kind,
+                          'data-active': isLinkActive ? '1' : '0',
                           d: lk.d,
                           fill: 'none',
                           stroke: lk.color,
-                          strokeWidth: lk.kind === 'collab-sync' ? 1.25 : 1.35,
-                          strokeDasharray: lk.dashed ? '4 4' : undefined,
+                          strokeWidth: isLinkActive
+                            ? (lk.kind === 'collab-sync' ? 1.55 : 1.75)
+                            : (lk.kind === 'collab-sync' ? 1.25 : 1.35),
+                          strokeDasharray: isLinkActive
+                            ? '6 6'
+                            : (lk.dashed ? '4 4' : undefined),
                           strokeLinecap: 'round',
-                          opacity: lk.kind === 'collab-sync' ? 0.62 : 0.56,
+                          opacity: isLinkActive
+                            ? 0.88
+                            : (lk.kind === 'collab-sync' ? 0.54 : 0.48),
                         }),
-                        h('circle', { cx: lk.x1, cy: lk.y1, r: 1.6, fill: lk.color, opacity: 0.65 }),
-                        h('circle', { cx: lk.x2, cy: lk.y2, r: 1.8, fill: lk.color, opacity: 0.72 }),
-                      ),
-                    ),
+                        h('circle', { cx: lk.x1, cy: lk.y1, r: isLinkActive ? 2 : 1.6, fill: lk.color, opacity: isLinkActive ? 0.85 : 0.6 }),
+                        h('circle', { cx: lk.x2, cy: lk.y2, r: isLinkActive ? 2.2 : 1.8, fill: lk.color, opacity: isLinkActive ? 0.9 : 0.65 }),
+                        isLinkActive
+                          ? h(
+                              'circle',
+                              {
+                                r: lk.kind === 'collab-sync' ? 2.1 : 2.4,
+                                fill: lk.color,
+                                className: 'dnb-squad-link-pulse',
+                              },
+                              h('animateMotion', {
+                                dur: lk.kind === 'collab-sync' ? '2.5s' : '2.1s',
+                                repeatCount: 'indefinite',
+                                path: lk.d,
+                              }),
+                              h('animate', {
+                                attributeName: 'opacity',
+                                values: '0;0.95;0.95;0',
+                                keyTimes: '0;0.14;0.86;1',
+                                dur: lk.kind === 'collab-sync' ? '2.5s' : '2.1s',
+                                repeatCount: 'indefinite',
+                              }),
+                            )
+                          : null,
+                      )
+                    }),
                   ),
                   h(
                     'g',
                     { className: 'dnb-squad-links-labels' },
                     linkLayout.links.map((lk) => {
                       if (!lk.label) return null
+                      const isLinkActive = Boolean(lk.active)
                       const pillW = Math.max(30, Math.round(lk.label.split('').reduce((s, ch) => s + (/[\u4e00-\u9fa5]/.test(ch) ? 9.4 : 5.8), 11)))
                       return h(
                         'g',
-                        { key: 'l-' + lk.id, transform: `translate(${lk.mx.toFixed(1)}, ${lk.my.toFixed(1)})` },
+                        {
+                          key: 'l-' + lk.id,
+                          className: 'dnb-squad-link-label',
+                          'data-active': isLinkActive ? '1' : '0',
+                          transform: `translate(${lk.mx.toFixed(1)}, ${lk.my.toFixed(1)})`,
+                        },
                         h('rect', {
                           x: -(pillW / 2),
                           y: -7.5,
@@ -853,8 +1002,8 @@ export function PeersTab({ view }) {
                           rx: 7.5,
                           className: 'dnb-squad-link-pill-bg',
                           stroke: lk.color,
-                          strokeOpacity: 0.48,
-                          strokeWidth: 0.75,
+                          strokeOpacity: isLinkActive ? 0.78 : 0.44,
+                          strokeWidth: isLinkActive ? 0.9 : 0.75,
                         }),
                         h(
                           'text',
@@ -883,6 +1032,7 @@ export function PeersTab({ view }) {
                   ref: hubRef,
                   className: 'dnb-liquid-hub',
                   'data-locked': bubbleLocked ? '1' : '0',
+                  'data-working': isWorking ? '1' : '0',
                   title: bi('DSH 参谋长作为统一总调度枢纽，串联主对话、下属子代理、联动主窗与外部 Harness', 'DSH Chief orchestrates Primary Lead, Subagents, Linked Windows & Harnesses'),
                 },
                 h('span', { className: 'dnb-liquid-hub-star' }, '✦'),
@@ -1068,7 +1218,7 @@ export function PeersTab({ view }) {
                   peerBranches.map((branch) => {
                     const pPeer = branch.raw || {}
                     const pRun = pPeer.status === 'running'
-                    const pSummary = pPeer.taskTitle || pPeer.progressSummary || pPeer.objective || bi('已并入当前协同水泡', 'Linked in Bubble')
+                    const pSummary = pPeer.taskTitle || pPeer.progressSummary || pPeer.objective || bi('已并入当前协同编队', 'Linked in Squad')
                     return h(
                       'div',
                       { key: 'pwrap-' + branch.rootId, className: 'dnb-liquid-peer-block' },
@@ -1125,7 +1275,7 @@ export function PeersTab({ view }) {
                           h('button', {
                             type: 'button',
                             className: 'dnb-mini-btn',
-                            title: bubbleLocked ? bi('编队已锁，请先急停或等完工后移出', 'Locked while active') : bi('移出当前水泡', 'Eject from Bubble'),
+                            title: bubbleLocked ? bi('编队已锁，请先急停或等完工后移出', 'Locked while active') : bi('移出协同编队', 'Remove from squad'),
                             onClick: () => performLeave({ kind: 'peer-session', id: branch.rootId, branch }),
                           }, bubbleLocked ? '🔒' : '×'),
                         ),
@@ -1228,7 +1378,7 @@ export function PeersTab({ view }) {
                 'span',
                 { className: 'dnb-dock-hint' },
                 hasStandby
-                  ? bi('拖入水泡或点 + 入队', 'Drag up or tap + to join')
+                  ? bi('拖入上方或点 + 加入', 'Drag up or tap + to join')
                   : bi('仅展示本机已配置的外部工具与独立窗口', 'Only locally configured tools & open sessions'),
               ),
               h(
@@ -1275,7 +1425,7 @@ export function PeersTab({ view }) {
                       type: 'button',
                       className: 'dnb-dock-bolt-btn',
                       'data-active': isSelTarget ? '1' : '0',
-                      title: bi('⚡ 一键调用并自动纳入水泡锁死', '⚡ One-click run & lock'),
+                      title: bi('⚡ 一键调用并加入协同编队锁定', '⚡ One-click run & lock'),
                       onClick: (e) => {
                         e.stopPropagation()
                         setDispatchTarget(d => (d === hItem.provider ? '' : hItem.provider))
@@ -1442,7 +1592,12 @@ export function PeersTab({ view }) {
                                   : (lowFrom.includes('lead') || lowFrom.includes('主对话') || lowFrom === 'agent'
                                       ? 'lead'
                                       : 'subagent')))
-                        const fColor = colorForRootSession(mail.fromRootId || mail.fromSession || selfRootId, selfRootId)
+                        const extMailProvider = detectExternalHarnessProvider(mail)
+                        const fRoot = String(mail.fromRootId || mail.fromSession || selfRootId || '')
+                        const fColor = (fRoot.startsWith('harness:') || senderRole === 'harness')
+                          ? colorForHarness(fRoot.startsWith('harness:') ? fRoot.slice(8) : extMailProvider)
+                          : colorForRootSession(fRoot, selfRootId)
+                        const toDisplay = '@' + String(toName || 'lead').replace(/^@+/, '')
                         const rawBody = String(mail.text || '')
                         const cleanSubject = String(mail.subject || '').trim()
                         const showSubject = Boolean(cleanSubject && !rawBody.trim().startsWith(cleanSubject))
@@ -1472,7 +1627,7 @@ export function PeersTab({ view }) {
                               h(
                                 'span',
                                 { className: 'dnb-mail-target', 'data-all': toName === 'all' ? '1' : '0' },
-                                '@' + toName,
+                                toDisplay,
                               ),
                               h('span', { className: 'dnb-mail-mode', 'data-mode': modeKey }, modeLabel),
                             ),

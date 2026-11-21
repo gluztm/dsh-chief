@@ -1,6 +1,6 @@
 {
   "name": "dsh-chief",
-  "version": "1.6.0",
+  "version": "1.7.0",
   "icon": "icon.svg",
   "type": "module",
   "description": "Right-sidebar supervisor plugin for DeepSeek Harness (DSH): saves findings before compaction, monitors subagent workflows, checks file edits and shell commands against guard rules, stops repeat-error loops, and hands off long sessions.",

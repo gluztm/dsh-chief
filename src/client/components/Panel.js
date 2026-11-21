@@ -28,6 +28,9 @@ import {
   selectPanel,
   rightbarExpanded,
   openChief,
+  openChiefInMainPage,
+  openChiefInRightbar,
+  switchConversationView,
   closeChief,
   toggleChief,
   reserveCornerSpace,
@@ -145,6 +148,7 @@ function PanelInner(props) {
   const [gearDeg, setGearDeg] = React.useState(0)
   const isPage = !!(props && props.variant === 'main')
   const isDock = !!(props && props.variant === 'dock')
+  const inConvView = !!(props && props.inConversationView)
   const selfRef = React.useRef(null)
 
   const secBarRef = React.useRef(null)
@@ -189,6 +193,13 @@ function PanelInner(props) {
   const secBadge = (meta.pendingSuggestions || 0)
   const archMeta = view.archiveMeta || {}
   const archiveBadge = archMeta.takenOutCount || 0
+  const panelWorking = Boolean(
+    view.chiefWorkFx
+    || (meta && meta.activeWork)
+    || view.secBusy
+    || view.secRegenerating
+    || (Array.isArray(view.subagents) && view.subagents.some(a => a && a.status === 'running')),
+  )
 
   const body = view.settingsOpen
     ? h(
@@ -253,7 +264,9 @@ function PanelInner(props) {
           style: { display: 'inline-flex', alignItems: 'center', gap: 5 },
           title: `${bi(BRAND_NAME, 'DSH Chief')} v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? (view.staleBackendDetected ? bi(`（后台还是旧版 v${meta.backendBuild}，重启 DSH 后生效）`, ` (background is still v${meta.backendBuild}; restart DSH to update)`) : bi('（版本已同步）', ' (synced)')) : ''}${view.sessionId ? ` · ${bi('对话', 'Chat')} ${shortSession(view.sessionId)}` : ''}`,
         },
-          h(Icon, { name: 'sparkles', size: 14, style: { color: 'var(--dnb-accent)' } }),
+          h('span', { className: 'dnb-brand-status-icon', 'data-working': panelWorking ? '1' : '0' },
+            h(Icon, { name: 'sparkles', size: 14, style: { color: 'currentColor' } }),
+          ),
           bi(BRAND_NAME, 'DSH Chief'),
         ),
         h('button', {
@@ -366,8 +379,25 @@ function PanelInner(props) {
           }, h(Icon, { name: 'refresh', size: 15, style: view.busy ? { animation: 'dnb-spin 0.9s linear infinite' } : undefined })),
           h('button', {
             className: 'dnb-icon-btn',
+            title: isPage ? bi('切回右侧栏', 'Switch to Right Sidebar') : bi('在主页面全屏打开', 'Open in Main Page'),
+            onClick: () => {
+              if (isPage) openChiefInRightbar()
+              else openChiefInMainPage()
+            },
+          }, h(Icon, { name: isPage ? 'sidebarRight' : 'maximize', size: 14.5 })),
+          h('button', {
+            className: 'dnb-icon-btn',
             title: isPage ? bi('回到对话', 'Back to Chat') : bi('收起', 'Collapse'),
             onClick: () => {
+              if (inConvView) {
+                if (props && typeof props.openView === 'function') {
+                  try {
+                    props.openView('chat', '')
+                    return
+                  } catch {}
+                }
+                if (switchConversationView('chat')) return
+              }
               if (closeChief()) return
               if (isPage) {
                 selectPanel(null)
@@ -688,6 +718,7 @@ function TriggerButton(props) {
 }
 
 export function ComposerEntry(props) {
+  const view = useStore()
   const sessionId = props && props.sessionId ? String(props.sessionId) : ''
   const inputActions = props ? props.inputActions : null
   const isSubagent = useIsSubagentSession(sessionId)
@@ -699,7 +730,9 @@ export function ComposerEntry(props) {
     adoptSession('composer', sessionId, inputActions)
     return () => adoptSession('composer', '')
   }, [sessionId, inputActions, isSubagent])
-  if (isSubagent) return null
+  const pref = view.placementPref || {}
+  if (isSubagent && pref.hideInSubagent !== false) return null
+  if (pref.showComposerEntry === false) return null
   return h(React.Fragment, null, h(Style, null), h(TriggerButton, { compact: true }))
 }
 
@@ -708,8 +741,10 @@ export function CornerTrigger() {
   const dockShown = useDockShown()
   const urlSid = sessionIdFromUrl()
   const isSubagent = useIsSubagentSession(urlSid)
-  const showing = view.open || view.panel === SIDE_ID || dockShown
-  if (showing || isSubagent) return null
+  const placement = (view.placementPref && view.placementPref.placement) || 'both'
+  const hideSub = (view.placementPref && view.placementPref.hideInSubagent) !== false
+  const showing = view.open || view.convView || view.panel === SIDE_ID || dockShown || (placement === 'topTab' && Boolean(urlSid || view.sessionId))
+  if (showing || (isSubagent && hideSub)) return null
   return h(
     'button',
     {
@@ -747,6 +782,78 @@ export function MainPanel() {
     }
   }, [])
   return h('div', { className: 'dnb-page' }, h(Panel, { variant: 'main' }))
+}
+
+export function ConversationChiefView(props) {
+  const view = useStore()
+  const sessionId = props && props.sessionId ? String(props.sessionId) : ''
+  const inputActions = props ? props.inputActions : null
+  const openView = props && typeof props.openView === 'function' ? props.openView : null
+  const isSubagent = useIsSubagentSession(sessionId)
+  const [allowSubPreview, setAllowSubPreview] = React.useState(false)
+
+  React.useEffect(() => {
+    runtimeRefs.convViewOpenView = openView
+    patch({ convView: true })
+    return () => {
+      if (runtimeRefs.convViewOpenView === openView) runtimeRefs.convViewOpenView = null
+      if (store.convView) patch({ convView: false })
+    }
+  }, [openView])
+
+  React.useEffect(() => {
+    if (!sessionId || isSubagent) {
+      adoptSession('conv-view', '')
+      return undefined
+    }
+    adoptSession('conv-view', sessionId, inputActions)
+    return () => adoptSession('conv-view', '')
+  }, [sessionId, inputActions, isSubagent])
+
+  const hideSub = (view.placementPref && view.placementPref.hideInSubagent) !== false
+  if (isSubagent && hideSub && !allowSubPreview) {
+    return h(
+      'div',
+      {
+        className: 'dnb-page dnb-conv-page',
+        style: { alignItems: 'center', justifyContent: 'center', padding: 24 },
+      },
+      h(Style, null),
+      h(
+        'div',
+        {
+          className: 'dnb-group',
+          style: { maxWidth: 420, padding: '18px 20px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 10 },
+        },
+        h('div', { style: { fontSize: 13.5, fontWeight: 600, color: 'var(--dnb-text)' } },
+          bi('当前处于子代理会话窗口', 'This is a subagent chat window')),
+        h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.55 } },
+          bi('为避免混淆各子代理进度，DSH 参谋长主页面默认只在主对话窗口绑定展示。', 'To keep main-session state clean, DSH Chief binds to your primary conversation by default.')),
+        h(
+          'div',
+          { style: { display: 'flex', justifyContent: 'center', gap: 8, flexWrap: 'wrap', marginTop: 4 } },
+          openView
+            ? h('button', {
+                type: 'button',
+                className: 'dnb-primary-btn',
+                onClick: () => openView('chat', ''),
+              }, bi('返回子代理对话', 'Back to Chat'))
+            : null,
+          h('button', {
+            type: 'button',
+            className: 'dnb-pill',
+            onClick: () => setAllowSubPreview(true),
+          }, bi('仍在此查看主会话看板', 'View Main Board Anyway')),
+        ),
+      ),
+    )
+  }
+
+  return h(
+    'div',
+    { className: 'dnb-page dnb-conv-page' },
+    h(Panel, { variant: 'main', inConversationView: true, openView }),
+  )
 }
 
 export function SidebarChiefTab(props) {

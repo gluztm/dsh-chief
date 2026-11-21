@@ -933,7 +933,7 @@ export async function consumePreStepDelta(deps, agent) {
     for (const mail of view.mailbox) {
       if (mail.detachedFromCluster) continue
       const mailFromRoot = mail.fromRootId || (mail.fromSession && deps.resolveRootSessionId ? deps.resolveRootSessionId(mail.fromSession) : '')
-      if (mailFromRoot && mailFromRoot !== rootId && !view.cluster.includes(mailFromRoot)) continue
+      if (mailFromRoot && !String(mailFromRoot).startsWith('harness:') && mailFromRoot !== rootId && !view.cluster.includes(mailFromRoot)) continue
       const toLower = String(mail.toSession || mail.to || '').toLowerCase()
       const toHandleLower = String(mail.to || '').toLowerCase()
       const isMine = toLower === 'all'

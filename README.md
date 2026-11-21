@@ -284,14 +284,14 @@ flowchart LR
 在已装好 [dshmarket](https://github.com/dsh-market/dsh-market) 的 DSH 里直接搜 **`dsh-chief`** 或 **`DSH 参谋长`** 就能点安装，也可以用命令行（网页版把 `desktop` 换成 `web`）：
 
 ```bash
-# 方式 1：通过 npm 安装最新版（v1.6.0）
+# 方式 1：通过 npm 安装最新版（v1.7.0）
 dsh plugin --profile desktop add dsh-chief
 
 # 方式 2：从 GitHub 仓库直接安装（与 main 最新代码同步）
 dsh plugin --profile desktop add github:gluztm/dsh-chief
 
-# 方式 3：安装 GitHub Release 预构建包（v1.6.0）
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.6.0/dsh-chief-1.6.0.tgz
+# 方式 3：安装 GitHub Release 预构建包（v1.7.0）
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.7.0/dsh-chief-1.7.0.tgz
 ```
 
 装好后重启或刷新 DSH 客户端，点工作区右上角 **✦ `DSH 参谋长`** 图标打开面板。

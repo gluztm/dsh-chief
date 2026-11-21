@@ -62,11 +62,11 @@ try {
   const digestMod = await import(modUrl('digest.js'))
 
   // =========================================================================
-  // W1: Version alignment (1.6.0), client bundle markers & light-theme rules
+  // W1: Version alignment (>= 1.6.0), client bundle markers & light-theme rules
   // =========================================================================
-  assert.equal(pkgJson.version, '1.6.0', 'W1 package.json must be 1.6.0')
-  assert.equal(schemaMod.BACKEND_BUILD, '1.6.0', 'W1 board-schema BACKEND_BUILD must be 1.6.0')
-  assert.equal(constMod.EXPECTED_BACKEND_BUILD, '1.6.0', 'W1 constants EXPECTED_BACKEND_BUILD must be 1.6.0')
+  assert.ok(/^1\.([6-9]|[1-9]\d)\.\d+/.test(pkgJson.version), `W1 package.json must be >= 1.6.0 (got ${pkgJson.version})`)
+  assert.equal(schemaMod.BACKEND_BUILD, pkgJson.version, 'W1 board-schema BACKEND_BUILD must align with package.json')
+  assert.equal(constMod.EXPECTED_BACKEND_BUILD, pkgJson.version, 'W1 constants EXPECTED_BACKEND_BUILD must align with package.json')
 
   const clientBundle = fs.readFileSync(path.join(PKG, 'client.js'), 'utf8')
   for (const needle of [
@@ -92,7 +92,7 @@ try {
   ]) {
     assert.ok(clientBundle.includes(needle), `W1 client.js missing required v1.6.0 marker: ${needle}`)
   }
-  console.log('[W1 PASS] Version 1.6.0 aligned & client workflow markers verified')
+  console.log(`[W1 PASS] Version ${pkgJson.version} aligned & client workflow markers verified`)
 
   // =========================================================================
   // W2: planStepId / targetPlanStepId persistence, auto-binding & backfill

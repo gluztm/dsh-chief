@@ -2,7 +2,7 @@
  * src/client/entry.js (客户端插件总入口 · 详契见 pkg/ARCHITECTURE.md)
  *
  * 模块：src/client/entry.js (经 scripts/build-client.mjs 拓扑打包为 pkg/client.js)
- * 职责：提供 `createClientPlugin()`，绑定宿主服务并注册 7 个 UI 插槽与右侧栏标签页 (`sidebarRightTabs`)。
+ * 职责：提供 `createClientPlugin()`，绑定宿主服务并注册 UI 插槽（含 `conversation.view` 主页面）与右侧栏标签页 (`sidebarRightTabs`)。
  * 允许依赖：./constants.js、./store.js、./api.js、./components/Panel.js
  * 禁止依赖：后端 Node 模块、`node:*` 内置库；禁止修改 `src/client/` 后遗漏运行 `npm run build:client`。
  * 公开 API：createClientPlugin (bundle 包装后向 `window.__ModuleLoader__.load({ id: 'dsh-chief' })` 暴露)
@@ -16,6 +16,7 @@ import { bi } from './i18n.js'
 import {
   store,
   patch,
+  subscribe,
   service,
   seedRightbarIfEmpty,
   runtimeRefs,
@@ -28,6 +29,7 @@ import {
   ComposerEntry,
   CornerTrigger,
   MainPanel,
+  ConversationChiefView,
   SidebarChiefTab,
 } from './components/Panel.js'
 
@@ -94,6 +96,39 @@ export function createClientPlugin() {
         () => ctx.slots.inject('main', () => ctx.slots.register({ name: 'main', key: SIDE_ID, locale: 'zh-CN' }, MainPanel)),
         'dsh-chief: main-area page',
       )
+
+      ctx.effect(() => {
+        let disposeConvView = null
+        const syncConvView = () => {
+          const pref = store.placementPref || {}
+          const wantTopTab = pref.placement !== 'sidebar'
+          if (wantTopTab && !disposeConvView) {
+            disposeConvView = ctx.slots.inject('conversation.view', () =>
+              ctx.slots.register(
+                {
+                  name: 'conversation.view',
+                  id: SIDE_ID,
+                  order: 1,
+                  label: () => bi(BRAND_NAME, 'DSH Chief'),
+                },
+                ConversationChiefView,
+              ),
+            )
+          } else if (!wantTopTab && disposeConvView) {
+            try { disposeConvView() } catch {}
+            disposeConvView = null
+          }
+        }
+        syncConvView()
+        const unsub = subscribe(syncConvView)
+        return () => {
+          unsub()
+          if (disposeConvView) {
+            try { disposeConvView() } catch {}
+            disposeConvView = null
+          }
+        }
+      }, 'dsh-chief: conversation view top tab')
 
       ctx.effect(
         () =>

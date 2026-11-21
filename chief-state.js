@@ -849,8 +849,9 @@ function filterFactsForCluster(rawFacts, clusterSet, rootId) {
 
 function annotateMailClusterState(mail, clusterSet) {
   if (!mail || typeof mail !== 'object') return mail
-  const fromOut = Boolean(mail.fromRootId && !clusterSet.has(mail.fromRootId))
-  const toOut = Boolean(mail.toRootId && mail.toRootId !== 'all' && !clusterSet.has(mail.toRootId))
+  const isHarnessRoot = id => typeof id === 'string' && id.startsWith('harness:')
+  const fromOut = Boolean(mail.fromRootId && !isHarnessRoot(mail.fromRootId) && !clusterSet.has(mail.fromRootId))
+  const toOut = Boolean(mail.toRootId && mail.toRootId !== 'all' && !isHarnessRoot(mail.toRootId) && !clusterSet.has(mail.toRootId))
   const detachedFromCluster = fromOut || toOut
   return detachedFromCluster ? { ...mail, detachedFromCluster: true } : mail
 }

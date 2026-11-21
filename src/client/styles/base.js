@@ -222,10 +222,55 @@ export const CSS_BASE = `
     background: transparent;
   }
 
+  .dnb-conv-page {
+    height: 100%;
+    min-height: 0;
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
+    background: transparent;
+  }
+
   .dnb-dock {
     height: 100%;
     flex: 1 1 auto;
     min-height: 0;
+  }
+
+  .dnb-brand-status-icon {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    color: var(--dnb-accent);
+    flex-shrink: 0;
+  }
+  .dnb-brand-status-icon[data-working="1"] {
+    --dnb-glow-soft: rgba(56, 189, 248, 0.22);
+    --dnb-glow-strong: rgba(56, 189, 248, 0.68);
+    --dnb-glow-ring-min: none;
+    --dnb-glow-ring-max: none;
+    animation: dnb-icon-breathe 2.4s ease-in-out infinite;
+  }
+  html[data-ds-theme-source="light"] .dnb-brand-status-icon[data-working="1"] {
+    --dnb-glow-soft: rgba(37, 99, 235, 0.16);
+    --dnb-glow-strong: rgba(37, 99, 235, 0.44);
+  }
+
+  @media (min-width: 820px) {
+    .dnb-panel.dnb-main .dnb-seg-wrap > .dnb-seg,
+    .dnb-panel.dnb-main .dnb-body > .dnb-view,
+    .dnb-panel.dnb-main .dnb-sec-bar > .dnb-sec-targets,
+    .dnb-panel.dnb-main .dnb-sec-bar > .dnb-sec-img-strip,
+    .dnb-panel.dnb-main .dnb-sec-bar > .dnb-sec-shell,
+    .dnb-panel.dnb-main .dnb-sec-bar > .dnb-tactical-strip,
+    .dnb-panel.dnb-main .dnb-sec-bar > .dnb-pending-banner,
+    .dnb-panel.dnb-main .dnb-sec-bar > .dnb-sec-reply {
+      max-width: 1080px;
+      width: 100%;
+      margin-left: auto;
+      margin-right: auto;
+    }
   }
 
   /* Entry button in composer bar */

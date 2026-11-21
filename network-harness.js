@@ -828,6 +828,7 @@ export async function dispatchBubbleHarness(deps, {
     })
     mutateChiefState((st) => {
       const ws = ensureWorkspace(st, rid)
+      const harnessRoot = `harness:${cleanProvider}`
       ws.mailbox.push({
         id: nextId('mail'),
         from: fromLabel || 'DSH 参谋长',
@@ -835,11 +836,12 @@ export async function dispatchBubbleHarness(deps, {
         fromRootId: rid,
         to: cleanProvider,
         toSession: childIdVal || cleanProvider,
-        toRootId: rid,
+        toRootId: harnessRoot,
+        participantRoots: [rid, harnessRoot],
         subject: `外部 Harness 派单 · ${cleanProvider}`,
         text: taskText.slice(0, 1200),
         mode: 'followup',
-        channelType: 'internal',
+        channelType: 'pair',
         readBy: [rid],
         at: Date.now(),
       })
@@ -860,18 +862,20 @@ export async function dispatchBubbleHarness(deps, {
     const bodyTxt = clamp(String(outText || '').trim() || (ok ? '外部 Harness 任务已完成' : '外部 Harness 执行未返回有效结果'), 1400)
     mutateChiefState((st) => {
       const ws = ensureWorkspace(st, rid)
+      const harnessRoot = `harness:${cleanProvider}`
       ws.mailbox.push({
         id: nextId('mail'),
         from: `@${cleanProvider}`,
         fromSession: childIdVal || cleanProvider,
-        fromRootId: rid,
+        fromRootId: harnessRoot,
         to: 'lead',
         toSession: rid,
         toRootId: rid,
+        participantRoots: [rid, harnessRoot],
         subject: `外部 Harness 回执 · ${cleanProvider}`,
         text: bodyTxt,
         mode: 'followup',
-        channelType: 'internal',
+        channelType: 'pair',
         readBy: [],
         at: Date.now(),
       })
