@@ -5,7 +5,6 @@
  */
 
 import fs from 'node:fs'
-import os from 'node:os'
 import path from 'node:path'
 import { renderDigest } from './digest.js'
 import { memorySections, renderMemoryDigest } from './memory.js'
@@ -44,17 +43,15 @@ import {
   normalizeSuggestion,
   hasValidChiefRiskAck,
   summarizeLlmLedger,
-  OFFICIAL_HARNESS_CATALOG,
   setBubbleHarnessMembership,
   setBubbleManualLock,
   appendChiefAuditLog,
   clamp,
   SUGGESTIONS_CAP,
   CHAT_CAP,
-  MAIL_CAP,
   nextId,
 } from './chief-state.js'
-import { listPeerDirectory, computeBubbleState, detectLocalHarnessBinaries } from './chief-network.js'
+import { listPeerDirectory, computeBubbleState, dispatchBubbleHarness } from './chief-network.js'
 import {
   resolveProjectKey,
   getArchiveMeta,
@@ -1055,273 +1052,22 @@ export function createApiRoutes(deps) {
               const provider = clamp(String(body.provider || '').trim(), 64)
               const taskText = typeof body.text === 'string' ? body.text.trim() : ''
               const taskLabel = clamp(String(body.label || taskText || provider).trim(), 48)
-              if (!provider || !taskText) {
-                sendJson(res, 400, { ok: false, error: '需要指定目标 Harness provider 与任务内容' })
+              const disp = await dispatchBubbleHarness(chiefDeps, {
+                rootId: rootA,
+                provider,
+                text: taskText,
+                label: taskLabel,
+                fromLabel: 'DSH 参谋长',
+                force: body.force === true,
+                allowAutoEnroll: true,
+              })
+              if (!disp.ok) {
+                const status = disp.statusCode || (disp.locked ? 409 : 400)
+                sendJson(res, status, disp)
                 return
               }
-              const subagents = runtime && typeof runtime.get === 'function' ? runtime.get('subagents') : null
-              const agentsSvc = runtime && typeof runtime.get === 'function' ? runtime.get('agents') : null
-              const subprocessSvc = (runtime && typeof runtime.get === 'function' ? runtime.get('subprocess') : null)
-                || deps.hostState.activeSubprocess
-                || null
-              const prov = subagents && typeof subagents.getProvider === 'function' ? subagents.getProvider(provider) : null
-              const localHit = detectLocalHarnessBinaries().get(provider) || null
-              const canUseSubagent = Boolean(subagents && typeof subagents.startActivation === 'function' && prov)
-              const canUseLocalCli = Boolean(subprocessSvc && typeof subprocessSvc.spawn === 'function' && localHit && localHit.binaryPath)
-
-              if (!canUseSubagent && !canUseLocalCli) {
-                sendJson(res, 400, {
-                  ok: false,
-                  error: `当前宿主未检测到「${provider}」外部插件，也未找到本机 CLI（可安装 @deepseek-ai/dsh-subagent-${provider} 或本机 CLI 后重试）`,
-                })
-                return
-              }
-
-              const liveCaller = (agentsSvc && typeof agentsSvc.get === 'function' ? agentsSvc.get(rootA) : null)
-                || (typeof deps.findLiveCallerAgent === 'function' ? deps.findLiveCallerAgent(runtime, rootA, null) : null)
-              if (!canUseLocalCli && canUseSubagent && !liveCaller) {
-                sendJson(res, 400, { ok: false, error: '当前主对话会话未激活，请先在主窗口发一条消息激活会话' })
-                return
-              }
-
-              // One-click dispatch auto-enrolls unlocked standby Harnesses into the Bubble
-              const stNow = loadChiefState()
-              const wsNow = ensureWorkspace(stNow, rootA)
-              const isEnrolled = Array.isArray(wsNow.bubbleHarnesses) && wsNow.bubbleHarnesses.some(h => h && h.provider === provider)
-              if (!isEnrolled) {
-                if (bState.locked && body.force !== true) {
-                  sendJson(res, 409, { ok: false, locked: true, error: LOCK_ERR, bubble: bState })
-                  return
-                }
-                const official = OFFICIAL_HARNESS_CATALOG.find(item => item.provider === provider)
-                setBubbleHarnessMembership(rootA, {
-                  provider,
-                  label: (official && official.label) || String((prov && prov.label) || provider),
-                  role: (official && official.roleHint) || '外部 Harness 执行进程',
-                  joined: true,
-                })
-              }
-
-              let actionCwd = process.cwd()
-              try { actionCwd = archiveTarget(runtime, rootA, { vaultScope: 'session' }).cwd || actionCwd } catch {}
-              const boardNow = rootA ? boardForSession(boardFileFor(rootA)) : emptyBoard()
-              const forbiddenList = (boardNow && boardNow.bounds && Array.isArray(boardNow.bounds.forbidden))
-                ? boardNow.bounds.forbidden.filter(Boolean).slice(0, 8)
-                : []
-              const activeWalls = listGuardWalls({ cwd: actionCwd }).filter(w => w && w.activeNow).slice(0, 8)
-              const constraintLines = []
-              if (forbiddenList.length) {
-                constraintLines.push('禁止红线: ' + forbiddenList.join('；'))
-              }
-              if (activeWalls.length) {
-                constraintLines.push('物理驻墙保护: ' + activeWalls.map(w => `${w.title}(${(w.patterns || []).join(', ')})`).join('；'))
-              }
-              const safePrompt = constraintLines.length
-                ? `[DSH 参谋长协同水泡派单 · 外部独立进程需严格遵守以下边界]\n${constraintLines.join('\n')}\n\n[任务内容]\n${taskText}`
-                : taskText
-
-              const ac = new AbortController()
-              const runKey = nextId('brun')
-              const recordDispatchState = (childId, transportLabel) => {
-                appendChiefAuditLog(rootA, {
-                  kind: 'bubble_harness_dispatch',
-                  decision: 'allowed',
-                  tool: provider,
-                  reason: `向水泡外部 Harness「${provider}」(${transportLabel}) 派发任务并自动锁死编队：${taskLabel}`,
-                })
-                mutateChiefState((st) => {
-                  const ws = ensureWorkspace(st, rootA)
-                  ws.mailbox.push({
-                    id: nextId('mail'),
-                    from: 'DSH 参谋长',
-                    fromSession: rootA,
-                    fromRootId: rootA,
-                    to: provider,
-                    toSession: childId || provider,
-                    toRootId: rootA,
-                    subject: `外部 Harness 派单 · ${provider}`,
-                    text: taskText.slice(0, 1200),
-                    mode: 'followup',
-                    channelType: 'internal',
-                    readBy: [rootA],
-                    at: Date.now(),
-                  })
-                  if (ws.mailbox.length > MAIL_CAP) ws.mailbox = ws.mailbox.slice(-MAIL_CAP)
-                  ws.chat.push({
-                    id: nextId('chat'),
-                    role: 'chief',
-                    kind: 'receipt',
-                    text: `- 【⚡ 水泡派单 · ${provider}】已启动${transportLabel === 'local-cli' ? '本机 CLI 直连' : '外部 Harness'}执行「${taskLabel}」，编队已自动锁定保护。`,
-                    actions: ['🔒 编队工作中已锁死'],
-                    at: Date.now(),
-                  })
-                  if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
-                })
-              }
-
-              const writeSettlementReceipt = (childId, outText, ok = true) => {
-                const bodyTxt = clamp(String(outText || '').trim() || (ok ? '外部 Harness 任务已完成' : '外部 Harness 执行未返回有效结果'), 1400)
-                mutateChiefState((st) => {
-                  const ws = ensureWorkspace(st, rootA)
-                  ws.mailbox.push({
-                    id: nextId('mail'),
-                    from: `@${provider}`,
-                    fromSession: childId || provider,
-                    fromRootId: rootA,
-                    to: 'lead',
-                    toSession: rootA,
-                    toRootId: rootA,
-                    subject: `外部 Harness 回执 · ${provider}`,
-                    text: bodyTxt,
-                    mode: 'followup',
-                    channelType: 'internal',
-                    readBy: [],
-                    at: Date.now(),
-                  })
-                  if (ws.mailbox.length > MAIL_CAP) ws.mailbox = ws.mailbox.slice(-MAIL_CAP)
-                  ws.chat.push({
-                    id: nextId('chat'),
-                    role: 'chief',
-                    kind: 'receipt',
-                    text: ok
-                      ? `- 【✅ @${provider} 交卷】${bodyTxt.slice(0, 320)}`
-                      : `- 【⚠️ @${provider} 异常中断】${bodyTxt.slice(0, 320)}`,
-                    actions: [ok ? '解开对应执行锁' : '🔓 已释放执行锁'],
-                    at: Date.now(),
-                  })
-                  if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
-                })
-              }
-
-              let childId = runKey
-              let usedTransport = 'dsh-subagent'
-
-              if (canUseSubagent && liveCaller) {
-                const activation = await subagents.startActivation({
-                  provider,
-                  label: taskLabel,
-                  prompt: [{ type: 'text', text: safePrompt }],
-                  parent: liveCaller,
-                  signal: ac.signal,
-                  delivery: 'parent',
-                })
-                childId = String((activation && activation.childId) || '') || runKey
-                deps.hostState.activeBubbleRuns.set(runKey, {
-                  id: runKey,
-                  rootId: rootA,
-                  provider,
-                  label: taskLabel,
-                  childId,
-                  transport: 'dsh-subagent',
-                  startedAt: Date.now(),
-                  abortController: ac,
-                })
-                recordDispatchState(childId, 'dsh-subagent')
-
-                if (activation && activation.result && typeof activation.result.then === 'function') {
-                  Promise.resolve(activation.result)
-                    .then((resVal) => {
-                      if (ac.signal.aborted) return
-                      const outText = (resVal && (resVal.text || resVal.output || resVal.summary))
-                        || (typeof resVal === 'string' ? resVal : '外部 Harness 任务已完成')
-                      writeSettlementReceipt(childId, outText, true)
-                    })
-                    .catch((err) => {
-                      if (ac.signal.aborted) return
-                      writeSettlementReceipt(childId, (err && err.message) || err || '执行失败', false)
-                    })
-                    .finally(() => {
-                      deps.hostState.activeBubbleRuns.delete(runKey)
-                    })
-                }
-              } else {
-                // Path B: Direct invocation of local Codex / Claude Code CLI via DSH host ctx.subprocess
-                usedTransport = 'local-cli'
-                const tmpOutFile = provider === 'codex'
-                  ? path.join(os.tmpdir(), `dsh-bubble-${provider}-${runKey}.txt`)
-                  : ''
-                const argv = provider === 'codex'
-                  ? [localHit.binaryPath, 'exec', '--skip-git-repo-check', '--color', 'never', '-C', actionCwd, '-s', 'workspace-write', '-o', tmpOutFile, '-']
-                  : [localHit.binaryPath, '-p', '--output-format', 'text', '--no-session-persistence']
-
-                const handle = subprocessSvc.spawn({
-                  argv,
-                  cwd: actionCwd,
-                  graceMs: 4000,
-                  signal: ac.signal,
-                  stdio: {
-                    stdin: { data: Buffer.from(safePrompt, 'utf8') },
-                    stdout: 'pipe',
-                    stderr: 'pipe',
-                  },
-                })
-
-                const outChunks = []
-                const errChunks = []
-                const appendChunk = (arr, byteRefSet, chunk) => {
-                  if (byteRefSet.n >= 65536) return
-                  const s = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '')
-                  arr.push(s)
-                  byteRefSet.n += s.length
-                }
-                const outLen = { n: 0 }
-                const errLen = { n: 0 }
-                try { handle.stdout?.on?.('data', chunk => appendChunk(outChunks, outLen, chunk)) } catch {}
-                try { handle.stderr?.on?.('data', chunk => appendChunk(errChunks, errLen, chunk)) } catch {}
-
-                deps.hostState.activeBubbleRuns.set(runKey, {
-                  id: runKey,
-                  rootId: rootA,
-                  provider,
-                  label: taskLabel,
-                  childId,
-                  transport: 'local-cli',
-                  startedAt: Date.now(),
-                  abortController: ac,
-                  terminate: () => {
-                    try { if (handle && typeof handle.terminate === 'function') handle.terminate() } catch {}
-                  },
-                })
-                recordDispatchState(childId, 'local-cli')
-
-                const cleanTmpOut = () => {
-                  if (!tmpOutFile) return
-                  try { fs.rmSync(tmpOutFile, { force: true }) } catch {}
-                }
-
-                if (handle && handle.done && typeof handle.done.then === 'function') {
-                  Promise.resolve(handle.done)
-                    .then((outcome) => {
-                      let outText = ''
-                      if (tmpOutFile) {
-                        try {
-                          if (fs.existsSync(tmpOutFile)) outText = fs.readFileSync(tmpOutFile, 'utf8').trim()
-                        } catch {}
-                      }
-                      if (!outText) outText = outChunks.join('').trim()
-                      const errTail = errChunks.join('').trim().slice(-400)
-                      const exitCode = outcome && typeof outcome.exitCode === 'number' ? outcome.exitCode : 0
-                      if (ac.signal.aborted) return
-                      if (exitCode !== 0) {
-                        const failMsg = outText || (errTail ? `退出码 ${exitCode}：${errTail}` : `外部 CLI 进程以退出码 ${exitCode} 结束`)
-                        writeSettlementReceipt(childId, failMsg, false)
-                      } else {
-                        writeSettlementReceipt(childId, outText || '本机 CLI 任务已执行完成', true)
-                      }
-                    })
-                    .catch((err) => {
-                      if (ac.signal.aborted) return
-                      writeSettlementReceipt(childId, (err && err.message) || err || 'CLI 调用失败', false)
-                    })
-                    .finally(() => {
-                      cleanTmpOut()
-                      deps.hostState.activeBubbleRuns.delete(runKey)
-                    })
-                }
-              }
-
               const view = await getChiefView(chiefDeps, rootA, { autoSummarize: false })
-              sendJson(res, 200, { ok: true, runId: runKey, childId, transport: usedTransport, view })
+              sendJson(res, 200, { ok: true, runId: disp.runId, childId: disp.childId, transport: disp.transport, view })
               return
             }
 

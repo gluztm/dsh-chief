@@ -219,10 +219,8 @@ function computeLiquidLinks(stageEl, hubEl, leadEl, allyElsMap, allies) {
   const lRect = leadEl.getBoundingClientRect()
   if (!sRect.width || !sRect.height || !hRect.width || !lRect.width) return { w: 0, h: 0, links: [] }
 
-  const hubBottom = {
-    x: hRect.left - sRect.left + hRect.width / 2,
-    y: hRect.bottom - sRect.top,
-  }
+  const hubCx = hRect.left - sRect.left + hRect.width / 2
+  const hubBottomY = hRect.bottom - sRect.top
   const leadBox = {
     left: lRect.left - sRect.left,
     right: lRect.right - sRect.left,
@@ -235,8 +233,14 @@ function computeLiquidLinks(stageEl, hubEl, leadEl, allyElsMap, allies) {
   const links = []
   const addCurve = (id, kind, p1, p2, color, dashed, label) => {
     const dy = p2.y - p1.y
-    const spread = Math.max(18, Math.abs(dy) * 0.48)
-    const d = `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} C ${p1.x.toFixed(1)} ${(p1.y + spread).toFixed(1)}, ${p2.x.toFixed(1)} ${(p2.y - spread).toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+    const spread = Math.max(16, Math.abs(dy) * 0.52)
+    const cx1 = p1.x
+    const cy1 = p1.y + spread
+    const cx2 = p2.x
+    const cy2 = p2.y - spread
+    const d = `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} C ${cx1.toFixed(1)} ${cy1.toFixed(1)}, ${cx2.toFixed(1)} ${cy2.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+    const mx = 0.125 * p1.x + 0.375 * cx1 + 0.375 * cx2 + 0.125 * p2.x
+    const my = 0.125 * p1.y + 0.375 * cy1 + 0.375 * cy2 + 0.125 * p2.y
     links.push({
       id,
       kind,
@@ -245,78 +249,72 @@ function computeLiquidLinks(stageEl, hubEl, leadEl, allyElsMap, allies) {
       y1: p1.y,
       x2: p2.x,
       y2: p2.y,
-      mx: (p1.x + p2.x) / 2,
-      my: (p1.y + p2.y) / 2,
+      mx,
+      my,
       color,
       dashed,
       label,
     })
   }
 
+  const hasAllies = allies.length > 0
   addCurve(
     'hub-lead',
     'primary',
-    hubBottom,
-    { x: leadBox.cx, y: leadBox.top },
+    { x: hasAllies ? hubCx - 24 : hubCx, y: hubBottomY },
+    { x: leadBox.cx, y: leadBox.top - 2 },
     '#38bdf8',
     false,
-    allies.length > 0 ? '主控' : '',
+    hasAllies ? '主控' : '',
   )
 
   const allyBoxes = []
-  let firstHarnessLabeled = false
-  let firstPeerLabeled = false
-
   for (const ally of allies) {
     const el = allyElsMap.get(ally.uid)
     if (!el) continue
-    const r = el.getBoundingClientRect()
+    const targetEl = el.classList && el.classList.contains('dnb-liquid-ally-cluster')
+      ? (el.querySelector('.dnb-liquid-ally-pill') || el.firstElementChild || el)
+      : el
+    const r = targetEl.getBoundingClientRect()
     if (!r.width) continue
-    const box = {
+    allyBoxes.push({
       uid: ally.uid,
       kind: ally.kind,
       left: r.left - sRect.left,
+      right: r.right - sRect.left,
       top: r.top - sRect.top,
       cx: r.left - sRect.left + r.width / 2,
       cy: r.top - sRect.top + r.height / 2,
       color: ally.color,
-    }
-    allyBoxes.push(box)
-    let lbl = ''
-    if (ally.kind === 'harness' && !firstHarnessLabeled) {
-      firstHarnessLabeled = true
-      lbl = '派单'
-    } else if (ally.kind === 'peer' && !firstPeerLabeled) {
-      firstPeerLabeled = true
-      lbl = '联动'
-    }
-    addCurve(
-      `hub-${ally.uid}`,
-      ally.kind,
-      hubBottom,
-      { x: box.cx, y: box.top },
-      box.color,
-      ally.kind === 'harness',
-      lbl,
-    )
+      label: ally.label || '',
+    })
   }
 
   if (allyBoxes.length > 0) {
     const topAlly = allyBoxes[0]
+    addCurve(
+      `hub-${topAlly.uid}`,
+      topAlly.kind,
+      { x: hubCx + 24, y: hubBottomY },
+      { x: topAlly.cx, y: topAlly.top - 2 },
+      topAlly.color,
+      topAlly.kind === 'harness',
+      topAlly.label || (topAlly.kind === 'harness' ? '派单' : '联动'),
+    )
     if (topAlly.left > leadBox.right + 18) {
-      const yMid = Math.round((leadBox.cy + topAlly.cy) / 2)
-      const x1 = leadBox.right
-      const x2 = topAlly.left
+      const syncY = Math.round((leadBox.cy + topAlly.cy) / 2)
+      const x1 = leadBox.right + 4
+      const x2 = topAlly.left - 4
       links.push({
         id: 'lead-ally-sync',
         kind: 'collab-sync',
-        d: `M ${x1.toFixed(1)} ${leadBox.cy.toFixed(1)} C ${((x1 + x2) / 2).toFixed(1)} ${yMid.toFixed(1)}, ${((x1 + x2) / 2).toFixed(1)} ${yMid.toFixed(1)}, ${x2.toFixed(1)} ${topAlly.cy.toFixed(1)}`,
+        d: `M ${x1.toFixed(1)} ${syncY.toFixed(1)} L ${x2.toFixed(1)} ${syncY.toFixed(1)}`,
         x1,
-        y1: leadBox.cy,
+        y1: syncY,
         x2,
-        y2: topAlly.cy,
+        y2: syncY,
         mx: (x1 + x2) / 2,
-        my: yMid,
+        my: syncY,
         color: topAlly.color,
         dashed: true,
         label: '⇄协同',
@@ -776,7 +774,7 @@ export function PeersTab({ view }) {
             ),
           ),
 
-          // Centered Golden-Ratio Liquid Bubble Stage (prevents ultra-wide horizontal stretching)
+          // Centered Golden-Ratio VisionOS Liquid Glass Capsule Stage
           h(
             'div',
             {
@@ -784,52 +782,7 @@ export function PeersTab({ view }) {
               className: 'dnb-liquid-core-frame',
               'data-dual': hasRightAllies ? '1' : '0',
             },
-            // Layer 0: Organic Liquid Membrane Contour & Soft Glow Backdrop
-            h(
-              'svg',
-              {
-                className: 'dnb-liquid-bg-svg',
-                viewBox: '0 0 640 240',
-                preserveAspectRatio: 'none',
-                'aria-hidden': 'true',
-              },
-              h(
-                'defs',
-                null,
-                h(
-                  'radialGradient',
-                  { id: 'dnb-liq-glow-a', cx: hasRightAllies ? '30%' : '50%', cy: '54%', r: '46%' },
-                  h('stop', { offset: '0%', stopColor: bubbleLocked ? '#f59e0b' : '#38bdf8', stopOpacity: '0.20' }),
-                  h('stop', { offset: '100%', stopColor: bubbleLocked ? '#f59e0b' : '#38bdf8', stopOpacity: '0' }),
-                ),
-                hasRightAllies
-                  ? h(
-                      'radialGradient',
-                      { id: 'dnb-liq-glow-b', cx: '73%', cy: '54%', r: '40%' },
-                      h('stop', { offset: '0%', stopColor: bubbleLocked ? '#f59e0b' : '#2dd4bf', stopOpacity: '0.15' }),
-                      h('stop', { offset: '100%', stopColor: '#2dd4bf', stopOpacity: '0' }),
-                    )
-                  : null,
-              ),
-              h('rect', { width: 640, height: 240, fill: 'url(#dnb-liq-glow-a)' }),
-              hasRightAllies ? h('rect', { width: 640, height: 240, fill: 'url(#dnb-liq-glow-b)' }) : null,
-              h('path', {
-                className: 'dnb-liquid-contour',
-                d: hasRightAllies
-                  ? 'M 14 120 C 14 26, 152 14, 286 34 C 310 38, 330 38, 354 34 C 488 14, 626 26, 626 120 C 626 214, 496 228, 352 210 C 330 207, 310 207, 288 210 C 144 228, 14 214, 14 120 Z'
-                  : 'M 92 120 C 92 26, 206 16, 320 16 C 434 16, 548 26, 548 120 C 548 214, 434 224, 320 224 C 206 224, 92 214, 92 120 Z',
-                fill: 'none',
-              }),
-              h('path', {
-                className: 'dnb-liquid-specular',
-                d: hasRightAllies
-                  ? 'M 64 38 Q 160 19 258 33'
-                  : 'M 176 31 Q 320 15 464 31',
-                fill: 'none',
-              }),
-            ),
-
-            // Layer 1: Adaptive Optical Filament Connectors (paths first, top labels second)
+            // Layer 1: Adaptive Optical Filament Connectors (measured across hub + membrane nodes)
             (linkLayout.w > 0 && linkLayout.h > 0 && linkLayout.links.length > 0)
               ? h(
                   'svg',
@@ -853,13 +806,13 @@ export function PeersTab({ view }) {
                           d: lk.d,
                           fill: 'none',
                           stroke: lk.color,
-                          strokeWidth: lk.kind === 'collab-sync' ? 1.4 : 1.7,
+                          strokeWidth: lk.kind === 'collab-sync' ? 1.25 : 1.35,
                           strokeDasharray: lk.dashed ? '4 4' : undefined,
                           strokeLinecap: 'round',
-                          opacity: lk.kind === 'collab-sync' ? 0.72 : 0.65,
+                          opacity: lk.kind === 'collab-sync' ? 0.62 : 0.56,
                         }),
-                        h('circle', { cx: lk.x1, cy: lk.y1, r: 2.3, fill: lk.color, opacity: 0.85 }),
-                        h('circle', { cx: lk.x2, cy: lk.y2, r: 2.8, fill: lk.color, opacity: 0.92 }),
+                        h('circle', { cx: lk.x1, cy: lk.y1, r: 1.6, fill: lk.color, opacity: 0.65 }),
+                        h('circle', { cx: lk.x2, cy: lk.y2, r: 1.8, fill: lk.color, opacity: 0.72 }),
                       ),
                     ),
                   ),
@@ -868,25 +821,26 @@ export function PeersTab({ view }) {
                     { className: 'dnb-squad-links-labels' },
                     linkLayout.links.map((lk) => {
                       if (!lk.label) return null
-                      const pillW = Math.max(30, Math.round(lk.label.split('').reduce((s, ch) => s + (/[\u4e00-\u9fa5]/.test(ch) ? 9.8 : 6.0), 12)))
+                      const pillW = Math.max(30, Math.round(lk.label.split('').reduce((s, ch) => s + (/[\u4e00-\u9fa5]/.test(ch) ? 9.4 : 5.8), 11)))
                       return h(
                         'g',
                         { key: 'l-' + lk.id, transform: `translate(${lk.mx.toFixed(1)}, ${lk.my.toFixed(1)})` },
                         h('rect', {
                           x: -(pillW / 2),
-                          y: -8,
+                          y: -7.5,
                           width: pillW,
-                          height: 16,
-                          rx: 8,
+                          height: 15,
+                          rx: 7.5,
                           className: 'dnb-squad-link-pill-bg',
                           stroke: lk.color,
-                          strokeWidth: 0.85,
+                          strokeOpacity: 0.48,
+                          strokeWidth: 0.75,
                         }),
                         h(
                           'text',
                           {
                             x: 0,
-                            y: 3.1,
+                            y: 3.0,
                             textAnchor: 'middle',
                             className: 'dnb-squad-link-pill-txt',
                             fill: lk.color,
@@ -899,7 +853,7 @@ export function PeersTab({ view }) {
                 )
               : null,
 
-            // Layer 2: Floating Central Coordinator Micro-Hub
+            // Layer 2: Floating Central Coordinator Micro-Hub (cleanly separated above the membrane)
             h(
               'div',
               { className: 'dnb-liquid-hub-wrap' },
@@ -920,19 +874,26 @@ export function PeersTab({ view }) {
               ),
             ),
 
-            // Layer 3: Liquid Core Body (Left Primary Core + Satellite Pearls | Right Glass Allies)
+            // Layer 3: Translucent VisionOS Liquid Glass Membrane housing Primary Core + Right Glass Allies
             h(
               'div',
-              { className: 'dnb-liquid-body', 'data-dual': hasRightAllies ? '1' : '0' },
-            // Left Core: Lead Bubble + Close Satellite Pearls
-            primaryBranch
-              ? (() => {
-                  const leadPeer = primaryBranch.raw || {}
-                  const leadRunning = leadPeer.status === 'running'
-                  const leadTip = leadPeer.taskTitle || leadPeer.progressSummary || leadPeer.objective || bi('当前主指挥核心会话', 'Current primary coordinator session')
-                  return h(
-                    'div',
-                    { className: 'dnb-liquid-lead-cluster' },
+              {
+                className: 'dnb-liquid-membrane',
+                'data-dual': hasRightAllies ? '1' : '0',
+                'data-locked': bubbleLocked ? '1' : '0',
+              },
+              h(
+                'div',
+                { className: 'dnb-liquid-body', 'data-dual': hasRightAllies ? '1' : '0' },
+                // Left Core: Lead Bubble + Close Satellite Pearls
+                primaryBranch
+                  ? (() => {
+                      const leadPeer = primaryBranch.raw || {}
+                      const leadRunning = leadPeer.status === 'running'
+                      const leadTip = leadPeer.taskTitle || leadPeer.progressSummary || leadPeer.objective || bi('当前主指挥核心会话', 'Current primary coordinator session')
+                      return h(
+                        'div',
+                        { className: 'dnb-liquid-lead-cluster', 'data-dual': hasRightAllies ? '1' : '0' },
                     h(
                       'div',
                       {
@@ -1178,6 +1139,7 @@ export function PeersTab({ view }) {
                   }),
                 )
               : null,
+              ),
             ),
           ),
         ),

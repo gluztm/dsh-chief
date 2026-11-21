@@ -9,6 +9,7 @@ import os from 'node:os'
 import path from 'node:path'
 import {
   MAIL_CAP,
+  CHAT_CAP,
   CHIEF_UPDATE_SOURCE,
   CHIEF_RELAY_SOURCE,
   CHIEF_INQUIRY_SOURCE,
@@ -22,15 +23,18 @@ import {
   loadChiefState,
   mutateChiefState,
   answerChiefInquiry,
+  appendChiefAuditLog,
   getLinkedCluster,
   ensureWorkspace,
   resolveWorkspaceConfig,
   OFFICIAL_HARNESS_CATALOG,
+  setBubbleHarnessMembership,
   clusterView,
   stripCheckpointNoise,
   isInternalCheckpointNoise,
 } from './chief-state.js'
 import { loadDshLlm } from './chief-models.js'
+import { listGuardWalls } from './chief-executor.js'
 
 let chiefDirectRequestHook = null
 
@@ -524,9 +528,46 @@ export async function deliverCrossMessage(deps, {
 
   const peer = matchTargetPeer(directory.targets, rawTarget)
   if (!peer) {
+    const extHit = resolveExternalHarnessTarget(deps && deps.runtime, deps && deps.hostState, senderRootId, rawTarget)
+    if (extHit) {
+      const disp = await dispatchBubbleHarness(deps, {
+        rootId: senderRootId,
+        provider: extHit.provider,
+        text: effectiveText,
+        label: subject || clamp(effectiveText, 48),
+        fromLabel,
+        allowAutoEnroll: true,
+      })
+      if (!disp.ok) {
+        return {
+          ok: false,
+          error: disp.error || `外部工具 ${extHit.label || extHit.provider} 派单失败`,
+          locked: Boolean(disp.locked),
+        }
+      }
+      if (recordBoardLog && rootId && typeof deps.appendBoardLog === 'function') {
+        deps.appendBoardLog(rootId, `⚡ ${fromLabel} → @${extHit.provider} 外部派单：${clamp(effectiveText, 56)}`, fromLabel)
+      }
+      return {
+        ok: true,
+        target: extHit.label || extHit.provider,
+        targetId: extHit.provider,
+        deliveryMode: 'bubble-harness',
+        transport: disp.transport,
+        runId: disp.runId,
+        childId: disp.childId,
+        deliveredPhysical: true,
+        bubbleLocked: true,
+      }
+    }
+    const bAvail = computeBubbleState(deps, senderRootId)
+    const availHarnesses = [...(bAvail.enrolledHarnesses || []), ...(bAvail.availableHarnesses || [])]
+      .filter(h => h && h.installed !== false)
+      .map(h => h.provider)
+    const targetChoices = [...directory.targets.map(t => t.handle), ...new Set(availHarnesses)].filter(Boolean)
     return {
       ok: false,
-      error: `未找到目标对话 "${rawTarget}"。当前可用目标：${directory.targets.map(t => t.handle).join('、') || '无'}`,
+      error: `未找到目标对话 "${rawTarget}"。当前可用目标：${targetChoices.join('、') || '无'}`,
     }
   }
 
@@ -1293,5 +1334,421 @@ export function computeBubbleState(deps, rootId, state, directory = null) {
     }),
     availableHarnesses: disc.available.filter(a => !enrolledSet.has(a.provider)),
     catalogHarnesses: disc.catalog,
+  }
+}
+
+const BUBBLE_LOCK_ERR = '🔒 协同水泡工作中已锁死结构，不允许中途拆解或改动编队；请等待全员收工或点击「⏹ 急停解体」'
+
+const CLAUDE_FORWARD_ENV_KEYS = [
+  'CLAUDE_CONFIG_DIR',
+  'ANTHROPIC_BASE_URL',
+  'ANTHROPIC_API_KEY',
+  'ANTHROPIC_AUTH_TOKEN',
+  'ANTHROPIC_MODEL',
+  'ANTHROPIC_SMALL_FAST_MODEL',
+  'ANTHROPIC_DEFAULT_SONNET_MODEL',
+  'ANTHROPIC_DEFAULT_OPUS_MODEL',
+  'ANTHROPIC_DEFAULT_HAIKU_MODEL',
+  'CLAUDE_CODE_USE_BEDROCK',
+  'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
+  'API_TIMEOUT_MS',
+]
+
+const CODEX_FORWARD_ENV_KEYS = [
+  'CODEX_HOME',
+  'OPENAI_API_KEY',
+  'OPENAI_BASE_URL',
+  'OPENAI_ORG_ID',
+  'OPENAI_PROJECT',
+]
+
+/** Build explicit opt-in child env for out-of-process external CLIs (passes dsh-subprocess scrub without leaking DEEPSEEK_* / DSH_*). */
+function buildExternalHarnessEnv(provider) {
+  const keys = provider === 'claude-code'
+    ? CLAUDE_FORWARD_ENV_KEYS
+    : (provider === 'codex' ? CODEX_FORWARD_ENV_KEYS : [])
+  if (!keys.length) return undefined
+  const out = {}
+  for (const k of keys) {
+    const val = process.env[k]
+    if (typeof val === 'string' && val.length > 0) {
+      out[k] = val
+    }
+  }
+  return Object.keys(out).length ? out : undefined
+}
+
+const HARNESS_TARGET_ALIASES = {
+  claude: 'claude-code',
+  claudecode: 'claude-code',
+  'claude code': 'claude-code',
+  'claude-code': 'claude-code',
+  codex: 'codex',
+  'openai-codex': 'codex',
+}
+
+/** Resolve an external Harness target identifier or alias against enrolled/available Harnesses in the Bubble. */
+export function resolveExternalHarnessTarget(runtime, hostState, rootId, rawTarget) {
+  const clean = String(rawTarget || '').trim().replace(/^@/, '').toLowerCase()
+  if (!clean) return null
+  const canonical = HARNESS_TARGET_ALIASES[clean] || clean
+  const bState = computeBubbleState({ runtime, hostState }, rootId)
+  const enrolledList = Array.isArray(bState.enrolledHarnesses) ? bState.enrolledHarnesses : []
+  const availList = Array.isArray(bState.availableHarnesses) ? bState.availableHarnesses : []
+
+  const matchItem = (item) => {
+    if (!item || !item.provider || item.installed === false) return false
+    const pLow = String(item.provider).trim().toLowerCase()
+    const lLow = String(item.label || '').trim().toLowerCase()
+    return pLow === canonical || pLow === clean || lLow === clean
+  }
+
+  const enrolledHit = enrolledList.find(matchItem)
+  if (enrolledHit) {
+    return {
+      provider: enrolledHit.provider,
+      label: enrolledHit.label || enrolledHit.provider,
+      transport: enrolledHit.transport || '',
+      installed: Boolean(enrolledHit.installed),
+      enrolled: true,
+    }
+  }
+
+  const availHit = availList.find(matchItem)
+  if (availHit) {
+    return {
+      provider: availHit.provider,
+      label: availHit.label || availHit.provider,
+      transport: availHit.transport || '',
+      installed: Boolean(availHit.installed),
+      enrolled: false,
+    }
+  }
+  return null
+}
+
+/** Unified out-of-process external Harness dispatcher shared by HTTP routes & DSH Chief relays. */
+export async function dispatchBubbleHarness(deps, {
+  rootId = '',
+  provider = '',
+  text = '',
+  label = '',
+  fromLabel = 'DSH 参谋长',
+  force = false,
+  allowAutoEnroll = true,
+} = {}) {
+  const rid = String(rootId || 'global').trim() || 'global'
+  const cleanProvider = clamp(String(provider || '').trim(), 64)
+  const taskText = typeof text === 'string' ? text.trim() : ''
+  const taskLabel = clamp(String(label || taskText || cleanProvider).trim(), 48)
+  if (!cleanProvider || !taskText) {
+    return { ok: false, statusCode: 400, error: '需要指定目标 Harness provider 与任务内容' }
+  }
+
+  const runtime = deps && deps.runtime
+  const subagents = runtime && typeof runtime.get === 'function' ? runtime.get('subagents') : null
+  const agentsSvc = runtime && typeof runtime.get === 'function' ? runtime.get('agents') : null
+  const subprocessSvc = (runtime && typeof runtime.get === 'function' ? runtime.get('subprocess') : null)
+    || (deps && deps.hostState && deps.hostState.activeSubprocess)
+    || null
+  const prov = subagents && typeof subagents.getProvider === 'function' ? subagents.getProvider(cleanProvider) : null
+  const localHit = detectLocalHarnessBinaries().get(cleanProvider) || null
+  const canUseSubagent = Boolean(subagents && typeof subagents.startActivation === 'function' && prov)
+  const canUseLocalCli = Boolean(subprocessSvc && typeof subprocessSvc.spawn === 'function' && localHit && localHit.binaryPath)
+
+  if (!canUseSubagent && !canUseLocalCli) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: `当前宿主未检测到「${cleanProvider}」外部插件，也未找到本机 CLI（可安装 @deepseek-ai/dsh-subagent-${cleanProvider} 或本机 CLI 后重试）`,
+    }
+  }
+
+  const liveCaller = (agentsSvc && typeof agentsSvc.get === 'function' ? agentsSvc.get(rid) : null)
+    || (deps && typeof deps.findLiveCallerAgent === 'function' ? deps.findLiveCallerAgent(runtime, rid, null) : null)
+  if (!canUseLocalCli && canUseSubagent && !liveCaller) {
+    return {
+      ok: false,
+      statusCode: 400,
+      error: '当前主对话会话未激活，请先在主窗口发一条消息激活会话',
+    }
+  }
+
+  const stNow = loadChiefState()
+  const wsNow = ensureWorkspace(stNow, rid)
+  const official = OFFICIAL_HARNESS_CATALOG.find(item => item.provider === cleanProvider)
+  const displayLabel = (official && official.label) || String((prov && prov.label) || cleanProvider)
+  const isEnrolled = Array.isArray(wsNow.bubbleHarnesses) && wsNow.bubbleHarnesses.some(h => h && h.provider === cleanProvider)
+
+  if (!isEnrolled) {
+    const dirNow = await listPeerDirectory(deps, rid).catch(() => ({ targets: [], cluster: [] }))
+    const bState = computeBubbleState(deps, rid, stNow, dirNow)
+    if (bState.locked && force !== true) {
+      return { ok: false, locked: true, statusCode: 409, error: BUBBLE_LOCK_ERR, bubble: bState }
+    }
+    if (!allowAutoEnroll) {
+      return { ok: false, statusCode: 400, error: `外部 Harness「${displayLabel}」尚未编入当前协同水泡` }
+    }
+    setBubbleHarnessMembership(rid, {
+      provider: cleanProvider,
+      label: displayLabel,
+      role: (official && official.roleHint) || '外部 Harness 执行进程',
+      joined: true,
+    })
+  }
+
+  let actionCwd = process.cwd()
+  try {
+    const resolvedCwd = deps && typeof deps.getSessionCwd === 'function' ? deps.getSessionCwd(rid) : ''
+    if (resolvedCwd) actionCwd = resolvedCwd
+  } catch {}
+
+  let boardNow = null
+  try {
+    if (rid && deps && typeof deps.boardForSession === 'function' && typeof deps.boardFileFor === 'function') {
+      boardNow = deps.boardForSession(deps.boardFileFor(rid))
+    }
+  } catch {}
+  const forbiddenList = (boardNow && boardNow.bounds && Array.isArray(boardNow.bounds.forbidden))
+    ? boardNow.bounds.forbidden.filter(Boolean).slice(0, 8)
+    : []
+  const activeWalls = listGuardWalls({ cwd: actionCwd }).filter(w => w && w.activeNow).slice(0, 8)
+  const constraintLines = []
+  if (forbiddenList.length) {
+    constraintLines.push('禁止红线: ' + forbiddenList.join('；'))
+  }
+  if (activeWalls.length) {
+    constraintLines.push('物理驻墙保护: ' + activeWalls.map(w => `${w.title}(${(w.patterns || []).join(', ')})`).join('；'))
+  }
+  const safePrompt = constraintLines.length
+    ? `[DSH 参谋长协同水泡派单 · 外部独立进程需严格遵守以下边界]\n${constraintLines.join('\n')}\n\n[任务内容]\n${taskText}`
+    : taskText
+
+  if (deps && deps.hostState && !(deps.hostState.activeBubbleRuns instanceof Map)) {
+    deps.hostState.activeBubbleRuns = new Map()
+  }
+  const activeRuns = deps && deps.hostState ? deps.hostState.activeBubbleRuns : null
+
+  const ac = new AbortController()
+  const runKey = nextId('brun')
+  const recordDispatchState = (childIdVal, transportLabel) => {
+    appendChiefAuditLog(rid, {
+      kind: 'bubble_harness_dispatch',
+      decision: 'allowed',
+      tool: cleanProvider,
+      reason: `${fromLabel} 向水泡外部 Harness「${cleanProvider}」(${transportLabel}) 派发任务并自动锁死编队：${taskLabel}`,
+    })
+    mutateChiefState((st) => {
+      const ws = ensureWorkspace(st, rid)
+      ws.mailbox.push({
+        id: nextId('mail'),
+        from: fromLabel || 'DSH 参谋长',
+        fromSession: rid,
+        fromRootId: rid,
+        to: cleanProvider,
+        toSession: childIdVal || cleanProvider,
+        toRootId: rid,
+        subject: `外部 Harness 派单 · ${cleanProvider}`,
+        text: taskText.slice(0, 1200),
+        mode: 'followup',
+        channelType: 'internal',
+        readBy: [rid],
+        at: Date.now(),
+      })
+      if (ws.mailbox.length > MAIL_CAP) ws.mailbox = ws.mailbox.slice(-MAIL_CAP)
+      ws.chat.push({
+        id: nextId('chat'),
+        role: 'chief',
+        kind: 'receipt',
+        text: `- 【⚡ 水泡派单 · ${cleanProvider}】已启动${transportLabel === 'local-cli' ? '本机 CLI 直连' : '外部 Harness'}执行「${taskLabel}」，编队已自动锁定保护。`,
+        actions: ['🔒 编队工作中已锁死'],
+        at: Date.now(),
+      })
+      if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+    })
+  }
+
+  const writeSettlementReceipt = (childIdVal, outText, ok = true) => {
+    const bodyTxt = clamp(String(outText || '').trim() || (ok ? '外部 Harness 任务已完成' : '外部 Harness 执行未返回有效结果'), 1400)
+    mutateChiefState((st) => {
+      const ws = ensureWorkspace(st, rid)
+      ws.mailbox.push({
+        id: nextId('mail'),
+        from: `@${cleanProvider}`,
+        fromSession: childIdVal || cleanProvider,
+        fromRootId: rid,
+        to: 'lead',
+        toSession: rid,
+        toRootId: rid,
+        subject: `外部 Harness 回执 · ${cleanProvider}`,
+        text: bodyTxt,
+        mode: 'followup',
+        channelType: 'internal',
+        readBy: [],
+        at: Date.now(),
+      })
+      if (ws.mailbox.length > MAIL_CAP) ws.mailbox = ws.mailbox.slice(-MAIL_CAP)
+      ws.chat.push({
+        id: nextId('chat'),
+        role: 'chief',
+        kind: 'receipt',
+        text: ok
+          ? `- 【✅ @${cleanProvider} 交卷】${bodyTxt.slice(0, 320)}`
+          : `- 【⚠️ @${cleanProvider} 异常中断】${bodyTxt.slice(0, 320)}`,
+        actions: [ok ? '解开对应执行锁' : '🔓 已释放执行锁'],
+        at: Date.now(),
+      })
+      if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+    })
+  }
+
+  let childId = runKey
+  let usedTransport = 'dsh-subagent'
+
+  if (canUseSubagent && liveCaller) {
+    const activation = await subagents.startActivation({
+      provider: cleanProvider,
+      label: taskLabel,
+      prompt: [{ type: 'text', text: safePrompt }],
+      parent: liveCaller,
+      signal: ac.signal,
+      delivery: 'parent',
+    })
+    childId = String((activation && activation.childId) || '') || runKey
+    if (activeRuns) {
+      activeRuns.set(runKey, {
+        id: runKey,
+        rootId: rid,
+        provider: cleanProvider,
+        label: taskLabel,
+        childId,
+        transport: 'dsh-subagent',
+        startedAt: Date.now(),
+        abortController: ac,
+      })
+    }
+    recordDispatchState(childId, 'dsh-subagent')
+
+    if (activation && activation.result && typeof activation.result.then === 'function') {
+      Promise.resolve(activation.result)
+        .then((resVal) => {
+          if (ac.signal.aborted) return
+          const outText = (resVal && (resVal.text || resVal.output || resVal.summary))
+            || (typeof resVal === 'string' ? resVal : '外部 Harness 任务已完成')
+          writeSettlementReceipt(childId, outText, true)
+        })
+        .catch((err) => {
+          if (ac.signal.aborted) return
+          writeSettlementReceipt(childId, (err && err.message) || err || '执行失败', false)
+        })
+        .finally(() => {
+          if (activeRuns) activeRuns.delete(runKey)
+        })
+    }
+  } else {
+    // Path B: Direct invocation of local Codex / Claude Code CLI via DSH host ctx.subprocess
+    usedTransport = 'local-cli'
+    const tmpOutFile = cleanProvider === 'codex'
+      ? path.join(os.tmpdir(), `dsh-bubble-${cleanProvider}-${runKey}.txt`)
+      : ''
+    const argv = cleanProvider === 'codex'
+      ? [localHit.binaryPath, 'exec', '--skip-git-repo-check', '--color', 'never', '-C', actionCwd, '-s', 'workspace-write', '-o', tmpOutFile, '-']
+      : [localHit.binaryPath, '-p', '--output-format', 'text', '--no-session-persistence']
+
+    const envOverrides = buildExternalHarnessEnv(cleanProvider)
+    const handle = subprocessSvc.spawn({
+      argv,
+      cwd: actionCwd,
+      graceMs: 4000,
+      signal: ac.signal,
+      ...(envOverrides ? { env: envOverrides } : {}),
+      stdio: {
+        stdin: { data: safePrompt },
+        stdout: 'pipe',
+        stderr: 'pipe',
+      },
+    })
+
+    const outChunks = []
+    const errChunks = []
+    const appendChunk = (arr, byteRefSet, chunk) => {
+      if (byteRefSet.n >= 65536) return
+      const s = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '')
+      arr.push(s)
+      byteRefSet.n += s.length
+    }
+    const outLen = { n: 0 }
+    const errLen = { n: 0 }
+    try { handle.stdout?.on?.('data', chunk => appendChunk(outChunks, outLen, chunk)) } catch {}
+    try { handle.stderr?.on?.('data', chunk => appendChunk(errChunks, errLen, chunk)) } catch {}
+
+    if (activeRuns) {
+      activeRuns.set(runKey, {
+        id: runKey,
+        rootId: rid,
+        provider: cleanProvider,
+        label: taskLabel,
+        childId,
+        transport: 'local-cli',
+        startedAt: Date.now(),
+        abortController: ac,
+        terminate: () => {
+          try { if (handle && typeof handle.terminate === 'function') handle.terminate() } catch {}
+        },
+      })
+    }
+    recordDispatchState(childId, 'local-cli')
+
+    const cleanTmpOut = () => {
+      if (!tmpOutFile) return
+      try { fs.rmSync(tmpOutFile, { force: true }) } catch {}
+    }
+
+    if (handle && handle.done && typeof handle.done.then === 'function') {
+      Promise.resolve(handle.done)
+        .then((outcome) => {
+          let outText = ''
+          if (tmpOutFile) {
+            try {
+              if (fs.existsSync(tmpOutFile)) outText = fs.readFileSync(tmpOutFile, 'utf8').trim()
+            } catch {}
+          }
+          if (!outText) outText = outChunks.join('').trim()
+          const errTail = errChunks.join('').trim().slice(-400)
+          const exitCode = outcome && typeof outcome.exitCode === 'number' ? outcome.exitCode : 0
+          if (ac.signal.aborted) return
+          if (exitCode !== 0) {
+            const diagParts = [outText, errTail].filter(Boolean)
+            const combinedDiag = diagParts.join(outText && errTail ? '\n' : '').trim()
+            const failMsg = combinedDiag
+              ? `退出码 ${exitCode}：${clamp(combinedDiag, 1200)}`
+              : `外部 CLI 进程以退出码 ${exitCode} 结束`
+            writeSettlementReceipt(childId, failMsg, false)
+          } else {
+            writeSettlementReceipt(childId, outText || '本机 CLI 任务已执行完成', true)
+          }
+        })
+        .catch((err) => {
+          if (ac.signal.aborted) return
+          writeSettlementReceipt(childId, (err && err.message) || err || 'CLI 调用失败', false)
+        })
+        .finally(() => {
+          cleanTmpOut()
+          if (activeRuns) activeRuns.delete(runKey)
+        })
+    } else {
+      cleanTmpOut()
+    }
+  }
+
+  return {
+    ok: true,
+    runId: runKey,
+    childId,
+    provider: cleanProvider,
+    label: displayLabel,
+    transport: usedTransport,
+    bubbleLocked: true,
   }
 }
