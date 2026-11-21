@@ -1036,6 +1036,14 @@ export function createRuntimeHooks(deps) {
         }
       })
     } catch {}
+    try {
+      ctx.inject(['subprocess'], (subProcCtx) => {
+        const rt = deps.hostState.activeRuntime
+        deps.hostState.activeSubprocess = (subProcCtx && subProcCtx.subprocess)
+          || (rt && typeof rt.get === 'function' ? rt.get('subprocess') : null)
+          || null
+      })
+    } catch {}
 
     // Cold-start safety reconciliation for persistent TaskLedger (stale running/resuming -> interrupted; past TTL -> expired)
     try {

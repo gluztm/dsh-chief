@@ -130,6 +130,7 @@ function buildBubbleOrbs({
       subText: `${hItem.provider} · ${roleText}`,
       r: 31,
       installed: Boolean(hItem.installed),
+      transport: hItem.transport || '',
       installCmd: hItem.installed ? '' : harnessInstallCmdFor(hItem.provider, catItem && catItem.installCmd),
       running: Boolean(hItem.running),
       canLeave: true,
@@ -172,17 +173,19 @@ function buildBubbleOrbs({
     availableProviders.add(hItem.provider)
     const acc = hItem.accent || '#38bdf8'
     const roleText = hItem.roleHint || hItem.role || bi('外部独立执行进程', 'External Harness')
+    const isLocalCli = hItem.transport === 'local-cli'
     list.push({
       uid: 'standby-harness:' + hItem.provider,
       zone: 'outside',
       kind: 'standby-harness',
       label: hItem.label || hItem.provider,
       shortLabel: shortOrbLabel(hItem.label || hItem.provider, 'harness'),
-      badge: bi('就绪', 'Ready'),
-      kindName: bi('Harness · 已安装', 'Harness · Ready'),
+      badge: isLocalCli ? bi('本机就绪', 'Local') : bi('就绪', 'Ready'),
+      kindName: isLocalCli ? bi('Harness · 本机直连', 'Harness · Local') : bi('Harness · 已安装', 'Harness · Ready'),
       subText: `${hItem.provider} · ${roleText}`,
       r: 27,
       installed: true,
+      transport: hItem.transport || '',
       installCmd: '',
       running: false,
       canLeave: false,
@@ -1227,14 +1230,14 @@ export function PeersTab({ view }) {
                         },
                       }, bi('@递话', '@Relay'))
                     : null,
-                  (selectedOrb.kind === 'harness' && selectedOrb.installed && selectedOrb.raw)
+                  ((selectedOrb.kind === 'harness' || selectedOrb.kind === 'standby-harness') && selectedOrb.installed && selectedOrb.raw)
                     ? h('button', {
                         type: 'button',
                         className: 'dnb-pill dnb-pill-accent',
                         'data-active': dispatchTarget === selectedOrb.raw.provider ? '1' : '0',
-                        style: { height: 21, padding: '0 7px', fontSize: 10.5 },
+                        style: { height: 21, padding: '0 8px', fontSize: 10.5 },
                         onClick: () => setDispatchTarget(d => (d === selectedOrb.raw.provider ? '' : selectedOrb.raw.provider)),
-                      }, bi('⚡ 派活', '⚡ Run'))
+                      }, bi('⚡ 一键调用', '⚡ Run Now'))
                     : null,
                   selectedOrb.installCmd
                     ? h('button', {

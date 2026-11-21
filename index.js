@@ -28,6 +28,8 @@ const hostState = {
   activeRuntime: null,
   // Active host LLM service injected via ctx.inject(['llm'])
   activeLlm: null,
+  // Active host subprocess service injected via ctx.inject(['subprocess'])
+  activeSubprocess: null,
   // Active Auto-Continue engine instance cleaned up on plugin dispose
   activeAutoContinue: null,
   // Recent idle/loop steer timestamps keyed by `sessionId:turn`

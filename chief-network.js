@@ -4,6 +4,8 @@
  * Cross-session messaging, subagent relay, peer directory, and pre-step delta delivery for DSH Chief.
  */
 
+import fs from 'node:fs'
+import os from 'node:os'
 import path from 'node:path'
 import {
   MAIL_CAP,
@@ -880,34 +882,241 @@ const PROBE_EXTERNAL_PROVIDER_NAMES = [
   'gemini',
 ]
 
-/** Discover registered out-of-process external Harness backends (`ctx.subagents` + Cordis lifecycle cache). */
+let localHarnessCache = { at: 0, envSig: '', map: new Map() }
+
+function isRegularFileSafe(p) {
+  if (!p) return false
+  try {
+    return fs.statSync(p).isFile()
+  } catch {
+    return false
+  }
+}
+
+function findInSystemPath(candidates = []) {
+  const rawPath = String(process.env.PATH || '')
+  if (!rawPath) return ''
+  for (const dir of rawPath.split(path.delimiter)) {
+    const cleanDir = dir.trim().replace(/^"+|"+$/g, '')
+    if (!cleanDir) continue
+    for (const fileName of candidates) {
+      const full = path.join(cleanDir, fileName)
+      if (isRegularFileSafe(full)) return full
+    }
+  }
+  return ''
+}
+
+function resolveCodexFromAppAlias(aliasPath) {
+  try {
+    const target = fs.readlinkSync(aliasPath)
+    if (!target) return ''
+    if (path.basename(target).toLowerCase() === 'codex.exe' && isRegularFileSafe(target)) return target
+    const dir = path.dirname(target)
+    for (const cand of [
+      path.join(dir, 'codex.exe'),
+      path.join(dir, 'resources', 'codex.exe'),
+      path.join(path.dirname(dir), 'resources', 'codex.exe'),
+    ]) {
+      if (isRegularFileSafe(cand)) return cand
+    }
+  } catch {}
+  return ''
+}
+
+function probeLocalCodexBinary() {
+  const envBin = String(process.env.DSH_CHIEF_CODEX_BIN || '').trim()
+  if (envBin && isRegularFileSafe(envBin)) return envBin
+
+  const fromPath = findInSystemPath(['codex.exe', 'codex.cmd', 'codex'])
+  if (fromPath) return fromPath
+
+  const localApp = String(process.env.LOCALAPPDATA || '')
+  if (localApp) {
+    const aliasRoot = path.join(localApp, 'Microsoft', 'WindowsApps')
+    try {
+      const entries = fs.readdirSync(aliasRoot, { withFileTypes: true })
+      for (const ent of entries) {
+        if (ent.isDirectory() && /^OpenAI\.Codex_/i.test(ent.name)) {
+          const pkgAliasDir = path.join(aliasRoot, ent.name)
+          try {
+            for (const sub of fs.readdirSync(pkgAliasDir, { withFileTypes: true })) {
+              if (!sub.name.toLowerCase().endsWith('.exe')) continue
+              const hit = resolveCodexFromAppAlias(path.join(pkgAliasDir, sub.name))
+              if (hit) return hit
+            }
+          } catch {}
+        } else if (/^codex.*\.exe$/i.test(ent.name)) {
+          const hit = resolveCodexFromAppAlias(path.join(aliasRoot, ent.name))
+          if (hit) return hit
+        }
+      }
+    } catch {}
+  }
+
+  // Direct Windows Store MSIX fallback when WindowsApps is readable
+  const winAppsDir = process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'WindowsApps') : 'C:\\Program Files\\WindowsApps'
+  try {
+    const dirs = fs.readdirSync(winAppsDir, { withFileTypes: true })
+      .filter(d => d.isDirectory() && /^OpenAI\.Codex_/i.test(d.name))
+      .map(d => d.name)
+      .sort()
+      .reverse()
+    for (const dirName of dirs) {
+      for (const rel of ['app\\resources\\codex.exe', 'resources\\codex.exe', 'app\\codex.exe']) {
+        const cand = path.join(winAppsDir, dirName, rel)
+        if (isRegularFileSafe(cand)) return cand
+      }
+    }
+  } catch {}
+
+  const appData = String(process.env.APPDATA || '')
+  for (const cand of [
+    appData ? path.join(appData, 'npm', 'codex.cmd') : '',
+    localApp ? path.join(localApp, 'pnpm', 'codex.cmd') : '',
+    path.join(os.homedir(), '.local', 'bin', 'codex.exe'),
+    path.join(os.homedir(), '.local', 'bin', 'codex'),
+  ]) {
+    if (isRegularFileSafe(cand)) return cand
+  }
+  return ''
+}
+
+function findVersionedClaudeExe(baseDir, nestedHashDir = false) {
+  if (!baseDir) return ''
+  try {
+    const vers = fs.readdirSync(baseDir, { withFileTypes: true })
+      .filter(d => d.isDirectory())
+      .map(d => d.name)
+      .sort()
+      .reverse()
+    for (const ver of vers) {
+      const verDir = path.join(baseDir, ver)
+      if (!nestedHashDir) {
+        const direct = path.join(verDir, 'claude.exe')
+        if (isRegularFileSafe(direct)) return direct
+      } else {
+        try {
+          const subDirs = fs.readdirSync(verDir, { withFileTypes: true }).filter(d => d.isDirectory())
+          for (const sub of subDirs) {
+            const nested = path.join(verDir, sub.name, 'claude.exe')
+            if (isRegularFileSafe(nested)) return nested
+          }
+        } catch {}
+      }
+    }
+  } catch {}
+  return ''
+}
+
+function probeLocalClaudeBinary() {
+  const envBin = String(process.env.DSH_CHIEF_CLAUDE_BIN || '').trim()
+  if (envBin && isRegularFileSafe(envBin)) return envBin
+
+  const fromPath = findInSystemPath(['claude.exe', 'claude.cmd', 'claude'])
+  if (fromPath) return fromPath
+
+  const localApp = String(process.env.LOCALAPPDATA || '')
+  const appData = String(process.env.APPDATA || '')
+  if (localApp) {
+    const claude3p = findVersionedClaudeExe(path.join(localApp, 'Claude-3p', 'claude-code'), true)
+      || findVersionedClaudeExe(path.join(localApp, 'Claude-3p', 'claude-code'), false)
+    if (claude3p) return claude3p
+
+    try {
+      const pkgsDir = path.join(localApp, 'Packages')
+      const claudePkgs = fs.readdirSync(pkgsDir, { withFileTypes: true })
+        .filter(d => d.isDirectory() && /^AnthropicPBC\.Claude_/i.test(d.name))
+      for (const pkg of claudePkgs) {
+        const base = path.join(pkgsDir, pkg.name, 'LocalCache', 'Roaming', 'Claude', 'claude-code')
+        const hit = findVersionedClaudeExe(base, true) || findVersionedClaudeExe(base, false)
+        if (hit) return hit
+      }
+    } catch {}
+  }
+  if (appData) {
+    const roamingHit = findVersionedClaudeExe(path.join(appData, 'Claude', 'claude-code'), true)
+      || findVersionedClaudeExe(path.join(appData, 'Claude', 'claude-code'), false)
+    if (roamingHit) return roamingHit
+  }
+
+  for (const cand of [
+    path.join(os.homedir(), '.local', 'bin', 'claude.exe'),
+    path.join(os.homedir(), '.local', 'bin', 'claude'),
+    appData ? path.join(appData, 'npm', 'claude.cmd') : '',
+    localApp ? path.join(localApp, 'pnpm', 'claude.cmd') : '',
+  ]) {
+    if (isRegularFileSafe(cand)) return cand
+  }
+  return ''
+}
+
+/** Pure filesystem detection of local external Harness CLIs (`codex.exe`, `claude.exe`) with 60s TTL cache. */
+export function detectLocalHarnessBinaries({ force = false } = {}) {
+  const now = Date.now()
+  const envSig = `${process.env.DSH_CHIEF_CODEX_BIN || ''}|${process.env.DSH_CHIEF_CLAUDE_BIN || ''}`
+  if (!force && envSig === localHarnessCache.envSig && (now - localHarnessCache.at) < 60_000) {
+    return localHarnessCache.map
+  }
+  const found = new Map()
+  const codexBin = probeLocalCodexBinary()
+  if (codexBin) {
+    found.set('codex', { provider: 'codex', binaryPath: codexBin, transport: 'local-cli' })
+  }
+  const claudeBin = probeLocalClaudeBinary()
+  if (claudeBin) {
+    found.set('claude-code', { provider: 'claude-code', binaryPath: claudeBin, transport: 'local-cli' })
+  }
+  localHarnessCache = { at: now, envSig, map: found }
+  return found
+}
+
+/** Discover registered external Harness backends (`ctx.subagents` + local `ctx.subprocess` direct CLIs). */
 export function discoverHarnessProviders(runtime, hostState = null) {
   const sub = runtime && typeof runtime.get === 'function' ? runtime.get('subagents') : null
+  const subprocessSvc = (runtime && typeof runtime.get === 'function' ? runtime.get('subprocess') : null)
+    || (hostState && hostState.activeSubprocess)
+    || null
   const foundMap = new Map()
-  const addProv = (pname, prov) => {
+  const addProv = (pname, prov, transport = 'dsh-subagent', binaryPath = '') => {
     const clean = String(pname || '').trim()
     if (!clean || clean === 'spawn' || clean === 'fork') return
     if (prov && typeof prov.prepareContinuable === 'function') return
-    if (!foundMap.has(clean)) foundMap.set(clean, prov || { name: clean })
+    if (!foundMap.has(clean)) {
+      foundMap.set(clean, {
+        prov: prov || { name: clean },
+        transport,
+        binaryPath,
+      })
+    }
   }
 
   if (sub && sub.providers instanceof Map) {
-    for (const [pname, prov] of sub.providers.entries()) addProv(pname, prov)
+    for (const [pname, prov] of sub.providers.entries()) addProv(pname, prov, 'dsh-subagent', '')
   }
   if (sub && typeof sub.getProvider === 'function') {
     for (const candidate of PROBE_EXTERNAL_PROVIDER_NAMES) {
       try {
         const prov = sub.getProvider(candidate)
-        if (prov) addProv(prov.name || candidate, prov)
+        if (prov) addProv(prov.name || candidate, prov, 'dsh-subagent', '')
       } catch {}
     }
   }
   if (hostState && hostState.detectedHarnessProviders instanceof Map) {
-    for (const [pname, prov] of hostState.detectedHarnessProviders.entries()) addProv(pname, prov)
+    for (const [pname, prov] of hostState.detectedHarnessProviders.entries()) addProv(pname, prov, 'dsh-subagent', '')
+  }
+
+  // Layer 2: Directly detected local Codex / Claude Code CLIs via host ctx.subprocess
+  if (subprocessSvc && typeof subprocessSvc.spawn === 'function') {
+    const localBins = detectLocalHarnessBinaries()
+    for (const [pname, info] of localBins.entries()) {
+      addProv(pname, { name: pname }, 'local-cli', info.binaryPath)
+    }
   }
 
   const available = []
-  for (const [pname, prov] of foundMap.entries()) {
+  for (const [pname, entry] of foundMap.entries()) {
+    const prov = entry.prov
     const official = OFFICIAL_HARNESS_CATALOG.find(item => item.provider === pname)
     const caps = (prov && prov.capabilities && typeof prov.capabilities === 'object') ? prov.capabilities : {}
     available.push({
@@ -918,6 +1127,8 @@ export function discoverHarnessProviders(runtime, hostState = null) {
       roleHint: (official && official.roleHint) || '外部 Harness 执行进程',
       mode: 'one-shot',
       installed: true,
+      transport: entry.transport,
+      binaryPath: entry.binaryPath || '',
       capabilities: {
         agentPreset: Boolean(caps.agentPreset),
         outputSchema: Boolean(caps.outputSchema),
@@ -933,6 +1144,8 @@ export function discoverHarnessProviders(runtime, hostState = null) {
       ...item,
       mode: 'one-shot',
       installed: false,
+      transport: '',
+      binaryPath: '',
       installCmd: `dsh plugin --profile desktop add ${item.packageName}`,
     }))
 
@@ -965,6 +1178,7 @@ export function computeBubbleState(deps, rootId, state, directory = null) {
           provider: run.provider,
           label: run.label,
           childId: run.childId || '',
+          transport: run.transport || '',
           startedAt: run.startedAt || 0,
         })
       }
@@ -1002,6 +1216,8 @@ export function computeBubbleState(deps, rootId, state, directory = null) {
         role: h.role || roleHint,
         roleHint,
         installed: Boolean(avail),
+        transport: (avail && avail.transport) || h.transport || '',
+        binaryPath: (avail && avail.binaryPath) || '',
         running: activeExternalRuns.some(r => r.provider === h.provider),
       }
     }),
