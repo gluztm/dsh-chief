@@ -4702,6 +4702,7 @@ const CSS = `
     color: #6ee7b7;
     padding: 3px 9px;
     border-radius: 999px;
+    corner-shape: round;
     background: rgba(16, 185, 129, 0.12);
     border: 1px solid rgba(16, 185, 129, 0.32);
     max-width: 100%;
@@ -4716,6 +4717,7 @@ const CSS = `
     width: 7px;
     height: 7px;
     border-radius: 50%;
+    corner-shape: round;
     background: currentColor;
     flex-shrink: 0;
   }
@@ -4738,19 +4740,17 @@ const CSS = `
     touch-action: none;
     user-select: none;
     background:
-      radial-gradient(circle at 38% 48%, rgba(56, 189, 248, 0.11), transparent 62%),
-      radial-gradient(circle at 80% 78%, rgba(16, 185, 129, 0.07), transparent 55%),
-      rgba(9, 14, 26, 0.72);
-    border: 1.5px solid rgba(56, 189, 248, 0.28);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 0 28px rgba(15, 23, 42, 0.65);
-    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      radial-gradient(circle at 35% 50%, rgba(56, 189, 248, 0.09), transparent 60%),
+      rgba(9, 14, 26, 0.68);
+    border: 1.5px solid rgba(56, 189, 248, 0.26);
+    box-shadow: inset 0 0 20px rgba(15, 23, 42, 0.55);
+    transition: border-color 0.2s ease;
   }
   .dnb-bubble-tank[data-locked="1"] {
     border-color: rgba(245, 158, 11, 0.54);
     background:
-      radial-gradient(circle at 38% 48%, rgba(245, 158, 11, 0.10), transparent 62%),
-      rgba(15, 18, 28, 0.78);
-    box-shadow: inset 0 0 24px rgba(245, 158, 11, 0.10);
+      radial-gradient(circle at 35% 50%, rgba(245, 158, 11, 0.08), transparent 60%),
+      rgba(15, 18, 28, 0.74);
   }
   .dnb-bubble-tank[data-shake="1"] {
     animation: dnb-bubble-shake 0.36s ease;
@@ -4768,6 +4768,7 @@ const CSS = `
     width: 50px;
     height: 50px;
     border-radius: 50%;
+    corner-shape: round;
     z-index: 3;
     pointer-events: none;
     display: flex;
@@ -4775,15 +4776,15 @@ const CSS = `
     align-items: center;
     justify-content: center;
     gap: 1px;
-    background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.36), rgba(56, 189, 248, 0.26) 55%, rgba(14, 165, 233, 0.16) 100%);
-    border: 1.5px solid rgba(125, 211, 252, 0.62);
-    box-shadow: 0 0 16px rgba(56, 189, 248, 0.28), inset 0 1px 4px rgba(255, 255, 255, 0.35);
+    background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.26), rgba(56, 189, 248, 0.22) 60%, rgba(14, 165, 233, 0.14) 100%);
+    border: 1.5px solid rgba(125, 211, 252, 0.60);
+    box-shadow: 0 2px 10px rgba(14, 165, 233, 0.24);
     color: #e0f2fe;
   }
   .dnb-bubble-center-hub[data-locked="1"] {
-    background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.32), rgba(245, 158, 11, 0.26) 55%, rgba(217, 119, 6, 0.18) 100%);
-    border-color: rgba(251, 191, 36, 0.72);
-    box-shadow: 0 0 16px rgba(245, 158, 11, 0.28), inset 0 1px 4px rgba(255, 255, 255, 0.3);
+    background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.24), rgba(245, 158, 11, 0.22) 60%, rgba(217, 119, 6, 0.16) 100%);
+    border-color: rgba(251, 191, 36, 0.70);
+    box-shadow: 0 2px 10px rgba(245, 158, 11, 0.24);
     color: #fef3c7;
   }
   .dnb-bubble-center-icon {
@@ -4802,6 +4803,7 @@ const CSS = `
     left: 0;
     top: 0;
     border-radius: 50%;
+    corner-shape: round;
     display: flex;
     flex-direction: column;
     align-items: center;
@@ -4813,14 +4815,9 @@ const CSS = `
     touch-action: none;
     will-change: transform;
     background:
-      radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.38) 0%, rgba(255, 255, 255, 0.10) 24%, var(--orb-bg, rgba(56, 189, 248, 0.22)) 66%, rgba(255, 255, 255, 0.18) 100%);
-    border: 1.5px solid var(--orb-border, rgba(125, 211, 252, 0.6));
-    box-shadow:
-      inset 0 2px 6px rgba(255, 255, 255, 0.26),
-      inset 0 -4px 10px rgba(0, 0, 0, 0.28),
-      0 6px 16px rgba(0, 0, 0, 0.30);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+      radial-gradient(circle at 30% 26%, rgba(255, 255, 255, 0.28) 0%, var(--orb-bg, rgba(56, 189, 248, 0.20)) 58%, rgba(255, 255, 255, 0.12) 100%);
+    border: 1.5px solid var(--orb-border, rgba(125, 211, 252, 0.58));
+    box-shadow: inset 0 1px 4px rgba(255, 255, 255, 0.20), 0 4px 12px rgba(0, 0, 0, 0.26);
   }
   .dnb-orb:active {
     cursor: grabbing;
@@ -4828,12 +4825,13 @@ const CSS = `
   .dnb-orb::before {
     content: "";
     position: absolute;
-    top: 12%;
+    top: 11%;
     left: 19%;
-    width: 28%;
-    height: 15%;
+    width: 24%;
+    height: 12%;
     border-radius: 50%;
-    background: rgba(255, 255, 255, 0.42);
+    corner-shape: round;
+    background: rgba(255, 255, 255, 0.34);
     transform: rotate(-32deg);
     pointer-events: none;
   }
@@ -4841,11 +4839,19 @@ const CSS = `
   .dnb-orb[data-kind="standby-harness"] {
     border-style: dashed;
   }
+  .dnb-orb[data-installed="0"] {
+    opacity: 0.80;
+  }
+  .dnb-orb[data-installed="0"]:hover,
+  .dnb-orb[data-installed="0"][data-selected="1"] {
+    opacity: 1;
+  }
   .dnb-orb[data-running="1"]::after {
     content: "";
     position: absolute;
     inset: -5px;
     border-radius: 50%;
+    corner-shape: round;
     border: 1.5px solid var(--orb-dot, #38bdf8);
     pointer-events: none;
     animation: dnb-orb-pulse 1.8s ease-in-out infinite;
@@ -4853,28 +4859,27 @@ const CSS = `
   .dnb-orb[data-selected="1"] {
     box-shadow:
       0 0 0 2.5px var(--orb-dot, #38bdf8),
-      inset 0 2px 7px rgba(255, 255, 255, 0.32),
-      0 8px 20px rgba(0, 0, 0, 0.42);
+      0 6px 16px rgba(0, 0, 0, 0.38);
   }
   .dnb-orb-top {
     display: flex;
     align-items: center;
     justify-content: center;
-    height: 10px;
+    height: 9px;
     margin-bottom: 1px;
   }
   .dnb-orb-dot {
-    width: 6.5px;
-    height: 6.5px;
+    width: 6px;
+    height: 6px;
     border-radius: 50%;
-    box-shadow: 0 0 6px currentColor;
+    corner-shape: round;
   }
   .dnb-orb-label {
     font-size: 10.5px;
     font-weight: 700;
     line-height: 1.12;
     color: var(--dnb-text);
-    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.42);
     max-width: 100%;
     overflow: hidden;
     display: -webkit-box;
@@ -4889,6 +4894,7 @@ const CSS = `
     line-height: 1.1;
     padding: 1px 5px;
     border-radius: 999px;
+    corner-shape: round;
     background: rgba(15, 23, 42, 0.56);
     color: var(--orb-text, #e2e8f0);
     border: 1px solid var(--orb-border, rgba(255, 255, 255, 0.22));
@@ -4938,6 +4944,7 @@ const CSS = `
     width: 8px;
     height: 8px;
     border-radius: 50%;
+    corner-shape: round;
     flex-shrink: 0;
   }
   .dnb-droplet-kind {
@@ -4945,6 +4952,7 @@ const CSS = `
     font-weight: 700;
     padding: 1px 6px;
     border-radius: 999px;
+    corner-shape: round;
     background: rgba(255, 255, 255, 0.07);
     color: var(--dnb-text-2);
     border: 1px solid var(--dnb-border);

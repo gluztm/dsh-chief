@@ -42,11 +42,11 @@ function clampNum(v, lo, hi) {
 
 function computeTankGeometry(width, height, hasOutside) {
   const W = Math.max(280, Number(width) || 540)
-  const H = Math.max(280, Number(height) || 336)
-  const cx = hasOutside ? Math.round(W * 0.39) : Math.round(W * 0.5)
+  const H = Math.max(280, Number(height) || 326)
+  const cx = hasOutside ? Math.round(W * 0.35) : Math.round(W * 0.5)
   const cy = Math.round(H * 0.5)
   const R = hasOutside
-    ? Math.max(92, Math.min(H * 0.43, W * 0.34))
+    ? Math.max(88, Math.min(H * 0.42, W * 0.29))
     : Math.max(106, Math.min(H * 0.44, W * 0.40))
   return { W, H, cx, cy, R, hubR: 25, hasOutside }
 }
@@ -58,16 +58,30 @@ function shortOrbLabel(name, kind) {
   return raw.slice(0, 6) + '…'
 }
 
+function harnessInstallCmdFor(provider, itemCmd) {
+  if (itemCmd) return itemCmd
+  const p = String(provider || '').trim()
+  return p ? `dsh plugin --profile desktop add @deepseek-ai/dsh-subagent-${p}` : ''
+}
+
 function buildBubbleOrbs({
   peers,
   enrolledHarnesses,
   standbySessions,
   availableHarnesses,
+  catalogHarnesses,
   selfRootId,
   otherSessions,
   bubbleLocked,
 }) {
   const list = []
+  const enrolledProviders = new Set()
+  const availableProviders = new Set()
+  const catalogByProvider = new Map()
+  for (const item of (catalogHarnesses || [])) {
+    if (item && item.provider) catalogByProvider.set(item.provider, item)
+  }
+
   for (const peer of peers) {
     if (!peer) continue
     const isLinkedPeer = peer.kind === 'peer-session'
@@ -75,7 +89,7 @@ function buildBubbleOrbs({
     const col = colorForRootSession(peerRootId, selfRootId)
     const linkedSessObj = isLinkedPeer ? otherSessions.find(s => s && s.id === peerRootId) : null
     const subText = peer.taskTitle || peer.progressSummary || (peer.kind === 'lead' ? '当前主指挥核心会话' : '泡内协同成员')
-    const r = peer.kind === 'lead' ? 35 : (isLinkedPeer ? 31 : 27)
+    const r = peer.kind === 'lead' ? 34 : (isLinkedPeer ? 30 : 26)
     const tagText = peer.kind === 'lead' ? '主' : (isLinkedPeer ? '窗' : '子')
     list.push({
       uid: 'peer:' + peer.key,
@@ -87,6 +101,8 @@ function buildBubbleOrbs({
       kindName: peer.kind === 'lead' ? bi('主对话', 'Lead') : (isLinkedPeer ? bi('联动窗口', 'Linked') : bi('子代理', 'Subagent')),
       subText,
       r,
+      installed: true,
+      installCmd: '',
       running: peer.status === 'running',
       canLeave: isLinkedPeer,
       canJoin: false,
@@ -99,8 +115,10 @@ function buildBubbleOrbs({
   }
   for (const hItem of enrolledHarnesses) {
     if (!hItem || !hItem.provider) continue
+    enrolledProviders.add(hItem.provider)
     const acc = hItem.accent || '#38bdf8'
     const roleText = hItem.role || hItem.roleHint || bi('外部独立执行进程', 'External Harness')
+    const catItem = catalogByProvider.get(hItem.provider)
     list.push({
       uid: 'harness:' + hItem.provider,
       zone: 'inside',
@@ -110,7 +128,9 @@ function buildBubbleOrbs({
       badge: hItem.provider.length <= 7 ? hItem.provider : '外挂',
       kindName: hItem.installed ? 'Harness' : bi('未安装后端', 'Not Installed'),
       subText: `${hItem.provider} · ${roleText}`,
-      r: 32,
+      r: 31,
+      installed: Boolean(hItem.installed),
+      installCmd: hItem.installed ? '' : harnessInstallCmdFor(hItem.provider, catItem && catItem.installCmd),
       running: Boolean(hItem.running),
       canLeave: true,
       canJoin: false,
@@ -136,7 +156,9 @@ function buildBubbleOrbs({
       badge: '待命',
       kindName: bi('独立会话', 'Session'),
       subText: sess.objective || sess.progressSummary || bi('未加入水泡的独立会话，可直接抓入水泡', 'Standalone session ready to drag into Bubble'),
-      r: 29,
+      r: 28,
+      installed: true,
+      installCmd: '',
       running: sess.status === 'running',
       canLeave: false,
       canJoin: true,
@@ -146,7 +168,8 @@ function buildBubbleOrbs({
     })
   }
   for (const hItem of availableHarnesses) {
-    if (!hItem || !hItem.provider) continue
+    if (!hItem || !hItem.provider || enrolledProviders.has(hItem.provider)) continue
+    availableProviders.add(hItem.provider)
     const acc = hItem.accent || '#38bdf8'
     const roleText = hItem.roleHint || hItem.role || bi('外部独立执行进程', 'External Harness')
     list.push({
@@ -155,10 +178,12 @@ function buildBubbleOrbs({
       kind: 'standby-harness',
       label: hItem.label || hItem.provider,
       shortLabel: shortOrbLabel(hItem.label || hItem.provider, 'harness'),
-      badge: hItem.provider.length <= 7 ? hItem.provider : '外挂',
-      kindName: 'Harness',
+      badge: bi('就绪', 'Ready'),
+      kindName: bi('Harness · 已安装', 'Harness · Ready'),
       subText: `${hItem.provider} · ${roleText}`,
-      r: 30,
+      r: 27,
+      installed: true,
+      installCmd: '',
       running: false,
       canLeave: false,
       canJoin: true,
@@ -172,14 +197,44 @@ function buildBubbleOrbs({
       raw: hItem,
     })
   }
+  for (const hItem of (catalogHarnesses || [])) {
+    if (!hItem || !hItem.provider) continue
+    if (enrolledProviders.has(hItem.provider) || availableProviders.has(hItem.provider)) continue
+    const acc = hItem.accent || '#38bdf8'
+    const roleText = hItem.roleHint || bi('外部 Harness 执行进程', 'External Harness')
+    list.push({
+      uid: 'standby-harness:' + hItem.provider,
+      zone: 'outside',
+      kind: 'standby-harness',
+      label: hItem.label || hItem.provider,
+      shortLabel: shortOrbLabel(hItem.label || hItem.provider, 'harness'),
+      badge: bi('未装', 'Setup'),
+      kindName: bi('Harness · 待安装', 'Harness · Setup'),
+      subText: `${hItem.provider} · ${roleText}`,
+      r: 26,
+      installed: false,
+      installCmd: harnessInstallCmdFor(hItem.provider, hItem.installCmd),
+      running: false,
+      canLeave: false,
+      canJoin: true,
+      draggable: true,
+      accent: {
+        dot: acc,
+        bg: `${acc}16`,
+        border: `${acc}58`,
+        text: acc,
+      },
+      raw: hItem,
+    })
+  }
   return list
 }
 
 function initialBodyPos(orb, idxInZone, countInZone, geo) {
   const seed = hashStrSeed(orb.uid)
   const baseAngle = ((idxInZone + 0.5) / Math.max(1, countInZone)) * Math.PI * 2 + (seed % 100) * 0.01
-  const velAngle = baseAngle + 1.1
-  const spd = orb.running ? 44 : 28
+  const velAngle = baseAngle + 1.15
+  const spd = orb.running ? 32 : 20
   if (orb.zone === 'inside') {
     const orbit = clampNum(geo.R * 0.54, geo.hubR + orb.r + 6, Math.max(geo.hubR + orb.r + 8, geo.R - orb.r - 6))
     return {
@@ -190,13 +245,16 @@ function initialBodyPos(orb, idxInZone, countInZone, geo) {
       seed,
     }
   }
-  const minX = geo.cx + geo.R + orb.r + 16
-  const maxX = Math.max(minX + 10, geo.W - orb.r - 12)
+  const minX = geo.cx + geo.R + orb.r + 14
+  const maxX = Math.max(minX + 12, geo.W - orb.r - 12)
   const colSpan = Math.max(12, maxX - minX)
-  const rx = minX + ((idxInZone % 2 === 0 ? 0.35 : 0.72) * colSpan)
-  const ry = clampNum(((idxInZone + 0.5) / Math.max(1, countInZone)) * (geo.H - 40) + 20, orb.r + 12, geo.H - orb.r - 12)
+  const colIdx = idxInZone % 2
+  const rowCount = Math.max(1, Math.ceil(countInZone / 2))
+  const rowIdx = Math.floor(idxInZone / 2)
+  const rx = minX + ((colIdx === 0 ? 0.25 : 0.78) * colSpan)
+  const ry = clampNum(((rowIdx + 0.5) / rowCount) * (geo.H - 42) + 21, orb.r + 12, geo.H - orb.r - 12)
   return {
-    x: clampNum(rx, orb.r + 10, geo.W - orb.r - 10),
+    x: clampNum(rx, minX, geo.W - orb.r - 10),
     y: ry,
     vx: Math.cos(velAngle) * spd,
     vy: Math.sin(velAngle) * spd,
@@ -204,12 +262,7 @@ function initialBodyPos(orb, idxInZone, countInZone, geo) {
   }
 }
 
-function pushRipple(ripples, x, y, maxR, color) {
-  if (ripples.length > 26) ripples.shift()
-  ripples.push({ x, y, r: 4, maxR: maxR || 36, alpha: 0.65, color: color || '#38bdf8' })
-}
-
-function syncPhysicsBodies(bodiesMap, orbs, geo, ripples) {
+function syncPhysicsBodies(bodiesMap, orbs, geo) {
   const activeUids = new Set(orbs.map(o => o.uid))
   for (const key of bodiesMap.keys()) {
     if (!activeUids.has(key)) bodiesMap.delete(key)
@@ -229,16 +282,11 @@ function syncPhysicsBodies(bodiesMap, orbs, geo, ripples) {
         uid: orb.uid,
         zone: orb.zone,
         r: orb.r,
-        sx: 1,
-        sy: 1,
         hovered: false,
         running: orb.running,
         color: orb.accent.dot,
       })
       return
-    }
-    if (prev.zone !== orb.zone) {
-      pushRipple(ripples, prev.x, prev.y, orb.r + 28, orb.accent.dot)
     }
     prev.zone = orb.zone
     prev.r = orb.r
@@ -247,82 +295,46 @@ function syncPhysicsBodies(bodiesMap, orbs, geo, ripples) {
   })
 }
 
-function applySquash(body, nx, ny, impact) {
-  const k = clampNum(impact / 75, 0.05, 0.16)
-  if (Math.abs(nx) >= Math.abs(ny)) {
-    body.sx = 1 - k
-    body.sy = 1 + k
-  } else {
-    body.sx = 1 + k
-    body.sy = 1 - k
-  }
-}
-
-function stepBubblePhysics(bodiesMap, orbs, geo, { dt, tNow, drag, paused, locked, ripples }) {
-  for (let i = ripples.length - 1; i >= 0; i -= 1) {
-    const rp = ripples[i]
-    rp.r += 58 * dt
-    rp.alpha -= 1.05 * dt
-    if (rp.alpha <= 0.01 || rp.r >= rp.maxR) ripples.splice(i, 1)
-  }
-
+function stepBubblePhysics(bodiesMap, orbs, geo, { dt, drag, paused, locked }) {
+  if (paused) return
   const bodies = orbs.map(o => bodiesMap.get(o.uid)).filter(Boolean)
-  if (paused) {
-    for (const b of bodies) {
-      b.sx += (1 - b.sx) * Math.min(1, dt * 14)
-      b.sy += (1 - b.sy) * Math.min(1, dt * 14)
-    }
-    return
-  }
-
-  const orbByUid = new Map(orbs.map(o => [o.uid, o]))
   for (const b of bodies) {
     const isDragged = drag && drag.uid === b.uid && drag.moved
     if (isDragged) {
-      const orbMeta = orbByUid.get(b.uid)
       let nx = drag.x
       let ny = drag.y
-      // Elastic lock barrier while locked: stretch slightly against rim but prevent escape/breach
-      if (locked && orbMeta) {
+      if (locked) {
         const dx = nx - geo.cx
         const dy = ny - geo.cy
         const dist = Math.hypot(dx, dy) || 0.001
         if (b.zone === 'inside') {
           const maxD = Math.max(8, geo.R - b.r - 2)
           if (dist > maxD) {
-            const extra = (dist - maxD) * 0.18
-            nx = geo.cx + (dx / dist) * (maxD + Math.min(8, extra))
-            ny = geo.cy + (dy / dist) * (maxD + Math.min(8, extra))
+            nx = geo.cx + (dx / dist) * (maxD + 4)
+            ny = geo.cy + (dy / dist) * (maxD + 4)
           }
         } else {
           const minD = geo.R + b.r + 4
           if (dist < minD) {
-            const extra = (minD - dist) * 0.18
-            nx = geo.cx + (dx / dist) * Math.max(8, minD - Math.min(8, extra))
-            ny = geo.cy + (dy / dist) * Math.max(8, minD - Math.min(8, extra))
+            nx = geo.cx + (dx / dist) * Math.max(8, minD - 4)
+            ny = geo.cy + (dy / dist) * Math.max(8, minD - 4)
           }
         }
       }
       b.x = clampNum(nx, b.r + 4, geo.W - b.r - 4)
       b.y = clampNum(ny, b.r + 4, geo.H - b.r - 4)
-      b.sx = 1.07
-      b.sy = 0.94
       continue
     }
 
     if (b.hovered) {
-      b.vx *= Math.pow(0.08, dt)
-      b.vy *= Math.pow(0.08, dt)
+      b.vx *= Math.pow(0.06, dt)
+      b.vy *= Math.pow(0.06, dt)
     } else {
-      const swirlX = Math.sin(tNow * 0.95 + b.seed) * 16
-      const swirlY = Math.cos(tNow * 0.82 + b.seed * 1.37) * 16
-      b.vx += swirlX * dt
-      b.vy += swirlY * dt
       const spd = Math.hypot(b.vx, b.vy) || 0.001
-      const minSpd = b.running ? 30 : 18
-      const maxSpd = b.running ? 66 : 46
-      if (spd > maxSpd * 1.6) {
-        const damp = Math.pow(0.18, dt)
+      const minSpd = b.running ? 24 : 15
+      const maxSpd = b.running ? 44 : 28
+      if (spd > maxSpd * 1.4) {
+        const damp = Math.pow(0.22, dt)
         b.vx *= damp
         b.vy *= damp
       } else if (spd > maxSpd) {
@@ -340,7 +352,6 @@ function stepBubblePhysics(bodiesMap, orbs, geo, { dt, tNow, drag, paused, locke
     b.y += b.vy * dt
 
     if (b.zone === 'inside') {
-      // Keep clear of central DSH Chief hub
       const hdx = b.x - geo.cx
       const hdy = b.y - geo.cy
       const hDist = Math.hypot(hdx, hdy) || 0.001
@@ -352,13 +363,11 @@ function stepBubblePhysics(bodiesMap, orbs, geo, { dt, tNow, drag, paused, locke
         b.y = geo.cy + ny * minHubDist
         const vn = b.vx * nx + b.vy * ny
         if (vn < 0) {
-          b.vx -= 1.88 * vn * nx
-          b.vy -= 1.88 * vn * ny
-          applySquash(b, nx, ny, Math.abs(vn))
+          b.vx -= 1.9 * vn * nx
+          b.vy -= 1.9 * vn * ny
         }
       }
 
-      // Bounce off inner membrane of big Bubble
       const dx = b.x - geo.cx
       const dy = b.y - geo.cy
       const dist = Math.hypot(dx, dy) || 0.001
@@ -370,52 +379,20 @@ function stepBubblePhysics(bodiesMap, orbs, geo, { dt, tNow, drag, paused, locke
         b.y = geo.cy + ny * maxDist
         const vn = b.vx * nx + b.vy * ny
         if (vn > 0) {
-          b.vx -= 1.9 * vn * nx
-          b.vy -= 1.9 * vn * ny
-          if (vn > 15) {
-            applySquash(b, nx, ny, vn)
-            pushRipple(ripples, geo.cx + nx * (geo.R - 3), geo.cy + ny * (geo.R - 3), 26, locked ? '#f59e0b' : b.color)
-          }
+          b.vx -= 1.92 * vn * nx
+          b.vy -= 1.92 * vn * ny
         }
       }
     } else {
-      // Outer tank wall reflection
       const minX = b.r + 8
       const maxX = Math.max(minX + 4, geo.W - b.r - 8)
       const minY = b.r + 8
       const maxY = Math.max(minY + 4, geo.H - b.r - 8)
-      if (b.x < minX) {
-        b.x = minX
-        if (b.vx < 0) {
-          const imp = -b.vx
-          b.vx = imp * 0.92
-          if (imp > 15) { applySquash(b, 1, 0, imp); pushRipple(ripples, 8, b.y, 24, b.color) }
-        }
-      } else if (b.x > maxX) {
-        b.x = maxX
-        if (b.vx > 0) {
-          const imp = b.vx
-          b.vx = -imp * 0.92
-          if (imp > 15) { applySquash(b, 1, 0, imp); pushRipple(ripples, geo.W - 8, b.y, 24, b.color) }
-        }
-      }
-      if (b.y < minY) {
-        b.y = minY
-        if (b.vy < 0) {
-          const imp = -b.vy
-          b.vy = imp * 0.92
-          if (imp > 15) { applySquash(b, 0, 1, imp); pushRipple(ripples, b.x, 8, 24, b.color) }
-        }
-      } else if (b.y > maxY) {
-        b.y = maxY
-        if (b.vy > 0) {
-          const imp = b.vy
-          b.vy = -imp * 0.92
-          if (imp > 15) { applySquash(b, 0, 1, imp); pushRipple(ripples, b.x, geo.H - 8, 24, b.color) }
-        }
-      }
+      if (b.x < minX) { b.x = minX; if (b.vx < 0) b.vx = -b.vx * 0.94 }
+      else if (b.x > maxX) { b.x = maxX; if (b.vx > 0) b.vx = -b.vx * 0.94 }
+      if (b.y < minY) { b.y = minY; if (b.vy < 0) b.vy = -b.vy * 0.94 }
+      else if (b.y > maxY) { b.y = maxY; if (b.vy > 0) b.vy = -b.vy * 0.94 }
 
-      // Bounce off exterior membrane of big Bubble
       const dx = b.x - geo.cx
       const dy = b.y - geo.cy
       const dist = Math.hypot(dx, dy) || 0.001
@@ -427,21 +404,13 @@ function stepBubblePhysics(bodiesMap, orbs, geo, { dt, tNow, drag, paused, locke
         b.y = geo.cy + ny * minOuter
         const vn = b.vx * nx + b.vy * ny
         if (vn < 0) {
-          b.vx -= 1.9 * vn * nx
-          b.vy -= 1.9 * vn * ny
-          if (-vn > 14) {
-            applySquash(b, nx, ny, -vn)
-            pushRipple(ripples, geo.cx + nx * (geo.R + 2), geo.cy + ny * (geo.R + 2), 26, locked ? '#f59e0b' : b.color)
-          }
+          b.vx -= 1.92 * vn * nx
+          b.vy -= 1.92 * vn * ny
         }
       }
     }
-
-    b.sx += (1 - b.sx) * Math.min(1, dt * 11)
-    b.sy += (1 - b.sy) * Math.min(1, dt * 11)
   }
 
-  // Pairwise elastic orb-to-orb collisions within each zone
   for (let i = 0; i < bodies.length; i += 1) {
     const a = bodies[i]
     for (let j = i + 1; j < bodies.length; j += 1) {
@@ -473,164 +442,89 @@ function stepBubblePhysics(bodiesMap, orbs, geo, { dt, tNow, drag, paused, locke
         const rvy = b.vy - a.vy
         const relVel = rvx * nx + rvy * ny
         if (relVel < 0) {
-          const impulse = -0.92 * relVel
-          if (!aDragged) {
-            a.vx -= impulse * nx
-            a.vy -= impulse * ny
-          }
-          if (!bDragged) {
-            b.vx += impulse * nx
-            b.vy += impulse * ny
-          }
-          if (-relVel > 16) {
-            applySquash(a, nx, ny, -relVel)
-            applySquash(b, nx, ny, -relVel)
-            pushRipple(ripples, a.x + nx * a.r, a.y + ny * a.r, 20, b.color)
-          }
+          const impulse = -0.94 * relVel
+          if (!aDragged) { a.vx -= impulse * nx; a.vy -= impulse * ny }
+          if (!bDragged) { b.vx += impulse * nx; b.vy += impulse * ny }
         }
       }
     }
   }
 }
 
-function drawBubbleTankCanvas(ctx, dpr, geo, bodiesMap, orbs, { tNow, locked, drag, paused, ripples, isLight }) {
+function drawBubbleTankCanvas(ctx, dpr, geo, bodiesMap, orbs, { tNow, locked, isLight }) {
   if (!ctx) return
   ctx.save()
   ctx.scale(dpr, dpr)
   ctx.clearRect(0, 0, geo.W, geo.H)
 
-  // Subtle ambient tank micro-particles
-  for (let i = 0; i < 12; i += 1) {
-    const px = ((i * 97 + tNow * (paused ? 0 : (5 + (i % 3) * 2))) % (geo.W - 20)) + 10
-    const py = ((i * 53 + Math.sin(tNow * 0.7 + i) * 14 + geo.H) % (geo.H - 20)) + 10
-    ctx.beginPath()
-    ctx.arc(px, py, (i % 3) + 1.1, 0, Math.PI * 2)
-    ctx.fillStyle = isLight ? 'rgba(2, 132, 199, 0.12)' : 'rgba(125, 211, 252, 0.12)'
-    ctx.fill()
-  }
-
-  // Standby zone watermark label when outside pool exists
   if (geo.hasOutside) {
     ctx.save()
     ctx.font = '600 10.5px "Microsoft YaHei UI", sans-serif'
-    ctx.fillStyle = isLight ? 'rgba(71, 85, 105, 0.6)' : 'rgba(148, 163, 184, 0.52)'
+    ctx.fillStyle = isLight ? 'rgba(71, 85, 105, 0.58)' : 'rgba(148, 163, 184, 0.50)'
     ctx.textAlign = 'right'
-    ctx.fillText('外围待命域 · 直接拖入左泡', geo.W - 14, 22)
+    ctx.fillText('外围待命域 · 拖入左泡协同', geo.W - 14, 21)
     ctx.restore()
   }
 
-  // Big organic soap bubble or amber crystallization lock shell
   const grad = ctx.createRadialGradient(
     geo.cx - geo.R * 0.28,
-    geo.cy - geo.R * 0.30,
+    geo.cy - geo.R * 0.28,
     geo.R * 0.08,
     geo.cx,
     geo.cy,
     geo.R,
   )
   if (locked) {
-    grad.addColorStop(0, isLight ? 'rgba(251, 191, 36, 0.14)' : 'rgba(245, 158, 11, 0.13)')
-    grad.addColorStop(0.72, isLight ? 'rgba(245, 158, 11, 0.06)' : 'rgba(217, 119, 6, 0.07)')
-    grad.addColorStop(1, isLight ? 'rgba(217, 119, 6, 0.20)' : 'rgba(245, 158, 11, 0.24)')
+    grad.addColorStop(0, isLight ? 'rgba(251, 191, 36, 0.14)' : 'rgba(245, 158, 11, 0.12)')
+    grad.addColorStop(1, isLight ? 'rgba(217, 119, 6, 0.18)' : 'rgba(245, 158, 11, 0.22)')
   } else {
-    grad.addColorStop(0, isLight ? 'rgba(56, 189, 248, 0.12)' : 'rgba(56, 189, 248, 0.15)')
-    grad.addColorStop(0.68, isLight ? 'rgba(14, 165, 233, 0.05)' : 'rgba(14, 165, 233, 0.06)')
-    grad.addColorStop(1, isLight ? 'rgba(16, 185, 129, 0.16)' : 'rgba(56, 189, 248, 0.22)')
+    grad.addColorStop(0, isLight ? 'rgba(56, 189, 248, 0.11)' : 'rgba(56, 189, 248, 0.13)')
+    grad.addColorStop(1, isLight ? 'rgba(16, 185, 129, 0.14)' : 'rgba(56, 189, 248, 0.20)')
   }
 
-  const steps = 72
   ctx.beginPath()
-  for (let i = 0; i <= steps; i += 1) {
-    const a = (i / steps) * Math.PI * 2
-    const wobble = (locked || paused)
-      ? 0
-      : (Math.sin(a * 3 + tNow * 1.55) * 2.1 + Math.cos(a * 5 - tNow * 2.05) * 1.3)
-    const r = geo.R + wobble
-    const px = geo.cx + Math.cos(a) * r
-    const py = geo.cy + Math.sin(a) * r
-    if (i === 0) ctx.moveTo(px, py)
-    else ctx.lineTo(px, py)
-  }
-  ctx.closePath()
+  ctx.arc(geo.cx, geo.cy, geo.R, 0, Math.PI * 2)
   ctx.fillStyle = grad
   ctx.fill()
-
-  ctx.lineWidth = locked ? 2.4 : 1.8
+  ctx.lineWidth = locked ? 2.2 : 1.7
   ctx.strokeStyle = locked
     ? (isLight ? 'rgba(217, 119, 6, 0.72)' : 'rgba(251, 191, 36, 0.72)')
-    : (isLight ? 'rgba(2, 132, 199, 0.56)' : 'rgba(103, 232, 249, 0.56)')
+    : (isLight ? 'rgba(2, 132, 199, 0.54)' : 'rgba(103, 232, 249, 0.52)')
   ctx.stroke()
 
   if (locked) {
-    // Secondary dashed outer lock-shield ring
     ctx.save()
     ctx.setLineDash([7, 5])
     ctx.lineWidth = 1.2
-    ctx.strokeStyle = isLight ? 'rgba(217, 119, 6, 0.44)' : 'rgba(245, 158, 11, 0.45)'
+    ctx.strokeStyle = isLight ? 'rgba(217, 119, 6, 0.42)' : 'rgba(245, 158, 11, 0.44)'
     ctx.beginPath()
     ctx.arc(geo.cx, geo.cy, geo.R + 5, 0, Math.PI * 2)
     ctx.stroke()
     ctx.restore()
   } else {
-    // Specular soap-film highlight arc
     ctx.save()
     ctx.beginPath()
-    ctx.arc(geo.cx, geo.cy, geo.R - 6, -Math.PI * 0.82, -Math.PI * 0.48)
-    ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.75)' : 'rgba(224, 242, 254, 0.42)'
-    ctx.lineWidth = 2.6
+    ctx.arc(geo.cx, geo.cy, geo.R - 6, -Math.PI * 0.80, -Math.PI * 0.52)
+    ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.72)' : 'rgba(224, 242, 254, 0.36)'
+    ctx.lineWidth = 2.2
     ctx.lineCap = 'round'
     ctx.stroke()
     ctx.restore()
   }
 
-  // Active energy streams connecting working inside orbs to Chief center hub
   for (const orb of orbs) {
     if (orb.zone !== 'inside' || !orb.running) continue
     const b = bodiesMap.get(orb.uid)
     if (!b) continue
     ctx.save()
     ctx.setLineDash([4, 4])
-    ctx.lineDashOffset = -(tNow * 30)
-    ctx.lineWidth = 1.4
+    ctx.lineDashOffset = -(tNow * 24)
+    ctx.lineWidth = 1.3
     ctx.strokeStyle = orb.accent.dot
-    ctx.globalAlpha = 0.55
+    ctx.globalAlpha = 0.52
     ctx.beginPath()
     ctx.moveTo(geo.cx, geo.cy)
     ctx.lineTo(b.x, b.y)
-    ctx.stroke()
-    ctx.restore()
-  }
-
-  // Boundary magnetic fuse / lock block halo when dragging an orb near Bubble rim
-  if (drag && drag.moved && drag.uid) {
-    const b = bodiesMap.get(drag.uid)
-    const meta = orbs.find(o => o.uid === drag.uid)
-    if (b && meta && (meta.canJoin || meta.canLeave)) {
-      const dx = b.x - geo.cx
-      const dy = b.y - geo.cy
-      const dist = Math.hypot(dx, dy) || 0.001
-      if (Math.abs(dist - geo.R) < 48) {
-        const angle = Math.atan2(dy, dx)
-        ctx.save()
-        ctx.beginPath()
-        ctx.arc(geo.cx, geo.cy, geo.R + 1, angle - 0.36, angle + 0.36)
-        ctx.lineWidth = 4
-        ctx.lineCap = 'round'
-        ctx.strokeStyle = locked ? '#ef4444' : '#38bdf8'
-        ctx.stroke()
-        ctx.restore()
-      }
-    }
-  }
-
-  // Expanding bounce/splash ripples
-  for (const rp of ripples) {
-    ctx.save()
-    ctx.beginPath()
-    ctx.arc(rp.x, rp.y, rp.r, 0, Math.PI * 2)
-    ctx.strokeStyle = rp.color
-    ctx.globalAlpha = Math.max(0, rp.alpha)
-    ctx.lineWidth = 1.6
     ctx.stroke()
     ctx.restore()
   }
@@ -778,10 +672,9 @@ export function PeersTab({ view }) {
   const canvasRef = React.useRef(null)
   const bodiesRef = React.useRef(new Map())
   const nodeElsRef = React.useRef(new Map())
-  const ripplesRef = React.useRef([])
   const dragRef = React.useRef(null)
-  const tankSizeRef = React.useRef({ w: 540, h: 338 })
-  const latestSimRef = React.useRef({ orbs: [], locked: false, paused: false, hasOutside: false, tankHeight: 338 })
+  const tankSizeRef = React.useRef({ w: 540, h: 326 })
+  const latestSimRef = React.useRef({ orbs: [], locked: false, paused: false, hasOutside: false, tankHeight: 326 })
 
   React.useEffect(() => {
     if (!confirmStop) return undefined
@@ -795,20 +688,21 @@ export function PeersTab({ view }) {
     return () => clearTimeout(timer)
   }, [lockShake])
 
-  const hasOutside = standbySessions.length > 0 || availableHarnesses.length > 0
   const orbs = buildBubbleOrbs({
     peers,
     enrolledHarnesses,
     standbySessions,
     availableHarnesses,
+    catalogHarnesses,
     selfRootId,
     otherSessions,
     bubbleLocked,
   })
-  const tankHeight = orbs.length > 6 ? 372 : 338
+  const hasOutside = orbs.some(o => o.zone === 'outside')
+  const tankHeight = orbs.length > 6 ? 350 : 326
   const curW = (tankRef.current && tankRef.current.clientWidth) || tankSizeRef.current.w || 540
   const geoNow = computeTankGeometry(curW, tankHeight, hasOutside)
-  syncPhysicsBodies(bodiesRef.current, orbs, geoNow, ripplesRef.current)
+  syncPhysicsBodies(bodiesRef.current, orbs, geoNow)
   latestSimRef.current = {
     orbs,
     locked: bubbleLocked,
@@ -850,14 +744,12 @@ export function PeersTab({ view }) {
       tankSizeRef.current.w = w
       const geo = computeTankGeometry(w, sim.tankHeight, sim.hasOutside)
 
-      syncPhysicsBodies(bodiesRef.current, sim.orbs, geo, ripplesRef.current)
+      syncPhysicsBodies(bodiesRef.current, sim.orbs, geo)
       stepBubblePhysics(bodiesRef.current, sim.orbs, geo, {
         dt,
-        tNow,
         drag: dragRef.current,
         paused: sim.paused,
         locked: sim.locked,
-        ripples: ripplesRef.current,
       })
 
       for (const orb of sim.orbs) {
@@ -867,7 +759,7 @@ export function PeersTab({ view }) {
         const x0 = b.x - b.r
         const y0 = b.y - b.r
         const isDragging = Boolean(dragRef.current && dragRef.current.uid === orb.uid && dragRef.current.moved)
-        el.style.transform = `translate3d(${x0.toFixed(2)}px, ${y0.toFixed(2)}px, 0) scale(${b.sx.toFixed(3)}, ${b.sy.toFixed(3)})`
+        el.style.transform = `translate3d(${x0.toFixed(2)}px, ${y0.toFixed(2)}px, 0)`
         el.style.zIndex = isDragging ? '12' : (b.hovered ? '8' : (orb.zone === 'inside' ? '4' : '3'))
       }
 
@@ -889,9 +781,6 @@ export function PeersTab({ view }) {
         drawBubbleTankCanvas(ctx2d, dpr, geo, bodiesRef.current, sim.orbs, {
           tNow,
           locked: sim.locked,
-          drag: dragRef.current,
-          paused: sim.paused,
-          ripples: ripplesRef.current,
           isLight,
         })
       }
@@ -908,8 +797,6 @@ export function PeersTab({ view }) {
 
   const triggerLockedReject = (reasonHint) => {
     setLockShake(true)
-    const geo = computeTankGeometry(tankSizeRef.current.w, tankHeight, hasOutside)
-    pushRipple(ripplesRef.current, geo.cx, geo.cy, geo.R + 18, '#ef4444')
     patch({
       notice: reasonHint || bi(
         '🔒 协同水泡工作中已锁死结构，禁止拆解成员；请等待全员收工或点击「⏹ 急停解体」',
@@ -989,8 +876,8 @@ export function PeersTab({ view }) {
     if (!d.moved) return
     const nowT = performance.now()
     const dt = Math.max(0.008, (nowT - d.lastT) / 1000)
-    const rawVx = clampNum((px - d.lastX) / dt, -220, 220)
-    const rawVy = clampNum((py - d.lastY) / dt, -220, 220)
+    const rawVx = clampNum((px - d.lastX) / dt, -140, 140)
+    const rawVy = clampNum((py - d.lastY) / dt, -140, 140)
     d.vx = d.vx * 0.45 + rawVx * 0.55
     d.vy = d.vy * 0.45 + rawVy * 0.55
     d.lastX = px
@@ -1008,10 +895,6 @@ export function PeersTab({ view }) {
     const b = bodiesRef.current.get(orb.uid)
     if (!d.moved) {
       setSelectedUid(cur => (cur === orb.uid ? '' : orb.uid))
-      if (b) {
-        applySquash(b, 1, 0, 52)
-        pushRipple(ripplesRef.current, b.x, b.y, b.r + 22, orb.accent.dot)
-      }
       return
     }
     if (!b) return
@@ -1027,14 +910,11 @@ export function PeersTab({ view }) {
         const ny = dy / dist
         b.x = geo.cx + nx * (geo.R + b.r + 12)
         b.y = geo.cy + ny * (geo.R + b.r + 12)
-        b.vx = nx * 95
-        b.vy = ny * 95
-        applySquash(b, nx, ny, 75)
-        pushRipple(ripplesRef.current, geo.cx + nx * geo.R, geo.cy + ny * geo.R, 38, '#ef4444')
+        b.vx = nx * 42
+        b.vy = ny * 42
         triggerLockedReject()
         return
       }
-      pushRipple(ripplesRef.current, b.x, b.y, b.r + 36, '#38bdf8')
       performOrbJoin(orb)
       return
     }
@@ -1046,22 +926,17 @@ export function PeersTab({ view }) {
         const pullD = Math.max(geo.hubR + b.r + 6, geo.R - b.r - 8)
         b.x = geo.cx + nx * pullD
         b.y = geo.cy + ny * pullD
-        b.vx = -nx * 95
-        b.vy = -ny * 95
-        applySquash(b, nx, ny, 75)
-        pushRipple(ripplesRef.current, geo.cx + nx * geo.R, geo.cy + ny * geo.R, 38, '#ef4444')
+        b.vx = -nx * 42
+        b.vy = -ny * 42
         triggerLockedReject()
         return
       }
-      pushRipple(ripplesRef.current, b.x, b.y, b.r + 34, orb.accent.dot)
       performOrbLeave(orb)
       return
     }
 
-    // Same-zone playful sling
-    b.vx = clampNum(d.vx * 0.65, -135, 135)
-    b.vy = clampNum(d.vy * 0.65, -135, 135)
-    pushRipple(ripplesRef.current, b.x, b.y, b.r + 18, orb.accent.dot)
+    b.vx = clampNum(d.vx * 0.35, -36, 36)
+    b.vy = clampNum(d.vy * 0.35, -36, 36)
   }
 
   const selectedOrb = selectedUid ? orbs.find(o => o.uid === selectedUid) || null : null
@@ -1231,6 +1106,7 @@ export function PeersTab({ view }) {
                 'data-uid': orb.uid,
                 'data-zone': orb.zone,
                 'data-kind': orb.kind,
+                'data-installed': orb.installed ? '1' : '0',
                 'data-running': orb.running ? '1' : '0',
                 'data-selected': isSel ? '1' : '0',
                 title: `${orb.label}（${orb.kindName}）\n${orb.subText}`,
@@ -1351,7 +1227,7 @@ export function PeersTab({ view }) {
                         },
                       }, bi('@递话', '@Relay'))
                     : null,
-                  (selectedOrb.kind === 'harness' && selectedOrb.raw)
+                  (selectedOrb.kind === 'harness' && selectedOrb.installed && selectedOrb.raw)
                     ? h('button', {
                         type: 'button',
                         className: 'dnb-pill dnb-pill-accent',
@@ -1359,6 +1235,18 @@ export function PeersTab({ view }) {
                         style: { height: 21, padding: '0 7px', fontSize: 10.5 },
                         onClick: () => setDispatchTarget(d => (d === selectedOrb.raw.provider ? '' : selectedOrb.raw.provider)),
                       }, bi('⚡ 派活', '⚡ Run'))
+                    : null,
+                  selectedOrb.installCmd
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-pill',
+                        style: { height: 21, padding: '0 7px', fontSize: 10.5 },
+                        title: selectedOrb.installCmd,
+                        onClick: () => {
+                          try { navigator.clipboard?.writeText(selectedOrb.installCmd) } catch {}
+                          patch({ notice: bi('已复制安装命令：', 'Copied install command: ') + selectedOrb.installCmd })
+                        },
+                      }, bi('复制安装命令', 'Copy Install Cmd'))
                     : null,
                   selectedOrb.canJoin
                     ? h('button', {
