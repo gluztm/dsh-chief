@@ -79,6 +79,8 @@ import {
   listPeerDirectory,
   deliverCrossMessage,
   registerChiefDirectRequestHook,
+  computeBubbleState,
+  resolveExternalHarnessTarget,
 } from './chief-network.js'
 import {
   sanitizeConciseBriefText,
@@ -108,7 +110,7 @@ const ASK_CHIEF_SYSTEM = [
   '    "requestedActionSummary": "拟执行的核心动作简述"',
   '  },',
   '  "relays": [',
-  '    { "target": "成员 key 或名字（如 lead / 子代理名 / session-xxx / all）", "mode": "steer|followup|silent", "subject": "简短事由", "text": "替用户转化好的清晰可执行执行请求" }',
+  '    { "target": "成员 key 或名字（如 lead / 子代理名 / session-xxx / all / 或协同水泡中的外部工具 provider 如 claude-code、codex）", "mode": "steer|followup|silent", "subject": "简短事由", "text": "替用户转化好的清晰可执行执行请求" }',
   '  ],',
   '  "inquiries": [',
   '    { "target": "lead", "question": "缺情报时向主对话提出的优先问询（禁止凭空瞎猜）", "context": "简短问询背景" }',
@@ -178,6 +180,7 @@ const ASK_CHIEF_SYSTEM = [
   '',
   '宰相参谋与行事准则：',
   '- 【懒介入与主会话优先铁律（严禁抢活越俎代庖）】：即使你已拥有高权限，也必须遏制亲自写代码或跑项目命令的冲动！凡是修改项目源码、跑构建测试、长程勘探排障，只要主对话在线可用且用户没有明确指定“参谋长你亲自来做/别找主对话”，一律优先放在 `"relays"` 中以正式执行请求形式交由 `@lead` 动手执行！只有用户点名直办、纯参谋内务（看板/档案/记忆/边界/物理墙草案）或主对话失联卡死时才亲自调工具。',
+  '- 【协同水泡与外部工具（Claude Code / Codex）差遣】：当用户要求调用外部工具（如让 Claude Code 审查、让 Codex 实现/重构）或水泡内已编入外部工具时，直接在 `"relays"` 中填写 `target="claude-code"` 或 `target="codex"` 与清晰可执行任务（系统将按当前 L0–L3 权限门禁审批/执行、自动附带禁止红线与物理驻墙并锁死水泡防误拆，完工后自动把回执写回信箱与对话）。',
   '- 【优先问询渠道（缺信息就问主对话，严禁瞎猜）】：无论是在自主调配还是回答用户问题时，只要缺乏代码细节或实时状态确认，请输出 `"inquiries"` 向 `@lead` 发出优先问询，主对话会在不打断手头动作的情况下原路快答。',
   '- 【手搓动态物理墙与极低概率请示拆墙】：\n  1) 当用户让你“筑一堵物理墙/锁死某个目录或仓库/禁跑某个高危命令”时，直接将大白话诉求编译成 `"wallProposals"`（跨会话常驻设 `"scope": "global"`），呈交用户一键确认落锁；\n  2) **拆墙红线（极低触发）**：任何权限下（哪怕是 L3 最高权限）你都绝无权私拆或绕过物理驻墙！仅当主代理或子代理真实撞墙并确认无法绕过、向你上报阻断情况，且你独立复核确认确因该动态物理墙导致任务彻底无法推进、无合法替代路径时，才允许填入 `"wallRemovalProposals"` 向人类提交拆墙审批申请（硬安全内核规则永远不可申请拆除）；平时一切情形严禁主动填 `"wallRemovalProposals"`。',
   '- 【许愿框全权自治与三层档案隔离】：无论整理/分类/织钩/提炼档案入全局、`pin_to_desktop` 摆上认知桌面（2400 Tokens / 6 份上限）、`deliver_to_lead` 一次性向主对话递送关键档案、还是设定边界/重编任务、`effortOps` 调配主对话/子代理思考深度，只要符合当前权限，直接输出对应 JSON ops 执行到位。严禁触碰或读取冷藏档案柜（`precipitated` 100% 人类专属）；严禁越级让本局档案直接跳级沉淀，必须遵循 `本局 -> 全局 -> 冷藏` 梯度。',
@@ -1632,6 +1635,25 @@ export async function askOrCommandChief(deps, {
     t => t.kind === 'lead' || t.status === 'running' || !/^mnemon-review/i.test(String(t.name || t.handle || '')),
   )
   const hiddenIdleProbes = Math.max(0, directory.targets.length - meaningfulPeers.length)
+  const bubbleCtx = computeBubbleState(deps, rootId, loadChiefState(), directory)
+  const bubbleLines = []
+  if (bubbleCtx.enrolledHarnesses.length > 0 || bubbleCtx.availableHarnesses.length > 0) {
+    bubbleLines.push(
+      '',
+      '## 6.6 当前协同水泡编队与可用外部工具（可用 relays 的 target="claude-code"|"codex" 派单）',
+      `- 水泡结构锁状态: ${bubbleCtx.locked ? `已锁死 (${bubbleCtx.lockReason || '保护中'})` : '整备中（未锁死）'}`,
+    )
+    if (bubbleCtx.enrolledHarnesses.length > 0) {
+      bubbleLines.push(
+        ...bubbleCtx.enrolledHarnesses.map(h => `- [已入泡] provider="${h.provider}" | 名称="${h.label || h.provider}" | 通道=${h.transport || 'dsh-subagent'}${h.configLabel ? ` (${h.configLabel})` : ''} | 状态=${h.running ? '执行中' : (h.installed ? '待命可派单' : '未检测到本地/插件')}`),
+      )
+    }
+    if (bubbleCtx.availableHarnesses.length > 0) {
+      bubbleLines.push(
+        ...bubbleCtx.availableHarnesses.map(h => `- [本机待命可用] provider="${h.provider}" | 名称="${h.label || h.provider}" | 通道=${h.transport || 'dsh-subagent'}${h.configLabel ? ` (${h.configLabel})` : ''}（水泡未锁死时可直接用 relays 派单并自动入泡）`),
+      )
+    }
+  }
 
   const promptLines = [
     '## 1. 当前可通信成员名录 (Peers)',
@@ -1683,6 +1705,7 @@ export async function askOrCommandChief(deps, {
           ...peerProgress.map(p => `- 🌐 [${p.title}] ${p.objective ? `目标="${p.objective}" | ` : ''}${p.progressSummary || '暂无板卡进度'}${p.cursorStep ? ` | 当前="${p.cursorStep}"` : ''}`),
         ]
       : []),
+    ...bubbleLines,
     ...(view.mailbox.slice(-4).map(m => `- [信箱 ${m.from} → @${m.to}] ${clamp(m.text, 120)}`)),
     ...onDemandArchiveLines,
     ...flippedVaultLines,
@@ -2200,6 +2223,9 @@ export async function askOrCommandChief(deps, {
     if (!r || !r.text) continue
     const targetName = r.target || 'lead'
     const isLeadTarget = /^(?:lead|main|主对话)$/i.test(String(targetName).trim())
+    const extHarnessHit = !isLeadTarget
+      ? resolveExternalHarnessTarget(deps && deps.runtime, deps && deps.hostState, rootId, targetName)
+      : null
     const relayMode = ['steer', 'followup', 'silent'].includes(r.mode) ? r.mode : 'steer'
 
     const relayGuard = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: r.text, board })
@@ -2214,17 +2240,31 @@ export async function askOrCommandChief(deps, {
       if (relayGate.decision !== 'deny_policy_plugin') workflowBlockedNeedsElevation = true
       actionBadges.push(relayGate.badge || '🔒 权限禁调工作流')
       relayResults.push({ ok: false, target: targetName, deniedByMode: true, error: relayGate.error })
-      appendChiefAuditLog(rootId, { mode: permissionMode, stage: relayGate.decision === 'deny_policy_plugin' ? 'policy_plugin' : 'permission_gate', rule: relayGate.rule || relayGate.decision, decision: relayGate.decision, operation: isLeadTarget ? '调整主对话工作流' : '调整子代理工作流', target: String(targetName), reason: relayGate.error, outcome: 'denied', by: 'chief' })
+      appendChiefAuditLog(rootId, {
+        mode: permissionMode,
+        stage: relayGate.decision === 'deny_policy_plugin' ? 'policy_plugin' : 'permission_gate',
+        rule: relayGate.rule || relayGate.decision,
+        decision: relayGate.decision,
+        operation: isLeadTarget ? '调整主对话工作流' : (extHarnessHit ? '派单外部工具（独立进程）' : '调整子代理工作流'),
+        target: String(targetName),
+        reason: relayGate.error,
+        outcome: 'denied',
+        by: 'chief',
+      })
       continue
     }
 
     if (relayGate.decision === 'require_approval') {
       const apr = queueChiefApproval(rootId, {
         category: isLeadTarget ? 'main_workflow' : 'subagent_workflow',
-        operationLabel: isLeadTarget ? '调整主对话工作流（投递指令）' : '调整子代理工作流（投递指令）',
-        targetLabel: isLeadTarget ? '主对话 (@lead)' : `@${targetName}`,
-        reason: clamp(r.subject || '参谋建议向代理投递工作流指令', 140),
-        impact: isLeadTarget ? '将向主对话注入工作流指令并触发继续推进' : '将唤醒或引导子代理执行新任务指令',
+        operationLabel: isLeadTarget ? '调整主对话工作流（投递指令）' : (extHarnessHit ? '派单外部工具（独立进程）' : '调整子代理工作流（投递指令）'),
+        targetLabel: isLeadTarget ? '主对话 (@lead)' : (extHarnessHit ? `${extHarnessHit.label} (@${extHarnessHit.provider})` : `@${targetName}`),
+        reason: clamp(r.subject || (extHarnessHit ? `参谋建议向外部工具 ${extHarnessHit.label} 派发执行任务` : '参谋建议向代理投递工作流指令'), 140),
+        impact: isLeadTarget
+          ? '将向主对话注入工作流指令并触发继续推进'
+          : (extHarnessHit
+              ? '将启动外部工具独立进程执行任务，自动附带禁止红线与物理驻墙并锁死协同水泡'
+              : '将唤醒或引导子代理执行新任务指令'),
         preview: clamp(r.text, 240),
         kind: 'relay',
         capabilityScope: buildCapabilityScope({ kind: 'relay', tool: 'relay', target: targetName }),
@@ -2244,9 +2284,18 @@ export async function askOrCommandChief(deps, {
         by: 'chief',
       })
       if (apr) queuedApprovals.push(apr)
-      actionBadges.push(`🛡️ 待确认递话 → ${isLeadTarget ? '主对话' : targetName}`)
+      actionBadges.push(extHarnessHit ? `🛡️ 待确认外部派单 → ${extHarnessHit.label}` : `🛡️ 待确认递话 → ${isLeadTarget ? '主对话' : targetName}`)
       relayResults.push({ ok: false, pendingApproval: true, approvalId: apr && apr.id, target: targetName })
-      appendChiefAuditLog(rootId, { mode: permissionMode, stage: 'permission_gate', decision: 'pending_approval', operation: isLeadTarget ? '主对话工作流递话' : '子代理工作流递话', target: String(targetName), reason: clamp(r.subject || r.text, 120), outcome: 'pending', by: 'chief' })
+      appendChiefAuditLog(rootId, {
+        mode: permissionMode,
+        stage: 'permission_gate',
+        decision: 'pending_approval',
+        operation: isLeadTarget ? '主对话工作流递话' : (extHarnessHit ? '外部工具派单' : '子代理工作流递话'),
+        target: String(targetName),
+        reason: clamp(r.subject || r.text, 120),
+        outcome: 'pending',
+        by: 'chief',
+      })
       continue
     }
 
@@ -2277,8 +2326,23 @@ export async function askOrCommandChief(deps, {
       }
     }
     relayResults.push(deliv)
-    appendChiefAuditLog(rootId, { mode: permissionMode, stage: 'executor', decision: 'executed', operation: isLeadTarget ? '主对话递话' : '子代理递话', target: String(deliv.target || targetName), reason: clamp(r.subject || r.text, 120), outcome: deliv.ok ? 'ok' : 'error', by: 'chief' })
-    if (deliv.ok) actionBadges.push(`${relayMode === 'steer' ? '插话' : '递话'} → ${deliv.target}`)
+    appendChiefAuditLog(rootId, {
+      mode: permissionMode,
+      stage: 'executor',
+      decision: 'executed',
+      operation: isLeadTarget ? '主对话递话' : (extHarnessHit ? '外部工具派单' : '子代理递话'),
+      target: String(deliv.target || targetName),
+      reason: clamp(r.subject || r.text, 120),
+      outcome: deliv.ok ? 'ok' : 'error',
+      by: 'chief',
+    })
+    if (deliv.ok) {
+      actionBadges.push(
+        deliv.deliveryMode === 'bubble-harness'
+          ? `⚡ 外部派单 → ${deliv.target}`
+          : `${relayMode === 'steer' ? '插话' : '递话'} → ${deliv.target}`,
+      )
+    }
   }
 
   // Execute Chief-system ops (L1 Assistant+ required; strictly denied in L0 Advisor)
