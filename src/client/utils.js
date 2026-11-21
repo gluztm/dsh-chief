@@ -348,7 +348,7 @@ export function encodeImageForChief(file) {
     })
     if (normType === 'image/gif' || typeof Image === 'undefined') {
       const parsed = extractB64(rawUrl)
-      if (!parsed) return reject(new Error('图片编码解析失败'))
+      if (!parsed) return reject(new Error('解析图片失败'))
       return resolve(makeItem(parsed, rawUrl, file.name || 'image.gif'))
     }
     const img = new Image()
@@ -385,7 +385,7 @@ export function encodeImageForChief(file) {
     img.onerror = () => {
       const parsed = extractB64(rawUrl)
       if (parsed) resolve(makeItem(parsed, rawUrl))
-      else reject(new Error('无法加载图片文件'))
+      else reject(new Error('加载图片失败'))
     }
     img.src = rawUrl
   }))
@@ -394,7 +394,7 @@ export function encodeImageForChief(file) {
 export function truncationNotice(result) {
   const list = result && Array.isArray(result.truncated) ? result.truncated : []
   if (!list.length) return ''
-  return '内容过长已截断：' + list.map(i => i.field).join(', ')
+  return '内容太长，以下部分已省略：' + list.map(i => i.field).join(', ')
 }
 
 export function colorForRootSession(rootId, selfRootId = '') {

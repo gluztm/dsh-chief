@@ -135,14 +135,14 @@ function TaskInspectorDrawer({ board, task }) {
         { style: { display: 'flex', gap: 4 } },
         h('button', {
           className: 'dnb-icon-btn',
-          title: editing ? '取消编辑' : '编辑详情',
+          title: editing ? '取消修改' : '修改任务详情',
           'data-active': editing ? '1' : '0',
           onClick: () => editing ? patch({ editTaskId: '' }) : openTaskEditor(task),
         }, h(Icon, { name: 'edit', size: 13 })),
         h('button', {
           className: 'dnb-icon-btn',
           style: { color: '#ff453a' },
-          title: '删除节点',
+          title: '删掉这条任务',
           onClick: () => {
             patch({ selectedTaskId: '', editTaskId: '' })
             void act({ action: 'task.remove', id: task.id })
@@ -183,7 +183,7 @@ function TaskInspectorDrawer({ board, task }) {
         h('input', {
           className: 'dnb-input',
           style: { width: 108, height: 28, padding: '0 9px', borderRadius: 99, fontSize: 11.5 },
-          placeholder: '子代理名…',
+          placeholder: '填子代理名称…',
           value: dispatchAgent,
           onChange: e => setDispatchAgent(e.target.value),
         }),
@@ -193,8 +193,8 @@ function TaskInspectorDrawer({ board, task }) {
           value: dispatchProvider,
           onChange: e => setDispatchProvider(e.target.value),
         },
-          h('option', { value: 'spawn' }, '独立上下文'),
-          h('option', { value: 'fork' }, '继承上下文'),
+          h('option', { value: 'spawn' }, '新建空白对话'),
+          h('option', { value: 'fork' }, '带当前对话背景'),
         ),
         h('button', {
           className: 'dnb-primary-btn',
@@ -205,7 +205,7 @@ function TaskInspectorDrawer({ board, task }) {
           ? h('button', {
               className: 'dnb-pill',
               style: { height: 28 },
-              title: '忽略前置依赖直接启动',
+              title: '不等前面做完，直接开始',
               onClick: () => triggerDispatch(true),
             }, '强制')
           : null,
@@ -230,7 +230,7 @@ function TaskInspectorDrawer({ board, task }) {
         h('input', {
           className: 'dnb-input',
           style: { flex: 1, height: 28, padding: '0 10px', borderRadius: 99, fontSize: 11.5 },
-          placeholder: '补充执行指令（回车发送）…',
+          placeholder: '补充要求，按回车发给它…',
           value: dispatchPrompt,
           onChange: e => setDispatchPrompt(e.target.value),
           onKeyDown: e => {
@@ -254,7 +254,7 @@ function TaskInspectorDrawer({ board, task }) {
                 setDispatchPrompt('')
                 void act({ action: 'team.steer', id: task.id, agent: assignedName, message: msg })
               },
-            }, '引导')
+            }, '发过去')
           : null,
       ),
     ),
@@ -269,10 +269,10 @@ function TaskInspectorDrawer({ board, task }) {
         value: task.parentId || '',
         onChange: e => void act({ action: 'task.update', id: task.id, parentId: e.target.value }),
       },
-        h('option', { value: '' }, '顶层节点'),
+        h('option', { value: '' }, '最上层任务'),
         allTasks
           .filter(t => t.id !== task.id)
-          .map(t => h('option', { key: t.id, value: t.id }, '父级: ' + clampTitle(t.title, 10))),
+          .map(t => h('option', { key: t.id, value: t.id }, '属于: ' + clampTitle(t.title, 10))),
       ),
       (board && Array.isArray(board.plan) && board.plan.length > 0)
         ? h(
@@ -281,28 +281,28 @@ function TaskInspectorDrawer({ board, task }) {
             h('select', {
               className: 'dnb-pill',
               style: { height: 24, padding: '0 8px', maxWidth: 146 },
-              title: '该任务所属的推进步骤',
+              title: '这条任务属于哪一步',
               value: task.planStepId || '',
               onChange: e => {
                 patch({ editTaskPlanStepId: e.target.value })
                 void act({ action: 'task.update', id: task.id, planStepId: e.target.value })
               },
             },
-              h('option', { value: '' }, '步骤: 自动归位'),
+              h('option', { value: '' }, '步骤: 自动匹配'),
               board.plan.map((s, idx) => h('option', { key: s.id, value: s.id }, `步骤 ${idx + 1}: ${clampTitle(s.text, 9)}`)),
             ),
             h('select', {
               className: 'dnb-pill',
               style: { height: 24, padding: '0 8px', maxWidth: 146 },
-              title: '子代理或任务完成后回指的目标步骤',
+              title: '做完后把结果交回哪一步',
               value: task.targetPlanStepId || '',
               onChange: e => {
                 patch({ editTaskTargetPlanStepId: e.target.value })
                 void act({ action: 'task.update', id: task.id, targetPlanStepId: e.target.value })
               },
             },
-              h('option', { value: '' }, '回指: 同归属步'),
-              board.plan.map((s, idx) => h('option', { key: s.id, value: s.id }, `回指 ${idx + 1}: ${clampTitle(s.text, 9)}`)),
+              h('option', { value: '' }, '交回: 当前这一步'),
+              board.plan.map((s, idx) => h('option', { key: s.id, value: s.id }, `交回 ${idx + 1}: ${clampTitle(s.text, 9)}`)),
             ),
           )
         : null,
@@ -333,7 +333,7 @@ function TaskInspectorDrawer({ board, task }) {
         value: '',
         onChange: e => addDep(e.target.value),
       },
-        h('option', { value: '' }, '+ 前置依赖'),
+        h('option', { value: '' }, '+ 先等谁做完'),
         allTasks
           .filter(t => t.id !== task.id && !(task.blockedBy || []).includes(t.id))
           .map(t => h('option', { key: t.id, value: t.id }, clampTitle(t.title, 11))),
@@ -353,13 +353,13 @@ function TaskInspectorDrawer({ board, task }) {
           }),
           h('input', {
             className: 'dnb-input',
-            placeholder: '意图 (Intent)',
+            placeholder: '为什么要做（目的）',
             value: store.editTaskIntent,
             onChange: e => patch({ editTaskIntent: e.target.value }),
           }),
           h('input', {
             className: 'dnb-input',
-            placeholder: '验收依据 (Evidence)',
+            placeholder: '怎么才算做完（检查标准）',
             value: store.editTaskEvidence,
             onChange: e => patch({ editTaskEvidence: e.target.value }),
           }),
@@ -379,7 +379,7 @@ function TaskInspectorDrawer({ board, task }) {
       : h(
           'div',
           { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', display: 'flex', flexDirection: 'column', gap: 3 } },
-          task.intent ? h('div', null, '意图 · ' + task.intent) : null,
+          task.intent ? h('div', null, '目的 · ' + task.intent) : null,
           task.evidence ? h('div', { style: { color: '#30d158' } }, '结论 · ' + task.evidence) : null,
           task.note ? h('div', null, task.note) : null,
         ),
@@ -410,7 +410,7 @@ function TaskInspectorDrawer({ board, task }) {
                 h('input', {
                   className: 'dnb-input',
                   style: { height: 26, fontSize: 11.5 },
-                  placeholder: '添加待验证假设…',
+                  placeholder: '加一条要确认的问题…',
                   value: newAssumption,
                   onChange: e => setNewAssumption(e.target.value),
                   onKeyDown: e => { if (e.key === 'Enter') addAssumption() },
@@ -476,7 +476,7 @@ function AddTask({ board }) {
       h('input', {
         className: 'dnb-input',
         style: { borderRadius: 99, paddingLeft: 13, height: 32, flex: 1 },
-        placeholder: '添加新任务或子目标（回车直接创建）…',
+        placeholder: '写下新任务，按回车加上…',
         value: text,
         onChange: e => setText(e.target.value),
         onKeyDown: e => { if (e.key === 'Enter') submit() },
@@ -497,10 +497,10 @@ function AddTask({ board }) {
             className: 'dnb-pill',
             style: { flex: '1 1 112px', height: 26, padding: '0 8px', fontSize: 11 },
             value: planStepId,
-            title: '选择挂入哪个顺序推进步骤',
+            title: '放到哪一步下面',
             onChange: e => setPlanStepId(e.target.value),
           },
-            h('option', { value: '' }, '步骤：自动归入当前步'),
+            h('option', { value: '' }, '步骤：自动放到当前步'),
             planSteps.map((s, idx) => h('option', { key: s.id, value: s.id }, `步骤 ${idx + 1} · ${clampTitle(s.text, 12)}`)),
           )
         : null,
@@ -508,20 +508,20 @@ function AddTask({ board }) {
         className: 'dnb-pill',
         style: { flex: '1 1 112px', height: 26, padding: '0 8px', fontSize: 11 },
         value: parentId,
-        title: '选择挂载在哪个父级任务之下',
+        title: '作为哪个大任务的子任务',
         onChange: e => setParentId(e.target.value),
       },
-        h('option', { value: '' }, '父节点：顶层直属'),
-        allTasks.map(t => h('option', { key: t.id, value: t.id }, '父级 · ' + clampTitle(t.title, 13))),
+        h('option', { value: '' }, '父级：最上层任务'),
+        allTasks.map(t => h('option', { key: t.id, value: t.id }, '属于 · ' + clampTitle(t.title, 13))),
       ),
       h('select', {
         className: 'dnb-pill',
         style: { flex: '1 1 112px', height: 26, padding: '0 8px', fontSize: 11 },
         value: blockedById,
-        title: '选择需要先完成的前置依赖任务',
+        title: '选一个要先做完的任务',
         onChange: e => setBlockedById(e.target.value),
       },
-        h('option', { value: '' }, '前置依赖：无'),
+        h('option', { value: '' }, '先等谁：不用等'),
         openTasks.map(t => h('option', { key: t.id, value: t.id }, '等待 · ' + clampTitle(t.title, 13))),
       ),
       knownAgents.length > 0
@@ -529,19 +529,19 @@ function AddTask({ board }) {
             className: 'dnb-pill',
             style: { flex: '1 1 110px', height: 26, padding: '0 8px', fontSize: 11 },
             value: ownerPick,
-            title: '直接指派给现有子代理或自定义子代理',
+            title: '交给哪个子代理去做',
             onChange: e => setOwnerPick(e.target.value),
           },
-            h('option', { value: '' }, '指派：@主代理'),
-            knownAgents.map(a => h('option', { key: a.name, value: a.name }, '指派：@' + shortAgentName(a.name, true))),
-            h('option', { value: '__custom__' }, '+ 自定义新子代理…'),
+            h('option', { value: '' }, '交给：@主对话'),
+            knownAgents.map(a => h('option', { key: a.name, value: a.name }, '交给：@' + shortAgentName(a.name, true))),
+            h('option', { value: '__custom__' }, '+ 新建子代理…'),
           )
         : null,
       (knownAgents.length === 0 || ownerPick === '__custom__')
         ? h('input', {
             className: 'dnb-input',
             style: { flex: '1 1 100px', minWidth: 96, height: 26, borderRadius: 99, padding: '0 10px', fontSize: 11 },
-            placeholder: '@指派子代理（选填）',
+            placeholder: '@交给哪个子代理（选填）',
             value: knownAgents.length === 0 ? ownerPick : customOwner,
             onChange: e => knownAgents.length === 0 ? setOwnerPick(e.target.value) : setCustomOwner(e.target.value),
             onKeyDown: e => { if (e.key === 'Enter') submit() },
@@ -600,7 +600,7 @@ function TaskRow({ task, board, depth = 0 }) {
                   background: isDoing ? 'rgba(10, 132, 255, 0.10)' : isBlocked ? STATUS_BG.blocked : 'transparent',
                 }),
           },
-          title: '切换状态为 ' + STATUS_LABEL[next],
+          title: '标为 ' + STATUS_LABEL[next],
           onClick: e => {
             e.stopPropagation()
             void act({ action: 'task.update', id: task.id, status: next })
@@ -643,13 +643,13 @@ function TaskRow({ task, board, depth = 0 }) {
             : null,
         ),
         task.intent
-          ? h('div', { style: { fontSize: 11, color: 'var(--dnb-text-2)', marginTop: 2 } }, '意图 · ' + task.intent)
+          ? h('div', { style: { fontSize: 11, color: 'var(--dnb-text-2)', marginTop: 2 } }, '目的 · ' + task.intent)
           : null,
         task.evidence
           ? h('div', { style: { fontSize: 11, color: '#30d158', marginTop: 2 } }, '结论 · ' + task.evidence)
           : null,
         (Array.isArray(task.blockedBy) && task.blockedBy.length && !isDone)
-          ? h('div', { style: { fontSize: 11, color: '#fbbf24', marginTop: 2 } }, '等待前置 ' + task.blockedBy.length + ' 项')
+          ? h('div', { style: { fontSize: 11, color: '#fbbf24', marginTop: 2 } }, '先等 ' + task.blockedBy.length + ' 项做完')
           : null,
       ),
       h(StatusBadge, { status: task.status }),
@@ -680,12 +680,12 @@ function TaskRow({ task, board, depth = 0 }) {
         h('button', {
           className: 'dnb-pyr-act-btn',
           'data-accent': '1',
-          title: '让模型用大白话解释这条任务是什么意思、为什么需要这一步',
+          title: '用大白话解释这一步',
           onClick: e => { e.stopPropagation(); explainTaskMeaning(task, board) },
         }, h(Icon, { name: 'sparkles', size: 11 }), '解释'),
         h('button', {
           className: 'dnb-pyr-act-btn',
-          title: '派发或唤醒子代理执行此任务',
+          title: '让子代理开始或继续做这件事',
           onClick: e => {
             e.stopPropagation()
             void act({
@@ -697,9 +697,9 @@ function TaskRow({ task, board, depth = 0 }) {
         }, h(Icon, { name: 'play', size: 10.5 }), isDoing ? '唤醒' : '派发'),
         h('button', {
           className: 'dnb-pyr-act-btn',
-          title: '在金字塔树中框选高亮负责推进此任务的代理',
+          title: '在组织树里高亮负责的代理',
           onClick: e => { e.stopPropagation(); focusObjectiveInPyramid(isFocused ? '' : task.id) },
-        }, h(Icon, { name: 'target', size: 11 }), isFocused ? '取消框选' : '框选'),
+        }, h(Icon, { name: 'target', size: 11 }), isFocused ? '取消高亮' : '高亮'),
         h('button', {
           className: 'dnb-pyr-act-btn',
           onClick: e => {
@@ -1113,8 +1113,8 @@ export function TasksTab({ board }) {
         const maxY = Math.max(...framedNodes.map(n => n.y + n.h)) + 12
         const isBlockedFocus = focusedTask.status === 'blocked'
         const agentCount = framedNodes.filter(n => n.kind === 'agent').length
-        const badgeLabel = (isBlockedFocus ? '⚠ 受阻关联 · ' : '🎯 正在推进 · ')
-          + (agentCount > 0 ? `${agentCount} 名子代理` : '主代理直管')
+        const badgeLabel = (isBlockedFocus ? '⚠ 卡住了 · ' : '🎯 进行中 · ')
+          + (agentCount > 0 ? `${agentCount} 个子代理` : '主对话自己在做')
           + ' ▸ ' + clampTitle(focusedTask.title || focusedTask.id, 12)
         spotlight = {
           x: minX,
@@ -1194,7 +1194,7 @@ export function TasksTab({ board }) {
   const triggerAiPlanGraph = () => {
     const goal = (board && board.objective ? `针对「${board.objective.slice(0, 80)}」，` : '')
     const sent = sendToComposer(goal + '请先调用 chief_board 的 plan.set 定好一二三四五顺序推进步骤，再用 graph.plan（填入对应 planStepId 与可选 targetPlanStepId）和 task.dispatch 调度子代理支线推进。')
-    patch({ notice: sent || '请在对话中让模型规划流程任务图' })
+    patch({ notice: sent || '请在主对话里让 AI 帮你拆出步骤' })
   }
 
   /* ---------------- Expandable Attention-First Organization Tree ---------------- */
@@ -1263,7 +1263,7 @@ export function TasksTab({ board }) {
                   h(Icon, { name: 'check', size: 11, style: { color: '#22c55e' } }),
                   bi(`已完成 ${doneItems.length} 项任务`, `${doneItems.length} done tasks`),
                 ),
-                h('span', { className: 'dnb-flow-done-fold-hint' }, doneExpanded ? bi('收起 ▴', 'Fold ▴') : bi('拉起 ▾', 'Pull ▾')),
+                h('span', { className: 'dnb-flow-done-fold-hint' }, doneExpanded ? bi('收起 ▴', 'Hide ▴') : bi('展开 ▾', 'Show ▾')),
               ),
               doneExpanded ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 5 } }, doneItems.map(wrapTaskItem)) : null,
             )
@@ -1341,7 +1341,7 @@ export function TasksTab({ board }) {
           {
             className: 'dnb-pyr-node-head',
             onClick: handleToggleDetail,
-            title: detailOpen ? '点击收起详情' : '点击拉起任务详情与操作',
+            title: detailOpen ? '收起详情' : '展开详情和操作',
           },
           kids.length > 0
             ? h('button', {
@@ -1367,7 +1367,7 @@ export function TasksTab({ board }) {
               style: isDone
                 ? { width: 16, height: 16, background: '#22c55e', borderColor: '#22c55e', color: '#fff', flexShrink: 0 }
                 : { width: 16, height: 16, borderColor: STATUS_HEX[task.status] || STATUS_HEX.todo, flexShrink: 0 },
-              title: '点击切换为 ' + (STATUS_LABEL[nextStatus] || nextStatus),
+              title: '标为 ' + (STATUS_LABEL[nextStatus] || nextStatus),
               onClick: e => {
                 e.stopPropagation()
                 void act({ action: 'task.update', id: task.id, status: nextStatus })
@@ -1397,13 +1397,13 @@ export function TasksTab({ board }) {
             ? h('span', {
                 className: 'dnb-tag',
                 style: { fontSize: 9.5, background: 'rgba(245, 158, 11, 0.16)', color: '#fbbf24', flexShrink: 0 },
-                title: '存在未完成前置依赖',
+                title: '还有前面没做完的任务在等',
               }, `⏳${unresolvedDeps.length}`)
             : null,
           kids.length > 0
             ? h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, bi(`${kids.length}子项`, `${kids.length} sub`))
             : null,
-          h('span', { className: 'dnb-pyr-detail-pill' }, detailOpen ? bi('收起 ▴', 'Fold ▴') : bi('详情 ▾', 'Details ▾')),
+          h('span', { className: 'dnb-pyr-detail-pill' }, detailOpen ? bi('收起 ▴', 'Hide ▴') : bi('详情 ▾', 'Details ▾')),
         ),
 
         // Expanded Pull-Open Detail Drawer (hidden by default!)
@@ -1427,18 +1427,18 @@ export function TasksTab({ board }) {
                               key: d.id,
                               className: 'dnb-tag',
                               style: { background: 'rgba(245, 158, 11, 0.16)', color: '#fbbf24', fontSize: 10.5 },
-                            }, '⏳ 等待前置：' + clampTitle(d.title || d.id, 14)),
+                            }, '⏳ 先等做完：' + clampTitle(d.title || d.id, 14)),
                           ),
                           doneDeps.map(d =>
                             h('span', {
                               key: d.id,
                               className: 'dnb-tag',
                               style: { background: STATUS_BG.done, color: '#30d158', fontSize: 10.5 },
-                            }, '✓ 前置就绪：' + clampTitle(d.title || d.id, 12)),
+                            }, '✓ 已准备好：' + clampTitle(d.title || d.id, 12)),
                           ),
                         )
                       : null,
-                    task.intent ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, '意图 · ' + task.intent) : null,
+                    task.intent ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, '目的 · ' + task.intent) : null,
                     task.evidence ? h('div', { style: { fontSize: 11.5, color: '#30d158', lineHeight: 1.42, wordBreak: 'break-word' } }, '结论 · ' + task.evidence) : null,
                     task.note ? h('div', { style: { fontSize: 11.5, color: isBlocked ? '#ff6961' : 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, task.note) : null,
                     Array.isArray(task.assumptions) && task.assumptions.length > 0
@@ -1496,13 +1496,13 @@ export function TasksTab({ board }) {
                   type: 'button',
                   className: 'dnb-pyr-act-btn',
                   'data-accent': '1',
-                  title: '让模型用通俗大白话解释这条任务',
+                  title: '用大白话解释这条任务',
                   onClick: () => explainTaskMeaning(task, board),
                 }, h(Icon, { name: 'sparkles', size: 11 }), '解释'),
                 h('button', {
                   type: 'button',
                   className: 'dnb-pyr-act-btn',
-                  title: '派发或唤醒子代理推进此任务',
+                  title: '让子代理开始或继续做这件事',
                   onClick: () => void act({
                     action: 'task.dispatch',
                     id: task.id,
@@ -1521,7 +1521,7 @@ export function TasksTab({ board }) {
                   ? h('button', {
                       type: 'button',
                       className: 'dnb-pyr-act-btn',
-                      onClick: () => { if (!openSubagentChat(matchedAgent)) patch({ notice: '该子代理暂无独立会话面板' }) },
+                      onClick: () => { if (!openSubagentChat(matchedAgent)) patch({ notice: '这个子代理没有单独的聊天窗口' }) },
                     }, h(Icon, { name: 'chat', size: 11 }), '对话')
                   : null,
                 h('button', {
@@ -1529,7 +1529,7 @@ export function TasksTab({ board }) {
                   className: 'dnb-pyr-act-btn',
                   style: isFocusedTarget ? { borderColor: '#409cff', color: '#409cff', background: 'rgba(10,132,255,0.14)' } : undefined,
                   onClick: () => focusObjectiveInPyramid(isFocusedTarget ? '' : task.id),
-                }, h(Icon, { name: 'target', size: 11 }), isFocusedTarget ? '已框选' : '框选'),
+                }, h(Icon, { name: 'target', size: 11 }), isFocusedTarget ? '已高亮' : '高亮'),
                 h('button', {
                   type: 'button',
                   className: 'dnb-pyr-act-btn',
@@ -1581,7 +1581,7 @@ export function TasksTab({ board }) {
     const directTasks = tasksByAgent.get(agentObj.name) || []
     const totalKids = subAgents.length + directTasks.length
     const tierLabel = tier === 1 ? '一级代理' : `${tier}级代理`
-    const desc = agentObj.taskTitle || agentObj.description || (isRunning ? '正在推进分配任务…' : (directTasks.length ? `挂载 ${directTasks.length} 项任务` : '待命 / 已完成回报'))
+    const desc = agentObj.taskTitle || agentObj.description || (isRunning ? '正在干活…' : (directTasks.length ? `手头 ${directTasks.length} 项任务` : '空闲 / 已完成'))
 
     const focusTone = isAgentFocused
       ? (focusedTask && focusedTask.status === 'blocked' ? 'blocked' : 'doing')
@@ -1617,14 +1617,14 @@ export function TasksTab({ board }) {
           {
             className: 'dnb-pyr-node-head',
             onClick: () => togglePyrDetail(nodeKey),
-            title: detailOpen ? '点击收起代理操作' : '点击拉起代理详情与指令按钮',
+            title: detailOpen ? '收起操作' : '展开详情和操作',
           },
           totalKids > 0
             ? h('button', {
                 type: 'button',
                 className: 'dnb-flow-mini-btn',
                 style: { width: 18, height: 18, flexShrink: 0 },
-                title: childrenOpen ? '收起下级子代理与任务' : `展开 ${totalKids} 个下级子节点`,
+                title: childrenOpen ? '收起下面负责的任务' : `展开 ${totalKids} 个下级任务`,
                 onClick: e => {
                   e.stopPropagation()
                   togglePyrNode(nodeKey)
@@ -1659,7 +1659,7 @@ export function TasksTab({ board }) {
           !detailOpen && desc
             ? h('span', { className: 'dnb-acc-preview', style: { fontSize: 11 } }, desc)
             : null,
-          h('span', { className: 'dnb-pyr-detail-pill' }, detailOpen ? bi('收起 ▴', 'Fold ▴') : bi('详情 ▾', 'Details ▾')),
+          h('span', { className: 'dnb-pyr-detail-pill' }, detailOpen ? bi('收起 ▴', 'Hide ▴') : bi('详情 ▾', 'Details ▾')),
         ),
 
         // Expanded Pull-Open Agent Details & Action Strip
@@ -1678,21 +1678,21 @@ export function TasksTab({ board }) {
                       type: 'button',
                       className: 'dnb-pyr-act-btn',
                       'data-accent': '1',
-                      title: bi('在分屏打开该子代理独立会话视图', 'Open split pane for subagent'),
+                      title: bi('分屏打开这个子代理的聊天窗口', 'Open subagent chat in split view'),
                       onClick: () => {
-                        if (!openSubagentChat(agentObj)) patch({ notice: bi('该子代理暂无独立会话视图', 'No dedicated view for this subagent') })
+                        if (!openSubagentChat(agentObj)) patch({ notice: bi('这个子代理没有单独的聊天窗口', 'No dedicated chat for this subagent') })
                       },
                     }, h(Icon, { name: 'chat', size: 11 }), bi('分屏对话', 'Split Chat'))
                   : null,
                 h('button', {
                   type: 'button',
                   className: 'dnb-pyr-act-btn',
-                  title: bi('锁定底部参谋长输入栏直接给该子代理递话或插话', 'Lock bottom input to steer/relay to this subagent'),
+                  title: bi('选中它，在底栏输入框直接发消息', 'Target this subagent in bottom input'),
                   onClick: () => {
                     patch({
                       secTarget: agentObj.name,
                       secMode: isRunning ? 'steer' : 'followup',
-                      notice: bi('已在下方锁定 @', 'Locked target @') + shortAgentName(agentObj.name, true) + bi('，输入指令回车即达', ', type instruction & Enter'),
+                      notice: bi('已选中 @', 'Selected @') + shortAgentName(agentObj.name, true) + bi('，在下面输入回车发送', ', type below and press Enter'),
                     })
                     focusSecInput()
                   },
@@ -1808,7 +1808,7 @@ export function TasksTab({ board }) {
             ? h(
                 'div',
                 { className: 'dnb-pyr-spot-tag', 'data-blocked': spotTone === 'blocked' ? '1' : '0' },
-                spotTone === 'blocked' ? '⚠ 受阻关联代理 · @' + shortAgentName(ag.name, true) : '🎯 正在推进 · @' + shortAgentName(ag.name, true),
+                spotTone === 'blocked' ? '⚠ 卡在这个代理 · @' + shortAgentName(ag.name, true) : '🎯 正在做 · @' + shortAgentName(ag.name, true),
               )
             : null,
           renderGrandAgentSubtree(ag, 1, visitedAgents, visitedTaskIds),
@@ -1848,7 +1848,7 @@ export function TasksTab({ board }) {
                   type: 'button',
                   className: 'dnb-flow-mini-btn',
                   style: { width: 18, height: 18, flexShrink: 0 },
-                  title: groupOpen ? '收起直管任务' : `展开 ${leadDirectRoots.length} 项直管任务`,
+                  title: groupOpen ? '收起主对话任务' : `展开 ${leadDirectRoots.length} 项主对话任务`,
                   onClick: e => {
                     e.stopPropagation()
                     togglePyrNode(groupKey)
@@ -1859,9 +1859,9 @@ export function TasksTab({ board }) {
                   style: { transform: groupOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' },
                 })),
                 h(Icon, { name: 'agentLead', size: 12, style: { color: '#60a5fa', flexShrink: 0 } }),
-                h('span', { style: { fontWeight: 700, fontSize: 12, color: 'var(--dnb-text)' } }, bi('主代理直管任务', 'Lead Direct Tasks')),
+                h('span', { style: { fontWeight: 700, fontSize: 12, color: 'var(--dnb-text)' } }, bi('主对话自己做的任务', 'Main Chat Tasks')),
                 h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, bi(`${leadDirectRoots.length} 项`, `${leadDirectRoots.length}`)),
-                h('span', { className: 'dnb-pyr-detail-pill' }, groupDetailOpen ? bi('收起 ▴', 'Fold ▴') : bi('操作 ▾', 'Actions ▾')),
+                h('span', { className: 'dnb-pyr-detail-pill' }, groupDetailOpen ? bi('收起 ▴', 'Hide ▴') : bi('操作 ▾', 'Actions ▾')),
               ),
               groupDetailOpen
                 ? h(
@@ -1874,7 +1874,7 @@ export function TasksTab({ board }) {
                         type: 'button',
                         className: 'dnb-pyr-act-btn',
                         onClick: () => {
-                          patch({ secTarget: 'lead', secMode: 'steer', notice: bi('已在下方锁定 @主对话', 'Locked target @Lead') })
+                          patch({ secTarget: 'lead', secMode: 'steer', notice: bi('已选中 @主对话，在下面发消息', 'Selected @Lead') })
                           focusSecInput()
                         },
                       }, h(Icon, { name: 'send', size: 10.5 }), bi('@主对话', '@Lead')),
@@ -1936,7 +1936,7 @@ export function TasksTab({ board }) {
           'data-spotlight': apexSpotlightTone || undefined,
           style: treeItems.length > 0 ? { cursor: 'pointer' } : undefined,
           title: treeItems.length > 0
-            ? (leadOpen ? bi('点击收起主代理下级任务与子代理', 'Collapse Lead tasks & subagents') : bi('点击展开主代理下级任务与子代理', 'Expand Lead tasks & subagents'))
+            ? (leadOpen ? bi('收起下面的子代理和任务', 'Collapse tasks & subagents') : bi('展开下面的子代理和任务', 'Expand tasks & subagents'))
             : undefined,
           onClick: treeItems.length > 0 ? toggleLeadOpen : undefined,
         },
@@ -1951,7 +1951,7 @@ export function TasksTab({ board }) {
                   type: 'button',
                   className: 'dnb-flow-mini-btn',
                   style: { width: 18, height: 18, flexShrink: 0 },
-                  title: leadOpen ? bi('收起组织树下级节点', 'Collapse org tree children') : bi('展开组织树下级节点', 'Expand org tree children'),
+                  title: leadOpen ? bi('收起组织树下一级', 'Collapse org tree') : bi('展开组织树下一级', 'Expand org tree'),
                   onClick: e => {
                     e.stopPropagation()
                     toggleLeadOpen()
@@ -1980,13 +1980,13 @@ export function TasksTab({ board }) {
               ? h('span', { className: 'dnb-acc-count', style: { color: '#409cff' } }, bi(`${runningKidsCount} 运行`, `${runningKidsCount} active`))
               : null,
             doingTotal > 0
-              ? h('span', { className: 'dnb-acc-count', style: { color: '#409cff' } }, bi(`${doingTotal} 推进`, `${doingTotal} doing`))
+              ? h('span', { className: 'dnb-acc-count', style: { color: '#409cff' } }, bi(`${doingTotal} 进行中`, `${doingTotal} doing`))
               : null,
             blockedTotal > 0
-              ? h('span', { className: 'dnb-acc-count', style: { color: '#ff453a' } }, bi(`${blockedTotal} 受阻`, `${blockedTotal} blocked`))
+              ? h('span', { className: 'dnb-acc-count', style: { color: '#ff453a' } }, bi(`${blockedTotal} 卡住`, `${blockedTotal} blocked`))
               : null,
             doneTotal > 0
-              ? h('span', { className: 'dnb-acc-count', style: { color: '#30d158' } }, bi(`${doneTotal}/${allTasks.length} 完`, `${doneTotal}/${allTasks.length} done`))
+              ? h('span', { className: 'dnb-acc-count', style: { color: '#30d158' } }, bi(`${doneTotal}/${allTasks.length} 完成`, `${doneTotal}/${allTasks.length} done`))
               : null,
           ),
           h(
@@ -1997,14 +1997,14 @@ export function TasksTab({ board }) {
               className: 'dnb-mini-btn',
               'data-tone': 'accent',
               style: { height: 22, padding: '0 7px', fontSize: 10.5 },
-              title: bi('让主对话模型将目标拆解为任务图并调度子代理', 'Ask Lead model to decompose objective & dispatch subagents'),
+              title: bi('让主对话把目标拆成步骤，分给子代理做', 'Break goal into steps and assign subagents'),
               onClick: e => {
                 e.stopPropagation()
                 triggerAiPlanGraph()
               },
             }, h(Icon, { name: 'sparkles', size: 10.5 }), bi('拆解', 'Plan')),
             treeItems.length > 0
-              ? h('span', { className: 'dnb-acc-pull-hint' }, leadOpen ? bi('收起 ▴', 'Fold ▴') : bi('拉起 ▾', 'Pull ▾'))
+              ? h('span', { className: 'dnb-acc-pull-hint' }, leadOpen ? bi('收起 ▴', 'Hide ▴') : bi('展开 ▾', 'Show ▾'))
               : null,
           ),
         ),
@@ -2285,13 +2285,13 @@ export function TasksTab({ board }) {
           fill: 'var(--dnb-text-2, #aeaeb2)',
           fontSize: 11.5,
           fontWeight: 600,
-        }, `+${node.hiddenAgents.length} 名空闲子代理`),
+        }, `+${node.hiddenAgents.length} 个空闲助手`),
         h('text', {
           x: x + w / 2, y: y + 35,
           textAnchor: 'middle',
           fill: 'var(--dnb-accent, #0a84ff)',
           fontSize: 10,
-        }, '点击展开全部'),
+        }, '点这里展开'),
       )
     }
 
@@ -2306,7 +2306,7 @@ export function TasksTab({ board }) {
         : isRunning
           ? '#0a84ff'
           : 'var(--dnb-border-strong, rgba(140,140,150,0.4))'
-      const desc = ag.taskTitle || ag.description || (isRunning ? '正在执行任务…' : '待命 / 已完成')
+      const desc = ag.taskTitle || ag.description || (isRunning ? '正在干活…' : '空闲 / 已完成')
 
       return h(
         'g',
@@ -2590,8 +2590,8 @@ export function TasksTab({ board }) {
       open: !topoCollapsed,
       onToggle: () => patch({ topoSectionCollapsed: !topoCollapsed }),
       className: 'dnb-topo-card',
-      title: bi('可视化工作拓扑', 'Work Topology'),
-      headTitle: topoCollapsed ? bi('点击拉起可视化工作拓扑（流程画布 / 组织树）', 'Expand work topology (Flow Canvas / Org Tree)') : bi('点击收起可视化工作拓扑', 'Collapse work topology'),
+      title: bi('任务关系图', 'Work Map'),
+      headTitle: topoCollapsed ? bi('展开任务关系图（流程画布 / 组织树）', 'Expand work map (Flow Canvas / Org Tree)') : bi('收起任务关系图', 'Collapse work map'),
       headerExtra: flowStages.length > 0
         ? h(
             'div',
@@ -2609,7 +2609,7 @@ export function TasksTab({ board }) {
                     type: 'button',
                     className: 'dnb-acc-mini-mile',
                     'data-status': st.status,
-                    title: bi(`步骤 ${st.index}: ${st.title}（点击定位到下方任务板）`, `Step ${st.index}: ${st.title} (jump to board)`),
+                    title: bi(`步骤 ${st.index}: ${st.title}（跳到对应任务）`, `Step ${st.index}: ${st.title} (jump to task)`),
                     onClick: () => jumpToBoardStage(st.id),
                   },
                   st.status === 'done' ? h(Icon, { name: 'check', size: 9 }) : String(st.index),
@@ -2626,7 +2626,7 @@ export function TasksTab({ board }) {
         : null,
       count: flowStages.length > 0 ? bi(`${flowStats.doneStages || 0}/${flowStats.totalStages || flowStages.length} 步`, `${flowStats.doneStages || 0}/${flowStats.totalStages || flowStages.length} steps`) : '',
       badges: runningAgentsCount > 0
-        ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'accent' }, bi(`${runningAgentsCount} 代理`, `${runningAgentsCount} active`))
+        ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'accent' }, bi(`${runningAgentsCount} 个在忙`, `${runningAgentsCount} active`))
         : null,
       actions: !topoCollapsed
         ? h(
@@ -2637,7 +2637,7 @@ export function TasksTab({ board }) {
               className: 'dnb-seg-btn',
               style: { padding: '2px 8px', fontSize: 10.5 },
               'data-active': topoViewMode === 'canvas' ? '1' : '0',
-              title: bi('顺序推进流 + 子代理分支与回指箭头 SVG 流程画布', 'Sequential stages + subagent branches SVG flow canvas'),
+              title: bi('流程画布：看步骤顺序和子代理分工', 'Flow Canvas: step order and subagents'),
               onClick: () => patch({ taskViewMode: 'canvas' }),
             }, bi('流程画布', 'Flow Canvas')),
             h('button', {
@@ -2645,7 +2645,7 @@ export function TasksTab({ board }) {
               className: 'dnb-seg-btn',
               style: { padding: '2px 8px', fontSize: 10.5 },
               'data-active': topoViewMode === 'graph' ? '1' : '0',
-              title: bi('按主/子代理层级展开拉起的组织树', 'Expandable Lead / Subagent hierarchy tree'),
+              title: bi('组织树：按上下级看谁负责哪块任务', 'Org Tree: see who owns each task'),
               onClick: () => patch({ taskViewMode: 'graph' }),
             }, h(Icon, { name: 'network', size: 10.5 }), bi('组织树', 'Org Tree')),
           )
@@ -2660,7 +2660,7 @@ export function TasksTab({ board }) {
             { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
             h(Icon, { name: 'target', size: 13 }),
             h('span', { style: { wordBreak: 'break-word' } },
-              (focusedTask.status === 'blocked' ? bi('已框选受阻关联代理：', 'Focused blocked agents: ') : bi('已框选正在推进的子代理：', 'Focused active subagents: '))
+              (focusedTask.status === 'blocked' ? bi('已高亮卡住的代理：', 'Highlighted blocked: ') : bi('已高亮正在做的子代理：', 'Highlighted active: '))
               + (focusInfo && focusInfo.agentNames.length
                   ? focusInfo.agentNames.map(n => '@' + shortAgentName(n, true)).join(bi('、', ', '))
                   : bi('@主代理', '@Lead'))),
@@ -2679,7 +2679,7 @@ export function TasksTab({ board }) {
               className: 'dnb-pill',
               style: { height: 21, padding: '0 7px', fontSize: 10.5 },
               onClick: () => patch({ focusTaskId: '' }),
-            }, bi('退出框选 ×', 'Unfocus ×')),
+            }, bi('取消高亮 ×', 'Clear ×')),
           ),
         )
       : null,
@@ -2697,12 +2697,12 @@ export function TasksTab({ board }) {
                 className: 'dnb-pill',
                 style: { height: 22, padding: '0 8px', fontSize: 10.5 },
                 onClick: () => patch({ graphDir: isLR ? 'TD' : 'LR' }),
-              }, isLR ? bi('横向流', 'Horizontal') : bi('竖向流', 'Vertical')),
+              }, isLR ? bi('横着排', 'Horizontal') : bi('竖着排', 'Vertical')),
               h(
                 'div',
                 { style: { display: 'flex', gap: 3, alignItems: 'center' } },
                 h('button', { type: 'button', className: 'dnb-pill', style: { height: 22, padding: '0 7px' }, onClick: () => setZoom(z => Math.max(0.42, +(z - 0.12).toFixed(2))) }, '−'),
-                h('button', { type: 'button', className: 'dnb-pill', style: { height: 22, padding: '0 7px', fontSize: 10.5 }, onClick: fitZoom, title: bi('点击自动适配当前宽度', 'Auto-fit canvas width') }, Math.round(zoom * 100) + '%'),
+                h('button', { type: 'button', className: 'dnb-pill', style: { height: 22, padding: '0 7px', fontSize: 10.5 }, onClick: fitZoom, title: bi('自动调整大小适应窗口', 'Fit to window width') }, Math.round(zoom * 100) + '%'),
                 h('button', { type: 'button', className: 'dnb-pill', style: { height: 22, padding: '0 7px' }, onClick: () => setZoom(z => Math.min(1.6, +(z + 0.12).toFixed(2))) }, '+'),
               ),
             ),
@@ -2728,21 +2728,21 @@ export function TasksTab({ board }) {
       : h(
           'div',
           { className: 'dnb-empty', style: { padding: '14px 10px' } },
-          h('div', { style: { marginBottom: 8 } }, bi('暂无推进流程或任务拓扑', 'No work topology or flow graph yet')),
+          h('div', { style: { marginBottom: 8 } }, bi('还没有任务关系图，先添加步骤或拆解任务', 'No work map yet')),
           h('button', {
             type: 'button',
             className: 'dnb-pill dnb-pill-accent',
             onClick: triggerAiPlanGraph,
-          }, h(Icon, { name: 'sparkles', size: 12 }), bi('让模型规划推进流程', 'Ask Lead to Plan Execution Flow')),
+          }, h(Icon, { name: 'sparkles', size: 12 }), bi('让主对话帮你拆出步骤', 'Ask main chat to plan steps')),
         ),
   )
 
   // ==================== Zone 3: Unified Progress Task Board (Merged Flow + Plan Board) ====================
   const renderUnifiedBoard = stepApi => {
     const taskMetaParts = []
-    if (blockedTotal > 0) taskMetaParts.push(bi(`${blockedTotal} 受阻`, `${blockedTotal} blocked`))
-    if (doingTotal > 0) taskMetaParts.push(bi(`${doingTotal} 推进`, `${doingTotal} active`))
-    if (doneTotal > 0) taskMetaParts.push(bi(`${doneTotal} 已完`, `${doneTotal} done`))
+    if (blockedTotal > 0) taskMetaParts.push(bi(`${blockedTotal} 卡住`, `${blockedTotal} blocked`))
+    if (doingTotal > 0) taskMetaParts.push(bi(`${doingTotal} 进行中`, `${doingTotal} active`))
+    if (doneTotal > 0) taskMetaParts.push(bi(`${doneTotal} 完成`, `${doneTotal} done`))
     const taskCountLabel = taskMetaParts.length > 0
       ? taskMetaParts.join(' · ')
       : (allTasks.length ? bi(`${doneTotal}/${allTasks.length} 任务`, `${doneTotal}/${allTasks.length} tasks`) : '')
@@ -2754,8 +2754,8 @@ export function TasksTab({ board }) {
         open: !boardCollapsed,
         onToggle: () => patch({ boardSectionCollapsed: !boardCollapsed }),
         className: 'dnb-board-card',
-        title: bi('推进任务板', 'Progress Task Board'),
-        headTitle: boardCollapsed ? bi('点击拉起推进任务板', 'Expand Progress Task Board') : bi('点击收起推进任务板', 'Collapse Progress Task Board'),
+        title: bi('任务进度板', 'Task Board'),
+        headTitle: boardCollapsed ? bi('展开任务进度板', 'Expand Task Board') : bi('收起任务进度板', 'Collapse Task Board'),
         count: [planSteps.length > 0 ? bi(`${planDoneCount}/${planSteps.length} 步`, `${planDoneCount}/${planSteps.length} steps`) : '', taskCountLabel].filter(Boolean).join(' · '),
         actions: h(
           React.Fragment,
@@ -2765,7 +2765,7 @@ export function TasksTab({ board }) {
             className: 'dnb-pill',
             'data-active': addTaskOpen ? '1' : '0',
             style: { height: 22, padding: '0 7px', fontSize: 10.5 },
-            title: addTaskOpen ? bi('收起新增任务表单', 'Close add-task form') : bi('展开新增任务表单', 'Add new task'),
+            title: addTaskOpen ? bi('收起添加框', 'Close form') : bi('手动加一条任务', 'Add a task'),
             onClick: () => {
               if (boardCollapsed) patch({ boardSectionCollapsed: false })
               setAddTaskOpen(v => !v)
@@ -2776,12 +2776,12 @@ export function TasksTab({ board }) {
                 type: 'button',
                 className: 'dnb-mini-btn',
                 'data-tone': expandAllStages ? 'accent' : undefined,
-                title: expandAllStages ? bi('切回聚焦模式（自动折叠已完成与未开始步骤）', 'Switch back to focused mode') : bi('一键展开全部步骤', 'Expand all steps'),
+                title: expandAllStages ? bi('只展开当前步，折叠其他步骤', 'Focus on current step only') : bi('展开全部步骤', 'Expand all steps'),
                 onClick: () => {
                   if (boardCollapsed) patch({ boardSectionCollapsed: false })
                   setExpandAllStages(v => !v)
                 },
-              }, expandAllStages ? bi('仅看聚焦', 'Focused') : bi('全展开', 'Expand All'))
+              }, expandAllStages ? bi('只看当前', 'Focused') : bi('全部展开', 'Expand All'))
             : null,
         ),
       },
@@ -2888,7 +2888,7 @@ export function TasksTab({ board }) {
               setContextMenu(null)
               focusObjectiveInPyramid(t.id)
             },
-          }, h(Icon, { name: 'target', size: 13 }), '框选负责代理'),
+          }, h(Icon, { name: 'target', size: 13 }), '高亮负责的代理'),
           h('div', {
             className: 'dnb-menu-item',
             style: { color: 'var(--dnb-accent)', fontWeight: 500 },
@@ -2897,7 +2897,7 @@ export function TasksTab({ board }) {
               setContextMenu(null)
               explainTaskMeaning(t, board)
             },
-          }, h(Icon, { name: 'sparkles', size: 13 }), '问含义与原因'),
+          }, h(Icon, { name: 'sparkles', size: 13 }), '用大白话解释'),
           h('div', {
             className: 'dnb-menu-item',
             onClick: () => {
@@ -2909,7 +2909,7 @@ export function TasksTab({ board }) {
                 agent: t.subagent || t.owner || ('worker-' + String(t.id).slice(-4)),
               })
             },
-          }, h(Icon, { name: 'play', size: 13 }), '派发子代理'),
+          }, h(Icon, { name: 'play', size: 13 }), '交给子代理做'),
           h('div', {
             className: 'dnb-menu-item',
             onClick: () => {
@@ -2917,7 +2917,7 @@ export function TasksTab({ board }) {
               setContextMenu(null)
               openTaskEditor(t)
             },
-          }, h(Icon, { name: 'edit', size: 13 }), '编辑节点'),
+          }, h(Icon, { name: 'edit', size: 13 }), '修改任务'),
           contextMenu.task.status !== 'done'
             ? h('div', {
                 className: 'dnb-menu-item',

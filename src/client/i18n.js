@@ -147,23 +147,23 @@ export function permDesc(key) {
   switch (key) {
     case 'advisor':
       return bi(
-        'L0 顾问档：只读巡检诊断并在面板输出建议，不修改工作区或向主对话/子代理注入强推指令',
-        'L0 Advisor: read-only diagnosis & panel suggestions; never edits workspace files or pushes main/subagents.',
+        'L0 顾问档：只看并给建议。不改项目文件，也不打断主对话或子代理。',
+        'L0 Advisor: reads only and gives advice. Never edits files or interrupts main or subagent chats.',
       )
     case 'assistant':
       return bi(
-        'L1 助手档：仅自主维护记忆/档案/看板与建议卡片，不改工作区文件且不直接插话主对话',
-        'L1 Assistant: maintains memory/archives/board & suggestions; never edits workspace files or interrupts lead.',
+        'L1 助手档：会自动整理记忆、档案和看板。不改项目文件，也不插话主对话。',
+        'L1 Assistant: organizes memory, archives, and tasks. Never edits files or interrupts the main chat.',
       )
     case 'strategist':
       return bi(
-        'L2 参谋档：自动分析并生成关键动作（工作区改动/递话/压缩），逐项弹窗授权后才执行',
-        'L2 Strategist: drafts actions & relays behind explicit per-item human approval popups.',
+        'L2 参谋档：会起草改文件、递话和压缩操作，每项都弹窗问你同意后再执行。',
+        'L2 Strategist: drafts file edits, relays, and compaction, then asks you to approve each item.',
       )
     case 'chief':
       return bi(
-        'L3 参谋长档：高自主闭环督导（直控主对话/子代理、纠偏、压缩与续跑），含防死循环熔断',
-        'L3 Chief: autonomous supervision, steering, compaction & resume within guard walls & loop/budget breakers.',
+        'L3 参谋长档：直接带主对话和子代理干活、纠偏、压缩并续跑，带防死循环保护。',
+        'L3 Chief: guides main and subagent chats, fixes course, compacts, and resumes, with loop protection.',
       )
     default:
       return ''
@@ -178,8 +178,8 @@ export function runModeMeta(key) {
         label: bi('⏸ 关停', '⏸ Off'),
         shortLabel: bi('⏸ 关停', '⏸ Off'),
         hint: bi(
-          '0 后台消耗，仅显式 Q&A / 按钮触发；禁止自动巡检、梦境漫游或断线续跑',
-          'Zero background LLM usage; triggers only on explicit Q&A or buttons.',
+          '后台不调用模型，只在你提问或点按钮时回复。不会自动巡检、梦境漫游或续跑。',
+          'No background model calls; responds only when you ask or click. No auto patrol, Dream Roam, or auto-resume.',
         ),
       }
     case 'patrol':
@@ -188,8 +188,8 @@ export function runModeMeta(key) {
         label: bi('🛡 巡检', '🛡 Patrol'),
         shortLabel: bi('🛡 巡检', '🛡 Patrol'),
         hint: bi(
-          '常规回合 0 Token；仅在阻墙拦截/异常/断流时精准唤醒，支持 Auto continue',
-          'Zero idle cost; wakes only on guard-wall blocks, errors, or stream drops.',
+          '平时不耗后台额度，只在被拦截、报错或中断时唤醒。支持自动续跑。',
+          'No background calls while idle; wakes only on blocks, errors, or drops. Supports auto-resume.',
         ),
       }
     case 'managed':
@@ -198,8 +198,8 @@ export function runModeMeta(key) {
         label: bi('🤖 托管', '🤖 Managed'),
         shortLabel: bi('🤖 托管', '🤖 Managed'),
         hint: bi(
-          '持续后台监工 + 🌙 梦境漫游整理卷宗织钩子 + 15 分钟 5 条件自动休眠 + 硬预算熔断',
-          'Continuous supervision + 🌙 Dream Roam + 5-condition auto-sleep + hard budget cap.',
+          '持续在后台盯进度，闲时用 🌙 梦境漫游整理档案。闲置 15 分钟满足条件后自动休眠，带用量上限。',
+          'Keeps watching progress and tidies archives with 🌙 Dream Roam. Auto-sleeps after 15m idle when conditions are met, with a usage cap.',
         ),
       }
     default:
@@ -216,8 +216,8 @@ export function effortMeta(key) {
         shortLabel: bi('🪄 自动', '🪄 Auto'),
         badge: bi('🪄 自动换挡', '🪄 Auto Effort'),
         hint: bi(
-          '按当前任务复杂度自动升降挡（摘要/梦境漫游→关，诊断/筑墙→高/极高）',
-          'Adapts reasoning depth by task complexity (off for summaries, high/xhigh for diagnosis).',
+          '按任务难易自动调思考深度。写摘要或梦境漫游时关闭，排查或设拦截规则时调高。',
+          'Adjusts thinking depth by task: off for summaries or Dream Roam, higher for debugging or guard rules.',
         ),
       }
     case 'off':
@@ -226,7 +226,7 @@ export function effortMeta(key) {
         label: bi('⚡ 关闭思考', '⚡ Off'),
         shortLabel: bi('⚡ 关', '⚡ Off'),
         badge: bi('⚡ 关闭思考', '⚡ No Thinking'),
-        hint: bi('极速低延迟文本输出，不开深度推理链', 'Fastest low-latency text output without reasoning chain.'),
+        hint: bi('直接输出回答，不做深度思考，速度最快。', 'Replies directly without deep thinking for the fastest output.'),
       }
     case 'low':
       return {
@@ -234,7 +234,7 @@ export function effortMeta(key) {
         label: bi('🔅 低强度', '🔅 Low'),
         shortLabel: bi('🔅 低', '🔅 Low'),
         badge: bi('🔅 低思考', '🔅 Low'),
-        hint: bi('轻量校验与一般问答', 'Lightweight checks and quick Q&A.'),
+        hint: bi('简单检查和日常问答。', 'Quick checks and everyday Q&A.'),
       }
     case 'medium':
       return {
@@ -242,7 +242,7 @@ export function effortMeta(key) {
         label: bi('⚖️ 中强度', '⚖️ Medium'),
         shortLabel: bi('⚖️ 中', '⚖️ Med'),
         badge: bi('⚖️ 中思考', '⚖️ Medium'),
-        hint: bi('日常均衡推理与复盘', 'Balanced reasoning for reviews and planning.'),
+        hint: bi('日常推理、写代码和复盘。', 'Balanced thinking for coding, reviews, and daily work.'),
       }
     case 'high':
       return {
@@ -250,7 +250,7 @@ export function effortMeta(key) {
         label: bi('🔥 高强度', '🔥 High'),
         shortLabel: bi('🔥 高', '🔥 High'),
         badge: bi('🔥 高思考', '🔥 High'),
-        hint: bi('复杂排障、筑墙、强介入与经验沉淀', 'Complex debugging, guard walls, intervention & synthesis.'),
+        hint: bi('处理复杂问题、设拦截规则、强介入和总结经验。', 'Complex debugging, guard rules, strong intervention, and takeaways.'),
       }
     case 'xhigh':
       return {
@@ -258,7 +258,7 @@ export function effortMeta(key) {
         label: bi('🧠 极高强度', '🧠 XHigh'),
         shortLabel: bi('🧠 极高', '🧠 XHigh'),
         badge: bi('🧠 极高思考', '🧠 XHigh'),
-        hint: bi('多边界碰撞、紧急危情诊断与全局深推演', 'Multi-wall conflicts, hazard diagnosis & deep global analysis.'),
+        hint: bi('处理多条规则冲突、严重故障和复杂分析。', 'Resolving rule conflicts, critical issues, and deep analysis.'),
       }
     default:
       return { key: String(key || 'auto'), label: String(key || ''), shortLabel: String(key || ''), badge: String(key || ''), hint: '' }

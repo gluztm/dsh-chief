@@ -83,38 +83,38 @@ function localizedAlertCopy(ev) {
   switch (ev.kind) {
     case 'pending_approval':
       return {
-        title: bi('🔐 等待人类逐项审批', '🔐 Approval Required'),
-        body: body || bi('参谋请求审批关键工作区或工作流操作。', 'A strategist action is waiting for your sign-off.'),
+        title: bi('🔐 等你确认操作', '🔐 Approval Needed'),
+        body: body || bi('参谋想改文件或调流程，等你点确认。', 'Chief wants to edit files or adjust a workflow and needs your OK.'),
       }
     case 'pending_elevation':
       return {
-        title: bi('⬆️ 参谋申请提升权限', '⬆️ Elevation Requested'),
-        body: body || bi('当前任务需要更高参谋权限才能继续执行。', 'Chief requests higher permission tier to continue.'),
+        title: bi('⬆️ 参谋申请更高权限', '⬆️ Higher Permission Requested'),
+        body: body || bi('这步需要更高权限，等你同意后才能继续。', 'This step needs a higher permission level before it can continue.'),
       }
     case 'guard_wall_blocked':
       return {
-        title: bi('🧱 物理驻墙已拦截越界调用', '🧱 Guard Wall Blocked Call'),
-        body: body || bi('已触发事前物理驻墙拦截，等待人工处置。', 'Pre-execute guard wall intercepted a risky call.'),
+        title: bi('🧱 物理驻墙已拦下操作', '🧱 Guard Wall Blocked Call'),
+        body: body || bi('触发了执行前的物理驻墙（拦截规则），等你处理。', 'Stopped by your pre-run guard wall rules. Please check.'),
       }
     case 'auto_continue_rescue':
       return {
-        title: bi('🔄 断流救活已触发续跑', '🔄 Stream Rescue Triggered'),
-        body: body || bi('检测到主会话意外中断，已尝试自动唤醒续跑。', 'Interrupted turn detected; auto-continue fired.'),
+        title: bi('🔄 对话断了，已自动接着跑', '🔄 Chat Stopped, Resuming'),
+        body: body || bi('主对话刚才突然断开了，已自动唤醒接着跑。', 'The main chat stopped unexpectedly and was resumed automatically.'),
       }
     case 'managed_auto_sleep':
       return {
-        title: bi('🌙 托管已自动休眠收工', '🌙 Managed Auto-Sleep'),
-        body: body || bi('在途待办与问询均已清零，已切回「⏸ 关停」以节省 Token。', 'All work cleared; returned to ⏸ Off to save tokens.'),
+        title: bi('🌙 托管已自动休眠', '🌙 Managed Mode Paused'),
+        body: body || bi('手头的事都做完了，已切回「⏸ 关停」省 Token。', 'All tasks finished. Switched back to ⏸ Off to save tokens.'),
       }
     case 'budget_circuit_break':
       return {
-        title: bi('🛑 托管已触及硬预算上限熔断', '🛑 Hard Budget Breaker Tripped'),
-        body: body || bi('托管后台调用/Token 达到上限，已自动切回「⏸ 关停」。', 'Managed budget limit reached; auto-stopped.'),
+        title: bi('🛑 托管已到用量上限停机', '🛑 Managed Usage Limit Reached'),
+        body: body || bi('托管调用次数或 Token 已到上限，已切回「⏸ 关停」。', 'Managed calls or tokens hit the limit. Switched back to ⏸ Off.'),
       }
     case 'hazard_halt':
       return {
-        title: bi('🚨 强介入紧急安全煞停', '🚨 Emergency Hazard Halt'),
-        body: body || bi('检测到重大不可逆风险或必然撞墙，已暂停推进。', 'High irreversible hazard detected; execution halted.'),
+        title: bi('🚨 发现高风险，已紧急暂停', '🚨 High Risk Found, Paused'),
+        body: body || bi('遇到高风险操作或反复卡住，已先帮你停下。', 'Paused after spotting a risky action or repeated block.'),
       }
     default:
       return {

@@ -65,12 +65,12 @@ function resolveDossierViewerMeta(item, scope) {
   const vs = item && item.viewerStatus && typeof item.viewerStatus === 'object' ? item.viewerStatus : null
   const fullLabel = (vs && vs.label) || (vs && vs.badgeText) || (
     item && item.takenOut
-      ? '桌面在读 · 主代理与参谋同看'
+      ? '已放到桌面：主对话和参谋都能看'
       : scope === 'precipitated'
-        ? '仅人类可见 · 双端严格隔离'
+        ? '仅你可见：主对话和参谋都看不到'
         : scope === 'global'
-          ? (item && item.chiefMounted ? '参谋参阅中 · 主对话 0 泄露' : (item && item.hasHook ? '参谋见钩可拉 · 主对话 0 泄露' : '仅人类可见（未织钩）'))
-          : (item && item.leadPulled ? '主代理已拉阅 · 参谋可读' : (item && item.hasHook ? '主见钩可拉 · 参谋可读' : '仅参谋可读（未织钩）'))
+          ? (item && item.chiefMounted ? '参谋正在看 · 主对话看不到' : (item && item.hasHook ? '参谋可按关键词查看 · 主对话看不到' : '仅你可见（还没打标签）'))
+          : (item && item.leadPulled ? '主对话已查看 · 参谋也能看' : (item && item.hasHook ? '主对话可按关键词查看 · 参谋能看' : '仅参谋能看（还没打标签）'))
   )
   let shortText = '参谋'
   let dataViewer = 'chief'
@@ -100,7 +100,7 @@ function ArchiveEditorCard({ folders, editor, defaultScope = '' }) {
   const isGlobalEditor = editorScope === 'global'
   const folderList = Array.isArray(folders) && folders.length
     ? folders
-    : [{ id: 'coords', label: '工程坐标与部署锚点' }, { id: 'incidents', label: '排障实录与硬事实' }, { id: 'inbox', label: '待分拣工作便签' }]
+    : [{ id: 'coords', label: '项目入口与配置' }, { id: 'incidents', label: '问题排查记录' }, { id: 'inbox', label: '待整理便签' }]
 
   const updateField = patchObj => {
     patch({ archiveEditor: { ...editor, ...patchObj } })
@@ -122,8 +122,8 @@ function ArchiveEditorCard({ folders, editor, defaultScope = '' }) {
       body,
       upsertByTitle: !isEdit ? false : undefined,
     }, isEdit
-      ? (isGlobalEditor ? '全局卷宗已更新' : '本局卷宗已更新')
-      : (isGlobalEditor ? '已存入全局档案柜' : '已封存入本局档案柜'))
+      ? (isGlobalEditor ? '已更新全局档案' : '已更新本局档案')
+      : (isGlobalEditor ? '已存到全局档案' : '已存到本局档案'))
     if (out && out.ok) {
       const savedItem = out.item
       const nextOpenFolders = { ...(store.archiveOpenFolders || {}) }
@@ -152,7 +152,7 @@ function ArchiveEditorCard({ folders, editor, defaultScope = '' }) {
       h('span', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-accent)' } },
         isGlobalEditor
           ? (isEdit ? '编辑全局档案' : '新建全局档案')
-          : (isEdit ? '编辑本局卷宗' : '新建本局卷宗')),
+          : (isEdit ? '编辑本局档案' : '新建本局档案')),
       h('button', {
         className: 'dnb-icon-btn',
         style: { width: 22, height: 22 },
@@ -174,22 +174,22 @@ function ArchiveEditorCard({ folders, editor, defaultScope = '' }) {
         value: editor.paperclip || 'silver',
         onChange: e => updateField({ paperclip: e.target.value }),
       },
-        h('option', { value: 'gold' }, '核心金针'),
-        h('option', { value: 'silver' }, '标准银针'),
-        h('option', { value: 'copper' }, '历史铜针'),
+        h('option', { value: 'gold' }, '金别针 · 核心'),
+        h('option', { value: 'silver' }, '银别针 · 常用'),
+        h('option', { value: 'copper' }, '铜别针 · 备用'),
       ),
     ),
     h('input', {
       className: 'dnb-input',
       style: { marginBottom: 6, fontWeight: 600 },
-      placeholder: '卷宗标题…',
+      placeholder: '输入档案标题…',
       value: editor.title || '',
       onChange: e => updateField({ title: e.target.value }),
     }),
     h('input', {
       className: 'dnb-input',
       style: { marginBottom: 6, fontSize: 11.5 },
-      placeholder: '一句话提要（选填）…',
+      placeholder: '一句话简介（可不填）…',
       value: editor.summary || '',
       onChange: e => updateField({ summary: e.target.value }),
     }),
@@ -197,14 +197,14 @@ function ArchiveEditorCard({ folders, editor, defaultScope = '' }) {
       className: 'dnb-textarea',
       rows: 5,
       style: { marginBottom: 6, fontSize: 12, lineHeight: 1.55 },
-      placeholder: '输入详细工程内容（支持 ## 小标题或键：值分段）…',
+      placeholder: '输入正文内容（支持 ## 小标题分段）…',
       value: editor.body || '',
       onChange: e => updateField({ body: e.target.value }),
     }),
     h('input', {
       className: 'dnb-input',
       style: { marginBottom: 8, fontSize: 11.5 },
-      placeholder: '关键词标签（逗号分隔）…',
+      placeholder: '关键词标签，用逗号隔开…',
       value: editor.tags || '',
       onChange: e => updateField({ tags: e.target.value }),
     }),
@@ -216,7 +216,7 @@ function ArchiveEditorCard({ folders, editor, defaultScope = '' }) {
         className: 'dnb-primary-btn',
         disabled: !(editor.title || '').trim() && !(editor.body || '').trim(),
         onClick: () => void saveDossier(),
-      }, isEdit ? '保存' : '存入档案柜'),
+      }, isEdit ? '保存' : '存到档案柜'),
     ),
   )
 }
@@ -254,7 +254,7 @@ function renderArchiveFolderDrawer({
         {
           className: 'dnb-drawer-front',
           onClick: onToggle,
-          title: folder.hint || (drawerOpen ? '点击合上抽屉' : '点击拉开抽屉'),
+          title: folder.hint || (drawerOpen ? '收起' : '展开'),
         },
         h('span', { className: 'dnb-drawer-spine', style: { background: accent } }),
         h(Icon, {
@@ -292,7 +292,7 @@ function renderArchiveFolderDrawer({
                 type: 'button',
                 className: 'dnb-icon-btn',
                 style: { width: 22, height: 22, color: 'var(--dnb-text-3)' },
-                title: '抽屉操作',
+                title: '更多操作',
                 onClick: () => setOpenMenuKey(menuOpen ? '' : menuId),
               }, '⋯'),
               menuOpen
@@ -304,21 +304,21 @@ function renderArchiveFolderDrawer({
                           type: 'button',
                           className: 'dnb-more-item',
                           onClick: () => { setOpenMenuKey(''); onOrganize() },
-                        }, '✦ 整理本抽屉')
+                        }, '✦ 整理这个抽屉')
                       : null,
                     onCreateInFolder
                       ? h('button', {
                           type: 'button',
                           className: 'dnb-more-item',
                           onClick: () => { setOpenMenuKey(''); onCreateInFolder() },
-                        }, '+ 在此新建卷宗')
+                        }, '+ 在这里新建档案')
                       : null,
                     onPrecipitate && items.length > 0
                       ? h('button', {
                           type: 'button',
                           className: 'dnb-more-item',
                           onClick: () => { setOpenMenuKey(''); onPrecipitate() },
-                        }, '🧊 沉淀本抽屉')
+                        }, '🧊 转入冷藏库')
                       : null,
                   )
                 : null,
@@ -332,7 +332,7 @@ function renderArchiveFolderDrawer({
             { className: 'dnb-drawer-well' },
             items.length > 0
               ? h('div', { className: 'dnb-paper-stack' }, items.map((it, idx) => renderChild(it, idx)))
-              : h('div', { style: { padding: '6px 4px', fontSize: 11, color: 'var(--dnb-text-3)' } }, '此抽屉暂空'),
+              : h('div', { style: { padding: '6px 4px', fontSize: 11, color: 'var(--dnb-text-3)' } }, '里面还是空的'),
           )
         : null,
     ),
@@ -417,7 +417,7 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
     },
     h(PaperclipPin, {
       paperclip: item.paperclip,
-      onClick: () => void mutateArchiveApi({ op: 'cycleClip', archiveId: item.id, vaultScope: activeScope }, '已切换曲别针等级'),
+      onClick: () => void mutateArchiveApi({ op: 'cycleClip', archiveId: item.id, vaultScope: activeScope }, '已切换重要程度'),
     }),
 
     // Top-Down Paper Header + Hover Peek Drawer
@@ -443,7 +443,7 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
                 onChange: () => toggleSelectArchive(item.id, isGlobalScope ? 'global' : 'session', item.title),
               })
             : null,
-          h('div', { className: 'dnb-paper-title' }, item.title || '未命名卷宗'),
+          h('div', { className: 'dnb-paper-title' }, item.title || '未命名档案'),
         ),
         h(
           'div',
@@ -521,7 +521,7 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
                     border: '1px solid var(--dnb-border)',
                   },
                 },
-                h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, '移至：'),
+                h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, '移到：'),
                 (folders || []).map(f =>
                   h('button', {
                     key: f.id,
@@ -533,7 +533,7 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
                         archiveMoveId: '',
                         archiveOpenFolders: { ...(view.archiveOpenFolders || {}), [f.id]: true },
                       })
-                      void mutateArchiveApi({ op: 'moveFolder', archiveId: item.id, folder: f.id, vaultScope: activeScope }, '已移入「' + f.label + '」')
+                      void mutateArchiveApi({ op: 'moveFolder', archiveId: item.id, folder: f.id, vaultScope: activeScope }, '已移到「' + f.label + '」')
                     },
                   }, f.label),
                 ),
@@ -546,7 +546,7 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
                 'div',
                 { style: { padding: '6px 2px', fontSize: 11, color: 'var(--dnb-text-3)', display: 'flex', alignItems: 'center', gap: 6 } },
                 h(Icon, { name: 'refresh', size: 11.5, style: { animation: 'dnb-spin 0.9s linear infinite' } }),
-                '调阅卷宗详情…',
+                '加载中…',
               )
             : points.length > 0
               ? points.map((pt, pIdx) => {
@@ -597,20 +597,20 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
                             h('button', {
                               type: 'button',
                               className: 'dnb-mini-btn',
-                              onClick: () => copyText(`【${item.title} · ${pt.title}】\n${pt.detail || pt.cue || ''}`, '已复制此条小点'),
+                              onClick: () => copyText(`【${item.title} · ${pt.title}】\n${pt.detail || pt.cue || ''}`, '已复制这条内容'),
                             }, '复制'),
                             h('button', {
                               type: 'button',
                               className: 'dnb-mini-btn',
                               'data-tone': 'accent',
                               onClick: () => void deliverArchiveToChat(detail || item, pt),
-                            }, '递给对话'),
+                            }, '发给对话'),
                           ),
                         )
                       : null,
                   )
                 })
-              : h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', padding: '2px 0' } }, '暂无结构化要点，可在右下方 ⋯ 重拆此卷。'),
+              : h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', padding: '2px 0' } }, '还没拆出要点，点右下角 ⋯ 让参谋长整理一下。'),
 
           // Lossless Raw Body
           showRaw && detail
@@ -649,10 +649,10 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
                   if (!item.takenOut && !isBoundSession) return
                   void mutateArchiveApi(
                     { op: item.takenOut ? 'putBack' : 'takeOut', archiveId: item.id, vaultScope: activeScope },
-                    item.takenOut ? '已从桌面撤回档案柜' : '📌 已置顶到认知桌面',
+                    item.takenOut ? '已从桌面撤回' : '📌 已放到认知桌面',
                   )
                 },
-              }, item.takenOut ? '撤出桌面' : '📌 置顶桌面'),
+              }, item.takenOut ? '撤出桌面' : '📌 放上桌面'),
               isGlobalScope
                 ? h('button', {
                     type: 'button',
@@ -684,7 +684,7 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
               h('button', {
                 type: 'button',
                 className: 'dnb-mini-btn',
-                title: '更多卷宗操作',
+                title: '更多操作',
                 onClick: () => setOpenMenuKey(cardMenuOpen ? '' : menuId),
               }, '⋯'),
               cardMenuOpen
@@ -699,7 +699,7 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
                             setOpenMenuKey('')
                             openArchiveRelayModal([{ id: item.id, vaultScope: 'global', title: item.title }])
                           },
-                        }, '📨 递话给对话')
+                        }, '📨 发给主对话')
                       : null,
                     isGlobalScope
                       ? h('button', {
@@ -708,17 +708,17 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
                           disabled: !isBoundSession,
                           onClick: () => {
                             setOpenMenuKey('')
-                            void mutateArchiveApi({ op: 'copyToSession', archiveId: item.id, vaultScope: 'global' }, '已无损调入本局')
+                            void mutateArchiveApi({ op: 'copyToSession', archiveId: item.id, vaultScope: 'global' }, '已复制到本局档案')
                           },
-                        }, '⤵️ 调入本局')
+                        }, '⤵️ 复制到本局')
                       : h('button', {
                           type: 'button',
                           className: 'dnb-more-item',
                           onClick: () => {
                             setOpenMenuKey('')
-                            void mutateArchiveApi({ op: 'copyToGlobal', archiveId: item.id, vaultScope: 'session' }, '已升级存入全局档案柜')
+                            void mutateArchiveApi({ op: 'copyToGlobal', archiveId: item.id, vaultScope: 'session' }, '已存到全局档案')
                           },
-                        }, item.diffStatus === 'synced' ? '✓ 同步全局' : '🌐 升级入全局'),
+                        }, item.diffStatus === 'synced' ? '✓ 同步到全局' : '🌐 存到全局'),
                     isGlobalScope
                       ? h('button', {
                           type: 'button',
@@ -731,12 +731,12 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
                                 vaultScope: 'global',
                                 cabinetId: '',
                                 ids: [item.id],
-                                label: `全局卷宗《${clampTitle(item.title, 24)}》`,
+                                label: `全局档案《${clampTitle(item.title, 24)}》`,
                                 clearSource: false,
                               },
                             })
                           },
-                        }, '🧊 沉淀进冷藏柜')
+                        }, '🧊 转入冷藏库')
                       : null,
                     !isGlobalScope
                       ? h('button', {
@@ -746,7 +746,7 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
                             setOpenMenuKey('')
                             patch({ archiveMoveId: movingThis ? '' : item.id })
                           },
-                        }, '📁 移至抽屉')
+                        }, '📁 换个抽屉')
                       : null,
                     h('div', { className: 'dnb-more-sep' }),
                     h('button', {
@@ -756,13 +756,13 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
                         setOpenMenuKey('')
                         void requestOrganizeArchives({ ids: [item.id], scope: 'selected', vaultScope: activeScope })
                       },
-                    }, '✦ 请参谋重拆此卷'),
+                    }, '✦ 让参谋重整这份'),
                     points.length > 1
                       ? h('button', {
                           type: 'button',
                           className: 'dnb-more-item',
                           onClick: () => { setOpenMenuKey(''); toggleAllPoints() },
-                        }, allPointsExpanded ? '收起全部要点' : '展开全部要点')
+                        }, allPointsExpanded ? '全部收起' : '全部展开')
                       : null,
                     h('button', {
                       type: 'button',
@@ -771,13 +771,13 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
                         setOpenMenuKey('')
                         patch({ archiveRawView: { ...(view.archiveRawView || {}), [item.id]: !showRaw } })
                       },
-                    }, showRaw ? '隐藏原文' : '📄 原文对照'),
+                    }, showRaw ? '隐藏原文' : '📄 看原文'),
                     h('button', {
                       type: 'button',
                       className: 'dnb-more-item',
                       onClick: () => {
                         setOpenMenuKey('')
-                        void mutateArchiveApi({ op: 'cycleClip', archiveId: item.id, vaultScope: activeScope }, '已切换曲别针等级')
+                        void mutateArchiveApi({ op: 'cycleClip', archiveId: item.id, vaultScope: activeScope }, '已切换重要程度')
                       },
                     }, `📎 换曲别针 (${clip.short})`),
                     h('button', {
@@ -789,21 +789,21 @@ function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', open
                         patch({ archiveSelectMode: true })
                         toggleSelectArchive(item.id, isGlobalScope ? 'global' : 'session', item.title)
                       },
-                    }, isSelected ? '✓ 已勾选多选' : '☑️ 勾选加入批量递话'),
+                    }, isSelected ? '✓ 已勾选' : '☑️ 勾选批量递话'),
                     h('div', { className: 'dnb-more-sep' }),
                     h('button', {
                       type: 'button',
                       className: 'dnb-more-item',
                       onClick: () => { setOpenMenuKey(''); void openEditorForThis() },
-                    }, '✎ 编辑卷宗'),
+                    }, '✎ 编辑'),
                     h('button', {
                       type: 'button',
                       className: 'dnb-more-item',
                       'data-danger': '1',
                       onClick: () => {
                         setOpenMenuKey('')
-                        if (!confirm('确认删除卷宗《' + clampTitle(item.title, 20) + '》？')) return
-                        void mutateArchiveApi({ op: 'delete', archiveId: item.id, vaultScope: activeScope }, '已删除卷宗')
+                        if (!confirm('确定要删除《' + clampTitle(item.title, 20) + '》吗？')) return
+                        void mutateArchiveApi({ op: 'delete', archiveId: item.id, vaultScope: activeScope }, '已删除')
                       },
                     }, '🗑️ 删除'),
                   )
@@ -925,10 +925,10 @@ function ArchiveColdCard({ p, idx, view, flippedSet, isBoundSession, openMenuKey
                   e.stopPropagation()
                   void mutateArchiveApi(
                     { op: isFlipped ? 'sealBack' : 'flipOut', id: p.id, vaultScope: 'precipitated' },
-                    isFlipped ? '已封回冷藏库' : '📌 已置顶到认知桌面',
+                    isFlipped ? '已放回冷藏库' : '📌 已放到认知桌面',
                   )
                 },
-              }, isFlipped ? '封回冷库' : '📌 置顶桌面'),
+              }, isFlipped ? '放回冷库' : '📌 放上桌面'),
               h('button', {
                 type: 'button',
                 className: 'dnb-mini-btn',
@@ -957,17 +957,17 @@ function ArchiveColdCard({ p, idx, view, flippedSet, isBoundSession, openMenuKey
                       disabled: !isBoundSession,
                       onClick: () => {
                         setOpenMenuKey('')
-                        void mutateArchiveApi({ op: 'pullPrecipitated', id: p.id, targetScope: 'session', vaultScope: 'precipitated' }, '已无损调入本局')
+                        void mutateArchiveApi({ op: 'pullPrecipitated', id: p.id, targetScope: 'session', vaultScope: 'precipitated' }, '已复制到本局')
                       },
-                    }, '⤵️ 调入本局'),
+                    }, '⤵️ 复制到本局'),
                     h('button', {
                       type: 'button',
                       className: 'dnb-more-item',
                       onClick: () => {
                         setOpenMenuKey('')
-                        void mutateArchiveApi({ op: 'pullPrecipitated', id: p.id, targetScope: 'global', vaultScope: 'precipitated' }, '已无损调入全局')
+                        void mutateArchiveApi({ op: 'pullPrecipitated', id: p.id, targetScope: 'global', vaultScope: 'precipitated' }, '已复制到全局')
                       },
-                    }, '🌐 调入全局'),
+                    }, '🌐 复制到全局'),
                     h('button', {
                       type: 'button',
                       className: 'dnb-more-item',
@@ -977,7 +977,7 @@ function ArchiveColdCard({ p, idx, view, flippedSet, isBoundSession, openMenuKey
                         patch({ archiveSelectMode: true })
                         toggleSelectArchive(p.id, 'precipitated', p.title)
                       },
-                    }, isSelected ? '✓ 已勾选多选' : '☑️ 勾选加入批量递话'),
+                    }, isSelected ? '✓ 已勾选' : '☑️ 勾选批量递话'),
                     h('div', { className: 'dnb-more-sep' }),
                     h('button', {
                       type: 'button',
@@ -985,7 +985,7 @@ function ArchiveColdCard({ p, idx, view, flippedSet, isBoundSession, openMenuKey
                       'data-danger': '1',
                       onClick: () => {
                         setOpenMenuKey('')
-                        if (!confirm('确认永久删除冷藏条目《' + clampTitle(p.title, 20) + '》？')) return
+                        if (!confirm('确定永久删除《' + clampTitle(p.title, 20) + '》吗？')) return
                         void mutateArchiveApi({ op: 'deletePrecipitated', id: p.id, vaultScope: 'precipitated' }, '已删除')
                       },
                     }, '🗑️ 删除'),
@@ -1156,8 +1156,8 @@ export function ArchiveTab({ board, view }) {
           'div',
           { style: { display: 'flex', gap: 4 } },
           [
-            { key: 'unorganized', label: '整理待精编' + (meta.unorganizedCount ? ` (${meta.unorganizedCount})` : '') },
-            { key: 'all', label: '全部重梳' },
+            { key: 'unorganized', label: '只整理未梳理的' + (meta.unorganizedCount ? ` (${meta.unorganizedCount})` : '') },
+            { key: 'all', label: '全部重新整理' },
           ].map(opt =>
             h('button', {
               key: opt.key,
@@ -1180,7 +1180,7 @@ export function ArchiveTab({ board, view }) {
         h('input', {
           className: 'dnb-input',
           style: { height: 27, fontSize: 11.5, borderRadius: 99, padding: '0 10px' },
-          placeholder: '补充整理要求（可选）…',
+          placeholder: '补充整理要求（可不填）…',
           value: view.archiveOrganizePrompt || '',
           onChange: e => patch({ archiveOrganizePrompt: e.target.value }),
           onKeyDown: e => { if (e.key === 'Enter') void requestOrganizeArchives({ vaultScope: targetScope }) },
@@ -1249,7 +1249,7 @@ export function ArchiveTab({ board, view }) {
                             title: it.title,
                           })))
                         },
-                      }, bi('📨 全桌面带要求递话', '📨 Relay Entire Desktop')),
+                      }, bi('📨 把桌面资料一起发给对话', '📨 Send Desktop Items to Chat')),
                       deskPinned.length > 1
                         ? h('button', {
                             type: 'button',
@@ -1264,9 +1264,9 @@ export function ArchiveTab({ board, view }) {
                                   await mutateArchiveApi({ op: 'unpinFromDesktop', archiveId: it.id, vaultScope: vs })
                                 }
                               }
-                              patch({ notice: bi('已全部撤回原档案柜抽屉', 'Returned all items to cabinets') })
+                              patch({ notice: bi('已全部撤回档案柜', 'Moved all items back') })
                             },
-                          }, bi('📥 全部撤回原柜', '📥 Unpin All to Cabinets'))
+                          }, bi('📥 全部撤下桌面', '📥 Remove All from Desktop'))
                         : null,
                     )
                   : null,
@@ -1274,20 +1274,20 @@ export function ArchiveTab({ board, view }) {
             : null,
         ),
       ),
-      h('div', { className: 'dnb-token-track', title: bi(`主对话桌面注入预算 ${usedTokens}/${tokenBudget} Tokens`, `Desktop injection budget ${usedTokens}/${tokenBudget} tokens`) },
+      h('div', { className: 'dnb-token-track', title: bi(`认知桌面：每轮发给主对话的资料（${usedTokens}/${tokenBudget} Tokens）`, `Cognitive Desktop: sent each turn (${usedTokens}/${tokenBudget} tokens)`) },
         h('div', { className: 'dnb-token-fill', 'data-warn': warnLevel, style: { width: Math.max(deskPinned.length ? 4 : 0, usagePct) + '%' } }),
       ),
       deskPinned.length === 0
         ? h(
             'div',
             { style: { padding: '22px 10px 16px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' } },
-            h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } }, bi('桌面空闲 · 当前未向主对话注入任何正文（0 Tokens）', 'Desktop empty · 0 tokens injected to Lead')),
-            h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, bi('仅带钩子的本局线索可供主代理按需拉阅；需要重点强调时可将卷宗摆到这里。', 'Hooked session clues remain pullable on demand; pin high-priority dossiers here.')),
+            h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } }, bi('认知桌面是空的：这里放的资料每轮都会发给主对话（最多 6 份 / 2,400 Tokens）', 'Desktop is empty. Pinned items are sent each turn (up to 6 / 2,400 tokens).')),
+            h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, bi('想让主对话一直记住的资料，可以从本局档案放过来。', 'Pin key notes from Session Vault so the main chat keeps seeing them.')),
             h('button', {
               type: 'button',
               className: 'dnb-pill',
               onClick: () => switchScope('session'),
-            }, bi('前往本局选档 →', 'Pick from Session Vault →')),
+            }, bi('去本局档案选资料 →', 'Pick from Session Vault →')),
           )
         : h(
             'div',
@@ -1350,9 +1350,9 @@ export function ArchiveTab({ board, view }) {
                       className: 'dnb-mini-btn',
                       onClick: () => {
                         if (vs === 'precipitated') {
-                          void mutateArchiveApi({ op: 'sealBack', id: it.id, vaultScope: 'precipitated' }, '已封回冷藏库')
+                          void mutateArchiveApi({ op: 'sealBack', id: it.id, vaultScope: 'precipitated' }, '已放回冷藏库')
                         } else {
-                          void mutateArchiveApi({ op: 'unpinFromDesktop', archiveId: it.id, vaultScope: vs }, '已撤回原档案柜')
+                          void mutateArchiveApi({ op: 'unpinFromDesktop', archiveId: it.id, vaultScope: vs }, '已撤下桌面')
                         }
                       },
                     }, '撤出'),
@@ -1378,7 +1378,7 @@ export function ArchiveTab({ board, view }) {
               },
             },
             h('span', { style: { color: '#c4b5fd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-              bi(`🫧 待归位 ${watchList.length} 卷（${watchList.slice(0, 2).map(w => w.title).join('、')}）`, `🫧 Pending Organize: ${watchList.length} (${watchList.slice(0, 2).map(w => w.title).join(', ')})`)),
+              bi(`🫧 刚撤下 ${watchList.length} 份，建议整理一下（${watchList.slice(0, 2).map(w => w.title).join('、')}）`, `🫧 ${watchList.length} unpinned, ready to organize (${watchList.slice(0, 2).map(w => w.title).join(', ')})`)),
             h('button', {
               type: 'button',
               className: 'dnb-mini-btn',
@@ -1401,24 +1401,24 @@ export function ArchiveTab({ board, view }) {
     const stripMeta = activeScope === 'global'
       ? {
           color: '#a855f7',
-          title: bi(`全局档案柜 · ${globalItems.length} 卷`, `Global Vault · ${globalItems.length}`),
+          title: bi(`全局档案 · ${globalItems.length} 份`, `Global Vault · ${globalItems.length}`),
           sub: isBoundSession ? bi(`参谋参阅 ${globalItems.filter(it => it && it.chiefMounted).length}`, `Chief Ref ${globalItems.filter(it => it && it.chiefMounted).length}`) : '',
-          hint: bi('未织钩对参谋与主会话双盲；参谋整理织钩后仅参谋可见钩拉阅（主会话始终 0 泄露）', 'Blind until hooked; Chief pulls on demand (0 leak to Lead)'),
+          hint: bi('跨对话共用的资料。打标签后参谋长可按需查看，不发给主对话。', 'Shared across chats. Chief reads tagged notes on demand; never sent to main chat.'),
         }
       : activeScope === 'precipitated'
         ? {
             color: '#94a3b8',
-            title: bi(`冷藏档案柜 · ${precipBadgeCount} 卷`, `Cold Vault · ${precipBadgeCount}`),
+            title: bi(`冷藏档案 · ${precipBadgeCount} 份`, `Cold Vault · ${precipBadgeCount}`),
             sub: flippedSet.size > 0 ? bi(`已置顶 ${flippedSet.size}`, `Pinned ${flippedSet.size}`) : '',
-            hint: bi('100% 人类专属视图（主代理与参谋长均 0 泄露），关键词钩子仅供人类检索', '100% human-only vault (0 leak to Lead or Chief)'),
+            hint: bi('只给你自己看的私密资料，主对话和参谋长都看不到。', 'Private vault for you only. Main chat and Chief never see it.'),
           }
         : {
             color: '#38bdf8',
-            title: bi(`本局档案柜 · ${sessionItems.length} 卷`, `Session Vault · ${sessionItems.length}`),
+            title: bi(`本局档案 · ${sessionItems.length} 份`, `Session Vault · ${sessionItems.length}`),
             sub: isBoundSession && sessionItems.some(it => it && it.leadPulled)
               ? bi(`主拉 ${sessionItems.filter(it => it && it.leadPulled).length}`, `Pulled ${sessionItems.filter(it => it && it.leadPulled).length}`)
               : '',
-            hint: bi('参谋随时可读；未整理草稿主会话不可见；织钩后主代理见钩可用 archive.pull 拉阅', 'Readable by Chief; Lead sees hooks only for archive.pull'),
+            hint: bi('仅限当前对话的资料。打标签后主对话可按需查看。', 'For this chat only. Main chat can pull tagged notes on demand.'),
           }
 
     const topMenuOpen = openMenuKey === 'vault-top'
@@ -1445,7 +1445,7 @@ export function ArchiveTab({ board, view }) {
           className: 'dnb-icon-btn',
           'data-active': view.archiveSearchOpen ? '1' : '0',
           style: { width: 24, height: 24 },
-          title: bi('筛选与搜索档案', 'Filter & Search Archives'),
+          title: bi('搜索或筛选档案', 'Search or filter archives'),
           onClick: () => patch({ archiveSearchOpen: !view.archiveSearchOpen }),
         }, h(Icon, { name: 'search', size: 13 })),
         activeScope !== 'precipitated'
@@ -1464,7 +1464,7 @@ export function ArchiveTab({ board, view }) {
             type: 'button',
             className: 'dnb-icon-btn',
             style: { width: 24, height: 24 },
-            title: bi('更多档案柜操作', 'More vault actions'),
+            title: bi('更多操作', 'More actions'),
             onClick: () => setOpenMenuKey(topMenuOpen ? '' : 'vault-top'),
           }, '⋯'),
           topMenuOpen
@@ -1487,13 +1487,13 @@ export function ArchiveTab({ board, view }) {
                             },
                           })
                         },
-                      }, bi('+ 新建本局卷宗', '+ New Session Dossier')),
+                      }, bi('+ 新建本局档案', '+ New Session Note')),
                       h('button', {
                         type: 'button',
                         className: 'dnb-more-item',
                         disabled: Boolean(view.archiveHarvesting || !isBoundSession),
                         onClick: () => { setOpenMenuKey(''); void harvestArchivesApi('', { vaultScope: 'session' }) },
-                      }, view.archiveHarvesting ? bi('抢救中…', 'Harvesting…') : bi('📥 抢救对话细节', '📥 Harvest Chat Details')),
+                      }, view.archiveHarvesting ? bi('提取中…', 'Extracting…') : bi('📥 从对话里提取档案', '📥 Extract Notes from Chat')),
                       h('button', {
                         type: 'button',
                         className: 'dnb-more-item',
@@ -1503,7 +1503,7 @@ export function ArchiveTab({ board, view }) {
                           const selSessionIds = selectedArchivesList.filter(s => s && s.vaultScope === 'session').map(s => s.id)
                           patch({ distillGlobalModal: { ids: selSessionIds.length > 0 ? selSessionIds : null, instruction: '', clearSource: false } })
                         },
-                      }, bi('✦ 提炼入全局', '✦ Distill to Global')),
+                      }, bi('✦ 整理进全局档案', '✦ Save to Global Vault')),
                       h('div', { className: 'dnb-more-sep' }),
                       h('button', {
                         type: 'button',
@@ -1522,7 +1522,7 @@ export function ArchiveTab({ board, view }) {
                         className: 'dnb-more-item',
                         disabled: nonEmptySessionDrawers.length === 0,
                         onClick: () => { setOpenMenuKey(''); toggleAllSessionDrawers() },
-                      }, anySessionDrawerOpen ? bi('↕ 合上全部抽屉', '↕ Collapse Drawers') : bi('↕ 展开全部抽屉', '↕ Expand Drawers')),
+                      }, anySessionDrawerOpen ? bi('↕ 全部收起', '↕ Collapse All') : bi('↕ 全部展开', '↕ Expand All')),
                     )
                   : activeScope === 'global'
                     ? h(
@@ -1539,7 +1539,7 @@ export function ArchiveTab({ board, view }) {
                               },
                             })
                           },
-                        }, bi('+ 新建全局档案', '+ New Global Dossier')),
+                        }, bi('+ 新建全局档案', '+ New Global Note')),
                         h('button', {
                           type: 'button',
                           className: 'dnb-more-item',
@@ -1550,7 +1550,7 @@ export function ArchiveTab({ board, view }) {
                               precipitateModal: { op: 'cabinet', vaultScope: 'global', cabinetId: '', label: bi('全局档案柜', 'Global Vault'), clearSource: false },
                             })
                           },
-                        }, bi('🧊 沉淀入冷藏柜', '🧊 Seal into Cold Vault')),
+                        }, bi('🧊 转入冷藏库', '🧊 Move to Cold Vault')),
                         isBoundSession
                           ? h('button', {
                               type: 'button',
@@ -1560,7 +1560,7 @@ export function ArchiveTab({ board, view }) {
                                 setOpenMenuKey('')
                                 patch({ globalShowLocalOnlyDrawer: !view.globalShowLocalOnlyDrawer })
                               },
-                            }, `⇄ 本局差分 (${diff.localOnlyCount || 0})`)
+                            }, `⇄ 本局独有 (${diff.localOnlyCount || 0})`)
                           : null,
                         h('div', { className: 'dnb-more-sep' }),
                       )
@@ -1573,7 +1573,7 @@ export function ArchiveTab({ board, view }) {
                     setOpenMenuKey('')
                     patch({ archiveSelectMode: !view.archiveSelectMode })
                   },
-                }, view.archiveSelectMode ? '✓ 退出批量多选' : '☑️ 批量多选递话'),
+                }, view.archiveSelectMode ? '✓ 退出多选' : '☑️ 批量选中递话'),
               )
             : null,
         ),
@@ -1586,7 +1586,7 @@ export function ArchiveTab({ board, view }) {
     if (!view.archiveSearchOpen) return null
     const cabinets = Array.isArray(view.archiveCabinets) && view.archiveCabinets.length
       ? view.archiveCabinets
-      : [{ id: view.archiveCabinetId || '', name: '默认工作分柜', count: sessionItems.length }]
+      : [{ id: view.archiveCabinetId || '', name: '默认分柜', count: sessionItems.length }]
     const activeCabId = view.archiveCabinetId || (cabinets[0] && cabinets[0].id) || ''
 
     return h(
@@ -1598,7 +1598,7 @@ export function ArchiveTab({ board, view }) {
         h('input', {
           className: 'dnb-input',
           style: { height: 27, borderRadius: 99, padding: '0 10px', fontSize: 11.5 },
-          placeholder: '按标题、关键词钩子筛选…',
+          placeholder: '搜标题或关键词…',
           value: view.archiveQuery || '',
           onChange: e => patch({ archiveQuery: e.target.value }),
         }),
@@ -1740,8 +1740,8 @@ export function ArchiveTab({ board, view }) {
       return h(
         'div',
         { className: 'dnb-group', style: { padding: '20px 14px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' } },
-        h('div', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } }, bi('空白新对话 · 暂未建立本局档案柜', 'Blank Session · Vault Not Created Yet')),
-        h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', maxWidth: 320 } }, bi('发送第一条对话后即自动隔离建柜，避免与历史对话串档。', 'Isolated session vault initializes automatically on first turn.')),
+        h('div', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } }, bi('新对话还没开始，本局档案暂未建立', 'New chat: session vault not created yet')),
+        h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', maxWidth: 320 } }, bi('发第一条消息后会自动建一个独立档案柜，不会和旧对话混在一起。', 'Starts an isolated vault on your first message so chats stay separate.')),
         h(
           'div',
           { style: { display: 'flex', gap: 6, marginTop: 4 } },
@@ -1765,7 +1765,7 @@ export function ArchiveTab({ board, view }) {
               className: 'dnb-strip-bar',
               style: { '--dnb-strip-color': '#10b981', marginBottom: 8 },
             },
-            h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi(`有 ${tempNotes.length} 篇本轮便签待入柜`, `${tempNotes.length} temp notes ready to store`)),
+            h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi(`有 ${tempNotes.length} 条临时便签可以存入档案`, `${tempNotes.length} temp notes ready to save`)),
             h('button', {
               type: 'button',
               className: 'dnb-mini-btn',
@@ -1774,7 +1774,7 @@ export function ArchiveTab({ board, view }) {
                 patch({ archiveSweeping: true })
                 try {
                   const noteIds = tempNotes.map(n => n && n.id).filter(Boolean)
-                  await mutateArchiveApi({ op: 'precipitateNotes', vaultScope: 'session', noteIds }, bi('已收纳入本局档案柜', 'Stored in Session Vault'))
+                  await mutateArchiveApi({ op: 'precipitateNotes', vaultScope: 'session', noteIds }, bi('已存进本局档案', 'Saved to Session Vault'))
                 } finally {
                   patch({ archiveSweeping: false })
                 }
@@ -1788,7 +1788,7 @@ export function ArchiveTab({ board, view }) {
           ? h(
               'div',
               { className: 'dnb-empty' },
-              query || clipFilter !== 'all' ? bi('没有匹配的卷宗', 'No matching dossiers') : bi('本局档案柜暂空（点右上 ⋯ 新建卷宗或抢救细节）', 'Session vault empty (click ⋯ above to add or harvest)'),
+              query || clipFilter !== 'all' ? bi('没有找到匹配的档案', 'No matching notes') : bi('本局档案还是空的。点右上角 ⋯ 可以新建，或从对话里提取。', 'Session vault is empty. Click ⋯ above to add or extract notes.'),
             )
           : h(
               React.Fragment,
@@ -1846,8 +1846,8 @@ export function ArchiveTab({ board, view }) {
       return h(
         'div',
         { className: 'dnb-group', style: { padding: '18px 14px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' } },
-        h('div', { style: { fontSize: 12.5, fontWeight: 600, color: '#f59e0b' } }, '宿主内存模块版本偏旧，请重启 DSH 后访问独立全局库'),
-        h('button', { type: 'button', className: 'dnb-pill', onClick: () => void loadArchives(true, '', 'global') }, '重新检测'),
+        h('div', { style: { fontSize: 12.5, fontWeight: 600, color: '#f59e0b' } }, '系统版本较旧，请重启 DSH 后再看全局档案'),
+        h('button', { type: 'button', className: 'dnb-pill', onClick: () => void loadArchives(true, '', 'global') }, '重试'),
       )
     }
 
@@ -1879,7 +1879,7 @@ export function ArchiveTab({ board, view }) {
             h(
               'div',
               { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11.5, color: 'var(--dnb-text-2)' } },
-              h('span', null, `本局尚有 ${localBriefs.length} 卷可推入全局`),
+              h('span', null, `本局还有 ${localBriefs.length} 份可以存到全局`),
               h('button', {
                 type: 'button',
                 className: 'dnb-icon-btn',
@@ -1895,16 +1895,16 @@ export function ArchiveTab({ board, view }) {
                 h('button', {
                   type: 'button',
                   className: 'dnb-mini-btn',
-                  onClick: () => void mutateArchiveApi({ op: 'copyToGlobal', archiveId: b.id, vaultScope: 'session' }, '已推送存入全局'),
-                }, b.diffStatus === 'local_modified' ? '覆盖全局' : '推入全局'),
+                  onClick: () => void mutateArchiveApi({ op: 'copyToGlobal', archiveId: b.id, vaultScope: 'session' }, '已存到全局档案'),
+                }, b.diffStatus === 'local_modified' ? '更新全局版本' : '存到全局'),
               ),
             ),
           )
         : null,
       view.archiveLoading && !view.globalVaultLoaded
-        ? h('div', { className: 'dnb-empty' }, bi('正在读取全局档案柜…', 'Loading global vault…'))
+        ? h('div', { className: 'dnb-empty' }, bi('正在加载全局档案…', 'Loading global vault…'))
         : nonEmptyG.length === 0
-          ? h('div', { className: 'dnb-empty' }, globalItems.length === 0 ? bi('全局档案柜暂空（从本局可提炼或新建）', 'Global vault empty (distill from session or add new)') : bi('没有匹配的全局档案', 'No matching global dossiers'))
+          ? h('div', { className: 'dnb-empty' }, globalItems.length === 0 ? bi('全局档案还是空的。可以从本局整理进来，或直接新建。', 'Global vault is empty. Save notes from a session or add one.') : bi('没有找到匹配的全局档案', 'No matching global notes'))
           : nonEmptyG.map(gf => {
               const fItems = gByFolder.get(gf.id) || []
               const gKey = 'global:' + gf.id
@@ -1925,7 +1925,7 @@ export function ArchiveTab({ board, view }) {
                     cabinetId: '',
                     folder: gf.id,
                     ids: fItems.map(x => x.id),
-                    label: `全局抽屉「${gf.label}」(${fItems.length} 卷)`,
+                    label: `全局抽屉「${gf.label}」(${fItems.length} 份)`,
                     clearSource: false,
                   },
                 }),
@@ -1949,11 +1949,11 @@ export function ArchiveTab({ board, view }) {
     const pFolderDefs = Array.isArray(view.precipitatedFolders) && view.precipitatedFolders.length
       ? view.precipitatedFolders
       : [
-          { id: 'coords', label: '工程坐标与路径', hint: '核心入口/脚本/端口', accent: '#38bdf8' },
-          { id: 'incidents', label: '排障实录与踩坑', hint: '高频异常与根因定位', accent: '#f59e0b' },
-          { id: 'contracts', label: '架构契约与规范', hint: '接口契约/安全边界', accent: '#a855f7' },
-          { id: 'ops', label: '通用运维经验', hint: '常用工程最佳实践', accent: '#10b981' },
-          { id: 'plans', label: '阶段蓝图归档', hint: '历史阶段里程碑', accent: '#64748b' },
+          { id: 'coords', label: '项目入口与路径', hint: '常用入口、脚本和端口', accent: '#38bdf8' },
+          { id: 'incidents', label: '踩坑与排查记录', hint: '常见问题和原因', accent: '#f59e0b' },
+          { id: 'contracts', label: '接口与规则约定', hint: '接口说明和安全要求', accent: '#a855f7' },
+          { id: 'ops', label: '日常操作经验', hint: '常用的好做法', accent: '#10b981' },
+          { id: 'plans', label: '旧版方案记录', hint: '过去的阶段规划', accent: '#64748b' },
         ]
     const pByFolder = new Map()
     for (const pf of pFolderDefs) pByFolder.set(pf.id, [])
@@ -1974,7 +1974,7 @@ export function ArchiveTab({ board, view }) {
       renderVaultStripBar(),
       renderSearchAndFilterStrip(),
       filteredPrecip.length === 0
-        ? h('div', { className: 'dnb-empty' }, precipList.length === 0 ? bi('冷藏档案柜暂空（从全局柜可沉淀跨工程通用经验）', 'Cold vault empty (seal reusable experience from Global Vault)') : bi('没有匹配的冷藏条目', 'No matching cold entries'))
+        ? h('div', { className: 'dnb-empty' }, precipList.length === 0 ? bi('冷藏库还是空的。可以把全局档案里长期不改的经验转到这里。', 'Cold vault is empty. Move long-term notes here from Global Vault.') : bi('没有找到匹配的冷藏档案', 'No matching cold notes'))
         : nonEmptyDrawers.map(pf => {
             const fItems = pByFolder.get(pf.id) || []
             const isDrawerOpen = !(view.precipOpenDrawers && view.precipOpenDrawers[pf.id] === false)
@@ -2008,7 +2008,7 @@ export function ArchiveTab({ board, view }) {
     // Clean 4-Tab Vault Segmented Bar (`📌 桌面 | 🗂️ 本局 | 🌐 全局 | 🧊 冷藏`)
     h(
       'div',
-      { className: 'dnb-vault-seg', role: 'tablist', 'aria-label': bi('桌面与三层档案柜', 'Desktop & Three-Tier Vaults') },
+      { className: 'dnb-vault-seg', role: 'tablist', 'aria-label': bi('桌面和三类档案柜', 'Desktop and Archive Vaults') },
       [
         { key: 'desktop', label: bi('📌 桌面', '📌 Desk'), count: deskPinned.length },
         { key: 'session', label: bi('🗂️ 本局', '🗂️ Session'), count: sessionBadgeCount },

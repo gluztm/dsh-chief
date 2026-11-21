@@ -202,7 +202,7 @@ export class ChiefErrorBoundary extends React.Component {
       return h(
         'div',
         { className: 'dnb-group', style: { padding: 16, textAlign: 'center', marginTop: 12 } },
-        h('div', { style: { fontWeight: 500, fontSize: 13, marginBottom: 6 } }, '视图渲染已自动恢复保护'),
+        h('div', { style: { fontWeight: 500, fontSize: 13, marginBottom: 6 } }, '面板加载出了点问题'),
         h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', marginBottom: 12, wordBreak: 'break-word' } },
           String(this.state.error && this.state.error.message ? this.state.error.message : this.state.error)),
         h('button', {
@@ -268,7 +268,7 @@ export function SearchDrawer({ view }) {
       h('input', {
         className: 'dnb-input',
         style: { borderRadius: 99, paddingLeft: 12, height: 30 },
-        placeholder: bi('搜索记忆、任务、协同信箱…', 'Search facts, tasks, mailbox…'),
+        placeholder: bi('搜记忆、任务或协同消息…', 'Search memory, tasks, or messages…'),
         autoFocus: true,
         value: view.askText || '',
         onChange: e => {
@@ -286,15 +286,15 @@ export function SearchDrawer({ view }) {
             style: { height: 30 },
             disabled: view.archiveSearchBusy,
             onClick: () => void searchColdArchives(view.askText),
-            title: bi('按需穿透搜索封存懒加载的长期工程档案柜', 'Search cold engineering archive vaults on demand'),
-          }, h(Icon, { name: 'archive', size: 12 }), view.archiveSearchBusy ? bi('检索中…', 'Searching…') : bi('搜档案柜', 'Vaults'))
+            title: bi('搜一搜收起来的长期历史档案', 'Search archived history files on demand'),
+          }, h(Icon, { name: 'archive', size: 12 }), view.archiveSearchBusy ? bi('搜索中…', 'Searching…') : bi('搜旧档案', 'Archives'))
         : null,
       (view.askText || '').trim()
         ? h('button', {
             className: 'dnb-pill dnb-pill-accent',
             style: { height: 30 },
             onClick: askModel,
-            title: bi('直接交给 DSH 参谋长回答或拆话', 'Ask DSH Chief directly'),
+            title: bi('直接发给参谋长来回答或安排', 'Send directly to DSH Chief to answer or handle'),
           }, h(Icon, { name: 'sparkles', size: 12 }), bi('问参谋长', 'Ask Chief'))
         : null,
     ),
@@ -333,7 +333,7 @@ export function SearchDrawer({ view }) {
                   ),
                 ),
               )
-            : h('div', { style: { padding: '10px 12px', fontSize: 11.5, color: 'var(--dnb-text-3)', textAlign: 'center' } }, bi('无匹配结果', 'No matches found')),
+            : h('div', { style: { padding: '10px 12px', fontSize: 11.5, color: 'var(--dnb-text-3)', textAlign: 'center' } }, bi('没找到相关内容', 'No matches found')),
         )
       : null,
   )
@@ -381,7 +381,7 @@ export function ObjectiveRadarStrip({ board, compact = false }) {
       const resolved = resolveTaskAgents(task, allTasks, subagents, identity)
       const agentLabels = resolved.agentNames.length
         ? resolved.agentNames.slice(0, 2).map(n => '@' + shortAgentName(n, true)).join('、')
-          + (resolved.agentNames.length > 2 ? ' 等 ' + resolved.agentNames.length + ' 代理' : '')
+          + (resolved.agentNames.length > 2 ? ' 等 ' + resolved.agentNames.length + ' 个代理' : '')
         : '@主代理'
       const subReason = kind === 'blocked' && (task.note || (board && board.cursor && board.cursor.blocked))
         ? clampTitle(task.note || board.cursor.blocked, 20)
@@ -395,8 +395,8 @@ export function ObjectiveRadarStrip({ board, compact = false }) {
           'data-kind': kind,
           'data-focused': isFocused ? '1' : '0',
           title: kind === 'blocked'
-            ? '受阻目标：点击跳转金字塔视角定位负责子代理'
-            : '推进目标：点击跳转金字塔视角框选正在推进的子代理',
+            ? '卡住的任务：点这里找负责的子代理'
+            : '进行中的任务：点这里看负责的子代理',
           onClick: () => {
             if (isFocused) {
               patch({ focusTaskId: '' })
@@ -435,7 +435,7 @@ export function ObjectiveRadarStrip({ board, compact = false }) {
                 whiteSpace: 'nowrap',
               },
             },
-            (kind === 'blocked' ? '受阻关联：' : '推进代理：') + agentLabels + (subReason ? ' · ' + subReason : ''),
+            (kind === 'blocked' ? '卡在：' : '负责：') + agentLabels + (subReason ? ' · ' + subReason : ''),
           ),
         ),
         h(
@@ -455,7 +455,7 @@ export function ObjectiveRadarStrip({ board, compact = false }) {
             },
           },
           h(Icon, { name: 'target', size: 11.5 }),
-          isFocused ? '已框选' : '看代理',
+          isFocused ? '已选中' : '看代理',
         ),
       )
     }),
@@ -529,7 +529,7 @@ export function SubagentFleetBar({ board }) {
             minWidth: 0,
           },
           onClick: () => patch({ fleetCollapsed: !isCollapsed }),
-          title: isCollapsed ? '点击展开子代理团队' : '点击收起子代理团队',
+          title: isCollapsed ? '展开子代理列表' : '收起子代理列表',
         },
         runningCount > 0
           ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#409cff' } })
@@ -546,7 +546,7 @@ export function SubagentFleetBar({ board }) {
         h(
           'span',
           { style: { color: runningCount > 0 ? '#409cff' : 'var(--dnb-text-3)', fontWeight: 500 } },
-          runningCount ? `${runningCount} 运行中 · 共 ${children.length}` : `共 ${children.length} 成员`,
+          runningCount ? `${runningCount} 个干活中 · 共 ${children.length} 个` : `共 ${children.length} 个`,
         ),
       ),
       h(
@@ -564,7 +564,7 @@ export function SubagentFleetBar({ board }) {
           style: { height: 22, fontSize: 11, padding: '0 8px' },
           onClick: () => patch({ fleetCollapsed: !isCollapsed }),
         },
-          isCollapsed ? `展示 (${children.length})` : '收起',
+          isCollapsed ? `展开 (${children.length})` : '收起',
           h(Icon, {
             name: 'chevron',
             size: 11,
@@ -620,24 +620,24 @@ export function SubagentFleetBar({ board }) {
             ? h('button', {
                 className: 'dnb-pill',
                 style: { height: 25, padding: '0 9px', fontSize: 11, borderStyle: 'dashed', color: 'var(--dnb-text-3)' },
-                title: '展示其余已结束/待命的子代理成员',
+                title: '展开其他已停下的子代理',
                 onClick: () => patch({ fleetShowAll: true }),
-              }, '+' + hiddenCount + ' 展示全部')
+              }, '还有 ' + hiddenCount + ' 个')
             : (hasMany && showAll
                 ? h('button', {
                     className: 'dnb-pill',
                     style: { height: 25, padding: '0 9px', fontSize: 11, color: 'var(--dnb-text-3)' },
                     onClick: () => patch({ fleetShowAll: false }),
-                  }, '折叠空闲')
+                  }, '收起空闲的')
                 : null),
           hasAnyProbe
             ? h('button', {
                 className: 'dnb-pill',
                 'data-active': store.showInternalProbes ? '1' : '0',
                 style: { height: 24, padding: '0 8px', fontSize: 10.5, borderStyle: 'dashed', opacity: 0.78 },
-                title: store.showInternalProbes ? '隐藏后台记忆检查点探针 (@mnemon-review)' : '显示后台记忆检查点探针 (@mnemon-review)',
+                title: store.showInternalProbes ? '隐藏后台自动核对记忆的小工具 (@mnemon-review)' : '显示后台自动核对记忆的小工具 (@mnemon-review)',
                 onClick: () => patch({ showInternalProbes: !store.showInternalProbes }),
-              }, store.showInternalProbes ? '隐藏内部探针' : `内部探针 (${hier.probeCount})`)
+              }, store.showInternalProbes ? '隐藏后台工具' : `后台工具 (${hier.probeCount})`)
             : null,
         )
       : null,
@@ -649,10 +649,10 @@ export function SubagentFleetBar({ board }) {
             ? h('button', {
                 className: 'dnb-pill',
                 style: { height: 28 },
-                title: '在分栏打开该子代理对话',
+                title: '在分屏打开它的对话',
                 onClick: () => {
                   if (!openSubagentChat(activeAgentObj)) {
-                    patch({ notice: '当前子代理尚未建立独立会话视图' })
+                    patch({ notice: '这个子代理还没有独立的对话窗口' })
                   }
                 },
               }, h(Icon, { name: 'chat', size: 12 }), '对话')
@@ -660,7 +660,7 @@ export function SubagentFleetBar({ board }) {
           h('input', {
             className: 'dnb-input',
             style: { flex: 1, height: 28, padding: '0 10px', borderRadius: 99, fontSize: 11.5 },
-            placeholder: '给 @' + shortAgentName(steerAgent) + ' 发指令…',
+            placeholder: '给 @' + shortAgentName(steerAgent) + ' 发消息…',
             value: steerText,
             onChange: e => setSteerText(e.target.value),
             onKeyDown: e => { if (e.key === 'Enter') sendSteer() },
@@ -674,7 +674,7 @@ export function SubagentFleetBar({ board }) {
           h('button', {
             className: 'dnb-pill dnb-pill-danger',
             style: { height: 28, padding: '0 8px' },
-            title: '停止当前轮次',
+            title: '停掉它当前这一步',
             onClick: () => void act({ action: 'team.interrupt', agent: steerAgent }),
           }, h(Icon, { name: 'stop', size: 11 })),
         )
@@ -1244,8 +1244,8 @@ export function EffortFanGauge({ value = 'auto', onChange, compact = false }) {
         className: 'dnb-fan-hub',
         'data-active': isAuto && !dragging ? '1' : '0',
         title: isAuto
-          ? '当前已是「🪄 自动调节」：按任务复杂度自动切换参谋思考深度；拖住外圈弧线可手调挡位'
-          : '点击切回「🪄 自动调节」，或继续拖住弧线手调挡位',
+          ? '已开启自动调档：难的问题多想一会，简单的快答；拖动外圈可手动改档'
+          : '点这里切回自动调档，或拖动外圈手动选择',
         onPointerDown: e => e.stopPropagation(),
         onMouseEnter: () => setHoverKey('auto'),
         onMouseLeave: () => setHoverKey(prev => (prev === 'auto' ? '' : prev)),
@@ -1259,7 +1259,7 @@ export function EffortFanGauge({ value = 'auto', onChange, compact = false }) {
             ? previewStep.label
             : (isAuto ? bi('🪄 自动', '🪄 Auto') : (committedStep ? committedStep.label : bi('自动', 'Auto')))),
         h('span', { className: 'dnb-fan-hub-sub' },
-          isAuto && !dragging ? bi('智能调节', 'Adaptive') : bi('点此自动', 'Set Auto')),
+          isAuto && !dragging ? bi('自动调档', 'Auto') : bi('切回自动', 'Set Auto')),
       ),
     ),
   )
@@ -1293,7 +1293,7 @@ export function AccCard({
   children,
 }) {
   const openHintText = pullHintOpen !== null ? pullHintOpen : bi('收起 ▴', 'Collapse ▴')
-  const closedHintText = pullHintClosed !== null ? pullHintClosed : bi('拉起 ▾', 'Expand ▾')
+  const closedHintText = pullHintClosed !== null ? pullHintClosed : bi('展开 ▾', 'Expand ▾')
   const canToggle = typeof onToggle === 'function'
   const cardCls = ['dnb-acc-card', className].filter(Boolean).join(' ')
   const mergedStyle = accentColor
@@ -1313,7 +1313,7 @@ export function AccCard({
       {
         className: 'dnb-acc-head',
         style: canToggle ? undefined : { cursor: 'default' },
-        title: headTitle || (canToggle ? (open ? bi('点击收起', 'Click to collapse') : bi('点击拉起', 'Click to expand')) : undefined),
+        title: headTitle || (canToggle ? (open ? bi('点击收起', 'Click to collapse') : bi('点击展开', 'Click to expand')) : undefined),
         onClick: canToggle ? onToggle : undefined,
       },
       h(

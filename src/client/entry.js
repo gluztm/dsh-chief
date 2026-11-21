@@ -75,7 +75,7 @@ export function createClientPlugin() {
               id: SIDE_ID,
               order: 40,
               title: () => bi(BRAND_NAME, 'DSH Chief'),
-              description: () => bi('摘要 · 推进流程拓扑 · 跨对话协同 · 工程档案柜 · 宰相边界', 'Digest · Workflow Topology · Peer Sync · Archives · Guardrails'),
+              description: () => bi('管摘要、任务、窗口协同、档案和边界规则', 'Manage summaries, tasks, window sync, archives, and guard rules'),
               icon: ChiefIcon,
             },
           ],

@@ -20,25 +20,25 @@ export const CHIEF_PERMISSION_LABELS = {
 }
 
 export const INTERVENTION_TIER_DESC = {
-  advisor: 'L0 顾问档：只读巡检诊断并在面板输出建议，不修改工作区或向主对话/子代理注入强推指令',
-  assistant: 'L1 助手档：仅自主维护记忆/档案/看板与建议卡片，不改工作区文件且不直接插话主对话',
-  strategist: 'L2 参谋档：自动分析并生成关键动作（工作区改动/递话/压缩），逐项弹窗授权后才执行',
-  chief: 'L3 参谋长档：高自主闭环督导（直控主对话/子代理、纠偏、压缩与续跑），含防死循环熔断',
+  advisor: 'L0 顾问档：只看并给建议。不改项目文件，也不打断主对话或子代理。',
+  assistant: 'L1 助手档：会自动整理记忆、档案和看板。不改项目文件，也不插话主对话。',
+  strategist: 'L2 参谋档：会起草改文件、递话和压缩操作，每项都弹窗问你同意后再执行。',
+  chief: 'L3 参谋长档：直接带主对话和子代理干活、纠偏、压缩并续跑，带防死循环保护。',
 }
 
 export const RUN_MODE_OPTIONS = [
-  { key: 'off', label: '⏸ 关停', shortLabel: '⏸ 关停', hint: '0 后台消耗，仅显式 Q&A / 按钮触发；禁止自动巡检、梦境漫游或断线续跑' },
-  { key: 'patrol', label: '🛡 巡检', shortLabel: '🛡 巡检', hint: '常规回合 0 Token；仅在阻墙拦截/异常/断流时精准唤醒，支持 Auto continue' },
-  { key: 'managed', label: '🤖 托管', shortLabel: '🤖 托管', hint: '持续后台监工 + 🌙 梦境漫游整理卷宗织钩子 + 15 分钟 5 条件自动休眠' },
+  { key: 'off', label: '⏸ 关停', shortLabel: '⏸ 关停', hint: '后台不调用模型，只在你提问或点按钮时回复。不会自动巡检、梦境漫游或续跑。' },
+  { key: 'patrol', label: '🛡 巡检', shortLabel: '🛡 巡检', hint: '平时不耗后台额度，只在被拦截、报错或中断时唤醒。支持自动续跑。' },
+  { key: 'managed', label: '🤖 托管', shortLabel: '🤖 托管', hint: '持续在后台盯进度，闲时用 🌙 梦境漫游整理档案。闲置 15 分钟满足条件后自动休眠。' },
 ]
 
 export const THINKING_EFFORT_OPTIONS = [
-  { key: 'auto', label: '🪄 自适应', shortLabel: '🪄 自动', badge: '🪄 自动换挡', hint: '按当前任务复杂度自动升降挡（摘要/梦境漫游→关，诊断/筑墙→高/极高）' },
-  { key: 'off', label: '⚡ 关闭思考', shortLabel: '⚡ 关', badge: '⚡ 关闭思考', hint: '极速低延迟文本输出，不开深度推理链' },
-  { key: 'low', label: '🔅 低强度', shortLabel: '🔅 低', badge: '🔅 低思考', hint: '轻量校验与一般问答' },
-  { key: 'medium', label: '⚖️ 中强度', shortLabel: '⚖️ 中', badge: '⚖️ 中思考', hint: '日常均衡推理与复盘' },
-  { key: 'high', label: '🔥 高强度', shortLabel: '🔥 高', badge: '🔥 高思考', hint: '复杂排障、筑墙、强介入与经验沉淀' },
-  { key: 'xhigh', label: '🧠 极高强度', shortLabel: '🧠 极高', badge: '🧠 极高思考', hint: '多边界碰撞、紧急危情诊断与全局深推演' },
+  { key: 'auto', label: '🪄 自适应', shortLabel: '🪄 自动', badge: '🪄 自动换挡', hint: '按任务难易自动调思考深度。写摘要或梦境漫游时关闭，排查或设拦截规则时调高。' },
+  { key: 'off', label: '⚡ 关闭思考', shortLabel: '⚡ 关', badge: '⚡ 关闭思考', hint: '直接输出回答，不做深度思考，速度最快。' },
+  { key: 'low', label: '🔅 低强度', shortLabel: '🔅 低', badge: '🔅 低思考', hint: '简单检查和日常问答。' },
+  { key: 'medium', label: '⚖️ 中强度', shortLabel: '⚖️ 中', badge: '⚖️ 中思考', hint: '日常推理、写代码和复盘。' },
+  { key: 'high', label: '🔥 高强度', shortLabel: '🔥 高', badge: '🔥 高思考', hint: '处理复杂问题、设拦截规则、强介入和总结经验。' },
+  { key: 'xhigh', label: '🧠 极高强度', shortLabel: '🧠 极高', badge: '🧠 极高思考', hint: '处理多条规则冲突、严重故障和复杂分析。' },
 ]
 
 export const STATUSES = ['todo', 'doing', 'blocked', 'done']
@@ -91,9 +91,9 @@ export const FACT_CAT_TONE = {
 }
 
 export const RELAY_MODES = [
-  { key: 'steer', label: '插话', hint: '正在运行时立即在下一步切入' },
-  { key: 'followup', label: '递话', hint: '排队或唤醒待命对话' },
-  { key: 'silent', label: '备忘', hint: '静默放入信箱，不强行唤醒' },
+  { key: 'steer', label: '插话', hint: '对方正在干活时，下一步立刻插进去提醒。' },
+  { key: 'followup', label: '递话', hint: '排在当前话后面发，对方空闲时直接唤醒。' },
+  { key: 'silent', label: '备忘', hint: '先放到收件箱里，不打断也不叫醒对方。' },
 ]
 
 export const MEMORY_SECTIONS = [
@@ -141,9 +141,9 @@ export const PAPERCLIP_META = {
     glow: 'drop-shadow(0 0 3.5px rgba(255, 224, 51, 0.62))',
     bg: 'rgba(255, 224, 51, 0.17)',
     border: 'rgba(255, 224, 51, 0.56)',
-    label: '璀璨金针',
+    label: '金别针（核心）',
     short: '核心',
-    tip: '亮金曲别针：核心工程坐标与关键锚点（点击切换曲别针等级）',
+    tip: '金别针：核心资料，优先留桌面（点一下切换）',
   },
   silver: {
     color: '#cbd5e1',
@@ -151,9 +151,9 @@ export const PAPERCLIP_META = {
     glow: 'none',
     bg: 'rgba(203, 213, 225, 0.13)',
     border: 'rgba(203, 213, 225, 0.38)',
-    label: '标准银针',
+    label: '银别针（日常）',
     short: '实录',
-    tip: '亮银曲别针：标准排障与工程实录（点击切换曲别针等级）',
+    tip: '银别针：日常记录和资料（点一下切换）',
   },
   copper: {
     color: '#9a583b',
@@ -161,9 +161,9 @@ export const PAPERCLIP_META = {
     glow: 'none',
     bg: 'rgba(124, 67, 41, 0.18)',
     border: 'rgba(124, 67, 41, 0.44)',
-    label: '暗古铜针',
+    label: '铜别针（旧档）',
     short: '归档',
-    tip: '暗古铜曲别针：历史阶段沉淀备查（点击切换曲别针等级）',
+    tip: '铜别针：旧资料，不够放先撤（点一下切换）',
   },
 }
 

@@ -114,14 +114,14 @@ export function ChiefTab({ board, view }) {
           style: { padding: '3px 10px', fontSize: 11.5 },
           'data-active': subTab === 'digest' ? '1' : '0',
           onClick: () => patch({ secSubTab: 'digest' }),
-        }, bi('摘要', 'Digest')),
+        }, bi('摘要', 'Summary')),
         h('button', {
           type: 'button',
           className: 'dnb-seg-btn',
           style: { padding: '3px 10px', fontSize: 11.5 },
           'data-active': subTab !== 'digest' ? '1' : '0',
           onClick: () => patch({ secSubTab: 'facts' }),
-        }, bi('纪律与条目', 'Disciplines & Facts'), facts.length ? h('span', { className: 'dnb-seg-dot' }, String(facts.length)) : null),
+        }, bi('长期规矩', 'Long-Term Rules'), facts.length ? h('span', { className: 'dnb-seg-dot' }, String(facts.length)) : null),
       ),
       subTab === 'digest'
         ? (() => {
@@ -139,14 +139,14 @@ export function ChiefTab({ board, view }) {
                 sessionId: view.sessionId,
               })
               if (copyOnly) {
-                copyText(md, bi('📋 复盘战报 Markdown 已复制到剪贴板', '📋 Retrospective Markdown copied'))
+                copyText(md, bi('📋 复盘报告已复制到剪贴板', '📋 Report copied to clipboard'))
                 return
               }
               const dl = downloadSessionReportMarkdown(md, view.sessionId)
               if (dl && dl.ok) {
-                patch({ notice: bi('📄 已导出复盘战报：', '📄 Exported report: ') + dl.filename })
+                patch({ notice: bi('📄 已导出复盘报告：', '📄 Exported report: ') + dl.filename })
               } else {
-                copyText(md, bi('📄 复盘战报 Markdown 已复制到剪贴板', '📋 Retrospective Markdown copied'))
+                copyText(md, bi('📄 复盘报告已复制到剪贴板', '📋 Report copied to clipboard'))
               }
             }
             const nextLangPref = () => {
@@ -161,7 +161,7 @@ export function ChiefTab({ board, view }) {
                 className: 'dnb-pill',
                 style: { height: 25, padding: '0 9px', fontSize: 11, gap: 4 },
                 disabled: Boolean(view.secBusy),
-                title: bi('向参谋长咨询当前局势与可行建议（无建议或超出能力范围会直接说明，不强行凑执行）', 'Consult Chief on current situation & next advice'),
+                title: bi('问问参谋长现在进展顺不顺、卡在哪、接下来怎么走', 'Ask Chief how things are going, what is blocked, and what to do next'),
                 onClick: () => void submitChiefBar(
                   '请结合当前任务进展、对话上下文、边界红线与团队状态，给我坦诚、接地气的参谋建议：当前有什么需要关注的卡点或更好的推进方向？若一切顺利暂无建议，或涉及非参谋与会话能处理的事项，直接实话告诉我即可，不要强行凑执行项。',
                   'consult_chief',
@@ -180,14 +180,14 @@ export function ChiefTab({ board, view }) {
                 },
                 disabled: view.secRegenerating || narrative.summarizing,
                 title: narrative.hasUnsummarizedChanges
-                  ? bi('上下文有新进展，点击让参谋长按需提炼最新摘要（平时后台不空转耗费 Token）', 'New context changes detected; click to refresh digest on demand')
-                  : bi('立即让参谋长提炼结构化摘要', 'Refresh structured digest now'),
+                  ? bi('对话有了新内容，点这里更新摘要（平时不后台自动跑，省 Token）', 'New chat updates found. Click to update the summary without extra background cost.')
+                  : bi('让参谋长重新整理一份最新摘要', 'Update the summary now'),
                 onClick: () => void loadChiefView(true, { syncHandoff: !isHandoffPinned && syncOnDigest }),
               },
                 (view.secRegenerating || narrative.summarizing)
                   ? h(Icon, { name: 'refresh', size: 11, style: { animation: 'dnb-spin 0.9s linear infinite' } })
                   : h(Icon, { name: 'sparkles', size: 11 }),
-                (view.secRegenerating || narrative.summarizing) ? bi('提炼中…', 'Distilling…') : bi('提炼摘要', 'Distill'),
+                (view.secRegenerating || narrative.summarizing) ? bi('整理中…', 'Updating…') : bi('更新摘要', 'Update Summary'),
                 (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
                   ? h('span', {
                       style: {
@@ -208,7 +208,7 @@ export function ChiefTab({ board, view }) {
                   className: 'dnb-pill',
                   style: { height: 25, padding: '0 7px', fontSize: 11 },
                   'data-active': view.chiefMoreMenuOpen ? '1' : '0',
-                  title: bi('战报导出、交接同步与语言切换', 'Report export, handoff sync & language'),
+                  title: bi('导出报告、更新交接单或切换语言', 'Export report, sync handoff, or switch language'),
                   onClick: () => patch({ chiefMoreMenuOpen: !view.chiefMoreMenuOpen }),
                 }, '⋯'),
                 view.chiefMoreMenuOpen
@@ -222,7 +222,7 @@ export function ChiefTab({ board, view }) {
                           patch({ chiefMoreMenuOpen: false })
                           exportReport(false)
                         },
-                      }, h('span', null, bi('📄 导出复盘战报 (.md)', '📄 Export Report (.md)'))),
+                      }, h('span', null, bi('📄 导出复盘报告 (.md)', '📄 Export Report (.md)'))),
                       h('button', {
                         type: 'button',
                         className: 'dnb-more-item',
@@ -230,7 +230,7 @@ export function ChiefTab({ board, view }) {
                           patch({ chiefMoreMenuOpen: false })
                           exportReport(true)
                         },
-                      }, h('span', null, bi('📋 复制复盘战报 Markdown', '📋 Copy Markdown Report'))),
+                      }, h('span', null, bi('📋 复制复盘报告 (Markdown)', '📋 Copy Report (Markdown)'))),
                       h('div', { className: 'dnb-more-sep' }),
                       h('button', {
                         type: 'button',
@@ -238,26 +238,26 @@ export function ChiefTab({ board, view }) {
                         'data-active': (!isHandoffPinned && syncOnDigest) ? '1' : '0',
                         disabled: isHandoffPinned,
                         title: isHandoffPinned
-                          ? bi('交接单已被人类定住锁定，参谋长不可覆盖', 'Handoff pinned by human; locked against auto-overwrite')
-                          : bi('开启后，点击「提炼摘要」完成时会自动一键同步更新交接单', 'Auto-sync handoff packet after digest distillation'),
+                          ? bi('交接单已被你定住防改，参谋长不会覆盖它', 'Handoff is pinned by you, so Chief will not overwrite it.')
+                          : bi('开启后，每次更新摘要时都会顺便更新交接单', 'Update the handoff card automatically whenever you refresh the summary.'),
                         onClick: () => {
                           patch({ chiefMoreMenuOpen: false })
                           void toggleSyncHandoffOnDigest(!syncOnDigest)
                         },
                       },
-                        h('span', null, isHandoffPinned ? bi('🔒 交接已定住', '🔒 Handoff Pinned') : bi('提炼时自动同步交接单', 'Auto-sync handoff on distill')),
+                        h('span', null, isHandoffPinned ? bi('🔒 交接单已定住', '🔒 Handoff Pinned') : bi('更新摘要时同步交接单', 'Auto-sync handoff on update')),
                         h('span', { style: { fontSize: 10.5, opacity: 0.78 } }, isHandoffPinned ? bi('锁定', 'Locked') : (syncOnDigest ? bi('开', 'On') : bi('关', 'Off'))),
                       ),
                       h('button', {
                         type: 'button',
                         className: 'dnb-more-item',
                         disabled: isHandoffPinned || view.secRegenerating || narrative.summarizing,
-                        title: isHandoffPinned ? bi('交接单已被人类定住，无法一键同步覆盖', 'Handoff is pinned') : bi('将当前参谋摘要与态势一键写入交接单', 'Write current digest to handoff'),
+                        title: isHandoffPinned ? bi('交接单已定住防改，不能覆盖', 'Handoff is pinned and cannot be overwritten.') : bi('把当前摘要写进交接单', 'Copy the current summary into the handoff card'),
                         onClick: () => {
                           patch({ chiefMoreMenuOpen: false })
                           void loadChiefView(false, { syncHandoff: true })
                         },
-                      }, h('span', null, isHandoffPinned ? bi('🔒 交接已定住', '🔒 Handoff Pinned') : bi('↪ 立即更新交接单', '↪ Sync Handoff Now'))),
+                      }, h('span', null, isHandoffPinned ? bi('🔒 交接单已定住', '🔒 Handoff Pinned') : bi('↪ 立即更新交接单', '↪ Sync Handoff Now'))),
                       h('div', { className: 'dnb-more-sep' }),
                       h('button', {
                         type: 'button',
@@ -282,11 +282,11 @@ export function ChiefTab({ board, view }) {
     subTab === 'digest'
       ? (() => {
           const digestStatusText = (narrative.summarizing || view.secRegenerating)
-            ? bi('正在提炼最新上下文…', 'Distilling latest context…')
+            ? bi('正在整理最新进展…', 'Updating summary…')
             : narrative.isLiveZeroToken
-              ? bi('实时看板速览 · 零 Token', 'Live board overview · 0 tokens')
-              : ((narrative.at ? bi('更新于 ', 'Updated ') + relativeTimeLabel(narrative.at) : bi('已提炼', 'Distilled'))
-                  + (narrative.hasUnsummarizedChanges ? bi(' · 有新进展待提炼', ' · New updates') : ''))
+              ? bi('实时状态（不额外耗 Token）', 'Live overview (no extra tokens)')
+              : ((narrative.at ? bi('更新于 ', 'Updated ') + relativeTimeLabel(narrative.at) : bi('已更新', 'Updated'))
+                  + (narrative.hasUnsummarizedChanges ? bi(' · 有新进展', ' · New updates') : ''))
           const digestPreview = sixGoalRows && sixGoalRows[0]
             ? clampTitle(sixGoalRows[0].body, 28)
             : digestStatusText
@@ -304,8 +304,8 @@ export function ChiefTab({ board, view }) {
               {
                 open: !view.chiefDigestCollapsed,
                 onToggle: () => patch({ chiefDigestCollapsed: !view.chiefDigestCollapsed }),
-                title: useSixBriefCards ? bi('⚡ 极简目标战报', '⚡ Concise Goal Brief') : bi('态势摘要', 'Situation Digest'),
-                headTitle: view.chiefDigestCollapsed ? bi('点击拉起态势摘要', 'Expand situation digest') : bi('点击收起态势摘要', 'Collapse situation digest'),
+                title: useSixBriefCards ? bi('⚡ 极简目标汇报', '⚡ Brief Goal Summary') : bi('当前进展摘要', 'Current Summary'),
+                headTitle: view.chiefDigestCollapsed ? bi('点击展开摘要', 'Click to expand summary') : bi('点击收起摘要', 'Click to collapse summary'),
                 preview: digestPreview,
                 headerExtra: !view.chiefDigestCollapsed
                   ? h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', whiteSpace: 'nowrap' } }, digestStatusText)
@@ -324,7 +324,7 @@ export function ChiefTab({ board, view }) {
                         type: 'button',
                         className: 'dnb-acc-badge',
                         style: { cursor: 'pointer', border: '1px solid var(--dnb-border)', background: 'var(--dnb-fill)' },
-                        title: bi('查看参谋长 LLM 账本与托管硬预算上限', 'View Chief LLM ledger & hard budget caps'),
+                        title: bi('查看用量统计和托管模式上限', 'View usage stats and Managed mode limits'),
                         onClick: e => {
                           e.stopPropagation()
                           patch({ settingsOpen: true })
@@ -364,7 +364,7 @@ export function ChiefTab({ board, view }) {
                       ),
                     )
                   : h('p', { className: 'dnb-prose-p' },
-                      '当前会话尚未沉淀持久规矩或阶段结论。你可以在下方许愿框直接立规矩、整档案、定边界或吩咐参谋长调度。'),
+                      '目前还没有记下长期规矩或总结。你可以在下面的输入框立规矩、存资料、设拦截规则，或让参谋长去干活。'),
             ),
 
             // Partitioned Chief Q&A Turn Collections vs System / Execution Receipts
@@ -405,7 +405,7 @@ export function ChiefTab({ board, view }) {
                             ? h('span', { className: 'dnb-receipt-badge' },
                                 item.isOneStopReport
                                   ? '🏁 一站式战报回执'
-                                  : (item.resumeTaskId ? '⚡ 授权续跑回执' : '📋 执行回执'))
+                                  : (item.resumeTaskId ? '⚡ 授权后继续结果' : '📋 操作记录'))
                             : h('span', { className: 'dnb-qa-badge', 'data-role': 'chief' }, '✦ 参谋回答'),
                         ),
                         h(
@@ -414,7 +414,7 @@ export function ChiefTab({ board, view }) {
                           effortBadge
                             ? h('span', {
                                 className: 'dnb-chat-effort-badge',
-                                title: item.thinkingEffortMode === 'auto' ? '自适应换挡本次实际生效思考强度' : '本次回复固定思考强度',
+                                title: item.thinkingEffortMode === 'auto' ? '这次回答自动选的思考深度' : '这次回答手动设的思考深度',
                               }, effortBadge)
                             : null,
                           h('span', null, timeLabel(item.at)),
@@ -440,7 +440,7 @@ export function ChiefTab({ board, view }) {
                     {
                       open: showHistory,
                       onToggle: () => setShowHistory(v => !v),
-                      title: bi('参谋问答与回执', 'Chief Q&A & Receipts'),
+                      title: bi('问答与操作记录', 'Q&A & Action Log'),
                       count: `${turns.length}`,
                       bodyStyle: { padding: 0 },
                       actions: h(
@@ -449,7 +449,7 @@ export function ChiefTab({ board, view }) {
                         [
                           { key: 'all', label: `${bi('全部', 'All')} ${turns.length}` },
                           { key: 'qa', label: `${bi('问答', 'Q&A')} ${qaCount}` },
-                          { key: 'receipt', label: `${bi('回执', 'Receipts')} ${receiptCount}` },
+                          { key: 'receipt', label: `${bi('记录', 'Log')} ${receiptCount}` },
                         ].map(opt =>
                           h('button', {
                             key: opt.key,
@@ -467,7 +467,7 @@ export function ChiefTab({ board, view }) {
                               type: 'button',
                               className: 'dnb-text-filter-btn',
                               style: { marginLeft: 2 },
-                              title: allTurnsCollapsed ? bi('展开全部会话条目', 'Expand all turns') : bi('收起全部会话条目', 'Collapse all turns'),
+                              title: allTurnsCollapsed ? bi('展开全部记录', 'Expand all items') : bi('收起全部记录', 'Collapse all items'),
                               onClick: () => {
                                 if (!showHistory) {
                                   setShowHistory(true)
@@ -515,7 +515,7 @@ export function ChiefTab({ board, view }) {
                                     'div',
                                     {
                                       className: 'dnb-turn-question',
-                                      title: isTurnCollapsed ? '点击拉开该轮对话与回执' : '点击收起该轮对话与回执',
+                                      title: isTurnCollapsed ? '点击展开这轮对话' : '点击收起这轮对话',
                                       onClick: toggleTurn,
                                     },
                                     h(
@@ -526,7 +526,7 @@ export function ChiefTab({ board, view }) {
                                         { style: { display: 'flex', alignItems: 'center', gap: 5 } },
                                         h('span', { className: 'dnb-qa-badge', 'data-role': 'user' }, '🙋 你的提问'),
                                         repliesToShow.length > 0
-                                          ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `含 ${repliesToShow.length} 条回复/回执`)
+                                          ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `${repliesToShow.length} 条回复`)
                                           : null,
                                       ),
                                       h(
@@ -583,7 +583,7 @@ export function ChiefTab({ board, view }) {
                                     'div',
                                     {
                                       className: 'dnb-turn-question',
-                                      title: isTurnCollapsed ? '点击拉开该组回执' : '点击收起该组回执',
+                                      title: isTurnCollapsed ? '点击展开这组记录' : '点击收起这组记录',
                                       onClick: toggleTurn,
                                     },
                                     h(
@@ -592,9 +592,9 @@ export function ChiefTab({ board, view }) {
                                       h(
                                         'div',
                                         { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                                        h('span', { className: 'dnb-receipt-badge' }, '📋 系统回执集合'),
+                                        h('span', { className: 'dnb-receipt-badge' }, '📋 系统自动记录'),
                                         repliesToShow.length > 0
-                                          ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `含 ${repliesToShow.length} 条回执`)
+                                          ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `${repliesToShow.length} 条记录`)
                                           : null,
                                       ),
                                       h(
@@ -624,7 +624,7 @@ export function ChiefTab({ board, view }) {
                           }),
                         )
                       : h('div', { className: 'dnb-cell', style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } },
-                          chatFilter === 'receipt' ? '暂无执行与系统回执记录' : '暂无问答对话记录'),
+                          chatFilter === 'receipt' ? '还没有操作记录' : '还没有提问记录'),
                   )
                 })()
               : null,
@@ -638,9 +638,9 @@ export function ChiefTab({ board, view }) {
             {
               open: !view.chiefFactsCollapsed,
               onToggle: () => patch({ chiefFactsCollapsed: !view.chiefFactsCollapsed }),
-              title: bi('持久纪律与团队约定', 'Persistent Disciplines & Facts'),
+              title: bi('长期规矩与约定', 'Long-Term Rules & Notes'),
               count: facts.length ? String(facts.length) : '',
-              preview: facts.length ? clampTitle(facts[0].text || '', 28) : bi('尚未设定长期纪律', 'No facts saved yet'),
+              preview: facts.length ? clampTitle(facts[0].text || '', 28) : bi('还没有长期规矩', 'No rules saved yet'),
               bodyStyle: { padding: 0 },
             },
             h(
@@ -655,7 +655,7 @@ export function ChiefTab({ board, view }) {
               h('input', {
                 className: 'dnb-input',
                 style: { height: 28, borderRadius: 99, padding: '0 11px', fontSize: 12 },
-                placeholder: bi('立一条长期规矩或团队约定…', 'Add a discipline or project rule…'),
+                placeholder: bi('写一条长期规矩或约定…', 'Add a long-term rule or note…'),
                 value: view.secNewFactText || '',
                 onChange: e => patch({ secNewFactText: e.target.value }),
                 onKeyDown: e => { if (e.key === 'Enter') submitNewFact() },
@@ -692,7 +692,7 @@ export function ChiefTab({ board, view }) {
                         h('button', {
                           className: 'dnb-icon-btn',
                           style: { width: 22, height: 22, color: fact.pinned ? 'var(--dnb-accent)' : undefined },
-                          title: fact.pinned ? '取消锁定（允许参谋长自动修订）' : '锁定置顶',
+                          title: fact.pinned ? '取消固定（允许参谋长自动修改）' : '固定住，不让参谋长自动改',
                           onClick: () => void mutateFact({ op: 'pin', id: fact.id, pinned: !fact.pinned }),
                         }, h(Icon, { name: 'pin', size: 11.5 })),
                         h('button', {
@@ -741,7 +741,7 @@ export function ChiefTab({ board, view }) {
                       : h('div', { style: { fontSize: 12.5, color: 'var(--dnb-text)', lineHeight: 1.55, wordBreak: 'break-word' } }, fact.text),
                   )
                 })
-              : h('div', { className: 'dnb-empty', style: { padding: '16px 12px', borderTop: '1px solid var(--dnb-border)' } }, '暂无持久纪律条目'),
+              : h('div', { className: 'dnb-empty', style: { padding: '16px 12px', borderTop: '1px solid var(--dnb-border)' } }, '还没有长期规矩'),
           ),
 
           // Collapsible Raw Turn Memory (Original MemoryTab) inside unified AccCard
@@ -750,9 +750,9 @@ export function ChiefTab({ board, view }) {
             {
               open: Boolean(view.secShowRawTurns),
               onToggle: () => patch({ secShowRawTurns: !view.secShowRawTurns }),
-              title: '每轮原始自动流水记录',
+              title: '每轮对话的自动记录',
               count: view.memCount ? String(view.memCount) : '',
-              preview: '按轮次追溯历史事实与记忆检索',
+              preview: '按对话轮次查看以前记下的内容',
             },
             h(MemoryTab, { board }),
           ),
@@ -809,12 +809,12 @@ export function ChiefComposerBar({ view, barRef }) {
       badgeText: '默认模式',
       badgeTone: 'green',
       bullets: [
-        '读取看板和允许访问的项目状态',
-        '分析任务、提供建议',
-        '不修改工作区',
-        '不修改主代理和子代理工作流',
+        '只看任务看板和项目情况',
+        '帮你分析问题、提建议',
+        '不会改你的任何文件',
+        '不会插手主对话和子代理的活',
       ],
-      footer: '只观察、只分析、只建议。',
+      footer: '只看不改，只在你问时给建议。',
     },
     {
       key: 'assistant',
@@ -826,13 +826,12 @@ export function ChiefComposerBar({ view, barRef }) {
       badgeText: '',
       badgeTone: '',
       bullets: [
-        '顾问模式全部能力',
-        '管理自己的参谋系统',
-        '修改自己的记忆、档案和看板配置',
-        '不直接修改项目工作区',
-        '不接管主代理工作流',
+        '包含 L0 顾问的全部能力',
+        '可自己整理记忆、档案和任务看板',
+        '不会直接改你的项目文件',
+        '不会直接插话打断主对话',
       ],
-      footer: '允许自主维护参谋系统。',
+      footer: '只整理笔记和看板，不碰你的项目代码。',
     },
     {
       key: 'strategist',
@@ -841,16 +840,16 @@ export function ChiefComposerBar({ view, barRef }) {
       shortLabel: 'L2 参谋',
       title: 'L2 · 参谋模式',
       code: 'ADVISOR WITH APPROVAL',
-      badgeText: '逐项授权',
+      badgeText: '逐项问你',
       badgeTone: 'blue',
       bullets: [
-        '助手模式全部能力',
-        '可以申请修改工作区文件',
-        '可以申请修改主对话和子代理工作流',
-        '每项受控操作执行前弹窗',
-        '用户确认后才能执行',
+        '包含 L1 助手的全部能力',
+        '想改项目文件前会先发请求',
+        '想调整主对话或子代理时也会先请示',
+        '每次重要操作都会弹窗问你',
+        '你点同意后才会执行',
       ],
-      footer: 'Agent 提出操作，用户决定是否执行。',
+      footer: '先提出修改方案，等你点头同意再动手。',
     },
     {
       key: 'chief',
@@ -859,16 +858,16 @@ export function ChiefComposerBar({ view, barRef }) {
       shortLabel: 'L3 参谋长',
       title: 'L3 · 参谋长模式',
       code: 'CHIEF OF STAFF',
-      badgeText: '主动风险知悉',
+      badgeText: '需确认风险',
       badgeTone: 'amber',
       bullets: [
-        '参谋模式全部能力',
-        '获得更高的自主执行权限',
-        '可以切换主代理',
-        '可以协调子代理及其工作流',
-        '启用前必须阅读风险声明并主动勾选确认',
+        '包含 L2 参谋的全部能力',
+        '不用逐个问你，可直接动手推进',
+        '可以切换主对话的模型或状态',
+        '可以协调子代理怎么干活',
+        '开启前需要先看风险说明并打勾确认',
       ],
-      footer: '用户明确接受更高自主权带来的操作风险。',
+      footer: '权限很高，开启前请确认你了解风险。',
     },
   ]
   const activePermObj = PERM_OPTIONS.find(p => p.key === permMode) || PERM_OPTIONS[0]
@@ -944,11 +943,11 @@ export function ChiefComposerBar({ view, barRef }) {
     void updateSecConfig({ tacticalModes: { ...tm, [key]: val } })
   }
   const placeholder = secImages.length > 0
-    ? bi('已附 ' + secImages.length + ' 张图，回车可直接发送或补充说明…', `${secImages.length} image(s) attached; Enter to send…`)
+    ? bi('已放 ' + secImages.length + ' 张图，按回车直接发送，或写点说明…', `${secImages.length} image(s) attached. Press Enter to send or add text…`)
     : (activeTarget === 'auto'
-        ? bi('✦ 许愿框：整理/提炼档案、设定边界、重设任务、调整协同网络或吩咐参谋长…', '✦ Command Chief: organize archives, set guards, adjust plan, dispatch or ask…')
+        ? bi('直接说你想让它做什么：整理档案、设拦截规则、改计划或问问题…', 'Tell Chief what to do: organize archives, set guard rules, edit plans, or ask…')
         : activeTarget === 'all'
-          ? bi('向全体成员广播（', 'Broadcast to all (') + modeObj.label + ')…'
+          ? bi('给所有人发消息（', 'Message everyone (') + modeObj.label + ')…'
           : (bi('给 @', 'To @') + shortAgentName(activePeer ? activePeer.name : activeTarget, true) + ' ' + modeObj.label + '…'))
 
   return h(
@@ -986,7 +985,7 @@ export function ChiefComposerBar({ view, barRef }) {
           h(
             'div',
             { className: 'dnb-tactical-head' },
-            h('span', { style: { fontSize: 12, fontWeight: 700, color: 'var(--dnb-text)' } }, '🎛 参谋长战术驾驶舱'),
+            h('span', { style: { fontSize: 12, fontWeight: 700, color: 'var(--dnb-text)' } }, '🎛 参谋长控制面板'),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -1004,7 +1003,7 @@ export function ChiefComposerBar({ view, barRef }) {
             h(
               'div',
               { style: { flex: 1, minWidth: 0 } },
-              h('div', { style: { fontSize: 12, fontWeight: 600, color: tm.intervention ? '#f59e0b' : 'var(--dnb-text)' } }, '⚡ 主动强介入（随四档权限联动）'),
+              h('div', { style: { fontSize: 12, fontWeight: 600, color: tm.intervention ? '#f59e0b' : 'var(--dnb-text)' } }, '⚡ 强介入（权限越高，管得越直接）'),
               h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } },
                 INTERVENTION_TIER_DESC[permMode] || INTERVENTION_TIER_DESC.advisor),
             ),
@@ -1013,12 +1012,12 @@ export function ChiefComposerBar({ view, barRef }) {
               { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
               h(
                 'div',
-                { className: 'dnb-stepper', title: '连续主动介入轮数上限（从 1 轮点「-」可切为 ♾️ 无限督导）' },
+                { className: 'dnb-stepper', title: '最多连续推动多少轮（降到 1 轮后再点「-」可改为 ♾️ 不限轮数）' },
                 h('button', {
                   type: 'button',
                   disabled: isUnlimitedTurns,
                   style: isUnlimitedTurns ? { opacity: 0.35, cursor: 'not-allowed' } : undefined,
-                  title: isUnlimitedTurns ? '当前已为无限轮次' : (maxTurns <= 1 ? '点按将弹窗确认是否切换为 ♾️ 无限督导' : '减少轮次上限'),
+                  title: isUnlimitedTurns ? '现在是不限轮数' : (maxTurns <= 1 ? '再点一次会弹窗确认开启 ♾️ 不限轮数' : '减少轮数上限'),
                   onClick: () => {
                     if (isUnlimitedTurns) return
                     toggleTacticalField('maxInterventionTurns', maxTurns <= 1 ? 0 : maxTurns - 1)
@@ -1049,13 +1048,13 @@ export function ChiefComposerBar({ view, barRef }) {
                 'div',
                 { style: { flex: 1, minWidth: 0 } },
                 h('div', { style: { fontSize: 12, fontWeight: 600, color: isSmartCompact ? 'var(--dnb-accent)' : 'var(--dnb-text)' } },
-                  '🗜 压缩前抢救 + 自动压缩（每轮核查）'),
+                  '🗜 存好资料再自动压缩（每轮检查）'),
                 h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1, lineHeight: 1.4 } },
                   isSmartCompact
-                    ? '✦ 智选已开启：每轮结束后由参谋长与主对话在阶段收口处协同压缩'
+                    ? '✦ 智选压缩已开：会在每段任务做完时，先存好关键资料再压缩'
                     : (thresholdMode === 'tokens'
-                        ? `每轮结束后核查：上下文达 ${thresholdInputVal} 时先抢救实档再静默压缩`
-                        : `每轮结束后核查：占用达 ${pct}% 时先抢救实档再压缩`)),
+                        ? `每轮检查：对话长度到 ${thresholdInputVal} 时先存档再自动压缩`
+                        : `每轮检查：对话占满 ${pct}% 时先存档再自动压缩`)),
               ),
               h(
                 'div',
@@ -1065,8 +1064,8 @@ export function ChiefComposerBar({ view, barRef }) {
                   className: 'dnb-mini-btn',
                   'data-tone': isSmartCompact ? 'accent' : undefined,
                   title: isSmartCompact
-                    ? '当前已开启 ✦ 智选（每轮协同判断压缩时机）；点击切回固定阈值模式'
-                    : '开启 ✦ 智选：由参谋长与主对话在阶段收口处协同把控压缩时机',
+                    ? '已开启 ✦ 智选压缩，点这里切回按固定大小压缩'
+                    : '开启 ✦ 智选压缩：在每段任务做完时自动先存档再压缩',
                   onClick: () => toggleTacticalField('smartCompact', !isSmartCompact),
                 }, isSmartCompact ? '✦ 智选中' : '✦ 智选'),
                 h(Switch, { checked: Boolean(tm.autoCompact), onChange: v => toggleTacticalField('autoCompact', v) }),
@@ -1104,12 +1103,12 @@ export function ChiefComposerBar({ view, barRef }) {
                         color: thresholdMode === 'tokens' ? 'var(--dnb-primary-fg, #fff)' : 'var(--dnb-text-2)',
                       },
                       onClick: () => toggleTacticalField('compactThresholdMode', 'tokens'),
-                    }, '自填上下文'),
+                    }, '按 Token 数'),
                   ),
                   thresholdMode === 'pct'
                     ? h('select', {
                         value: String(pct),
-                        title: '选择触发抢救与自动压缩的上下文占用比例（10%–95%，低于 25% 会提示过早压缩风险）',
+                        title: '对话占满多少比例时自动存档并压缩（10%–95%，低于 25% 会提醒）',
                         style: {
                           height: 26,
                           minWidth: 74,
@@ -1132,8 +1131,8 @@ export function ChiefComposerBar({ view, barRef }) {
                         h('input', {
                           type: 'text',
                           value: thresholdInputVal,
-                          placeholder: '如 1M 或 64(默认K)',
-                          title: '输入 1M 即 1M tokens；不填单位默认为 K（如填 64 即 64K）；低于 32K 会警告',
+                          placeholder: '比如 1M 或 64（默认单位 K）',
+                          title: '填 1M 就是 1M tokens；不写单位默认是 K（比如 64 就是 64K）；低于 32K 会提醒',
                           style: {
                             width: 112,
                             height: 26,
@@ -1177,10 +1176,10 @@ export function ChiefComposerBar({ view, barRef }) {
                     padding: '3px 7px',
                   },
                 }, isLowTokenThreshold
-                  ? `⚠️ 当前自填阈值（${tm.compactThresholdInput || '低于32K'}）低于安全建议线 32K，可能导致上下文频繁压缩丢失现场细节`
+                  ? `⚠️ 你填的 ${tm.compactThresholdInput || '低于 32K'} 太小了（建议至少 32K），压缩太勤容易丢细节`
                   : (view.compactLowWarning
                       ? ('⚠️ ' + view.compactLowWarning)
-                      : `⚠️ 当前压缩比例（${pct}%）低于 25%，可能导致上下文过早频繁压缩，建议设为 30%–80%`))
+                      : `⚠️ 现在设的 ${pct}% 太低了，压缩太勤容易丢细节，建议选 30%–80%`))
               : null,
           ),
           // Row 3: Strict Verify
@@ -1190,8 +1189,8 @@ export function ChiefComposerBar({ view, barRef }) {
             h(
               'div',
               { style: { flex: 1, minWidth: 0 } },
-              h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '✓ 严格实证核验'),
-              h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '要求结论附文件/命令证据，未核实不放行结项'),
+              h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '✓ 完工前核实证据'),
+              h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '必须贴出文件或命令运行结果，没核实就不算完工'),
             ),
             h(Switch, { checked: Boolean(tm.strictVerify), onChange: v => toggleTacticalField('strictVerify', v) }),
           ),
@@ -1214,9 +1213,9 @@ export function ChiefComposerBar({ view, barRef }) {
                     filter: tm.redlineSentinel ? 'drop-shadow(0 0 4px rgba(239,68,68,0.45))' : undefined,
                   },
                 }),
-                '红线越界哨兵',
+                '红线哨兵',
               ),
-              h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '触碰禁止红线或物理驻墙时立即高优拦截'),
+              h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '碰到禁止红线或物理驻墙（拦截规则）时马上拦住'),
             ),
             h(Switch, { checked: Boolean(tm.redlineSentinel), tone: 'red', onChange: v => toggleTacticalField('redlineSentinel', v) }),
           ),
@@ -1227,8 +1226,8 @@ export function ChiefComposerBar({ view, barRef }) {
             h(
               'div',
               { style: { flex: 1, minWidth: 0 } },
-              h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '📝 极简战报模式'),
-              h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '分结构多条短句汇报、剥离繁琐数字参数（细节归其他页）'),
+              h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '📝 极简汇报模式'),
+              h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '只用几句大白话汇报重点，少放复杂数字'),
             ),
             h(Switch, { checked: Boolean(tm.conciseBrief), onChange: v => toggleTacticalField('conciseBrief', v) }),
           ),
@@ -1249,20 +1248,20 @@ export function ChiefComposerBar({ view, barRef }) {
                 h(
                   'div',
                   { className: 'dnb-team-effort-info' },
-                  h('div', { className: 'dnb-team-effort-title' }, '团队思考强度（主/子代理）'),
+                  h('div', { className: 'dnb-team-effort-title' }, '主对话和子代理的思考深度'),
                   h('div', { className: 'dnb-team-effort-sub' },
                     teamMode === 'manual'
-                      ? '手动模式：参谋长不自动调节，由你自行掌控'
-                      : '默认自动：由参谋长按当前权限范围自动调节'),
+                      ? '手动：参谋长不插手，由你自己调'
+                      : '自动（默认）：参谋长按任务难度帮你调'),
                 ),
                 h(
                   'div',
-                  { className: 'dnb-team-effort-seg', role: 'group', 'aria-label': '团队思考强度调控模式' },
+                  { className: 'dnb-team-effort-seg', role: 'group', 'aria-label': '团队思考深度调整方式' },
                   h('button', {
                     type: 'button',
                     className: 'dnb-team-effort-btn',
                     'data-active': teamMode === 'auto' ? '1' : '0',
-                    title: '默认自动：由参谋长按当前权限范围自动调节主对话与子代理思考强度',
+                    title: '自动：按任务难度帮你调主对话和子代理的思考深度',
                     onClick: () => {
                       if (teamMode !== 'auto') void updateSecConfig({ teamEffortMode: 'auto' })
                     },
@@ -1271,7 +1270,7 @@ export function ChiefComposerBar({ view, barRef }) {
                     type: 'button',
                     className: 'dnb-team-effort-btn',
                     'data-active': teamMode === 'manual' ? '1' : '0',
-                    title: '手动模式：参谋长停止自动调节主对话与子代理思考强度',
+                    title: '手动：参谋长不再改动主对话和子代理的思考深度',
                     onClick: () => {
                       if (teamMode !== 'manual') void updateSecConfig({ teamEffortMode: 'manual' })
                     },
@@ -1290,7 +1289,7 @@ export function ChiefComposerBar({ view, barRef }) {
               style: { width: '100%', justifyContent: 'space-between', padding: '4px 6px', fontSize: 10.5 },
               onClick: () => patch({ chiefDisclaimerOpen: !view.chiefDisclaimerOpen }),
             },
-              h('span', null, 'ⓘ 模型能力与规则冲突说明'),
+              h('span', null, 'ⓘ 注意事项：模型效果和规则冲突'),
               h('span', { style: { fontSize: 10, opacity: 0.7 } }, view.chiefDisclaimerOpen ? '▴ 收起' : '▾ 展开'),
             ),
             view.chiefDisclaimerOpen
@@ -1298,12 +1297,12 @@ export function ChiefComposerBar({ view, barRef }) {
                   'div',
                   { className: 'dnb-disclaimer-box', style: { marginTop: 4 } },
                   h('div', { style: { marginBottom: 4 } },
-                    h('strong', null, '免责声明 1（模型依赖）：'),
-                    '参谋长的一切自动审查、强介入驱动、压缩前抢救与红线拦截能力均高度依赖您为参谋长配置的底层大模型能力与上下文质量，不同模型在规划严谨度与遵循指令上的表现存在客观差异。',
+                    h('strong', null, '说明 1（模型能力）：'),
+                    '自动检查、存档压缩和规则拦截的效果，主要看你给参谋长选了哪个大模型。不同模型在拆任务和听指令上的表现差别很大。',
                   ),
                   h('div', null,
-                    h('strong', null, '免责声明 2（规则冲突）：'),
-                    '若主会话或当前项目中挂载了过多的系统提示词（System Prompt）、Rules 或硬性规则，可能与本插件的自主干预逻辑产生指令冲突，进而导致介入循环异常、提前熔断或执行偏离预期。',
+                    h('strong', null, '说明 2（规则冲突）：'),
+                    '如果你在项目里加了太多其他的提示词或全局 Rules，可能会和本插件的规则打架，导致重复提醒或跑偏。',
                   ),
                 )
               : null,
@@ -1362,10 +1361,10 @@ export function ChiefComposerBar({ view, barRef }) {
                 'data-tone': 'accent',
                 onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen }),
                 title: isSmartCompact
-                  ? '✦ 智选已开启：参谋长与主对话协同把控压缩时机'
+                  ? '✦ 智选压缩已开：会在合适时机先存档再压缩'
                   : (thresholdMode === 'tokens'
-                      ? `固定上下文压缩线：${tm.compactThresholdInput || '64K'}`
-                      : `按比例自动压缩线：${pct}%`),
+                      ? `到 ${tm.compactThresholdInput || '64K'} 时自动存档并压缩`
+                      : `占用达 ${pct}% 时自动存档并压缩`),
               }, isSmartCompact ? '✦ 智选压缩' : `🗜 自动压缩 ${thresholdMode === 'tokens' ? (tm.compactThresholdInput || '64K') : (pct + '%')}`)
             : null,
           tm.redlineSentinel
@@ -1380,14 +1379,14 @@ export function ChiefComposerBar({ view, barRef }) {
             ? h('span', {
                 className: 'dnb-tac-chip',
                 style: { borderColor: 'rgba(255,69,58,0.45)', color: '#ff453a', background: 'rgba(255,69,58,0.1)' },
-                title: guard.circuitReason || '已触发自动防死循环熔断',
-              }, '⛔ 已熔断')
+                title: guard.circuitReason || '连续出错太多次，已自动停下',
+              }, '⛔ 已停机')
             : null,
           tm.intervention
             ? h('button', {
                 type: 'button',
                 className: 'dnb-stop-btn',
-                title: '立即急停主动强介入与后台自驱，保留当前计划',
+                title: '马上打断后台推进，当前任务计划会保留',
                 onClick: () => void updateSecConfig({ emergencyStopIntervention: true }),
               }, '⏹ 急停')
             : null,
@@ -1409,13 +1408,13 @@ export function ChiefComposerBar({ view, barRef }) {
             h(
               'div',
               { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '2px 2px 2px' } },
-              h('span', { style: { fontSize: 12.5, fontWeight: 700, color: 'var(--dnb-text)' } }, 'DSH Chief 四级权限模型（严格会话隔离）'),
+              h('span', { style: { fontSize: 12.5, fontWeight: 700, color: 'var(--dnb-text)' } }, '权限档位（只对当前对话有效）'),
               h('button', {
                 type: 'button',
                 className: 'dnb-mini-btn',
-                title: '查看 6 级安全流水线实时判定与审计日志',
+                title: '查看每次操作的安全检查记录',
                 onClick: () => patch({ secPermMenuOpen: false, auditLogModalOpen: true }),
-              }, `📜 审计 (${auditCount})`),
+              }, `📜 安全记录 (${auditCount})`),
             ),
             PERM_OPTIONS.map(opt => {
               const active = permMode === opt.key
@@ -1467,9 +1466,9 @@ export function ChiefComposerBar({ view, barRef }) {
             }),
             h(
               'div',
-              { className: 'dnb-pipe-bar', title: '统一 6 级安全架构流水线' },
-              h('span', { style: { fontWeight: 700, color: 'var(--dnb-text-2)', marginRight: 2 } }, '流水线:'),
-              ['用户模式', '操作请求', '安全卫兵硬性规则', '权限判定', '执行器', '审计日志'].map((step, idx, arr) =>
+              { className: 'dnb-pipe-bar', title: '每次操作都要经过这 6 道安全检查' },
+              h('span', { style: { fontWeight: 700, color: 'var(--dnb-text-2)', marginRight: 2 } }, '检查流程:'),
+              ['当前权限', '发起请求', '硬红线检查', '权限检查', '执行操作', '记入日志'].map((step, idx, arr) =>
                 h(
                   React.Fragment,
                   { key: step },
@@ -1500,8 +1499,8 @@ export function ChiefComposerBar({ view, barRef }) {
             },
           },
           h('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-            `⬆️ 模型申请提权：${CHIEF_PERMISSION_LABELS[pendingElevationObj.fromMode] || pendingElevationObj.fromMode} → ${CHIEF_PERMISSION_LABELS[pendingElevationObj.targetMode] || pendingElevationObj.targetMode}`),
-          h('span', { style: { flexShrink: 0, textDecoration: 'underline' } }, '去审批 →'),
+            `⬆️ 参谋申请升权限：${CHIEF_PERMISSION_LABELS[pendingElevationObj.fromMode] || pendingElevationObj.fromMode} → ${CHIEF_PERMISSION_LABELS[pendingElevationObj.targetMode] || pendingElevationObj.targetMode}`),
+          h('span', { style: { flexShrink: 0, textDecoration: 'underline' } }, '去确认 →'),
         )
       : null,
 
@@ -1523,8 +1522,8 @@ export function ChiefComposerBar({ view, barRef }) {
             },
           },
           h('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-            `🛡️ ${pendingApprovalsList[0].operationLabel || '受控操作'}（等待逐项授权 ${pendingApprovalsList.length} 项）`),
-          h('span', { style: { flexShrink: 0, textDecoration: 'underline' } }, '弹窗确认 →'),
+            `🛡️ ${pendingApprovalsList[0].operationLabel || '敏感操作'}（还有 ${pendingApprovalsList.length} 项等你确认）`),
+          h('span', { style: { flexShrink: 0, textDecoration: 'underline' } }, '点此确认 →'),
         )
       : null,
 
@@ -1536,7 +1535,7 @@ export function ChiefComposerBar({ view, barRef }) {
         type: 'button',
         className: 'dnb-sec-chip',
         'data-active': view.secPermMenuOpen ? '1' : '0',
-        title: `${activePermObj.title}（${activePermObj.code}）— ${activePermObj.footer}（点击切换四级权限模型）`,
+        title: `${activePermObj.title} — ${activePermObj.footer}（点这里切权限）`,
         onClick: () => patch({ secPermMenuOpen: !view.secPermMenuOpen, tacticalMenuOpen: false, secModelMenuOpen: false, secPaceMenuOpen: false }),
       },
         h('span', {
@@ -1555,9 +1554,9 @@ export function ChiefComposerBar({ view, barRef }) {
       h('button', {
         className: 'dnb-sec-chip',
         'data-active': activeTarget === 'auto' ? '1' : '0',
-        title: bi('由 DSH 参谋长研判实时进展、亲自实权查改/调度子代理或拆话递给对应成员', 'Let DSH Chief analyze state, coordinate or route relays'),
+        title: bi('发给参谋长处理：它会自动查进度、协调子代理或转达消息', 'Send to DSH Chief to check progress, coordinate subagents, or pass messages'),
         onClick: () => patch({ secTarget: 'auto' }),
-      }, bi('✦ 参谋/拆话', '✦ Chief')),
+      }, bi('✦ 找参谋长', '✦ Chief')),
       targetChips.map(p =>
         h('button', {
           key: p.key,
@@ -1585,7 +1584,7 @@ export function ChiefComposerBar({ view, barRef }) {
         ? h('button', {
             className: 'dnb-sec-chip',
             style: { marginLeft: 'auto', color: 'var(--dnb-text-2)', borderColor: 'var(--dnb-border-strong)' },
-            title: modeObj.hint + '（点击切换）',
+            title: modeObj.hint + '（点这里切换）',
             onClick: () => {
               const idx = RELAY_MODES.findIndex(m => m.key === modeObj.key)
               const next = RELAY_MODES[(idx + 1) % RELAY_MODES.length]
@@ -1640,7 +1639,7 @@ export function ChiefComposerBar({ view, barRef }) {
         className: 'dnb-plus-btn',
         'data-active': (view.tacticalMenuOpen || activeChipsCount > 0) ? '1' : '0',
         'data-danger': tm.intervention ? '1' : '0',
-        title: '打开参谋长战术驾驶舱（强介入 / 智选压缩 / 红线哨兵 / 核验开关）',
+        title: '打开开关面板：可设强介入、智选压缩、红线哨兵和思考深度',
         onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen, secPermMenuOpen: false, secModelMenuOpen: false, secPaceMenuOpen: false }),
       }, h(Icon, { name: view.tacticalMenuOpen ? 'x' : 'plus', size: 14, style: { display: 'block', verticalAlign: 0 } })),
       h('input', {
@@ -1663,7 +1662,7 @@ export function ChiefComposerBar({ view, barRef }) {
           disabled: Boolean(view.secBusy) || secImages.length >= SEC_MAX_IMAGES,
           title: secImages.length >= SEC_MAX_IMAGES
             ? `最多可附 ${SEC_MAX_IMAGES} 张图片`
-            : '上传图片（支持拖拽或 Ctrl+V 粘贴截图）',
+            : '上传图片（可直接拖进来，或按 Ctrl+V 粘贴截图）',
           onClick: () => {
             if (fileInputRef.current) fileInputRef.current.click()
           },
@@ -1705,7 +1704,7 @@ export function ChiefComposerBar({ view, barRef }) {
         type: 'button',
         className: 'dnb-sec-send',
         disabled: !canSend,
-        title: '发送给 DSH 参谋长',
+        title: '发给 DSH 参谋长',
         onClick: () => void submitChiefBar(),
       },
         view.secBusy

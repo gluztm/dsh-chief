@@ -37,25 +37,25 @@ window.__ModuleLoader__.load({
     }
 
     const INTERVENTION_TIER_DESC = {
-      advisor: 'L0 顾问档：只读巡检诊断并在面板输出建议，不修改工作区或向主对话/子代理注入强推指令',
-      assistant: 'L1 助手档：仅自主维护记忆/档案/看板与建议卡片，不改工作区文件且不直接插话主对话',
-      strategist: 'L2 参谋档：自动分析并生成关键动作（工作区改动/递话/压缩），逐项弹窗授权后才执行',
-      chief: 'L3 参谋长档：高自主闭环督导（直控主对话/子代理、纠偏、压缩与续跑），含防死循环熔断',
+      advisor: 'L0 顾问档：只看并给建议。不改项目文件，也不打断主对话或子代理。',
+      assistant: 'L1 助手档：会自动整理记忆、档案和看板。不改项目文件，也不插话主对话。',
+      strategist: 'L2 参谋档：会起草改文件、递话和压缩操作，每项都弹窗问你同意后再执行。',
+      chief: 'L3 参谋长档：直接带主对话和子代理干活、纠偏、压缩并续跑，带防死循环保护。',
     }
 
     const RUN_MODE_OPTIONS = [
-      { key: 'off', label: '⏸ 关停', shortLabel: '⏸ 关停', hint: '0 后台消耗，仅显式 Q&A / 按钮触发；禁止自动巡检、梦境漫游或断线续跑' },
-      { key: 'patrol', label: '🛡 巡检', shortLabel: '🛡 巡检', hint: '常规回合 0 Token；仅在阻墙拦截/异常/断流时精准唤醒，支持 Auto continue' },
-      { key: 'managed', label: '🤖 托管', shortLabel: '🤖 托管', hint: '持续后台监工 + 🌙 梦境漫游整理卷宗织钩子 + 15 分钟 5 条件自动休眠' },
+      { key: 'off', label: '⏸ 关停', shortLabel: '⏸ 关停', hint: '后台不调用模型，只在你提问或点按钮时回复。不会自动巡检、梦境漫游或续跑。' },
+      { key: 'patrol', label: '🛡 巡检', shortLabel: '🛡 巡检', hint: '平时不耗后台额度，只在被拦截、报错或中断时唤醒。支持自动续跑。' },
+      { key: 'managed', label: '🤖 托管', shortLabel: '🤖 托管', hint: '持续在后台盯进度，闲时用 🌙 梦境漫游整理档案。闲置 15 分钟满足条件后自动休眠。' },
     ]
 
     const THINKING_EFFORT_OPTIONS = [
-      { key: 'auto', label: '🪄 自适应', shortLabel: '🪄 自动', badge: '🪄 自动换挡', hint: '按当前任务复杂度自动升降挡（摘要/梦境漫游→关，诊断/筑墙→高/极高）' },
-      { key: 'off', label: '⚡ 关闭思考', shortLabel: '⚡ 关', badge: '⚡ 关闭思考', hint: '极速低延迟文本输出，不开深度推理链' },
-      { key: 'low', label: '🔅 低强度', shortLabel: '🔅 低', badge: '🔅 低思考', hint: '轻量校验与一般问答' },
-      { key: 'medium', label: '⚖️ 中强度', shortLabel: '⚖️ 中', badge: '⚖️ 中思考', hint: '日常均衡推理与复盘' },
-      { key: 'high', label: '🔥 高强度', shortLabel: '🔥 高', badge: '🔥 高思考', hint: '复杂排障、筑墙、强介入与经验沉淀' },
-      { key: 'xhigh', label: '🧠 极高强度', shortLabel: '🧠 极高', badge: '🧠 极高思考', hint: '多边界碰撞、紧急危情诊断与全局深推演' },
+      { key: 'auto', label: '🪄 自适应', shortLabel: '🪄 自动', badge: '🪄 自动换挡', hint: '按任务难易自动调思考深度。写摘要或梦境漫游时关闭，排查或设拦截规则时调高。' },
+      { key: 'off', label: '⚡ 关闭思考', shortLabel: '⚡ 关', badge: '⚡ 关闭思考', hint: '直接输出回答，不做深度思考，速度最快。' },
+      { key: 'low', label: '🔅 低强度', shortLabel: '🔅 低', badge: '🔅 低思考', hint: '简单检查和日常问答。' },
+      { key: 'medium', label: '⚖️ 中强度', shortLabel: '⚖️ 中', badge: '⚖️ 中思考', hint: '日常推理、写代码和复盘。' },
+      { key: 'high', label: '🔥 高强度', shortLabel: '🔥 高', badge: '🔥 高思考', hint: '处理复杂问题、设拦截规则、强介入和总结经验。' },
+      { key: 'xhigh', label: '🧠 极高强度', shortLabel: '🧠 极高', badge: '🧠 极高思考', hint: '处理多条规则冲突、严重故障和复杂分析。' },
     ]
 
     const STATUSES = ['todo', 'doing', 'blocked', 'done']
@@ -108,9 +108,9 @@ window.__ModuleLoader__.load({
     }
 
     const RELAY_MODES = [
-      { key: 'steer', label: '插话', hint: '正在运行时立即在下一步切入' },
-      { key: 'followup', label: '递话', hint: '排队或唤醒待命对话' },
-      { key: 'silent', label: '备忘', hint: '静默放入信箱，不强行唤醒' },
+      { key: 'steer', label: '插话', hint: '对方正在干活时，下一步立刻插进去提醒。' },
+      { key: 'followup', label: '递话', hint: '排在当前话后面发，对方空闲时直接唤醒。' },
+      { key: 'silent', label: '备忘', hint: '先放到收件箱里，不打断也不叫醒对方。' },
     ]
 
     const MEMORY_SECTIONS = [
@@ -158,9 +158,9 @@ window.__ModuleLoader__.load({
         glow: 'drop-shadow(0 0 3.5px rgba(255, 224, 51, 0.62))',
         bg: 'rgba(255, 224, 51, 0.17)',
         border: 'rgba(255, 224, 51, 0.56)',
-        label: '璀璨金针',
+        label: '金别针（核心）',
         short: '核心',
-        tip: '亮金曲别针：核心工程坐标与关键锚点（点击切换曲别针等级）',
+        tip: '金别针：核心资料，优先留桌面（点一下切换）',
       },
       silver: {
         color: '#cbd5e1',
@@ -168,9 +168,9 @@ window.__ModuleLoader__.load({
         glow: 'none',
         bg: 'rgba(203, 213, 225, 0.13)',
         border: 'rgba(203, 213, 225, 0.38)',
-        label: '标准银针',
+        label: '银别针（日常）',
         short: '实录',
-        tip: '亮银曲别针：标准排障与工程实录（点击切换曲别针等级）',
+        tip: '银别针：日常记录和资料（点一下切换）',
       },
       copper: {
         color: '#9a583b',
@@ -178,9 +178,9 @@ window.__ModuleLoader__.load({
         glow: 'none',
         bg: 'rgba(124, 67, 41, 0.18)',
         border: 'rgba(124, 67, 41, 0.44)',
-        label: '暗古铜针',
+        label: '铜别针（旧档）',
         short: '归档',
-        tip: '暗古铜曲别针：历史阶段沉淀备查（点击切换曲别针等级）',
+        tip: '铜别针：旧资料，不够放先撤（点一下切换）',
       },
     }
 
@@ -354,23 +354,23 @@ window.__ModuleLoader__.load({
       switch (key) {
         case 'advisor':
           return bi(
-            'L0 顾问档：只读巡检诊断并在面板输出建议，不修改工作区或向主对话/子代理注入强推指令',
-            'L0 Advisor: read-only diagnosis & panel suggestions; never edits workspace files or pushes main/subagents.',
+            'L0 顾问档：只看并给建议。不改项目文件，也不打断主对话或子代理。',
+            'L0 Advisor: reads only and gives advice. Never edits files or interrupts main or subagent chats.',
           )
         case 'assistant':
           return bi(
-            'L1 助手档：仅自主维护记忆/档案/看板与建议卡片，不改工作区文件且不直接插话主对话',
-            'L1 Assistant: maintains memory/archives/board & suggestions; never edits workspace files or interrupts lead.',
+            'L1 助手档：会自动整理记忆、档案和看板。不改项目文件，也不插话主对话。',
+            'L1 Assistant: organizes memory, archives, and tasks. Never edits files or interrupts the main chat.',
           )
         case 'strategist':
           return bi(
-            'L2 参谋档：自动分析并生成关键动作（工作区改动/递话/压缩），逐项弹窗授权后才执行',
-            'L2 Strategist: drafts actions & relays behind explicit per-item human approval popups.',
+            'L2 参谋档：会起草改文件、递话和压缩操作，每项都弹窗问你同意后再执行。',
+            'L2 Strategist: drafts file edits, relays, and compaction, then asks you to approve each item.',
           )
         case 'chief':
           return bi(
-            'L3 参谋长档：高自主闭环督导（直控主对话/子代理、纠偏、压缩与续跑），含防死循环熔断',
-            'L3 Chief: autonomous supervision, steering, compaction & resume within guard walls & loop/budget breakers.',
+            'L3 参谋长档：直接带主对话和子代理干活、纠偏、压缩并续跑，带防死循环保护。',
+            'L3 Chief: guides main and subagent chats, fixes course, compacts, and resumes, with loop protection.',
           )
         default:
           return ''
@@ -385,8 +385,8 @@ window.__ModuleLoader__.load({
             label: bi('⏸ 关停', '⏸ Off'),
             shortLabel: bi('⏸ 关停', '⏸ Off'),
             hint: bi(
-              '0 后台消耗，仅显式 Q&A / 按钮触发；禁止自动巡检、梦境漫游或断线续跑',
-              'Zero background LLM usage; triggers only on explicit Q&A or buttons.',
+              '后台不调用模型，只在你提问或点按钮时回复。不会自动巡检、梦境漫游或续跑。',
+              'No background model calls; responds only when you ask or click. No auto patrol, Dream Roam, or auto-resume.',
             ),
           }
         case 'patrol':
@@ -395,8 +395,8 @@ window.__ModuleLoader__.load({
             label: bi('🛡 巡检', '🛡 Patrol'),
             shortLabel: bi('🛡 巡检', '🛡 Patrol'),
             hint: bi(
-              '常规回合 0 Token；仅在阻墙拦截/异常/断流时精准唤醒，支持 Auto continue',
-              'Zero idle cost; wakes only on guard-wall blocks, errors, or stream drops.',
+              '平时不耗后台额度，只在被拦截、报错或中断时唤醒。支持自动续跑。',
+              'No background calls while idle; wakes only on blocks, errors, or drops. Supports auto-resume.',
             ),
           }
         case 'managed':
@@ -405,8 +405,8 @@ window.__ModuleLoader__.load({
             label: bi('🤖 托管', '🤖 Managed'),
             shortLabel: bi('🤖 托管', '🤖 Managed'),
             hint: bi(
-              '持续后台监工 + 🌙 梦境漫游整理卷宗织钩子 + 15 分钟 5 条件自动休眠 + 硬预算熔断',
-              'Continuous supervision + 🌙 Dream Roam + 5-condition auto-sleep + hard budget cap.',
+              '持续在后台盯进度，闲时用 🌙 梦境漫游整理档案。闲置 15 分钟满足条件后自动休眠，带用量上限。',
+              'Keeps watching progress and tidies archives with 🌙 Dream Roam. Auto-sleeps after 15m idle when conditions are met, with a usage cap.',
             ),
           }
         default:
@@ -423,8 +423,8 @@ window.__ModuleLoader__.load({
             shortLabel: bi('🪄 自动', '🪄 Auto'),
             badge: bi('🪄 自动换挡', '🪄 Auto Effort'),
             hint: bi(
-              '按当前任务复杂度自动升降挡（摘要/梦境漫游→关，诊断/筑墙→高/极高）',
-              'Adapts reasoning depth by task complexity (off for summaries, high/xhigh for diagnosis).',
+              '按任务难易自动调思考深度。写摘要或梦境漫游时关闭，排查或设拦截规则时调高。',
+              'Adjusts thinking depth by task: off for summaries or Dream Roam, higher for debugging or guard rules.',
             ),
           }
         case 'off':
@@ -433,7 +433,7 @@ window.__ModuleLoader__.load({
             label: bi('⚡ 关闭思考', '⚡ Off'),
             shortLabel: bi('⚡ 关', '⚡ Off'),
             badge: bi('⚡ 关闭思考', '⚡ No Thinking'),
-            hint: bi('极速低延迟文本输出，不开深度推理链', 'Fastest low-latency text output without reasoning chain.'),
+            hint: bi('直接输出回答，不做深度思考，速度最快。', 'Replies directly without deep thinking for the fastest output.'),
           }
         case 'low':
           return {
@@ -441,7 +441,7 @@ window.__ModuleLoader__.load({
             label: bi('🔅 低强度', '🔅 Low'),
             shortLabel: bi('🔅 低', '🔅 Low'),
             badge: bi('🔅 低思考', '🔅 Low'),
-            hint: bi('轻量校验与一般问答', 'Lightweight checks and quick Q&A.'),
+            hint: bi('简单检查和日常问答。', 'Quick checks and everyday Q&A.'),
           }
         case 'medium':
           return {
@@ -449,7 +449,7 @@ window.__ModuleLoader__.load({
             label: bi('⚖️ 中强度', '⚖️ Medium'),
             shortLabel: bi('⚖️ 中', '⚖️ Med'),
             badge: bi('⚖️ 中思考', '⚖️ Medium'),
-            hint: bi('日常均衡推理与复盘', 'Balanced reasoning for reviews and planning.'),
+            hint: bi('日常推理、写代码和复盘。', 'Balanced thinking for coding, reviews, and daily work.'),
           }
         case 'high':
           return {
@@ -457,7 +457,7 @@ window.__ModuleLoader__.load({
             label: bi('🔥 高强度', '🔥 High'),
             shortLabel: bi('🔥 高', '🔥 High'),
             badge: bi('🔥 高思考', '🔥 High'),
-            hint: bi('复杂排障、筑墙、强介入与经验沉淀', 'Complex debugging, guard walls, intervention & synthesis.'),
+            hint: bi('处理复杂问题、设拦截规则、强介入和总结经验。', 'Complex debugging, guard rules, strong intervention, and takeaways.'),
           }
         case 'xhigh':
           return {
@@ -465,7 +465,7 @@ window.__ModuleLoader__.load({
             label: bi('🧠 极高强度', '🧠 XHigh'),
             shortLabel: bi('🧠 极高', '🧠 XHigh'),
             badge: bi('🧠 极高思考', '🧠 XHigh'),
-            hint: bi('多边界碰撞、紧急危情诊断与全局深推演', 'Multi-wall conflicts, hazard diagnosis & deep global analysis.'),
+            hint: bi('处理多条规则冲突、严重故障和复杂分析。', 'Resolving rule conflicts, critical issues, and deep analysis.'),
           }
         default:
           return { key: String(key || 'auto'), label: String(key || ''), shortLabel: String(key || ''), badge: String(key || ''), hint: '' }
@@ -1526,7 +1526,7 @@ window.__ModuleLoader__.load({
         })
         if (normType === 'image/gif' || typeof Image === 'undefined') {
           const parsed = extractB64(rawUrl)
-          if (!parsed) return reject(new Error('图片编码解析失败'))
+          if (!parsed) return reject(new Error('解析图片失败'))
           return resolve(makeItem(parsed, rawUrl, file.name || 'image.gif'))
         }
         const img = new Image()
@@ -1563,7 +1563,7 @@ window.__ModuleLoader__.load({
         img.onerror = () => {
           const parsed = extractB64(rawUrl)
           if (parsed) resolve(makeItem(parsed, rawUrl))
-          else reject(new Error('无法加载图片文件'))
+          else reject(new Error('加载图片失败'))
         }
         img.src = rawUrl
       }))
@@ -1572,7 +1572,7 @@ window.__ModuleLoader__.load({
     function truncationNotice(result) {
       const list = result && Array.isArray(result.truncated) ? result.truncated : []
       if (!list.length) return ''
-      return '内容过长已截断：' + list.map(i => i.field).join(', ')
+      return '内容太长，以下部分已省略：' + list.map(i => i.field).join(', ')
     }
 
     function colorForRootSession(rootId, selfRootId = '') {
@@ -1687,38 +1687,38 @@ window.__ModuleLoader__.load({
       switch (ev.kind) {
         case 'pending_approval':
           return {
-            title: bi('🔐 等待人类逐项审批', '🔐 Approval Required'),
-            body: body || bi('参谋请求审批关键工作区或工作流操作。', 'A strategist action is waiting for your sign-off.'),
+            title: bi('🔐 等你确认操作', '🔐 Approval Needed'),
+            body: body || bi('参谋想改文件或调流程，等你点确认。', 'Chief wants to edit files or adjust a workflow and needs your OK.'),
           }
         case 'pending_elevation':
           return {
-            title: bi('⬆️ 参谋申请提升权限', '⬆️ Elevation Requested'),
-            body: body || bi('当前任务需要更高参谋权限才能继续执行。', 'Chief requests higher permission tier to continue.'),
+            title: bi('⬆️ 参谋申请更高权限', '⬆️ Higher Permission Requested'),
+            body: body || bi('这步需要更高权限，等你同意后才能继续。', 'This step needs a higher permission level before it can continue.'),
           }
         case 'guard_wall_blocked':
           return {
-            title: bi('🧱 物理驻墙已拦截越界调用', '🧱 Guard Wall Blocked Call'),
-            body: body || bi('已触发事前物理驻墙拦截，等待人工处置。', 'Pre-execute guard wall intercepted a risky call.'),
+            title: bi('🧱 物理驻墙已拦下操作', '🧱 Guard Wall Blocked Call'),
+            body: body || bi('触发了执行前的物理驻墙（拦截规则），等你处理。', 'Stopped by your pre-run guard wall rules. Please check.'),
           }
         case 'auto_continue_rescue':
           return {
-            title: bi('🔄 断流救活已触发续跑', '🔄 Stream Rescue Triggered'),
-            body: body || bi('检测到主会话意外中断，已尝试自动唤醒续跑。', 'Interrupted turn detected; auto-continue fired.'),
+            title: bi('🔄 对话断了，已自动接着跑', '🔄 Chat Stopped, Resuming'),
+            body: body || bi('主对话刚才突然断开了，已自动唤醒接着跑。', 'The main chat stopped unexpectedly and was resumed automatically.'),
           }
         case 'managed_auto_sleep':
           return {
-            title: bi('🌙 托管已自动休眠收工', '🌙 Managed Auto-Sleep'),
-            body: body || bi('在途待办与问询均已清零，已切回「⏸ 关停」以节省 Token。', 'All work cleared; returned to ⏸ Off to save tokens.'),
+            title: bi('🌙 托管已自动休眠', '🌙 Managed Mode Paused'),
+            body: body || bi('手头的事都做完了，已切回「⏸ 关停」省 Token。', 'All tasks finished. Switched back to ⏸ Off to save tokens.'),
           }
         case 'budget_circuit_break':
           return {
-            title: bi('🛑 托管已触及硬预算上限熔断', '🛑 Hard Budget Breaker Tripped'),
-            body: body || bi('托管后台调用/Token 达到上限，已自动切回「⏸ 关停」。', 'Managed budget limit reached; auto-stopped.'),
+            title: bi('🛑 托管已到用量上限停机', '🛑 Managed Usage Limit Reached'),
+            body: body || bi('托管调用次数或 Token 已到上限，已切回「⏸ 关停」。', 'Managed calls or tokens hit the limit. Switched back to ⏸ Off.'),
           }
         case 'hazard_halt':
           return {
-            title: bi('🚨 强介入紧急安全煞停', '🚨 Emergency Hazard Halt'),
-            body: body || bi('检测到重大不可逆风险或必然撞墙，已暂停推进。', 'High irreversible hazard detected; execution halted.'),
+            title: bi('🚨 发现高风险，已紧急暂停', '🚨 High Risk Found, Paused'),
+            body: body || bi('遇到高风险操作或反复卡住，已先帮你停下。', 'Paused after spotting a risky action or repeated block.'),
           }
         default:
           return {
@@ -1960,7 +1960,7 @@ window.__ModuleLoader__.load({
       try {
         value = text ? JSON.parse(text) : null
       } catch {
-        throw new Error('接口返回异常：' + text.slice(0, 80))
+        throw new Error('服务返回的数据格式不对：' + text.slice(0, 80))
       }
       if (value && value.board) patch({ board: value.board })
       if (value && Array.isArray(value.subagents)) patch({ subagents: value.subagents })
@@ -2058,15 +2058,15 @@ window.__ModuleLoader__.load({
         if (value && value.ok) applySecView(value)
         if (value && value.handoffSyncResult) {
           if (value.handoffSyncResult.synced) {
-            patch({ notice: '✦ 摘要已提炼并同步更新至交接单' })
+            patch({ notice: '✦ 摘要已更新，并同步到了交接单' })
             void loadHandoff()
           } else if (value.handoffSyncResult.skipped === 'pinned-by-human') {
-            patch({ notice: regenerate ? '摘要已提炼（交接单已被人类定住，保持未覆写）' : '交接单已被人类定住，跳过同步' })
+            patch({ notice: regenerate ? '摘要已更新（交接单已定住防改，没有覆盖）' : '交接单已定住防改，跳过同步' })
           } else if (regenerate) {
-            patch({ notice: '摘要已重新提炼' })
+            patch({ notice: '摘要已更新' })
           }
         } else if (regenerate) {
-          patch({ notice: '摘要已重新提炼' })
+          patch({ notice: '摘要已更新' })
         }
         return value
       } catch (error) {
@@ -2137,7 +2137,7 @@ window.__ModuleLoader__.load({
           return null
         }
         if (!value || value.ok === false) {
-          patch({ error: (value && value.error) || '更新参谋长配置失败' })
+          patch({ error: (value && value.error) || '保存设置失败' })
           return null
         }
         const resolvedLocks = (value.config && value.config.lockedModelEfforts && typeof value.config.lockedModelEfforts === 'object')
@@ -2181,7 +2181,7 @@ window.__ModuleLoader__.load({
         if (nextCfg.ackHazardAlertId) {
           // Quietly acknowledged; no intrusive toast needed
         } else if (nextCfg.emergencyStopIntervention) {
-          patch({ notice: '⏹ 已紧急关停「主动强介入」，自动驱动与巡检续跑已停机' })
+          patch({ notice: '⏹ 已急停：强介入和自动续跑都已停下' })
         } else if (typeof nextCfg.permissionMode === 'string') {
           const savedPerm = (value.config && value.config.permissionMode)
             || (value.view && value.view.config && value.view.config.permissionMode)
@@ -2190,97 +2190,97 @@ window.__ModuleLoader__.load({
             patch({
               staleBackendDetected: true,
               staleBackendDismissed: false,
-              error: '参谋长权限未在后端生效（宿主仍在运行旧版内存模块），请重启一次 DeepSeek Harness 客户端。',
+              error: '权限设置没生效，后台还在跑旧版本。请重启一下 DeepSeek Harness 客户端。',
             })
             return null
           }
           const permMap = {
-            advisor: '已切换为 L0 · 顾问模式（只读观察/分析/建议，不改工作区与工作流）',
-            assistant: '已切换为 L1 · 助手模式（仅可维护参谋记忆、档案与看板配置）',
-            strategist: '已切换为 L2 · 参谋模式（修改工作区或主/子工作流前将弹窗逐项授权）',
-            chief: '已通过风险确认并进入 L3 · 参谋长模式（高自主执行，受安全卫兵与审计日志约束）',
+            advisor: '已切到 L0 · 顾问模式：只看不改，只在需要时提建议',
+            assistant: '已切到 L1 · 助手模式：可整理记忆和档案，不改你的项目文件',
+            strategist: '已切到 L2 · 参谋模式：改文件或发消息前都会先弹窗问你',
+            chief: '已开启 L3 · 参谋长模式：可自主调度和改文件，仍受安全规则限制',
           }
-          patch({ notice: permMap[nextCfg.permissionMode] || '已更新参谋长执行权限' })
+          patch({ notice: permMap[nextCfg.permissionMode] || '已更新权限设置' })
         } else if (nextCfg.tacticalModes && typeof nextCfg.tacticalModes === 'object') {
           if (value.compactLowWarning) {
             patch({ notice: '⚠️ ' + value.compactLowWarning })
           } else if (normalizeMaxTurnsVal(nextCfg.tacticalModes.maxInterventionTurns) === 0 && Object.prototype.hasOwnProperty.call(nextCfg.tacticalModes, 'maxInterventionTurns') && !nextCfg.confirmedInterventionRisk) {
-            patch({ notice: '♾️ 已启用无限督导轮次（只要参谋长判定未完成就会继续 push）' })
+            patch({ notice: '♾️ 已开启不限轮数：只要任务没完，参谋长就会一直催着继续' })
           } else if (typeof nextCfg.tacticalModes.intervention === 'boolean' && nextCfg.confirmedInterventionRisk) {
             const ko = value.immediateKickoff
             patch({
               notice: nextCfg.tacticalModes.intervention
                 ? (ko && ko.triggered
-                    ? '⚡ 已开启「主动强介入」并锁定总目标，正在立即唤醒推进'
+                    ? '⚡ 已开启强介入并锁好目标，马上开始推进'
                     : (ko && ko.queuedApproval
-                        ? '⚡ 已开启「主动强介入」，请授权首轮推进弹窗'
-                        : '⚡ 已开启「主动强介入」并锁定核心总目标'))
-                : '已关闭「主动强介入」模式',
+                        ? '⚡ 已开启强介入，请在弹窗里同意第一步操作'
+                        : '⚡ 已开启强介入并锁好目标'))
+                : '已关闭强介入',
             })
           } else if (typeof nextCfg.tacticalModes.intervention === 'boolean' && Object.keys(nextCfg.tacticalModes).length === 1) {
-            patch({ notice: nextCfg.tacticalModes.intervention ? '⚡ 已开启「主动强介入」模式' : '已关闭「主动强介入」模式' })
+            patch({ notice: nextCfg.tacticalModes.intervention ? '⚡ 已开启强介入' : '已关闭强介入' })
           } else {
-            patch({ notice: '✦ 已更新参谋长战术驾驶舱开关' })
+            patch({ notice: '✦ 已更新自动控制开关' })
           }
         } else if (typeof nextCfg.runMode === 'string') {
           const rmMap = {
-            off: '⏸ 已切至「关停模式」：后台 0 LLM 消耗、0 巡检、0 梦境漫游（仅显式发话/按钮生效）',
-            patrol: '🛡 已切至「巡检模式」：常规回合 0 Token，阻墙拦截/高危报错/断流时精准唤醒（支持 Auto continue）',
-            managed: '🤖 已开启「托管模式」：持续监工督导 + 🌙 梦境漫游轻拢卷宗织钩子 + 15 分钟闲置自动休眠',
+            off: '⏸ 已切到关停：后台不花额度，也不自动检查，只在你提问或点按钮时工作',
+            patrol: '🛡 已切到巡检：平时不花额度，只在报错、断线或触发物理驻墙时介入',
+            managed: '🤖 已切到托管：后台盯着进度、用梦境漫游整理档案，闲置 15 分钟自动停下',
           }
-          patch({ notice: rmMap[nextCfg.runMode] || '已更新参谋长运行模式' })
+          patch({ notice: rmMap[nextCfg.runMode] || '已更新运行方式' })
         } else if (typeof nextCfg.thinkingEffort === 'string') {
-          patch({ notice: `🧠 已切换参谋长思考强度为「${nextCfg.thinkingEffort === 'auto' ? '自适应换挡' : nextCfg.thinkingEffort}」` })
+          patch({ notice: `🧠 思考深度已切到「${nextCfg.thinkingEffort === 'auto' ? '自动' : nextCfg.thinkingEffort}」` })
         } else if (typeof nextCfg.teamEffortMode === 'string') {
           patch({
             notice: nextCfg.teamEffortMode === 'manual'
-              ? '✋ 团队思考强度已设为「手动」：参谋长不再自动调节主/子代理思考强度'
-              : '🪄 团队思考强度已设为「自动」：参谋长将按当前权限范围自动调节',
+              ? '✋ 团队思考深度已设为手动，参谋长不会自动调整'
+              : '🪄 团队思考深度已设为自动，参谋长会按任务情况调整',
           })
         } else if (nextCfg.directSetAgentEffort && typeof nextCfg.directSetAgentEffort === 'object') {
           const t = nextCfg.directSetAgentEffort.target || 'lead'
           const e = nextCfg.directSetAgentEffort.reasoningEffort || nextCfg.directSetAgentEffort.effort || 'medium'
-          patch({ notice: `🧠 已调整 @${t} 模型思考强度为 ${e}` })
+          patch({ notice: `🧠 已把 @${t} 的思考深度调成 ${e}` })
         } else if (nextCfg.toggleLockAgentEffort && typeof nextCfg.toggleLockAgentEffort === 'object') {
           const t = nextCfg.toggleLockAgentEffort.target || 'lead'
           const l = Boolean(nextCfg.toggleLockAgentEffort.locked)
-          patch({ notice: l ? `🔒 已锁定 @${t} 思考挡位，参谋 L2/L3 无法自动覆写` : `🔓 已解除 @${t} 思考挡位锁定` })
+          patch({ notice: l ? `🔒 已锁定 @${t} 的思考深度，参谋长不能自动改` : `🔓 已解锁 @${t} 的思考深度` })
         } else if (nextCfg.preset) {
           const presetMap = {
-            observer: bi('👁 已切换至「只读旁观」预设：L0 · ⏸ 关停 · 低思考强度', '👁 Switched to Observer preset: L0 · Off · Low effort'),
-            collab: bi('🤝 已切换至「日常协作」预设：L2 · 🛡 巡检 · 逐项审批 · 红线哨兵', '🤝 Switched to Co-Pilot preset: L2 · Patrol · Approvals · Sentinel'),
-            away: bi('🚀 已切换至「离桌托管」预设：L3 · 🤖 托管 · 80%自动压缩 · 30次/300K硬预算', '🚀 Switched to Away Managed preset: L3 · Managed · 80% Compact · Budget Cap'),
+            observer: bi('👁 已切到「只读旁观」：L0 · ⏸ 关停 · 低思考深度', '👁 Switched to Observer: L0 · Off · Low thinking'),
+            collab: bi('🤝 已切到「日常协作」：L2 · 🛡 巡检 · 每步问你 · 🛡 红线哨兵', '🤝 Switched to Co-Pilot: L2 · Patrol · Ask first · 🛡 Sentinel'),
+            away: bi('🚀 已切到「离桌托管」：L3 · 🤖 托管 · 80%自动压缩 · 30次/300K上限', '🚀 Switched to Away Mode: L3 · Managed · 80% compact · 30 calls/300K cap'),
           }
-          patch({ notice: presetMap[nextCfg.preset] || bi('✦ 已应用场景预设', '✦ Scenario preset applied') })
+          patch({ notice: presetMap[nextCfg.preset] || bi('✦ 已套用预设模式', '✦ Preset applied') })
         } else if (typeof nextCfg.uiLang === 'string') {
-          const langNames = { auto: bi('自动跟随宿主', 'Auto'), zh: '简体中文', en: 'English' }
-          patch({ notice: bi('🌐 界面语言已切换为：', '🌐 Interface language: ') + (langNames[nextCfg.uiLang] || nextCfg.uiLang) })
+          const langNames = { auto: bi('自动', 'Auto'), zh: '简体中文', en: 'English' }
+          patch({ notice: bi('🌐 语言已切到：', '🌐 Language: ') + (langNames[nextCfg.uiLang] || nextCfg.uiLang) })
         } else if (nextCfg.resetManagedBudget) {
-          patch({ notice: bi('↺ 已重置本轮托管硬预算计数器', '↺ Managed budget counter reset') })
+          patch({ notice: bi('↺ 已清零本轮托管额度计数', '↺ Managed usage counter reset') })
         } else if (typeof nextCfg.notifyEnabled === 'boolean') {
-          patch({ notice: nextCfg.notifyEnabled ? bi('🔔 已开启关键节点系统通知提醒', '🔔 Desktop milestone alerts enabled') : bi('🔕 已关闭关键节点系统通知提醒', '🔕 Desktop milestone alerts disabled') })
+          patch({ notice: nextCfg.notifyEnabled ? bi('🔔 已开启桌面通知提醒', '🔔 Desktop alerts on') : bi('🔕 已关闭桌面通知提醒', '🔕 Desktop alerts off') })
         } else if (typeof nextCfg.notifySound === 'boolean') {
-          patch({ notice: nextCfg.notifySound ? bi('🔊 已开启轻柔提示音', '🔊 Gentle alert chime enabled') : bi('🔇 已静音提示音', '🔇 Alert chime muted') })
+          patch({ notice: nextCfg.notifySound ? bi('🔊 已开启提示音', '🔊 Sound on') : bi('🔇 已关闭提示音', '🔇 Sound off') })
         } else if (nextCfg.managedBudgetMaxCalls !== undefined || nextCfg.managedBudgetMaxTokens !== undefined) {
-          patch({ notice: bi('💰 已更新托管硬预算熔断上限', '💰 Managed hard budget limits updated') })
+          patch({ notice: bi('💰 已更新托管费用上限', '💰 Spending limits updated') })
         } else if (typeof nextCfg.paceMode === 'string') {
           const paceNotice = nextCfg.paceMode === 'stopped'
-            ? '⏹ 已停止参谋长：后台强介入、空转监控与断线续跑全部暂停（可随时切回恢复）'
+            ? '⏹ 已停止参谋长：自动推进和后台检查都已暂停'
             : nextCfg.paceMode === 'auto'
-              ? '⚡ 已开启本会话全自动托管（仅管当前对话，完工且摘要收尾后自动停机防空转）'
+              ? '⚡ 已开启本对话托管：只管当前窗口，做完后会自动停下'
               : nextCfg.paceMode === 'smart'
-                ? '已切为「关键巡检」：仅在撞墙或关键节点节流巡检，摘要按需手动提炼'
-                : '已切为「按需手动」：后台零自动总结，仅在你点提炼或发话时调用模型'
+                ? '已切到巡检：平时不运行，遇到卡点或报错才介入'
+                : '已切到手动：后台不自动运行，只在你主动点按钮或发消息时工作'
           patch({ notice: paceNotice })
         } else if (typeof nextCfg.autoPilot === 'boolean') {
-          patch({ notice: nextCfg.autoPilot ? '⚡ 已开启本会话全自动协同托管' : '已切换为按需手动模式' })
+          patch({ notice: nextCfg.autoPilot ? '⚡ 已开启当前对话托管' : '已切到手动模式' })
         } else if (typeof nextCfg.modelRef === 'string') {
           const cat = (value && value.view && value.view.models) || store.secModelsCatalog
           const followHint = (cat && (cat.followLabel || fullModelWithChannel(cat.followRef || cat.defaultRef, cat))) || ''
           patch({
             notice: nextCfg.modelRef
-              ? '参谋长专职模型：' + fullModelWithChannel(nextCfg.modelRef, cat)
-              : '已恢复跟随主对话模型' + (followHint ? '（' + followHint + '）' : ''),
+              ? '参谋长当前模型：' + fullModelWithChannel(nextCfg.modelRef, cat)
+              : '已切回跟随主对话模型' + (followHint ? '（' + followHint + '）' : ''),
           })
         }
         return value
@@ -2339,9 +2339,9 @@ window.__ModuleLoader__.load({
           openApprovalModalId: '',
           notice: decision === 'approve'
             ? (value && value.resumed
-                ? '✓ 已授权执行并自动续跑完成原任务'
-                : ((value && value.executed) ? '✓ 已授权并执行本次操作' : '✓ 已批准操作'))
-            : '已拒绝本次受控操作申请',
+                ? '✓ 已批准并继续完成了原任务'
+                : ((value && value.executed) ? '✓ 已批准并执行这次操作' : '✓ 已批准操作'))
+            : '已拒绝这次操作',
         })
         return value
       } catch (error) {
@@ -2371,15 +2371,15 @@ window.__ModuleLoader__.load({
           elevationChosenMode: '',
           notice: decision === 'approve'
             ? (value && value.resumed
-                ? ('已批准提权至 ' + (CHIEF_PERMISSION_LABELS[value.permissionMode || targetMode] || targetMode) + ' 并自动续跑')
-                : ('已批准提权至 ' + (CHIEF_PERMISSION_LABELS[value.permissionMode || targetMode] || targetMode)))
-            : '已拒绝模型的权限提升申请',
+                ? ('已批准升到 ' + (CHIEF_PERMISSION_LABELS[value.permissionMode || targetMode] || targetMode) + ' 并继续运行')
+                : ('已批准升到 ' + (CHIEF_PERMISSION_LABELS[value.permissionMode || targetMode] || targetMode)))
+            : '已拒绝提升权限',
         })
         return value
       } catch (error) {
         const payload = error && error.payload
         if (payload && payload.requireChiefRiskConfirm) {
-          patch({ elevationBusy: false, error: '进入 L3 参谋长模式必须勾选风险知悉确认' })
+          patch({ elevationBusy: false, error: '进入 L3 · 参谋长模式前，请先勾选风险确认框' })
           return null
         }
         patch({ elevationBusy: false, error: String((error && error.message) || error) })
@@ -2396,8 +2396,8 @@ window.__ModuleLoader__.load({
         })
         patch({
           notice: linked
-            ? '已接入跨对话协同网络（进度与信箱实时同步）'
-            : '已脱离协同网络：参谋摘要与协同上下文已隔离净化',
+            ? '已连上该对话，两边会同步进度和消息'
+            : '已断开连接，两边的摘要和记录已分开',
         })
         return value
       } catch (error) {
@@ -2444,24 +2444,24 @@ window.__ModuleLoader__.load({
             const isPinned = Boolean(applied.pinned)
             const replacedN = Number(applied.replacedCount || (Array.isArray(sug.replaces) ? sug.replaces.length : 0))
             if (replacedN > 0) {
-              patch({ notice: `${isPinned ? '📌 ' : ''}已将 ${replacedN} 条零散规则浓缩合并进【${label}】${isPinned ? '（全局共享）' : '（仅本任务）'}` })
+              patch({ notice: `${isPinned ? '📌 ' : ''}已把 ${replacedN} 条规则合并进【${label}】${isPinned ? '（所有任务通用）' : '（只限这次）'}` })
             } else {
-              patch({ notice: `${isPinned ? '📌 已批准并定住全局' : '已批准注入本任务'}【${label}】` })
+              patch({ notice: `${isPinned ? '📌 已添加到全局' : '已添加到本对话'}【${label}】` })
             }
           } else if (sug.kind === 'guard_wall') {
             const applied = value && value.wallApplied
-            patch({ notice: '🧱 已落锁物理驻墙：' + ((applied && applied.title) || sug.title || '') })
+            patch({ notice: '🧱 已启用物理驻墙：' + ((applied && applied.title) || sug.title || '') })
           } else if (sug.kind === 'wall_removal') {
             const removed = value && value.wallRemoved
             patch({
               notice: removed && removed.action === 'remove'
-                ? `🧱 已批准拆除物理驻墙：${removed.title || sug.title || ''}`
-                : `⏸ 已批准暂挂物理驻墙：${(removed && removed.title) || sug.title || ''}`,
+                ? `🧱 已删除物理驻墙：${removed.title || sug.title || ''}`
+                : `⏸ 已暂停物理驻墙：${(removed && removed.title) || sug.title || ''}`,
             })
           } else if (sug.kind === 'advice') {
-            patch({ notice: '💡 已采纳参谋长建议并递交 → @' + (sug.targetLabel || sug.target || '主对话') })
+            patch({ notice: '💡 已采纳建议并发送 → @' + (sug.targetLabel || sug.target || '主对话') })
           } else {
-            patch({ notice: '已递话 → @' + (sug.targetLabel || sug.target) })
+            patch({ notice: '已发送 → @' + (sug.targetLabel || sug.target) })
           }
           void refresh()
         }
@@ -2500,9 +2500,9 @@ window.__ModuleLoader__.load({
           const execCount = Number(value && value.executedCount) || 0
           const blockedCount = Number(value && value.blockedCount) || 0
           const skippedGoals = Number(value && value.skippedGoalCount) || 0
-          const parts = [`✓ 已执行 ${execCount} 项参谋建议`]
-          if (blockedCount > 0) parts.push(`拦截 ${blockedCount} 项越界建议`)
-          if (skippedGoals > 0) parts.push(`保留 ${skippedGoals} 项结项请示单独拍板`)
+          const parts = [`✓ 已执行 ${execCount} 条建议`]
+          if (blockedCount > 0) parts.push(`拦住 ${blockedCount} 条越界建议`)
+          if (skippedGoals > 0) parts.push(`还有 ${skippedGoals} 条完成确认需要你单独点`)
           patch({ notice: parts.join(' · ') })
           void refresh()
           return value
@@ -2542,7 +2542,7 @@ window.__ModuleLoader__.load({
       if (store.secBusy || store.boundConsolidating) return null
       const tag = field || 'all'
       return await withChiefWorkFx(
-        { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在浓缩边界中...' },
+        { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '正在合并边界规则…' },
         async () => {
           patch({ boundConsolidating: tag, secBusy: true, error: '' })
           try {
@@ -2566,7 +2566,7 @@ window.__ModuleLoader__.load({
               }
               patch({
                 boundSelected: nextSel,
-                notice: '🏛 参谋长已将零散边界浓缩为 1 条，请在上方请示卡拍板',
+                notice: '🏛 边界规则已合并成 1 条，请在上方建议卡片里确认',
               })
             }
             return value
@@ -2586,7 +2586,7 @@ window.__ModuleLoader__.load({
         secTarget: sug.target || 'lead',
         secMode: sug.mode || 'steer',
         secInput: sug.draftText || '',
-        notice: '已填入底部许愿框，可微调后发送',
+        notice: '已填到下面输入框，改好就能发',
       })
       if (sug.id && !sug.isSynthetic) void decideSuggestion(sug, 'dismiss')
     }
@@ -2598,8 +2598,8 @@ window.__ModuleLoader__.load({
           headers: { 'content-type': 'application/json' },
           body: JSON.stringify({ session: store.sessionId, ...payload }),
         })
-        if (payload.op === 'add') patch({ notice: '已记入持久条目' })
-        else if (payload.op === 'remove') patch({ notice: '已移除条目' })
+        if (payload.op === 'add') patch({ notice: '已保存这条记录' })
+        else if (payload.op === 'remove') patch({ notice: '已删除这条记录' })
         return value
       } catch (error) {
         patch({ error: String((error && error.message) || error) })
@@ -2615,7 +2615,7 @@ window.__ModuleLoader__.load({
         return /\.(png|jpe?g|webp|gif)$/i.test(String(f.name || ''))
       })
       if (!incoming.length) {
-        patch({ notice: '仅支持 PNG / JPEG / WebP / GIF 格式图片' })
+        patch({ notice: '只支持 PNG、JPG、WebP、GIF 图片' })
         return
       }
       const existing = Array.isArray(store.secImages) ? store.secImages : []
@@ -2626,7 +2626,7 @@ window.__ModuleLoader__.load({
       }
       const picked = incoming.slice(0, slots)
       if (incoming.length > slots) {
-        patch({ notice: `单次最多 ${SEC_MAX_IMAGES} 张，已截取前 ${slots} 张` })
+        patch({ notice: `一次最多传 ${SEC_MAX_IMAGES} 张，已选前 ${slots} 张` })
       }
       const encoded = []
       for (const file of picked) {
@@ -2644,45 +2644,45 @@ window.__ModuleLoader__.load({
 
     function classifyChiefWorkFx(text, quickTag = '') {
       if (quickTag === 'consult_chief') {
-        return { tone: 'neon', tab: 'chief', label: '💡 参谋长正在研判局势与拟定建议...' }
+        return { tone: 'neon', tab: 'chief', label: '💡 参谋长正在看情况、想建议…' }
       }
       if (quickTag === 'dream_roam') {
-        return { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游 · 轻拢卷宗与织就钩子中...' }
+        return { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游，帮你整理档案…' }
       }
       if (quickTag === 'craft_wall') {
-        return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在手搓驻墙中...' }
+        return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在写物理驻墙规则…' }
       }
       if (quickTag === 'extract_bounds') {
-        return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在提炼边界中...' }
+        return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在整理边界规则…' }
       }
       const clean = String(text || '').trim()
       const hits = []
       if (/梦境漫游|dream.?roam/i.test(clean)) {
-        hits.push({ tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游 · 轻拢卷宗与织就钩子中...' })
+        hits.push({ tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游，帮你整理档案…' })
       }
       if (/思考强度|思考挡位|推理强度|调挡|reasoningEffort|effortOps/i.test(clean)) {
-        hits.push({ tone: 'neon', tab: store.tab || 'chief', label: '🧠 参谋长正在调配模型思考强度中...' })
+        hits.push({ tone: 'neon', tab: store.tab || 'chief', label: '🧠 参谋长正在调整思考深度…' })
       }
       if (/置顶桌面|认知桌面|递送.*档案|拉阅.*钩子|archiveOps/i.test(clean)) {
-        hits.push({ tone: 'archive', tab: 'archive', label: '📌 参谋长正在调配认知桌面与卷宗钩子中...' })
+        hits.push({ tone: 'archive', tab: 'archive', label: '📌 参谋长正在整理认知桌面资料…' })
       }
       if (/手搓|驻墙|筑墙|物理墙|guard_?wall|wallProposals/i.test(clean)) {
-        hits.push({ tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在手搓驻墙中...' })
+        hits.push({ tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在写物理驻墙规则…' })
       }
       if (/提炼.{0,4}边界|工作边界|红线|必做项|注意事项|boundProposals/i.test(clean)) {
-        hits.push({ tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在调配红线边界中...' })
+        hits.push({ tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在整理红线规则…' })
       }
       if (/整理档案|档案柜|卷宗|归档|收纳入柜|桌面档案|抽屉|archive/i.test(clean)) {
-        hits.push({ tone: 'archive', tab: 'archive', label: '参谋长正在整理档案中...' })
+        hits.push({ tone: 'archive', tab: 'archive', label: '参谋长正在整理档案…' })
       }
       if (/任务看板|拆解任务|金字塔|子任务|graph\.plan/i.test(clean)) {
-        hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在编排任务看板中...' })
+        hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在整理任务列表…' })
       }
       if (/执行计划|规划步骤|交接单|handoff/i.test(clean)) {
-        hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在推演执行计划中...' })
+        hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在拟定执行计划…' })
       }
       if (/协同网络|跨窗|关联会话|子代理|广播/i.test(clean)) {
-        hits.push({ tone: 'peers', tab: 'peers', label: '参谋长正在协调团队网络中...' })
+        hits.push({ tone: 'peers', tab: 'peers', label: '参谋长正在协调各窗口对话…' })
       }
       if (hits.length === 1) return hits[0]
       if (hits.length >= 2) {
@@ -2691,43 +2691,43 @@ window.__ModuleLoader__.load({
           tone: 'neon',
           tab: allBoundaries ? 'boundaries' : (store.tab || 'chief'),
           ...(allBoundaries ? { boundSubTab: 'rules' } : {}),
-          label: allBoundaries ? '参谋长正在手搓驻墙与边界中...' : '参谋长正在统筹操作参谋系统中...',
+          label: allBoundaries ? '参谋长正在整理规则和物理驻墙…' : '参谋长正在批量处理中…',
         }
       }
       return {
         tone: 'neon',
         tab: store.tab || 'chief',
-        label: '参谋长正在推演研判中...',
+        label: '参谋长正在思考…',
       }
     }
 
     function resolveChiefSuggestionWorkFx(suggestions = []) {
       const list = Array.isArray(suggestions) ? suggestions.filter(Boolean) : []
       if (!list.length) {
-        return { tone: 'neon', tab: store.tab || 'chief', label: '参谋长正在统一落地参谋建议中...' }
+        return { tone: 'neon', tab: store.tab || 'chief', label: '参谋长正在执行你选的建议…' }
       }
       const kinds = new Set(list.map(s => String(s.kind || '').trim()))
       if (kinds.size === 1 && kinds.has('guard_wall')) {
-        return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在落锁物理驻墙中...' }
+        return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在启用物理驻墙…' }
       }
       if (kinds.size === 1 && kinds.has('wall_removal')) {
-        return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '⚠️ 正在按人工批准调整物理驻墙...' }
+        return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '⚠️ 正在按你的确认调整物理驻墙…' }
       }
       if (kinds.size === 1 && kinds.has('bound')) {
-        return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在注入红线边界中...' }
+        return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在添加边界规则…' }
       }
       if (kinds.size === 1 && kinds.has('archive_op')) {
-        return { tone: 'archive', tab: 'archive', label: '📌 参谋长正在调配认知桌面与卷宗钩子中...' }
+        return { tone: 'archive', tab: 'archive', label: '📌 参谋长正在整理认知桌面资料…' }
       }
       if (kinds.size === 1 && kinds.has('model_effort')) {
-        return { tone: 'neon', tab: 'chief', label: '🧠 参谋长正在调配模型思考强度中...' }
+        return { tone: 'neon', tab: 'chief', label: '🧠 参谋长正在调整思考深度…' }
       }
       const allBoundsPage = [...kinds].every(k => k === 'guard_wall' || k === 'bound')
       return {
         tone: 'neon',
         tab: allBoundsPage ? 'boundaries' : (store.tab || 'chief'),
         ...(allBoundsPage ? { boundSubTab: 'rules' } : {}),
-        label: allBoundsPage ? '参谋长正在同步落锁驻墙与边界中...' : '🏁 参谋长正在一站式推进建议清单中...',
+        label: allBoundsPage ? '参谋长正在保存规则和物理驻墙…' : '🏁 参谋长正在依次执行建议…',
       }
     }
 
@@ -2744,7 +2744,7 @@ window.__ModuleLoader__.load({
           token,
           tone: spec.tone || 'neon',
           tab: targetTab,
-          label: spec.label || '参谋长正在工作中...',
+          label: spec.label || '参谋长正在处理…',
         },
       })
       if (targetTab === 'archive' && !store.archiveLoaded) {
@@ -2816,13 +2816,13 @@ window.__ModuleLoader__.load({
               if (m && m.text) pushAction((m.op === 'remove' ? '移除：' : '记入：') + clampTitle(m.text, 14))
             }
             for (const wp of (value.wallProposals || [])) {
-              if (wp && wp.title) pushAction('呈批驻墙：' + clampTitle(wp.title, 14))
+              if (wp && wp.title) pushAction('新物理驻墙：' + clampTitle(wp.title, 14))
             }
             for (const wr of (value.wallRemovalProposals || [])) {
-              if (wr && wr.title) pushAction('⚠️ 请示拆墙：' + clampTitle(wr.title, 14))
+              if (wr && wr.title) pushAction('⚠️ 申请关墙：' + clampTitle(wr.title, 14))
             }
             for (const bp of (value.boundProposals || [])) {
-              if (bp && bp.draftText) pushAction('呈批边界：' + clampTitle(bp.draftText, 12))
+              if (bp && bp.draftText) pushAction('建议改边界：' + clampTitle(bp.draftText, 12))
             }
             if (value.view) applySecView(value.view)
             const createdSugCount = (Array.isArray(value.wallProposals) ? value.wallProposals.length : 0)
@@ -2844,8 +2844,8 @@ window.__ModuleLoader__.load({
               ...(createdSugCount > 0
                 ? {
                     notice: hasWallRemovalOnly
-                      ? `⚠️ 参谋请示人工审批拆墙（${value.wallRemovalProposals.length} 项），请在建议栏拍板批准或忽略`
-                      : `✨ 已生成 ${createdSugCount} 项待确认提案，请点面板顶部「▶ 执行建议」一键落锁生效`,
+                      ? `⚠️ 参谋长申请关闭 ${value.wallRemovalProposals.length} 条物理驻墙，请在上方建议卡片里决定`
+                      : `✨ 已生成 ${createdSugCount} 条待确认建议，点顶部「▶ 执行建议」就能生效`,
                   }
                 : {}),
             })
@@ -3192,8 +3192,8 @@ window.__ModuleLoader__.load({
       const isDream = Boolean(opts.dream || opts.reasonKind === 'dream_roam')
       return await withChiefWorkFx(
         isDream
-          ? { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游 · 轻拢卷宗与织就钩子中...' }
-          : { tone: 'archive', tab: 'archive', label: '参谋长正在整理档案中...' },
+          ? { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游，帮你整理档案…' }
+          : { tone: 'archive', tab: 'archive', label: '参谋长正在整理档案…' },
         async () => {
           patch({ archiveOrganizing: true, error: '' })
           try {
@@ -3221,8 +3221,8 @@ window.__ModuleLoader__.load({
                 archiveOrganizeOpen: false,
                 archiveOrganizePrompt: '',
                 notice: value.updatedCount > 0
-                  ? `✦ 参谋长已按层次整理收纳 ${value.updatedCount} 份工程卷宗（原文 100% 无损保留）`
-                  : '✦ 当前卷宗已分门别类，无需重复拆整',
+                  ? `✦ 已帮你把 ${value.updatedCount} 份档案分类整理好，原文完整保留`
+                  : '✦ 这些档案已经分类好了，不用重整',
               })
               void loadArchives(true, '', vaultScope)
               for (const k of openIds) {
@@ -3243,7 +3243,7 @@ window.__ModuleLoader__.load({
     async function harvestArchivesApi(focusHint = '', opts = {}) {
       if (store.archiveHarvesting) return null
       return await withChiefWorkFx(
-        { tone: 'archive', tab: 'archive', label: '参谋长正在抢救归档中...' },
+        { tone: 'archive', tab: 'archive', label: '正在从对话里提取关键记录…' },
         async () => {
           patch({ archiveHarvesting: true, error: '' })
           try {
@@ -3261,8 +3261,8 @@ window.__ModuleLoader__.load({
             if (value && value.ok) {
               patch({
                 notice: value.count > 0
-                  ? `📥 已抢救 ${value.count} 份本轮对话工程细节入柜（防压缩失忆）`
-                  : '📥 当前对话暂无新增重要工程细节',
+                  ? `📥 已保存 ${value.count} 份重要记录，避免长对话压缩后忘掉`
+                  : '📥 这轮对话没有新的重要细节要保存',
               })
               void loadArchives(true)
             }
@@ -3280,7 +3280,7 @@ window.__ModuleLoader__.load({
     async function precipitateArchivesApi(opts = {}) {
       if (store.archivePrecipitating) return null
       return await withChiefWorkFx(
-        { tone: 'archive', tab: 'archive', label: '参谋长正在沉淀经验入库中...' },
+        { tone: 'archive', tab: 'archive', label: '正在把经验存进长期冷库…' },
         async () => {
           patch({ archivePrecipitating: true, error: '' })
           try {
@@ -3302,8 +3302,8 @@ window.__ModuleLoader__.load({
               patch({
                 precipitateModal: null,
                 notice: value.count > 0
-                  ? `⏬ 已提炼 ${value.count} 条可复用经验封入冷库（默认 0 Token 隔离）`
-                  : '⏬ 当前卷宗暂无更多可沉淀经验',
+                  ? `⏬ 已把 ${value.count} 条常用经验存进冷库（平时占 0 Token）`
+                  : '⏬ 暂时没有可以存进冷库的经验',
               })
               void loadArchives(true, '', vaultScope)
             }
@@ -3355,7 +3355,7 @@ window.__ModuleLoader__.load({
       const items = Array.isArray(modalState && modalState.items) ? modalState.items : []
       if (!items.length) return null
       return await withChiefWorkFx(
-        { tone: 'archive', tab: 'archive', label: '参谋长正在整合递交档案中...' },
+        { tone: 'archive', tab: 'archive', label: '正在整理档案并准备发送…' },
         async () => {
           patch({ relayArchivesBusy: true, error: '' })
           try {
@@ -3380,7 +3380,7 @@ window.__ModuleLoader__.load({
               patch({
                 archiveRelayModal: null,
                 selectedArchiveMap: {},
-                notice: `📨 参谋长已带要求整合 ${items.length} 条档案并递交给 @${modalState.target === 'lead' || !modalState.target ? '主对话' : shortAgentName(modalState.target, true)}`,
+                notice: `📨 已把 ${items.length} 份档案和你的要求一起发给 @${modalState.target === 'lead' || !modalState.target ? '主对话' : shortAgentName(modalState.target, true)}`,
               })
               void refresh()
             }
@@ -3398,7 +3398,7 @@ window.__ModuleLoader__.load({
     async function distillToGlobalApi(modalState) {
       if (store.distillBusy) return null
       return await withChiefWorkFx(
-        { tone: 'archive', tab: 'archive', label: '参谋长正在提炼全局档案中...' },
+        { tone: 'archive', tab: 'archive', label: '正在整理要存入全局档案的经验…' },
         async () => {
           patch({ distillBusy: true, error: '' })
           try {
@@ -3422,8 +3422,8 @@ window.__ModuleLoader__.load({
                 selectedArchiveMap: {},
                 globalVaultLoaded: false,
                 notice: value.createdCount > 0
-                  ? `✦ 已从本局提炼 ${value.createdCount} 份可复用工程档案存入「🌐 全局档案柜」`
-                  : '✦ 当前本局暂无更多待提炼的新增可复用经验',
+                  ? `✦ 已提取 ${value.createdCount} 份通用经验，存进「🌐 全局档案柜」`
+                  : '✦ 这轮对话暂时没有新的通用经验',
               }
               if (value.globalArchives && Array.isArray(value.globalArchives.items)) {
                 nextPatch.globalVaultItems = value.globalArchives.items
@@ -3449,18 +3449,18 @@ window.__ModuleLoader__.load({
 
     async function approveGoalApi() {
       const value = await act({ action: 'goal.approve' })
-      if (value && value.ok) patch({ notice: '✅ 已批准目标结项并切换回标准计划模式' })
+      if (value && value.ok) patch({ notice: '✅ 已确认目标完成，切回普通计划模式' })
       return value
     }
 
     async function rejectGoalApi(reason) {
       const text = String(reason || '').trim()
       if (!text) {
-        patch({ error: '请简短说明驳回原因与补充要求' })
+        patch({ error: '请简单写一下没通过的原因，或要补什么' })
         return null
       }
       const value = await act({ action: 'goal.reject', reason: text })
-      if (value && value.ok) patch({ notice: '↩ 已驳回结项，目标督导将继续推进' })
+      if (value && value.ok) patch({ notice: '↩ 已退回重做，参谋长会继续盯着推进' })
       return value
     }
 
@@ -3514,7 +3514,7 @@ window.__ModuleLoader__.load({
           const localHits = searchBoard(q).filter(hItem => hItem.tab !== 'archive')
           patch({
             askHits: [...archHits, ...localHits],
-            notice: archHits.length ? `已在封存档案柜检出 ${archHits.length} 卷匹配记录` : '封存档案柜中未检出匹配卷宗',
+            notice: archHits.length ? `在档案库里找到 ${archHits.length} 份相关记录` : '档案库里没找到相关内容',
           })
         }
       } catch (error) {
@@ -3568,7 +3568,7 @@ window.__ModuleLoader__.load({
           patch({
             staleBackendDetected: true,
             staleBackendDismissed: false,
-            error: '检测到客户端内存仍驻留旧版参谋部后端（尚未加载新动作），请完整关闭并重新打开 DeepSeek Harness 客户端即可生效。',
+            error: '后台还在跑旧版本，新功能还没加载进来。请完全关闭再重新打开 DeepSeek Harness 客户端。',
           })
         } else {
           patch({ error: msg })
@@ -3636,7 +3636,7 @@ window.__ModuleLoader__.load({
         if (pinAfter) {
           await act({ action: 'handoff.pin', pinned: true, by: 'user' })
         }
-        patch({ handoffEditing: false, notice: pinAfter ? '✏️ 已保存交接单并定住防改' : '✏️ 已保存手动交接单' })
+        patch({ handoffEditing: false, notice: pinAfter ? '✏️ 已保存交接单，并设好定住防改' : '✏️ 已保存你改的交接单' })
         await loadHandoff()
       }
       return res
@@ -3660,7 +3660,7 @@ window.__ModuleLoader__.load({
         by: 'user',
       })
       if (res && res.ok) {
-        patch({ notice: nextPinned ? '📌 已定住交接单（已固化当前快照，参谋长不可自动覆写）' : '🔓 已解除交接单定住锁定' })
+        patch({ notice: nextPinned ? '📌 已定住防改：参谋长不会再自动覆盖这份交接单' : '🔓 已解除锁定，交接单可以重新自动更新了' })
         await loadHandoff()
       }
       return res
@@ -3669,7 +3669,7 @@ window.__ModuleLoader__.load({
     async function resetHandoffAuto() {
       const res = await act({ action: 'handoff.reset', by: 'user' })
       if (res && res.ok) {
-        patch({ handoffEditing: false, notice: '↺ 已恢复为系统实时自动生成交接单' })
+        patch({ handoffEditing: false, notice: '↺ 已改回由系统自动更新交接单' })
         await loadHandoff()
       }
       return res
@@ -3677,12 +3677,12 @@ window.__ModuleLoader__.load({
 
     async function toggleSyncHandoffOnDigest(enabled) {
       if (store.board && store.board.handoff && store.board.handoff.pinned) {
-        patch({ notice: '🔒 交接单已被人类定住，需先解除定住才能开启自动同步' })
+        patch({ notice: '🔒 交接单已定住防改，先解锁才能开启自动同步' })
         return null
       }
       const res = await act({ action: 'handoff.setSyncOnDigest', enabled: Boolean(enabled), by: 'user' })
       if (res && res.ok) {
-        patch({ notice: enabled ? '✦ 提炼摘要后将自动同步至交接单' : '已关闭摘要同步交接单（仅手工更新）' })
+        patch({ notice: enabled ? '✦ 以后提炼摘要时会自动更新交接单' : '已关闭自动同步，之后只按你的修改为准' })
         await loadHandoff()
       }
       return res
@@ -3695,8 +3695,8 @@ window.__ModuleLoader__.load({
       const staleOrIncomplete = !pinned && Boolean(hMeta.isIncomplete || hMeta.isStale || hMeta.hasNarrativeUpdate)
       if (staleOrIncomplete) {
         const reason = hMeta.isIncomplete
-          ? '当前交接单内容尚不完整（缺少目标、步骤或最新参谋摘要），直接交接会打乱新对话的上下文衔接。'
-          : '参谋长已更新最新态势摘要，但当前交接单尚未同步更新；直接交接可能让新窗口读到过期进度，建议先等参谋长刷新交接单。'
+          ? '交接单还缺目标、步骤或最新摘要，直接交接会让新对话接不上。'
+          : '摘要已经更新了，但交接单还没同步。直接交接会让新窗口看到旧进度，建议先更新一下。'
         patch({
           handoffWarnModal: {
             target,
@@ -3711,7 +3711,7 @@ window.__ModuleLoader__.load({
     }
 
     async function transfer(target, opts = {}) {
-      patch({ transferNote: '投递中…', error: '' })
+      patch({ transferNote: '正在交接…', error: '' })
       try {
         const value = await call('transfer', {
           method: 'POST',
@@ -3729,7 +3729,7 @@ window.__ModuleLoader__.load({
         })
         const created = value && value.mode === 'created' && value.sessionId ? String(value.sessionId) : ''
         let note = '已放入待领取队列（含参谋预部署）'
-        if (value && value.mode === 'injected') note = '已投递至目标会话并部署参谋'
+        if (value && value.mode === 'injected') note = '已交接到目标对话，并开启了参谋'
         if (created) {
           patch({ transferred: true })
           setTimeout(() => patch({ transferred: false }), 2000)
@@ -3801,7 +3801,7 @@ window.__ModuleLoader__.load({
       const title = store.memTitle.trim()
       const section = store.memSection
       if (!text) return
-      patch({ memText: '', memTitle: '', memComposerOpen: false, notice: '已记入记忆' })
+      patch({ memText: '', memTitle: '', memComposerOpen: false, notice: '已记下来' })
       await act({ action: 'memory.add', text, title, section })
       void loadMemory()
     }
@@ -3881,7 +3881,7 @@ window.__ModuleLoader__.load({
         if (submit) {
           try {
             submit()
-            return '已发送至对话'
+            return '已发到对话'
           } catch {}
         }
         return '已填入输入框'
@@ -3894,7 +3894,7 @@ window.__ModuleLoader__.load({
       if (!clean) return
       const sent = sendToComposer(clean)
       if (sent) {
-        patch({ notice: sent + ' · 等待模型解答' })
+        patch({ notice: sent + '，等主对话回复' })
         return
       }
       try {
@@ -3910,9 +3910,9 @@ window.__ModuleLoader__.load({
             mode: 'followup',
           }),
         })
-        patch({ notice: '已发送给主对话模型解答' })
+        patch({ notice: '已发给主对话' })
       } catch (error) {
-        copyText(clean, '问题已复制，可粘贴到对话框提问')
+        copyText(clean, '已复制，去对话框粘贴就能提问')
       }
     }
 
@@ -3936,7 +3936,7 @@ window.__ModuleLoader__.load({
       if (!res || store.error) return
       patch({
         boundDraft: { ...store.boundDraft, [field]: '' },
-        notice: pinned ? '📌 已添加并定住为全局共享边界' : '已添加至当前任务边界（点击前方的图钉可定住全局）',
+        notice: pinned ? '📌 已添加为所有任务通用的边界' : '已添加到当前对话边界（点前面图钉可设为通用）',
       })
     }
 
@@ -3945,8 +3945,8 @@ window.__ModuleLoader__.load({
       if (!res || store.error) return
       patch({
         notice: nextPinned
-          ? '📌 已盖上小图钉 · 定住为跨任务全局共享边界'
-          : '已取下小图钉 · 改为仅当前任务生效',
+          ? '📌 已固定为所有任务通用的边界'
+          : '已取消通用固定，只在当前对话生效',
       })
     }
 
@@ -3963,7 +3963,7 @@ window.__ModuleLoader__.load({
       const trimmed = String(nextItem || '').trim()
       if (!trimmed || trimmed === oldItem) return
       const res = await act({ action: 'bounds.edit', field, oldItem, item: trimmed })
-      if (res && !store.error) patch({ notice: '已更新边界条文' })
+      if (res && !store.error) patch({ notice: '已更新边界规则' })
     }
 
     function toggleBoundSelect(field, item) {
@@ -3980,7 +3980,7 @@ window.__ModuleLoader__.load({
         ? patterns
         : (cleanPattern ? cleanPattern.split(/[\r\n,;，；]+/).map(s => s.trim()).filter(Boolean) : [])
       if (!cleanTitle || !patList.length) {
-        patch({ error: '物理驻墙需要填写规则名称与至少 1 条匹配规则' })
+        patch({ error: '请给物理驻墙起个名字，并至少写 1 条拦截条件' })
         return null
       }
       const res = await act({
@@ -4000,7 +4000,7 @@ window.__ModuleLoader__.load({
           wallFormOpen: false,
           wallDraftTitle: '',
           wallDraftPattern: '',
-          notice: `🧱 已落锁物理驻墙「${cleanTitle}」（${scope === 'workspace' ? '仅本工程' : '🌐 全局随身'}）`,
+          notice: `🧱 已启用物理驻墙「${cleanTitle}」（${scope === 'workspace' ? '只管当前项目' : '🌐 所有项目通用'}）`,
         })
       }
       return res
@@ -4010,8 +4010,8 @@ window.__ModuleLoader__.load({
       if (!wallId || !scope) return null
       const res = await act({ action: 'wall.setScope', wallId, scope })
       if (res && res.ok) {
-        const labelMap = { global: '🌐 全局随身', workspace: '📁 仅本工程', paused: '⏸ 暂挂停用' }
-        patch({ notice: `🧱 已切换物理墙作用域 → ${labelMap[scope] || scope}` })
+        const labelMap = { global: '🌐 所有项目通用', workspace: '📁 只管当前项目', paused: '⏸ 暂停使用' }
+        patch({ notice: `🧱 物理驻墙范围已改为：${labelMap[scope] || scope}` })
       }
       return res
     }
@@ -4024,7 +4024,7 @@ window.__ModuleLoader__.load({
         patch({
           wallSelectedIds: curSel.filter(id => id !== wallId),
           wallMergeError: '',
-          notice: '🧱 已拆除该条物理驻墙',
+          notice: '🧱 已删除这条物理驻墙',
         })
       }
       return res
@@ -4043,21 +4043,21 @@ window.__ModuleLoader__.load({
       if (!autoGroup) {
         const cleanIds = [...new Set((Array.isArray(wallIds) ? wallIds : []).filter(id => walls.some(w => w && w.id === id)))]
         if (cleanIds.length < 2) {
-          const msg = '请至少勾选 2 条相同类型的物理驻墙后再合并'
+          const msg = '请至少选 2 条同类型的物理驻墙再合并'
           patch({ wallMergeError: msg, error: msg })
           return { ok: false, code: 'MERGE_MIN_TWO', error: msg }
         }
         const picked = walls.filter(w => cleanIds.includes(w.id))
         const ruleTypes = new Set(picked.map(w => w.ruleType))
         if (ruleTypes.size > 1) {
-          const msg = '⛔ 禁止跨类型合并物理驻墙：仅允许相同拦截类型的物理驻墙合并（如「禁碰路径」只能与「禁碰路径」合并），请取消异类勾选！'
+          const msg = '⛔ 不同类型的物理驻墙不能混在一起合并，比如「禁碰路径」只能和「禁碰路径」合。请取消选错的那条。'
           patch({ wallMergeError: msg, error: msg })
           return { ok: false, code: 'CROSS_TYPE_MERGE_FORBIDDEN', error: msg }
         }
       }
       patch({ wallMergeError: '', error: '' })
       return await withChiefWorkFx(
-        { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在合并同类驻墙中...', minMs: 520 },
+        { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '正在合并同类物理驻墙…', minMs: 520 },
         async () => {
           const res = await act({
             action: 'wall.merge',
@@ -4065,14 +4065,14 @@ window.__ModuleLoader__.load({
             autoGroup: Boolean(autoGroup),
           })
           if (!res || !res.ok) {
-            const msg = (res && res.error) || store.error || '合并物理驻墙失败'
+            const msg = (res && res.error) || store.error || '合并失败'
             patch({ wallMergeError: msg, error: msg })
             return res || { ok: false, error: msg }
           }
           patch({
             wallSelectedIds: [],
             wallMergeError: '',
-            notice: `🧱 已将 ${res.mergedCount || 2} 条同类物理驻墙合并为 ${res.createdCount || 1} 条`,
+            notice: `🧱 已把 ${res.mergedCount || 2} 条同类物理驻墙合并成 ${res.createdCount || 1} 条`,
           })
           return res
         },
@@ -9176,7 +9176,7 @@ window.__ModuleLoader__.load({
           return h(
             'div',
             { className: 'dnb-group', style: { padding: 16, textAlign: 'center', marginTop: 12 } },
-            h('div', { style: { fontWeight: 500, fontSize: 13, marginBottom: 6 } }, '视图渲染已自动恢复保护'),
+            h('div', { style: { fontWeight: 500, fontSize: 13, marginBottom: 6 } }, '面板加载出了点问题'),
             h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', marginBottom: 12, wordBreak: 'break-word' } },
               String(this.state.error && this.state.error.message ? this.state.error.message : this.state.error)),
             h('button', {
@@ -9242,7 +9242,7 @@ window.__ModuleLoader__.load({
           h('input', {
             className: 'dnb-input',
             style: { borderRadius: 99, paddingLeft: 12, height: 30 },
-            placeholder: bi('搜索记忆、任务、协同信箱…', 'Search facts, tasks, mailbox…'),
+            placeholder: bi('搜记忆、任务或协同消息…', 'Search memory, tasks, or messages…'),
             autoFocus: true,
             value: view.askText || '',
             onChange: e => {
@@ -9260,15 +9260,15 @@ window.__ModuleLoader__.load({
                 style: { height: 30 },
                 disabled: view.archiveSearchBusy,
                 onClick: () => void searchColdArchives(view.askText),
-                title: bi('按需穿透搜索封存懒加载的长期工程档案柜', 'Search cold engineering archive vaults on demand'),
-              }, h(Icon, { name: 'archive', size: 12 }), view.archiveSearchBusy ? bi('检索中…', 'Searching…') : bi('搜档案柜', 'Vaults'))
+                title: bi('搜一搜收起来的长期历史档案', 'Search archived history files on demand'),
+              }, h(Icon, { name: 'archive', size: 12 }), view.archiveSearchBusy ? bi('搜索中…', 'Searching…') : bi('搜旧档案', 'Archives'))
             : null,
           (view.askText || '').trim()
             ? h('button', {
                 className: 'dnb-pill dnb-pill-accent',
                 style: { height: 30 },
                 onClick: askModel,
-                title: bi('直接交给 DSH 参谋长回答或拆话', 'Ask DSH Chief directly'),
+                title: bi('直接发给参谋长来回答或安排', 'Send directly to DSH Chief to answer or handle'),
               }, h(Icon, { name: 'sparkles', size: 12 }), bi('问参谋长', 'Ask Chief'))
             : null,
         ),
@@ -9307,7 +9307,7 @@ window.__ModuleLoader__.load({
                       ),
                     ),
                   )
-                : h('div', { style: { padding: '10px 12px', fontSize: 11.5, color: 'var(--dnb-text-3)', textAlign: 'center' } }, bi('无匹配结果', 'No matches found')),
+                : h('div', { style: { padding: '10px 12px', fontSize: 11.5, color: 'var(--dnb-text-3)', textAlign: 'center' } }, bi('没找到相关内容', 'No matches found')),
             )
           : null,
       )
@@ -9355,7 +9355,7 @@ window.__ModuleLoader__.load({
           const resolved = resolveTaskAgents(task, allTasks, subagents, identity)
           const agentLabels = resolved.agentNames.length
             ? resolved.agentNames.slice(0, 2).map(n => '@' + shortAgentName(n, true)).join('、')
-              + (resolved.agentNames.length > 2 ? ' 等 ' + resolved.agentNames.length + ' 代理' : '')
+              + (resolved.agentNames.length > 2 ? ' 等 ' + resolved.agentNames.length + ' 个代理' : '')
             : '@主代理'
           const subReason = kind === 'blocked' && (task.note || (board && board.cursor && board.cursor.blocked))
             ? clampTitle(task.note || board.cursor.blocked, 20)
@@ -9369,8 +9369,8 @@ window.__ModuleLoader__.load({
               'data-kind': kind,
               'data-focused': isFocused ? '1' : '0',
               title: kind === 'blocked'
-                ? '受阻目标：点击跳转金字塔视角定位负责子代理'
-                : '推进目标：点击跳转金字塔视角框选正在推进的子代理',
+                ? '卡住的任务：点这里找负责的子代理'
+                : '进行中的任务：点这里看负责的子代理',
               onClick: () => {
                 if (isFocused) {
                   patch({ focusTaskId: '' })
@@ -9409,7 +9409,7 @@ window.__ModuleLoader__.load({
                     whiteSpace: 'nowrap',
                   },
                 },
-                (kind === 'blocked' ? '受阻关联：' : '推进代理：') + agentLabels + (subReason ? ' · ' + subReason : ''),
+                (kind === 'blocked' ? '卡在：' : '负责：') + agentLabels + (subReason ? ' · ' + subReason : ''),
               ),
             ),
             h(
@@ -9429,7 +9429,7 @@ window.__ModuleLoader__.load({
                 },
               },
               h(Icon, { name: 'target', size: 11.5 }),
-              isFocused ? '已框选' : '看代理',
+              isFocused ? '已选中' : '看代理',
             ),
           )
         }),
@@ -9503,7 +9503,7 @@ window.__ModuleLoader__.load({
                 minWidth: 0,
               },
               onClick: () => patch({ fleetCollapsed: !isCollapsed }),
-              title: isCollapsed ? '点击展开子代理团队' : '点击收起子代理团队',
+              title: isCollapsed ? '展开子代理列表' : '收起子代理列表',
             },
             runningCount > 0
               ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#409cff' } })
@@ -9520,7 +9520,7 @@ window.__ModuleLoader__.load({
             h(
               'span',
               { style: { color: runningCount > 0 ? '#409cff' : 'var(--dnb-text-3)', fontWeight: 500 } },
-              runningCount ? `${runningCount} 运行中 · 共 ${children.length}` : `共 ${children.length} 成员`,
+              runningCount ? `${runningCount} 个干活中 · 共 ${children.length} 个` : `共 ${children.length} 个`,
             ),
           ),
           h(
@@ -9538,7 +9538,7 @@ window.__ModuleLoader__.load({
               style: { height: 22, fontSize: 11, padding: '0 8px' },
               onClick: () => patch({ fleetCollapsed: !isCollapsed }),
             },
-              isCollapsed ? `展示 (${children.length})` : '收起',
+              isCollapsed ? `展开 (${children.length})` : '收起',
               h(Icon, {
                 name: 'chevron',
                 size: 11,
@@ -9594,24 +9594,24 @@ window.__ModuleLoader__.load({
                 ? h('button', {
                     className: 'dnb-pill',
                     style: { height: 25, padding: '0 9px', fontSize: 11, borderStyle: 'dashed', color: 'var(--dnb-text-3)' },
-                    title: '展示其余已结束/待命的子代理成员',
+                    title: '展开其他已停下的子代理',
                     onClick: () => patch({ fleetShowAll: true }),
-                  }, '+' + hiddenCount + ' 展示全部')
+                  }, '还有 ' + hiddenCount + ' 个')
                 : (hasMany && showAll
                     ? h('button', {
                         className: 'dnb-pill',
                         style: { height: 25, padding: '0 9px', fontSize: 11, color: 'var(--dnb-text-3)' },
                         onClick: () => patch({ fleetShowAll: false }),
-                      }, '折叠空闲')
+                      }, '收起空闲的')
                     : null),
               hasAnyProbe
                 ? h('button', {
                     className: 'dnb-pill',
                     'data-active': store.showInternalProbes ? '1' : '0',
                     style: { height: 24, padding: '0 8px', fontSize: 10.5, borderStyle: 'dashed', opacity: 0.78 },
-                    title: store.showInternalProbes ? '隐藏后台记忆检查点探针 (@mnemon-review)' : '显示后台记忆检查点探针 (@mnemon-review)',
+                    title: store.showInternalProbes ? '隐藏后台自动核对记忆的小工具 (@mnemon-review)' : '显示后台自动核对记忆的小工具 (@mnemon-review)',
                     onClick: () => patch({ showInternalProbes: !store.showInternalProbes }),
-                  }, store.showInternalProbes ? '隐藏内部探针' : `内部探针 (${hier.probeCount})`)
+                  }, store.showInternalProbes ? '隐藏后台工具' : `后台工具 (${hier.probeCount})`)
                 : null,
             )
           : null,
@@ -9623,10 +9623,10 @@ window.__ModuleLoader__.load({
                 ? h('button', {
                     className: 'dnb-pill',
                     style: { height: 28 },
-                    title: '在分栏打开该子代理对话',
+                    title: '在分屏打开它的对话',
                     onClick: () => {
                       if (!openSubagentChat(activeAgentObj)) {
-                        patch({ notice: '当前子代理尚未建立独立会话视图' })
+                        patch({ notice: '这个子代理还没有独立的对话窗口' })
                       }
                     },
                   }, h(Icon, { name: 'chat', size: 12 }), '对话')
@@ -9634,7 +9634,7 @@ window.__ModuleLoader__.load({
               h('input', {
                 className: 'dnb-input',
                 style: { flex: 1, height: 28, padding: '0 10px', borderRadius: 99, fontSize: 11.5 },
-                placeholder: '给 @' + shortAgentName(steerAgent) + ' 发指令…',
+                placeholder: '给 @' + shortAgentName(steerAgent) + ' 发消息…',
                 value: steerText,
                 onChange: e => setSteerText(e.target.value),
                 onKeyDown: e => { if (e.key === 'Enter') sendSteer() },
@@ -9648,7 +9648,7 @@ window.__ModuleLoader__.load({
               h('button', {
                 className: 'dnb-pill dnb-pill-danger',
                 style: { height: 28, padding: '0 8px' },
-                title: '停止当前轮次',
+                title: '停掉它当前这一步',
                 onClick: () => void act({ action: 'team.interrupt', agent: steerAgent }),
               }, h(Icon, { name: 'stop', size: 11 })),
             )
@@ -10218,8 +10218,8 @@ window.__ModuleLoader__.load({
             className: 'dnb-fan-hub',
             'data-active': isAuto && !dragging ? '1' : '0',
             title: isAuto
-              ? '当前已是「🪄 自动调节」：按任务复杂度自动切换参谋思考深度；拖住外圈弧线可手调挡位'
-              : '点击切回「🪄 自动调节」，或继续拖住弧线手调挡位',
+              ? '已开启自动调档：难的问题多想一会，简单的快答；拖动外圈可手动改档'
+              : '点这里切回自动调档，或拖动外圈手动选择',
             onPointerDown: e => e.stopPropagation(),
             onMouseEnter: () => setHoverKey('auto'),
             onMouseLeave: () => setHoverKey(prev => (prev === 'auto' ? '' : prev)),
@@ -10233,7 +10233,7 @@ window.__ModuleLoader__.load({
                 ? previewStep.label
                 : (isAuto ? bi('🪄 自动', '🪄 Auto') : (committedStep ? committedStep.label : bi('自动', 'Auto')))),
             h('span', { className: 'dnb-fan-hub-sub' },
-              isAuto && !dragging ? bi('智能调节', 'Adaptive') : bi('点此自动', 'Set Auto')),
+              isAuto && !dragging ? bi('自动调档', 'Auto') : bi('切回自动', 'Set Auto')),
           ),
         ),
       )
@@ -10267,7 +10267,7 @@ window.__ModuleLoader__.load({
       children,
     }) {
       const openHintText = pullHintOpen !== null ? pullHintOpen : bi('收起 ▴', 'Collapse ▴')
-      const closedHintText = pullHintClosed !== null ? pullHintClosed : bi('拉起 ▾', 'Expand ▾')
+      const closedHintText = pullHintClosed !== null ? pullHintClosed : bi('展开 ▾', 'Expand ▾')
       const canToggle = typeof onToggle === 'function'
       const cardCls = ['dnb-acc-card', className].filter(Boolean).join(' ')
       const mergedStyle = accentColor
@@ -10287,7 +10287,7 @@ window.__ModuleLoader__.load({
           {
             className: 'dnb-acc-head',
             style: canToggle ? undefined : { cursor: 'default' },
-            title: headTitle || (canToggle ? (open ? bi('点击收起', 'Click to collapse') : bi('点击拉起', 'Click to expand')) : undefined),
+            title: headTitle || (canToggle ? (open ? bi('点击收起', 'Click to collapse') : bi('点击展开', 'Click to expand')) : undefined),
             onClick: canToggle ? onToggle : undefined,
           },
           h(
@@ -10399,7 +10399,7 @@ window.__ModuleLoader__.load({
           },
           h('div', { style: { padding: '6px 10px 8px', borderBottom: '1px solid var(--dnb-border)', marginBottom: 4 } },
             h('div', { style: { fontSize: 10.5, fontWeight: 700, color: 'var(--dnb-text-3)', marginBottom: 4 } },
-              bi('🧠 参谋长思考强度（拖住弧线调挡 · 点中心自动）', '🧠 Chief Reasoning Effort (drag arc · tap center for Auto)')),
+              bi('🧠 思考深度（拖弧线调整 · 点中间自动）', '🧠 Thinking Depth (drag arc · tap center for Auto)')),
             h(EffortFanGauge, {
               compact: true,
               value: (view.chiefMeta && view.chiefMeta.thinkingEffort) || 'auto',
@@ -10407,7 +10407,7 @@ window.__ModuleLoader__.load({
             }),
           ),
           h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } },
-            bi('选择参谋长专职模型', 'Select Dedicated Chief Model')),
+            bi('选择参谋长使用的模型', 'Choose Chief Model')),
           h(
             'div',
             {
@@ -10419,7 +10419,7 @@ window.__ModuleLoader__.load({
               },
             },
             h('div', { style: { minWidth: 0, flex: 1 } },
-              h('div', null, bi('✦ 自动跟随主对话模型', '✦ Auto-follow Lead Model')),
+              h('div', null, bi('✦ 跟随主对话模型', '✦ Follow main chat model')),
               followSubtitle
                 ? h('div', {
                     style: { fontSize: 10.5, color: 'var(--dnb-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -10475,7 +10475,7 @@ window.__ModuleLoader__.load({
           ),
           !providers.length
             ? h('div', { style: { padding: '8px 10px', fontSize: 11, color: 'var(--dnb-text-3)' } },
-                catalog ? bi('未检测到额外模型提供商，将自动跟随主对话模型。', 'No extra providers found; following lead model.') : bi('加载模型列表中…', 'Loading models…'))
+                catalog ? bi('没有其他可用模型，默认跟随主对话。', 'No extra providers found; following main chat.') : bi('正在加载模型…', 'Loading models…'))
             : null,
           h(
             'div',
@@ -10530,7 +10530,7 @@ window.__ModuleLoader__.load({
             },
           },
           h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } },
-            bi('参谋长三态运行模式（与战术正交）', 'Chief Run Mode (orthogonal to tactics)')),
+            bi('选择参谋长的工作方式', 'Choose how Chief runs')),
           RUN_MODE_OPTIONS.map(opt => {
             const rm = runModeMeta(opt.key)
             const active = currentRunMode === opt.key
@@ -10570,50 +10570,50 @@ window.__ModuleLoader__.load({
     }
 
     function describeSuggestionMeta(sug) {
-      if (!sug) return { typeLabel: '参谋建议', impact: '协同调整', expect: '按建议推进', tone: 'var(--dnb-accent)', bg: 'rgba(10, 132, 255, 0.12)' }
+      if (!sug) return { typeLabel: '建议', impact: '调整协作方式', expect: '按建议继续', tone: 'var(--dnb-accent)', bg: 'rgba(10, 132, 255, 0.12)' }
       if (sug.kind === 'archive_op') {
         return {
-          typeLabel: '📌 档案注入/桌面建议',
-          impact: `影响：${sug.targetLabel || '📌 认知桌面'}（不越级改动冷库）`,
-          expect: '预期：确认后执行桌面置顶/撤回或一次性递送主对话',
+          typeLabel: '📌 认知桌面调整',
+          impact: `会调整：${sug.targetLabel || '📌 认知桌面'}（每轮发给主对话的少量资料）`,
+          expect: '确认后会把资料固定到桌面、撤下，或发给主对话',
           tone: '#f59e0b',
           bg: 'rgba(245, 158, 11, 0.13)',
         }
       }
       if (sug.kind === 'model_effort') {
         return {
-          typeLabel: '🧠 模型思考调挡建议',
-          impact: `影响：调整 ${sug.targetLabel || '@lead'} 思考深度`,
-          expect: '预期：按建议实时热切换下一轮模型推理深度',
+          typeLabel: '🧠 调整思考深度',
+          impact: `会调整 ${sug.targetLabel || '@主对话'} 的思考深度`,
+          expect: '确认后下一轮会按新深度思考',
           tone: '#a5b4fc',
           bg: 'rgba(99, 102, 241, 0.16)',
         }
       }
       if (sug.kind === 'goal_approval') {
         return {
-          typeLabel: '🎯 目标结项请示',
-          impact: '影响：锁定/完结当前主目标与验收状态',
-          expect: '预期：核心目标标为达成并停止继续催跑',
+          typeLabel: '🎯 申请确认完成目标',
+          impact: '会把当前总目标标为已完成',
+          expect: '确认后不再继续催着往下跑',
           tone: '#30d158',
           bg: 'rgba(48, 209, 88, 0.12)',
         }
       }
       if (sug.kind === 'guard_wall') {
         return {
-          typeLabel: '🧱 物理驻墙提案',
-          impact: `影响：${sug.targetLabel || '🌐 全局随身驻墙'}（事前物理硬拦截）`,
-          expect: '预期：确认后写入 guard-walls.json，所有代理触线即刻物理阻断',
+          typeLabel: '🧱 新增物理驻墙',
+          impact: `范围：${sug.targetLabel || '🌐 所有项目通用'}（触发规则会直接拦下）`,
+          expect: '确认后生效，助手踩到红线时会被直接拦住',
           tone: '#f87171',
           bg: 'rgba(239, 68, 68, 0.13)',
         }
       }
       if (sug.kind === 'wall_removal') {
         const spec = (sug.wallRemovalSpec && typeof sug.wallRemovalSpec === 'object') ? sug.wallRemovalSpec : {}
-        const actText = spec.action === 'remove' ? '永久移除该物理驻墙' : '暂挂休眠该物理驻墙'
+        const actText = spec.action === 'remove' ? '永久删掉这条物理驻墙' : '暂时停用这条物理驻墙'
         return {
-          typeLabel: '⚠️ 参谋请示拆墙（需人工批准）',
-          impact: `影响：${spec.wallTitle || sug.targetLabel || '目标物理驻墙'}（L0–L3 均须人类审批）`,
-          expect: `预期：批准后${actText}，参谋绝无权越权自拆`,
+          typeLabel: '⚠️ 申请关闭物理驻墙（需你确认）',
+          impact: `涉及：${spec.wallTitle || sug.targetLabel || '这条物理驻墙'}（所有模式都要你同意）`,
+          expect: `同意后会${actText}，参谋长不能自己关闭`,
           tone: '#ef4444',
           bg: 'rgba(239, 68, 68, 0.18)',
         }
@@ -10622,26 +10622,26 @@ window.__ModuleLoader__.load({
         const colLabel = sug.boundField === 'allowed' ? '必做事项' : (sug.boundField === 'notes' ? '注意事项' : '禁止红线')
         const repCount = Array.isArray(sug.replaces) ? sug.replaces.filter(Boolean).length : 0
         return {
-          typeLabel: repCount > 0 ? `🏛 边界浓缩 (${repCount} 合 1)` : `🏛 ${colLabel}请示`,
-          impact: sug.pinGlobal ? '影响：📌 全局定住边界（跨所有任务生效）' : '影响：本任务会话工作边界（实时生效）',
-          expect: repCount > 0 ? `预期：替换并清理 ${repCount} 条零散旧边界` : `预期：写入${colLabel}并广播全体代理遵照执行`,
+          typeLabel: repCount > 0 ? `🏛 合并边界 (${repCount} 合 1)` : `🏛 新增${colLabel}`,
+          impact: sug.pinGlobal ? '📌 会固定为所有任务通用的规则' : '只对当前这次对话生效',
+          expect: repCount > 0 ? `会合并掉 ${repCount} 条零散规则` : `会加入${colLabel}，让所有助手一起遵守`,
           tone: '#fbbf24',
           bg: 'rgba(245, 158, 11, 0.12)',
         }
       }
       if (sug.kind === 'advice') {
         return {
-          typeLabel: '💡 参谋长主动建议',
-          impact: `影响：向 @${shortAgentName(sug.targetLabel || sug.target || '主对话')} 递交协同建议`,
-          expect: '预期：按建议纠偏方向或补全缺失验证步骤',
+          typeLabel: '💡 参谋长建议',
+          impact: `发给 @${shortAgentName(sug.targetLabel || sug.target || '主对话')} 的参考建议`,
+          expect: '按建议调整方向或补上漏掉的检查',
           tone: 'var(--dnb-accent)',
           bg: 'rgba(10, 132, 255, 0.12)',
         }
       }
       return {
-        typeLabel: '✦ 参谋协同建议',
-        impact: `影响：向 @${shortAgentName(sug.targetLabel || sug.target || '主对话')} 发送${sug.mode === 'steer' ? '实时插话' : '顺延指令'}`,
-        expect: '预期：按拟定草案执行下一步动作并同步看板',
+        typeLabel: '✦ 协作建议',
+        impact: `发给 @${shortAgentName(sug.targetLabel || sug.target || '主对话')} 的${sug.mode === 'steer' ? '插话提示' : '后续消息'}`,
+        expect: '确认后会发给对方，并更新进度',
         tone: 'var(--dnb-accent)',
         bg: 'rgba(10, 132, 255, 0.10)',
       }
@@ -10685,7 +10685,7 @@ window.__ModuleLoader__.load({
             h('span', { style: { fontSize: 12, fontWeight: 700, color: 'var(--dnb-text)' } },
               `💡 参谋长建议 (${suggestions.length})`),
             h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
-              `已勾选 ${canExecuteCount}/${suggestions.length} 项 · 统一执行并产出回执`),
+              `已选 ${canExecuteCount}/${suggestions.length} 项，点右侧一起执行`),
           ),
           h(
             'div',
@@ -10695,7 +10695,7 @@ window.__ModuleLoader__.load({
               className: 'dnb-pill',
               style: { height: 26, padding: '0 9px', fontSize: 11, color: 'var(--dnb-text-3)' },
               disabled: Boolean(view.secBusy),
-              title: '忽略当前全部待处理建议',
+              title: '忽略上面所有建议',
               onClick: () => void dismissPendingSuggestions(suggestions),
             }, '全部忽略'),
             h('button', {
@@ -10704,8 +10704,8 @@ window.__ModuleLoader__.load({
               style: { height: 26, padding: '0 12px', fontSize: 11.5, fontWeight: 700 },
               disabled: Boolean(view.secBusy) || canExecuteCount === 0,
               title: selectedGoalCount > 0 && selectedNonGoalCount > 0
-                ? '在当前权限与红线范围内批量执行所选建议（含目标结项请示）并统一汇报回执'
-                : '在当前权限与红线范围内统一执行所选建议并输出执行回执',
+                ? '按当前权限和红线执行选中的建议（包括完成确认），并给你汇报结果'
+                : '按当前权限和红线执行选中的建议，并给你汇报结果',
               onClick: () => void executePendingSuggestions({
                 ids: selectedList.map(s => s.id),
                 includeGoalApproval: selectedGoalCount > 0,
@@ -10760,13 +10760,13 @@ window.__ModuleLoader__.load({
                       type: 'button',
                       className: 'dnb-mini-btn',
                       onClick: () => setExpandedId(openDraft ? '' : sug.id),
-                    }, openDraft ? '收起内容' : '详情')
+                    }, openDraft ? '收起' : '详情')
                   : null,
                 h('button', {
                   type: 'button',
                   className: 'dnb-icon-btn',
                   style: { width: 20, height: 20 },
-                  title: '忽略此条建议',
+                  title: '忽略这条建议',
                   onClick: () => void decideSuggestion(sug, 'dismiss'),
                 }, h(Icon, { name: 'x', size: 12 })),
               ),
@@ -10784,7 +10784,7 @@ window.__ModuleLoader__.load({
             ),
             replacesList.length > 0
               ? h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 4 } },
-                  `整合替代 ${replacesList.length} 条旧规：` + replacesList.slice(0, 3).map(r => '「' + clampTitle(r, 14) + '」').join('、'))
+                  `会合并这 ${replacesList.length} 条旧规则：` + replacesList.slice(0, 3).map(r => '「' + clampTitle(r, 14) + '」').join('、'))
               : null,
             openDraft && sug.draftText
               ? h('div', {
@@ -10859,7 +10859,7 @@ window.__ModuleLoader__.load({
       const permMode = ['advisor', 'assistant', 'strategist', 'chief'].includes(meta.permissionMode) ? meta.permissionMode : 'advisor'
       const trimmedDraft = String(objDraft || '').trim()
       const triggerObjRedFlash = (hintMsg) => {
-        setObjGuardHint(hintMsg || '请先明确核心总目标并点击右上角「🔒 锁定」，再开启强介入！')
+        setObjGuardHint(hintMsg || '请先写好总目标，再点右上角「锁定目标」，然后开启强介入。')
         setObjFlashRed(false)
         const fire = () => setObjFlashRed(true)
         if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fire)
@@ -10881,7 +10881,7 @@ window.__ModuleLoader__.load({
       const handleSuggestObjective = async () => {
         if (suggestBusy) return
         if (objLocked) {
-          patch({ notice: '当前核心目标输入框已锁定，请先点击「解锁」后再点建议或微调' })
+          patch({ notice: '目标已锁定，先点「已锁定目标」解锁后再改。' })
           return
         }
         const curText = String(objDraft || '').trim()
@@ -10928,7 +10928,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚡ 启用「主动强介入」— 设定核心目标与风险核对'),
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚡ 开启强介入：确认目标与安全规则'),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -10961,8 +10961,8 @@ window.__ModuleLoader__.load({
               { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
               h('span', { style: { fontWeight: 700, color: objLocked ? 'var(--dnb-text)' : '#ff6961' } },
                 objLocked
-                  ? '🎯 强介入核心总目标（已锁定 · 开启后立即推进）'
-                  : '🎯 强介入核心总目标（须先点右侧「锁定目标」才可开启）'),
+                  ? '🎯 总目标（已锁定，开启后马上开始）'
+                  : '🎯 总目标（写好后请点右侧「锁定目标」）'),
               h(
                 'div',
                 { style: { display: 'flex', alignItems: 'center', gap: 5 } },
@@ -10972,20 +10972,20 @@ window.__ModuleLoader__.load({
                   'data-tone': 'blue',
                   disabled: suggestBusy || objLocked,
                   title: trimmedDraft && !(lastWasAiGuess && trimmedDraft === lastAiText.trim())
-                    ? '在您输入框已有文字的基础上由参谋长微调润色'
-                    : '由参谋长结合对话现状自动猜测建议（可反复点击继续换角度猜意图）',
+                    ? '根据你写的内容，让参谋长帮你改得更清楚'
+                    : '让参谋长按当前对话帮你写一个目标，可多点几次换个写法',
                   onClick: () => void handleSuggestObjective(),
                 }, suggestBusy
-                  ? '推演中…'
-                  : (trimmedDraft && !(lastWasAiGuess && trimmedDraft === lastAiText.trim()) ? '✦ 微调建议' : '✦ 建议')),
+                  ? '生成中…'
+                  : (trimmedDraft && !(lastWasAiGuess && trimmedDraft === lastAiText.trim()) ? '✦ 帮我改改' : '✦ 帮我写')),
                 h('button', {
                   type: 'button',
                   className: 'dnb-mini-btn',
                   'data-tone': objLocked ? 'amber' : 'red',
-                  title: objLocked ? '点击解锁以继续编辑或点建议' : '点击锁定明确后的核心总目标，解锁“开启强介入”开关',
+                  title: objLocked ? '点一下解锁就能修改' : '确认目标没问题后点这里锁定',
                   onClick: () => {
                     if (!objLocked && !trimmedDraft) {
-                      triggerObjRedFlash('请先填写明确的核心总目标，再点选「锁定目标」！')
+                      triggerObjRedFlash('请先写清楚总目标，再点「锁定目标」。')
                       return
                     }
                     setObjLocked(v => {
@@ -11004,7 +11004,7 @@ window.__ModuleLoader__.load({
               className: 'dnb-input',
               rows: 3,
               readOnly: objLocked,
-              placeholder: '输入核心目标，或留空直接点右上「✦ 建议」让参谋长为您揣摩填写（可反复点建议）…',
+              placeholder: '写下你要完成的目标；留空直接点右上角「✦ 帮我写」也可以…',
               style: {
                 width: '100%',
                 minHeight: 62,
@@ -11027,14 +11027,14 @@ window.__ModuleLoader__.load({
               },
             }),
             suggestRationale
-              ? h('div', { style: { fontSize: 11, color: '#60a5fa', lineHeight: 1.4 } }, '💡 参谋长思路：' + suggestRationale)
+              ? h('div', { style: { fontSize: 11, color: '#60a5fa', lineHeight: 1.4 } }, '💡 为什么这么定：' + suggestRationale)
               : null,
             h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', lineHeight: 1.4 } },
               !trimmedDraft
-                ? h('span', { style: { color: '#ff6961', fontWeight: 600 } }, objGuardHint || '⚠ 请先明确核心总目标（可自行填写或点「✦ 建议」），再点击「锁定目标」。')
+                ? h('span', { style: { color: '#ff6961', fontWeight: 600 } }, objGuardHint || '⚠ 请先写好目标（也可以点「✦ 帮我写」），然后点「锁定目标」。')
                 : (!objLocked
-                    ? h('span', { style: { color: '#ff6961', fontWeight: 600 } }, objGuardHint || '⚠ 尚差一步：请点击右上「🔓 锁定目标」确认锁定后，方可开启强介入（开启后将立即开始推进）。')
-                    : '✓ 核心总目标已锁定：点击下方开启强介入后，将直接锁定本目标并立即开始推进，无需再发“继续”。')),
+                    ? h('span', { style: { color: '#ff6961', fontWeight: 600 } }, objGuardHint || '⚠ 还差一步：点右上角「🔓 锁定目标」，才能开启强介入。')
+                    : '✓ 目标已锁定。点下方按钮就会马上按这个目标往下跑，不用再发“继续”。')),
           ),
           // Live Boundaries & Guard Walls Readback (Physical Guard Walls + Forbidden Redlines)
           h(
@@ -11057,14 +11057,14 @@ window.__ModuleLoader__.load({
               h(
                 'div',
                 { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 } },
-                h('strong', null, '🛡️ 已设防线核对：'),
+                h('strong', null, '🛡️ 安全规则检查：'),
                 noDefenseRules
-                  ? h('span', { style: { color: '#ff453a', fontWeight: 600 } }, '未设物理驻墙与禁止红线（强介入风险较高）')
+                  ? h('span', { style: { color: '#ff453a', fontWeight: 600 } }, '还没设物理驻墙和禁止红线（直接自动跑风险较高）')
                   : h(
                       React.Fragment,
                       null,
                       h('span', { style: { color: activeWalls.length > 0 ? '#f87171' : 'var(--dnb-text-3)', fontWeight: 700 } },
-                        `🧱 物理驻墙 ${activeWalls.length} 堵`),
+                        `🧱 物理驻墙 ${activeWalls.length} 条`),
                       h('span', { style: { color: 'var(--dnb-text-3)' } }, '·'),
                       h('span', { style: { color: forbiddenList.length > 0 ? '#34d399' : 'var(--dnb-text-3)', fontWeight: 700 } },
                         `🚫 禁止红线 ${forbiddenList.length} 条`),
@@ -11077,7 +11077,7 @@ window.__ModuleLoader__.load({
                   ? h('button', {
                       type: 'button',
                       className: 'dnb-mini-btn',
-                      title: allDefenseCollapsed ? '一键拉开物理驻墙与禁止红线详情' : '一键收起物理驻墙与禁止红线详情',
+                      title: allDefenseCollapsed ? '展开查看物理驻墙和红线详情' : '收起物理驻墙和红线详情',
                       onClick: toggleAllDefense,
                     }, allDefenseCollapsed ? '↕ 一键拉开' : '↕ 一键收起')
                   : null,
@@ -11115,7 +11115,7 @@ window.__ModuleLoader__.load({
                   onClick: () => setWallsSecCollapsed(v => !v),
                 },
                 h('span', { style: { fontSize: 11, fontWeight: 700, color: '#f87171' } },
-                  `🧱 物理驻墙（事前硬拦截 · 已生效 ${activeWalls.length} 堵${pausedWallsCount > 0 ? ` · ${pausedWallsCount} 暂挂` : ''}）`),
+                  `🧱 物理驻墙（踩线直接拦住 · 已生效 ${activeWalls.length} 条${pausedWallsCount > 0 ? ` · ${pausedWallsCount} 条暂停` : ''}）`),
                 h(Icon, {
                   name: 'chevron',
                   size: 12,
@@ -11133,7 +11133,7 @@ window.__ModuleLoader__.load({
                     activeWalls.length > 0
                       ? [
                           ...activeWalls.slice(0, 4).map(w => {
-                            const scopeTag = w.scope === 'workspace' ? '📁本工程' : '🌐全局'
+                            const scopeTag = w.scope === 'workspace' ? '📁当前项目' : '🌐全局'
                             const typeTag = MODAL_WALL_TYPE_TAG[w.ruleType] || w.ruleType
                             const patStr = Array.isArray(w.patterns) ? w.patterns.join(', ') : ''
                             const previewPat = patStr.length > 52 ? patStr.slice(0, 52) + '…' : patStr
@@ -11149,11 +11149,11 @@ window.__ModuleLoader__.load({
                           }),
                           activeWalls.length > 4
                             ? h('div', { key: 'more-walls', style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
-                                `…另有 ${activeWalls.length - 4} 堵物理驻墙共同生效中`)
+                                `…还有 ${activeWalls.length - 4} 条物理驻墙正在生效`)
                             : null,
                         ]
                       : h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
-                          '暂未启用物理驻墙（可点右上「管理边界」手搓或手动驻防）'),
+                          '还没设物理驻墙（可点右上角「管理边界」添加）'),
                   )
                 : null,
             ),
@@ -11183,7 +11183,7 @@ window.__ModuleLoader__.load({
                   onClick: () => setRedlinesSecCollapsed(v => !v),
                 },
                 h('span', { style: { fontSize: 11, fontWeight: 700, color: forbiddenList.length > 0 ? '#34d399' : 'var(--dnb-text-2)' } },
-                  `🚫 禁止红线（全局与本局边界 · 已生效 ${forbiddenList.length} 条）`),
+                  `🚫 禁止红线（全局和当前规则 · 共 ${forbiddenList.length} 条）`),
                 h(Icon, {
                   name: 'chevron',
                   size: 12,
@@ -11208,10 +11208,10 @@ window.__ModuleLoader__.load({
                           ),
                           forbiddenList.length > 4
                             ? h('div', { key: 'more-redlines', style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
-                                `…另有 ${forbiddenList.length - 4} 条禁止红线共同生效中`)
+                                `…还有 ${forbiddenList.length - 4} 条禁止红线正在生效`)
                             : null,
                         ]
-                      : h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, '暂未设定禁止红线'),
+                      : h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, '还没设禁止红线'),
                   )
                 : null,
             ),
@@ -11220,24 +11220,24 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.55 } },
-            h('div', { style: { fontWeight: 600, color: 'var(--dnb-text)', marginBottom: 3 } }, '开启后的行为与实操风险：'),
+            h('div', { style: { fontWeight: 600, color: 'var(--dnb-text)', marginBottom: 3 } }, '开启后会发生什么（请注意风险）：'),
             h('div', { style: { color: '#60a5fa', marginBottom: 4, fontWeight: 600 } },
-              `• 当前权限档位联动表现：${INTERVENTION_TIER_DESC[permMode] || INTERVENTION_TIER_DESC.advisor}`),
-            h('div', null, '• Token 额外消耗：主对话每轮停顿都将唤醒参谋长核验并可能继续发指令。'),
-            h('div', null, '• 对话节奏接管：参谋长会主动插话纠偏与派发下步，点击红色「⏹ 急停」可随时中断。'),
-            h('div', null, `• 防死循环熔断：达到 ${normalizeMaxTurnsVal(tm.maxInterventionTurns) === 0 ? '♾️ 无限轮次' : (normalizeMaxTurnsVal(tm.maxInterventionTurns) + ' 轮上限')} 或连续无实际进展将触发熔断保护。`),
+              `• 当前权限：${INTERVENTION_TIER_DESC[permMode] || INTERVENTION_TIER_DESC.advisor}`),
+            h('div', null, '• 会多花 Token：主对话每次停下来，参谋长都会检查一遍，还可能继续发消息。'),
+            h('div', null, '• 会主动插话：参谋长会自己插话或安排下一步；点红色「⏹ 急停」能随时停下。'),
+            h('div', null, `• 卡住会自动停：到 ${normalizeMaxTurnsVal(tm.maxInterventionTurns) === 0 ? '♾️ 不限轮数' : (normalizeMaxTurnsVal(tm.maxInterventionTurns) + ' 轮')} 或连续没进展时，会自动停下来防止死循环。`),
           ),
           // Dual Mandatory Disclaimers
           h(
             'div',
             { className: 'dnb-disclaimer-box' },
             h('div', { style: { marginBottom: 4 } },
-              h('strong', null, '免责声明 1（模型依赖）：'),
-              '参谋长的一切自动审查、强介入驱动、压缩前抢救与红线拦截能力均高度依赖您为参谋长配置的底层大模型能力与上下文质量，不同模型在规划严谨度与遵循指令上的表现存在客观差异。',
+              h('strong', null, '说明 1（效果看模型）：'),
+              '参谋长检查准不准、能不能守住红线，很依赖你选的模型能力。不同模型理解规则的稳定度不一样，效果也会有差别。',
             ),
             h('div', null,
-              h('strong', null, '免责声明 2（规则冲突）：'),
-              '若主会话或当前项目中挂载了过多的系统提示词（System Prompt）、Rules 或硬性规则，可能与本插件的自主干预逻辑产生指令冲突，进而导致介入循环异常、提前熔断或执行偏离预期。',
+              h('strong', null, '说明 2（规则冲突）：'),
+              '如果主对话或项目里设了太多系统规则，可能会和这里的自动提示打架，导致提前停机或跑偏。',
             ),
           ),
           // Explicit Checkbox Agreement
@@ -11250,7 +11250,7 @@ window.__ModuleLoader__.load({
               style: { marginTop: 2 },
               onChange: e => patch({ interventionAgreed: Boolean(e.target.checked) }),
             }),
-            '我已核对当前目标、物理驻墙与禁止红线，理解底层模型与宿主提示词规则冲突可能带来偏离，并确认启用主动强介入。',
+            '我已核对好目标和安全规则，了解模型和规则可能带来的影响，确认开启强介入。',
           ),
           h(
             'div',
@@ -11276,15 +11276,15 @@ window.__ModuleLoader__.load({
               disabled: confirmBusy,
               onClick: async () => {
                 if (!trimmedDraft) {
-                  triggerObjRedFlash('⚠ 未明确核心总目标：请先填写总目标并点击「锁定目标」，方可开启强介入！')
+                  triggerObjRedFlash('⚠ 请先写好总目标，并点「锁定目标」，再开启强介入。')
                   return
                 }
                 if (!objLocked) {
-                  triggerObjRedFlash('⚠ 请先点选总目标框右上角的「🔓 锁定目标」按钮，锁定明确目标后才能开启强介入！')
+                  triggerObjRedFlash('⚠ 请先点右上角的「🔓 锁定目标」，锁定后再开启强介入。')
                   return
                 }
                 if (!view.interventionAgreed) {
-                  patch({ notice: '请先勾选下方风险确认框' })
+                  patch({ notice: '请先勾选下面的确认框' })
                   return
                 }
                 setConfirmBusy(true)
@@ -11303,7 +11303,7 @@ window.__ModuleLoader__.load({
                   setConfirmBusy(false)
                 }
               },
-            }, confirmBusy ? '开启并立即推进中…' : '确认锁定并开启强介入'),
+            }, confirmBusy ? '正在开启…' : '确认锁定并开启'),
           ),
         ),
       )
@@ -11327,7 +11327,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '♾️ 开启无限主动督导轮次 — 作者风险确认'),
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '♾️ 开启不限轮数自动推进 — 风险确认'),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -11339,12 +11339,12 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'dnb-disclaimer-box' },
             h('div', { style: { marginBottom: 4 } },
-              h('strong', null, '持续推跑风险：'),
-              '进入 ♾️ 无限督导模式后，只要参谋长评估主会话仍未完成当前任务，就会持续发送推进/纠偏指令而不再受固定轮数限制。',
+              h('strong', null, '会一直往下推：'),
+              '开启后，只要参谋长觉得任务还没做完，就会一直发指令让它继续跑，不再限制轮数。',
             ),
             h('div', null,
-              h('strong', null, '拉锯与费用提示：'),
-              '参谋长与主对话模型在复杂疑难处可能持续来回探讨或拉锯很久，并显著增加 Token 消耗（仅连续 8 轮无实质变化时才触发兜底防卡死熔断，且您可随时点「⏹ 急停」或把参谋长切为「⏹ 停止」）。',
+              h('strong', null, '费钱且可能反复拉锯：'),
+              '遇到难题时，两边模型可能来回讨论很久，花掉大量 Token。只有连续 8 轮没新进展才会自动停，你随时可以点「⏹ 急停」或把模式切回「⏸ 关停」。',
             ),
           ),
           h(
@@ -11355,7 +11355,7 @@ window.__ModuleLoader__.load({
               className: 'dnb-pill',
               style: { height: 32, padding: '0 14px', fontSize: 12.5 },
               onClick: () => patch({ unlimitedTurnsModalOpen: false }),
-            }, '保留有限轮次'),
+            }, '还是限制轮数'),
             h('button', {
               type: 'button',
               className: 'dnb-primary-btn',
@@ -11367,7 +11367,7 @@ window.__ModuleLoader__.load({
                 })
                 if (ok) patch({ unlimitedTurnsModalOpen: false })
               },
-            }, '确认启用 ♾️ 无限督导'),
+            }, '确认不限轮数'),
           ),
         ),
       )
@@ -11390,7 +11390,7 @@ window.__ModuleLoader__.load({
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
             h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#34d399' } },
-              bi('🤖 开启托管模式 — 梦境漫游、硬预算与自动休眠确认', '🤖 Enable Managed Mode — Dream Roam, Budget Cap & Auto-Sleep')),
+              bi('🤖 开启托管模式：确认后台整理与费用上限', '🤖 Enable Managed Mode: Cleanup & Budget Limits')),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -11402,10 +11402,10 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'dnb-disclaimer-box' },
             h('div', { style: { marginBottom: 4 } },
-              h('strong', null, bi('1. 持续后台监工与会话隔离：', '1. Continuous Session Supervision: ')),
+              h('strong', null, bi('1. 后台盯着进度（不串台）：', '1. Watch progress per chat: ')),
               bi(
-                '托管模式下，参谋长会按当前权限等级（L0–L3）持续核查目标与红线、协同纠偏及触发断流续跑（绝不触碰全局定住红线，绝不读写冷藏档案柜）。',
-                'Supervises objectives, boundaries, steering & stream rescue within your active permission tier (L0–L3), isolated per session.',
+                '参谋长会按你的权限等级（L0–L3）盯着目标和红线，出错或断线时帮忙续上。它不会改全局固定红线，也不会翻看长期冷库资料。',
+                'Watches goals and rules under your permission level (L0–L3) and resumes dropped chats. Never edits global pinned rules or cold archives.',
               ),
             ),
             h('div', { style: { marginBottom: 4 } },
@@ -11416,10 +11416,10 @@ window.__ModuleLoader__.load({
               ),
             ),
             h('div', null,
-              h('strong', null, bi('3. 五条件自动休眠 + 硬预算熔断守护：', '3. Auto-Sleep & Hard Budget Breaker: ')),
+              h('strong', null, bi('3. 闲置自动停机与费用上限：', '3. Auto-pause & spending cap: ')),
               bi(
-                '连续闲置达 15 分钟（或核心目标收口且待办清零）自动休眠回「⏸ 关停」；若后台达到硬预算上限也会自动熔断停机省费用。',
-                'Stands down automatically after 15m idle with 0 open items, OR immediately if the hard budget limit is hit.',
+                '闲置满 15 分钟（或目标完成且没待办）会自动切回「⏸ 关停」。达到费用上限时也会立刻停下，帮你省钱。',
+                'Switches back to ⏸ Off after 15m idle with no open tasks, or right away if the budget cap is reached.',
               ),
             ),
           ),
@@ -11445,7 +11445,7 @@ window.__ModuleLoader__.load({
                 })
                 if (ok) patch({ autoPilotConfirmOpen: false })
               },
-            }, bi('🤖 确认开启本对话托管模式', '🤖 Confirm Managed Mode')),
+            }, bi('🤖 确认开启托管', '🤖 Confirm Managed Mode')),
           ),
         ),
       )
@@ -11470,7 +11470,7 @@ window.__ModuleLoader__.load({
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
             h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } },
-              bi('🚀 一键切换「离桌托管」场景预设', '🚀 Enable "Away Managed" Scenario Preset')),
+              bi('🚀 开启「离桌托管」预设', '🚀 Enable "Away Mode" Preset')),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -11483,14 +11483,14 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'dnb-risk-box' },
             h('div', { style: { fontSize: 12.5, fontWeight: 700, color: '#f59e0b' } },
-              bi('⚠️ 将联动激活以下高自主配置（仍受物理驻墙与硬红线约束）：', '⚠️ This preset configures high-autonomy safeguards:')),
+              bi('⚠️ 开启后会同时打开以下设置（仍受物理驻墙和红线限制）：', '⚠️ Turns on these settings (still bound by guard walls and rules):')),
             h(
               'ul',
               { style: { margin: '0 0 0 18px', padding: 0, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--dnb-text)' } },
-              h('li', null, bi('权限升至 L3 · 参谋长模式（自动协调主/子代理与续跑）', 'Permission tier: L3 · Chief (autonomous steering & coordination)')),
-              h('li', null, bi('运行模式切至 🤖 托管（后台督导 + 🌙 梦境漫游 + 15分钟自动休眠）', 'Run mode: 🤖 Managed (patrol + Dream Roam + 15m auto-sleep)')),
-              h('li', null, bi('开启 80% 上下文自动压缩 + 🛡️ 红线哨兵监听', 'Auto-compact at 80% + 🛡️ Redline Sentinel alerts')),
-              h('li', null, bi('启用单次托管硬预算熔断（30 次调用 / 300K Tokens 上限）与桌面通知', 'Hard budget circuit breaker (30 calls / 300K tokens) + desktop alerts')),
+              h('li', null, bi('权限升到 L3 · 参谋长模式（可自动调度对话和子代理、断线续跑）', 'Permission: L3 · Chief (auto-guides chats, subagents, and resumes)')),
+              h('li', null, bi('工作方式切到 🤖 托管（后台盯进度，用梦境漫游整理档案，闲置 15 分钟自动停）', 'Run mode: 🤖 Managed (watches progress, runs Dream Roam cleanup, auto-pauses after 15m idle)')),
+              h('li', null, bi('对话满 80% 自动压缩，并开启 🛡 红线哨兵提醒越界风险', 'Auto-compacts at 80% context and turns on 🛡 Sentinel alerts')),
+              h('li', null, bi('设置费用上限（30 次调用或 300K Tokens 自动停），关键节点发桌面通知', 'Stops at budget limit (30 calls or 300K tokens) and sends desktop alerts')),
             ),
           ),
           h(
@@ -11504,8 +11504,8 @@ window.__ModuleLoader__.load({
               onChange: e => patch({ awayPresetAgreed: Boolean(e.target.checked) }),
             }),
             h('span', null, bi(
-              '我已阅读并知悉 L3 高权限及自动托管风险，确认开启「🚀 离桌托管」预设。',
-              'I understand the L3 autonomy risks and confirm applying the Away Managed preset.',
+              '我已了解 L3 高权限和自动托管的风险，确认开启「离桌托管」。',
+              'I understand the L3 and auto-managed risks, and confirm enabling Away Mode.',
             )),
           ),
           h(
@@ -11542,7 +11542,7 @@ window.__ModuleLoader__.load({
                   patch({ chiefRiskBusy: false })
                 }
               },
-            }, busy ? bi('校验激活中…', 'Activating…') : bi('确认并开启离桌托管', 'Confirm & Enable Away Mode')),
+            }, busy ? bi('正在开启…', 'Enabling…') : bi('确认开启离桌托管', 'Enable Away Mode')),
           ),
         ),
       )
@@ -11570,7 +11570,7 @@ window.__ModuleLoader__.load({
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
             h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } },
-              `📨 让参谋长带要求递话（已选 ${items.length} 条档案）`),
+              `📨 带上资料发给对话（已选 ${items.length} 份）`),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -11597,7 +11597,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
-            h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } }, '递达对象：'),
+            h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } }, '发给谁：'),
             h('select', {
               value: m.target || 'lead',
               disabled: busy,
@@ -11633,8 +11633,8 @@ window.__ModuleLoader__.load({
               },
               onChange: e => patch({ archiveRelayModal: { ...m, mode: e.target.value } }),
             },
-              h('option', { value: 'followup' }, '排队递话'),
-              h('option', { value: 'steer' }, '运行中插话'),
+              h('option', { value: 'followup' }, '排队发送'),
+              h('option', { value: 'steer' }, '立刻插话'),
             ),
           ),
           h('textarea', {
@@ -11642,7 +11642,7 @@ window.__ModuleLoader__.load({
             rows: 3,
             disabled: busy,
             style: { fontSize: 12, minHeight: 74, resize: 'vertical' },
-            placeholder: '告诉参谋长这批档案要带上什么要求再递给主对话（如：请严格按档案里的接口签名与边界重构，勿修改已有测试契约）…',
+            placeholder: '写一句附带要求，参谋长会连同资料一起发过去（比如：改代码时别动现有测试）…',
             value: m.instruction || '',
             onChange: e => patch({ archiveRelayModal: { ...m, instruction: e.target.value } }),
           }),
@@ -11662,7 +11662,7 @@ window.__ModuleLoader__.load({
               style: { height: 32, padding: '0 15px', fontSize: 12.5, fontWeight: 700 },
               disabled: busy || items.length === 0,
               onClick: () => void relayArchivesWithChiefApi(m),
-            }, busy ? '正在整理并递话…' : `📨 递给 @${m.target === 'lead' || !m.target ? '主对话' : shortAgentName(m.target, true)}`),
+            }, busy ? '正在发送…' : `📨 发给 @${m.target === 'lead' || !m.target ? '主对话' : shortAgentName(m.target, true)}`),
           ),
         ),
       )
@@ -11673,8 +11673,8 @@ window.__ModuleLoader__.load({
       if (!m) return null
       const busy = Boolean(view.distillBusy)
       const countLabel = Array.isArray(m.ids) && m.ids.length > 0
-        ? `已勾选的 ${m.ids.length} 卷本局档案`
-        : '本会话档案柜中全部可复用经验'
+        ? `选中的 ${m.ids.length} 份档案`
+        : '当前对话里值得长期留存的经验'
       return h(
         'div',
         {
@@ -11689,7 +11689,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '✦ 让参谋长总结提炼入全局档案库'),
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '✦ 把经验存到全局档案库'),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -11701,14 +11701,14 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5 } },
-            `参谋长将自动审查「${countLabel}」，剔除纯一次性过程碎屑，提炼跨对话可复用的工程坐标、规范与排障结论存入「🌐 全局档案柜」（默认保留原会话卷宗，遵守先升全局再沉淀的梯度）。`,
+            `参谋长会从「${countLabel}」里挑出以后还能用的经验，存到「🌐 全局档案柜」。一次性的过程记录会自动过滤，原档案默认保留。`,
           ),
           h('textarea', {
             className: 'dnb-textarea',
             rows: 2,
             disabled: busy,
             style: { fontSize: 12, minHeight: 56, resize: 'vertical' },
-            placeholder: '可选补充提炼侧重（如：重点摘除可跨项目复用的构建命令与架构踩坑结论）…',
+            placeholder: '可选：告诉参谋长重点留哪些内容（比如：打包命令或踩坑记录）…',
             value: m.instruction || '',
             onChange: e => patch({ distillGlobalModal: { ...m, instruction: e.target.value } }),
           }),
@@ -11722,7 +11722,7 @@ window.__ModuleLoader__.load({
               style: { marginTop: 2 },
               onChange: e => patch({ distillGlobalModal: { ...m, clearSource: Boolean(e.target.checked) } }),
             }),
-            '提炼成功后同步移除已提炼来源的本局原卷宗（默认不勾选，保留本局原档）',
+            '保存成功后，顺便删掉当前对话里的原档案（默认保留）',
           ),
           h(
             'div',
@@ -11740,7 +11740,7 @@ window.__ModuleLoader__.load({
               style: { height: 32, padding: '0 15px', fontSize: 12.5, fontWeight: 700 },
               disabled: busy,
               onClick: () => void distillToGlobalApi(m),
-            }, busy ? '参谋长正在提炼…' : '✦ 开始提炼入全局'),
+            }, busy ? '正在整理保存…' : '✦ 存到全局档案'),
           ),
         ),
       )
@@ -11765,7 +11765,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '💡 参谋长主动建议'),
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '💡 参谋长给你的建议'),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -11777,7 +11777,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { fontSize: 13, fontWeight: 600, color: 'var(--dnb-text)', lineHeight: 1.5 } },
-            m.title || '参谋长提出了一条阶段调整建议',
+            m.title || '参谋长有一条新建议',
           ),
           m.reason
             ? h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5 } }, m.reason)
@@ -11809,7 +11809,7 @@ window.__ModuleLoader__.load({
               style: { height: 32, padding: '0 12px', fontSize: 12 },
               disabled: busy,
               onClick: () => patch({ chiefAdviceModal: null }),
-            }, '暂不处理'),
+            }, '稍后再看'),
             !m.isSynthetic && m.id
               ? h('button', {
                   type: 'button',
@@ -11820,7 +11820,7 @@ window.__ModuleLoader__.load({
                     await decideSuggestion(m, 'dismiss')
                     patch({ chiefAdviceModal: null })
                   },
-                }, '忽略驳回')
+                }, '忽略这条')
               : null,
             draft
               ? h('button', {
@@ -11833,7 +11833,7 @@ window.__ModuleLoader__.load({
                     patch({ chiefAdviceModal: null })
                     focusSecInput()
                   },
-                }, '填入许愿框微调')
+                }, '放到输入框改改')
               : null,
             h('button', {
               type: 'button',
@@ -11849,7 +11849,7 @@ window.__ModuleLoader__.load({
                   patch({ chiefAdviceModal: null })
                 }
               },
-            }, busy ? '递交中…' : '📨 采纳并递交主对话'),
+            }, busy ? '正在发送…' : '📨 采纳并告诉主对话'),
           ),
         ),
       )
@@ -11896,7 +11896,7 @@ window.__ModuleLoader__.load({
             h(
               'span',
               { style: { fontSize: 13.5, fontWeight: 700, color: '#ff6961' } },
-              isBoundHit ? '🚫 撞边界熔断 · 主动强介入已紧急停机' : '🚨 重大不可逆风险拦截 · 主动强介入已紧急停机',
+              isBoundHit ? '🚫 踩到红线，强介入已自动停下' : '🚨 检测到高风险，强介入已自动停下',
             ),
             h('button', {
               type: 'button',
@@ -11920,7 +11920,7 @@ window.__ModuleLoader__.load({
                   fontWeight: 700,
                 },
               },
-              isBoundHit ? '必然撞边界拦阻' : '不可逆风险煞车',
+              isBoundHit ? '即将触犯边界' : '可能有不可逆风险',
             ),
             m.title
               ? h('span', { style: { fontSize: 12.5, fontWeight: 700, color: 'var(--dnb-text)' } }, m.title)
@@ -11941,20 +11941,20 @@ window.__ModuleLoader__.load({
                 wordBreak: 'break-word',
               },
             },
-            m.reason || '继续推进可能造成不可逆损失或触犯工作边界，参谋长已立即停下后续推送。',
+            m.reason || '继续操作可能会改坏东西或触犯红线，参谋长已经停了下来。',
           ),
           m.objective
             ? h(
                 'div',
                 { style: { fontSize: 11, color: 'var(--dnb-text-3)', lineHeight: 1.4 } },
-                '停机前锁定核心目标：',
+                '暂停前的目标：',
                 m.objective,
               )
             : null,
           h(
             'div',
             { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.45 } },
-            '已为您自动关闭「主动强介入」并取消自动续跑，彻底防止继续推进造成损失；请先人工核实或调整方案后再决定是否重启。',
+            '已经帮你关掉「⚡ 强介入」和自动续跑，避免继续操作出错。请先检查一下情况，确认没问题后再决定要不要重启。',
           ),
           h(
             'div',
@@ -11965,14 +11965,14 @@ window.__ModuleLoader__.load({
               style: { height: 32, padding: '0 12px', fontSize: 12 },
               disabled: ackBusy,
               onClick: () => void dismissAndAck('boundaries'),
-            }, '查看边界红线'),
+            }, '查看边界规则'),
             h('button', {
               type: 'button',
               className: 'dnb-primary-btn',
               style: { height: 32, padding: '0 16px', fontSize: 12.5, fontWeight: 700, background: '#ff453a', color: '#fff' },
               disabled: ackBusy,
               onClick: () => void dismissAndAck(''),
-            }, ackBusy ? '确认中…' : '我知道了（已交还人工控制）'),
+            }, ackBusy ? '确认中…' : '我知道了'),
           ),
         ),
       )
@@ -11995,7 +11995,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '⏬ 沉淀可复用工程经验至冷库'),
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '⏬ 把常用经验存到长期冷库'),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -12007,9 +12007,9 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5 } },
-            `将从「${m.label || '当前档案'}」中提炼高价值的通用踩坑、架构约定与验收模式，封入同项目全局冷库。冷库条目默认全会话 `,
-            h('strong', { style: { color: 'var(--dnb-text)' } }, '0 Token 隔离'),
-            '，仅在您需要时点击「翻出」才会临时注入当前对话。',
+            `会把「${m.label || '当前档案'}」里值得复用的经验提炼出来，存进项目长期冷库。冷库里的内容平时 `,
+            h('strong', { style: { color: 'var(--dnb-text)' } }, '占 0 Token'),
+            '，只有你点「翻出」时才会发给当前对话。',
           ),
           h(
             'label',
@@ -12021,7 +12021,7 @@ window.__ModuleLoader__.load({
               style: { marginTop: 2 },
               onChange: e => patch({ precipitateModal: { ...m, clearSource: Boolean(e.target.checked) } }),
             }),
-            '沉淀成功后同步清空已沉淀的原工作档案条目（保留冷库精炼经验）',
+            '存进冷库后，顺便删掉原来的零散记录',
           ),
           h(
             'div',
@@ -12046,7 +12046,7 @@ window.__ModuleLoader__.load({
                 ...(Array.isArray(m.ids) && m.ids.length > 0 ? { ids: m.ids } : {}),
                 clearSource: Boolean(m.clearSource),
               }),
-            }, view.archivePrecipitating ? '正在提炼沉淀…' : '开始提炼沉淀'),
+            }, view.archivePrecipitating ? '正在整理保存…' : '开始保存'),
           ),
         ),
       )
@@ -12069,7 +12069,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 接入互通协同网络 — 上下文防污染确认'),
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 确认连接另一个对话窗口'),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -12091,17 +12091,17 @@ window.__ModuleLoader__.load({
                 gap: 4,
               },
             },
-            h('div', null, h('strong', null, '拟接入窗口：'), m.peerTitle || shortSession(m.peerId)),
+            h('div', null, h('strong', null, '要连接的窗口：'), m.peerTitle || shortSession(m.peerId)),
             m.peerObjective
-              ? h('div', { style: { color: 'var(--dnb-text-2)' } }, h('strong', null, '对方当前目标：'), m.peerObjective)
+              ? h('div', { style: { color: 'var(--dnb-text-2)' } }, h('strong', null, '对方的目标：'), m.peerObjective)
               : null,
           ),
           h(
             'div',
             { className: 'dnb-disclaimer-box' },
-            '一旦接入同一协同网络，两个独立会话将自动共享实时进度、协同信箱与参谋态势。\n',
-            h('strong', null, '如果这两个对话处理的并非同一个或强关联的任务，强制联动会同时污染两个对话的上下文与参谋长摘要！'),
-            '\n请确认二者任务相关后再接入（后续若随时断开，系统会自动净化并隔离协同摘要与残余记忆）。',
+            '连上之后，两个窗口会共享进度和消息。\n',
+            h('strong', null, '如果它们做的不是同一件事，连在一起会把两边的资料和摘要弄混。'),
+            '\n请确认这两个对话有关联再连接。以后随时断开，资料也会立刻分开。',
           ),
           h(
             'div',
@@ -12111,7 +12111,7 @@ window.__ModuleLoader__.load({
               className: 'dnb-pill',
               style: { height: 28, padding: '0 12px', fontSize: 12 },
               onClick: () => patch({ peerLinkConfirmModal: null }),
-            }, '取消（不联动）'),
+            }, '先不连接'),
             h('button', {
               type: 'button',
               className: 'dnb-primary-btn',
@@ -12121,7 +12121,7 @@ window.__ModuleLoader__.load({
                 patch({ peerLinkConfirmModal: null })
                 await togglePeerSessionLink(pid, true)
               },
-            }, '确认任务相关并接入网络'),
+            }, '确认相关并连接'),
           ),
         ),
       )
@@ -12144,7 +12144,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 交接前提醒：交接单尚未对齐最新状态'),
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 交接单还没更新到最新进度'),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -12156,7 +12156,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'dnb-disclaimer-box' },
-            m.reason || '当前交接单若未写好或未同步最新进展，强行交接将打乱下一窗口的上下文！建议先让参谋长提炼并更新交接单后再投递。',
+            m.reason || '交接单是给新对话看的前情提要。现在还没写最新进展，直接交接会让新对话接不上，建议先更新一下再交接。',
           ),
           h(
             'div',
@@ -12169,7 +12169,7 @@ window.__ModuleLoader__.load({
               onClick: () => {
                 patch({ handoffWarnModal: null, handoffEditing: true, handoffDraft: view.handoffText || '' })
               },
-            }, '去手动修改'),
+            }, '自己去改'),
             h('button', {
               type: 'button',
               className: 'dnb-pill',
@@ -12179,7 +12179,7 @@ window.__ModuleLoader__.load({
                 patch({ handoffWarnModal: null })
                 void transfer(m.target, m.opts)
               },
-            }, '仍直接交接'),
+            }, '直接交接'),
             h('button', {
               type: 'button',
               className: 'dnb-primary-btn',
@@ -12190,7 +12190,7 @@ window.__ModuleLoader__.load({
                 patch({ handoffWarnModal: null })
                 await transfer(m.target, m.opts)
               },
-            }, view.secRegenerating ? '参谋长更新交接单中…' : '✦ 让参谋长更新交接单并交接'),
+            }, view.secRegenerating ? '正在更新交接单…' : '✦ 更新交接单并交接'),
           ),
         ),
       )
@@ -12215,7 +12215,7 @@ window.__ModuleLoader__.load({
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
             h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } },
-              bi('L3 · 参谋长模式（进入前确认风险）', 'L3 · Chief Mode (Confirm Risks First)')),
+              bi('L3 · 参谋长模式：确认风险', 'L3 · Chief Mode: Confirm Risks')),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -12228,18 +12228,18 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'dnb-risk-box' },
             h('div', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 6 } },
-              bi('⚠️ 高权限模式风险告知', '⚠️ High-Permission Risk Disclosure')),
-            h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } }, bi('启用后，Agent 可能自主：', 'Once enabled, the agent may autonomously:')),
+              bi('⚠️ 开启高权限前请确认', '⚠️ Before turning on high permissions')),
+            h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } }, bi('开启后，AI 可能会自己做这些事：', 'Once enabled, the AI can do these on its own:')),
             h(
               'ul',
               { style: { margin: '0 0 0 18px', padding: 0, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--dnb-text)' } },
-              h('li', null, bi('修改工作区文件', 'Modify workspace files')),
-              h('li', null, bi('执行系统命令', 'Execute system commands')),
-              h('li', null, bi('调整主代理及子代理工作流', 'Steer lead & subagent workflows')),
-              h('li', null, bi('执行可能造成不可逆影响的操作', 'Perform potentially irreversible operations')),
+              h('li', null, bi('修改你项目里的文件', 'Edit files in your project')),
+              h('li', null, bi('运行终端命令', 'Run system commands')),
+              h('li', null, bi('调度主对话和子代理的工作', 'Guide main chat and subagents')),
+              h('li', null, bi('做一些删改后难以撤回的操作', 'Make changes that are hard to undo')),
             ),
             h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text-2)' } },
-              bi('即使有安全卫兵，仍然不能保证完全消除风险。', 'Even with Safety Guardrails, risk cannot be completely eliminated.')),
+              bi('就算开了安全规则保护，也不能保证不出意外。', 'Even with safety rules on, some risk remains.')),
           ),
           h(
             'label',
@@ -12287,10 +12287,10 @@ window.__ModuleLoader__.load({
                   patch({ chiefRiskBusy: false })
                 }
               },
-            }, busy ? bi('DSH Chief 校验启用中…', 'Verifying & Enabling…') : bi('确认并启用', 'Confirm & Enable')),
+            }, busy ? bi('正在开启…', 'Enabling…') : bi('确认开启', 'Confirm')),
           ),
           h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', lineHeight: 1.4 } },
-            '真正启用必须由 DSH Chief 后端执行风险授权校验，切换回低权限或新会话后将自动重置该高权限授权。'),
+            '切换回低权限或开新对话时，高权限会自动关闭，需要重新确认。'),
         ),
       )
     }
@@ -12334,7 +12334,7 @@ window.__ModuleLoader__.load({
               type: 'button',
               className: 'dnb-icon-btn',
               style: { width: 22, height: 22 },
-              title: '稍后处理（保留底部授权提醒横幅）',
+              title: '先不处理（提示会留在底部）',
               disabled: busy,
               onClick: dismissCurrent,
             }, h(Icon, { name: 'x', size: 13 })),
@@ -12343,30 +12343,30 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'dnb-op-box' },
             h('div', { style: { fontSize: 13, fontWeight: 700, color: '#d97706', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
-              '🛡️ 操作授权请求',
+              '🛡️ 请你确认这项操作',
               active.kind === 'archive_op'
-                ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#fbbf24' } }, '📌 档案馆主会话注入')
+                ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#fbbf24' } }, '📌 向主对话发资料')
                 : (active.kind === 'model_effort'
-                    ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#a5b4fc' } }, '🧠 思考强度调挡')
+                    ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#a5b4fc' } }, '🧠 调整思考深度')
                     : (active.kind === 'auto_continue'
-                        ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#38bdf8' } }, '⚡ 断线自动续跑')
+                        ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#38bdf8' } }, '⚡ 断线后继续跑')
                         : null)),
             ),
             h('div', { className: 'dnb-op-kv' },
               h('span', { className: 'dnb-op-k' }, '操作：'),
-              h('span', null, active.operationLabel || '受控工作区或工作流操作'),
+              h('span', null, active.operationLabel || '需要你批准的操作'),
             ),
             h('div', { className: 'dnb-op-kv' },
               h('span', { className: 'dnb-op-k' }, '目标：'),
-              h('span', { className: 'dnb-op-code' }, active.targetLabel || '当前工作区'),
+              h('span', { className: 'dnb-op-code' }, active.targetLabel || '当前项目'),
             ),
             h('div', { className: 'dnb-op-kv' },
               h('span', { className: 'dnb-op-k' }, '原因：'),
-              h('span', null, active.reason || '完成当前参谋推进步骤'),
+              h('span', null, active.reason || '为了推进当前任务'),
             ),
             h('div', { className: 'dnb-op-kv' },
               h('span', { className: 'dnb-op-k' }, '影响：'),
-              h('span', null, active.impact || '仅在允许本次后执行一次该受控操作'),
+              h('span', null, active.impact || '只会执行这一次，之后如需继续会再问你'),
             ),
             active.preview
               ? h('pre', {
@@ -12446,7 +12446,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#60a5fa' } }, '⬆️ 模型申请提升权限'),
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#60a5fa' } }, '⬆️ 参谋长申请更高权限'),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -12459,20 +12459,20 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'dnb-op-box' },
             h('div', { className: 'dnb-op-kv' },
-              h('span', { className: 'dnb-op-k' }, '当前档位：'),
+              h('span', { className: 'dnb-op-k' }, '权限变化：'),
               h('span', null, `${CHIEF_PERMISSION_LABELS[req.fromMode] || req.fromMode} → 申请 ${CHIEF_PERMISSION_LABELS[req.targetMode] || req.targetMode}`),
             ),
             h('div', { className: 'dnb-op-kv' },
-              h('span', { className: 'dnb-op-k' }, '发起方：'),
+              h('span', { className: 'dnb-op-k' }, '谁发起的：'),
               h('span', { className: 'dnb-op-code' }, req.by || 'chief'),
             ),
             h('div', { className: 'dnb-op-kv' },
-              h('span', { className: 'dnb-op-k' }, '申请原因：'),
-              h('span', null, req.reason || '当前任务需要更高操作权限'),
+              h('span', { className: 'dnb-op-k' }, '原因：'),
+              h('span', null, req.reason || '当前任务需要更多权限才能继续'),
             ),
             req.requestedActionSummary
               ? h('div', { className: 'dnb-op-kv' },
-                  h('span', { className: 'dnb-op-k' }, '拟执行：'),
+                  h('span', { className: 'dnb-op-k' }, '准备做什么：'),
                   h('span', null, req.requestedActionSummary),
                 )
               : null,
@@ -12492,7 +12492,7 @@ window.__ModuleLoader__.load({
                 'data-tone': selected ? (modeKey === 'chief' ? 'amber' : 'accent') : undefined,
                 disabled: busy,
                 onClick: () => patch({ elevationChosenMode: modeKey, elevationAgreed: false }),
-              }, modeKey === 'strategist' ? '🛡️ 稳妥方案：仅提权至 L2 参谋模式（逐项授权）' : (CHIEF_PERMISSION_LABELS[modeKey] || modeKey))
+              }, modeKey === 'strategist' ? '🛡️ 更稳妥：只开到 L2 · 参谋模式（每步问你）' : (CHIEF_PERMISSION_LABELS[modeKey] || modeKey))
             }),
           ),
           needsRiskCheck
@@ -12502,9 +12502,9 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { className: 'dnb-risk-box' },
-                  h('div', { style: { fontSize: 13, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 高权限模式风险告知（提权至 L3）'),
+                  h('div', { style: { fontSize: 13, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 升级到 L3 高权限的风险'),
                   h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } },
-                    '批准进入 L3 · 参谋长模式后，Agent 将可自主修改工作区文件、执行系统命令、切换/协调主与子代理工作流。即使有安全卫兵，仍然不能保证完全消除风险。'),
+                    '进入 L3 · 参谋长模式后，AI 可以直接改项目文件、跑命令，也能调度其他助手。就算有安全规则保护，也不能保证不出意外。'),
                 ),
                 h(
                   'label',
@@ -12529,7 +12529,7 @@ window.__ModuleLoader__.load({
               style: { height: 32, padding: '0 14px', fontSize: 12.5 },
               disabled: busy,
               onClick: () => void decideElevation(req.id, 'reject'),
-            }, '拒绝提权'),
+            }, '不批准'),
             h('button', {
               type: 'button',
               className: 'dnb-primary-btn',
@@ -12543,7 +12543,7 @@ window.__ModuleLoader__.load({
               },
               disabled: busy || (needsRiskCheck && !agreed),
               onClick: () => void decideElevation(req.id, 'approve', chosenMode, needsRiskCheck ? agreed : false),
-            }, busy ? '校验提交中…' : `批准进入 ${CHIEF_PERMISSION_LABELS[chosenMode] || chosenMode}`),
+            }, busy ? '正在开启…' : `同意进入 ${CHIEF_PERMISSION_LABELS[chosenMode] || chosenMode}`),
           ),
         ),
       )
@@ -12568,7 +12568,7 @@ window.__ModuleLoader__.load({
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
             h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-text)' } },
-              bi('📜 6 级安全架构与审计日志', '📜 6-Layer Security Architecture & Audit Log')),
+              bi('📜 安全检查流程与操作记录', '📜 Security Flow & Action Log')),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -12580,12 +12580,12 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'dnb-pipe-bar' },
             [
-              bi('用户模式', 'Tier'),
-              bi('操作请求', 'Request'),
-              bi('安全卫兵硬性规则', 'Hard Guard'),
-              bi('权限判定', 'Gate'),
-              bi('执行器', 'Executor'),
-              bi('审计日志', 'Audit'),
+              bi('权限等级', 'Level'),
+              bi('申请操作', 'Request'),
+              bi('硬性红线检查', 'Guard Rules'),
+              bi('权限检查', 'Permission'),
+              bi('实际执行', 'Run'),
+              bi('记录留存', 'Log'),
             ].map((step, idx, arr) =>
               h(
                 React.Fragment,
@@ -12597,7 +12597,7 @@ window.__ModuleLoader__.load({
           ),
           logs.length === 0
             ? h('div', { style: { padding: '18px 8px', textAlign: 'center', fontSize: 12, color: 'var(--dnb-text-3)' } },
-                bi('当前会话暂无审计记录；权限切换、安全卫兵拦截、逐项授权与执行操作都将实时落盘于此。', 'No audit entries yet; tier switches, guard blocks, approvals and executions are logged here.'))
+                bi('目前还没有操作记录。以后切换权限、拦截违规操作或你点同意时，都会记在这里。', 'No records yet. Permission changes, blocked actions, and your approvals will appear here.'))
             : h(
                 'div',
                 { style: { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflowY: 'auto' } },
@@ -12665,7 +12665,7 @@ window.__ModuleLoader__.load({
         case 'done': return bi('已交卷', 'Returned')
         case 'doing': return bi('运行中', 'Running')
         case 'blocked': return bi('受阻/待批', 'Blocked')
-        default: return bi('待命', 'Standby')
+        default: return bi('等待中', 'Waiting')
       }
     }
 
@@ -13095,7 +13095,7 @@ window.__ModuleLoader__.load({
               style: isDone
                 ? { background: '#22c55e', borderColor: '#22c55e', color: '#fff', flexShrink: 0 }
                 : { borderColor: meta.hex, flexShrink: 0 },
-              title: '点击切换为 ' + STATUS_LABEL[next],
+              title: '切换为 ' + STATUS_LABEL[next],
               onClick: e => {
                 e.stopPropagation()
                 void act({ action: 'task.update', id: task.id, status: next })
@@ -13131,7 +13131,7 @@ window.__ModuleLoader__.load({
               ? h('button', {
                   type: 'button',
                   className: 'dnb-flow-mini-btn',
-                  title: '咨询大白话含义',
+                  title: '用大白话解释这条',
                   onClick: () => onExplainTask(task),
                 }, h(Icon, { name: 'sparkles', size: 11 }))
               : null,
@@ -13149,14 +13149,14 @@ window.__ModuleLoader__.load({
               type: 'button',
               className: 'dnb-flow-mini-btn',
               'data-active': isFocused ? '1' : '0',
-              title: isFocused ? '取消框选' : '框选定位',
+              title: isFocused ? '取消高亮定位' : '在图里高亮定位',
               onClick: () => focusObjectiveInPyramid(isFocused ? '' : task.id),
             }, h(Icon, { name: 'target', size: 10.5 })),
             onOpenEditor
               ? h('button', {
                   type: 'button',
                   className: 'dnb-flow-mini-btn',
-                  title: '编辑节点',
+                  title: '修改任务',
                   onClick: () => onOpenEditor(task),
                 }, h(Icon, { name: 'edit', size: 10.5 }))
               : null,
@@ -13180,12 +13180,12 @@ window.__ModuleLoader__.load({
       const meta = FLOW_STATUS_META[branch.status] || FLOW_STATUS_META.todo
       const targetCircle = flowCircledNum(branch.returnTargetIndex)
       const returnText = branch.status === 'done'
-        ? (branch.isCrossStep ? bi(`↩ 已完成 · 交卷指向步骤 ${targetCircle}`, `↩ Done · Hands off to Step ${targetCircle}`) : bi(`↩ 已完成 · 回指步骤 ${targetCircle}`, `↩ Done · Returns to Step ${targetCircle}`))
+        ? (branch.isCrossStep ? bi(`↩ 已完成 · 结果交给步骤 ${targetCircle}`, `↩ Done · Hands off to Step ${targetCircle}`) : bi(`↩ 已完成 · 回到步骤 ${targetCircle}`, `↩ Done · Back to Step ${targetCircle}`))
         : branch.status === 'blocked'
-          ? bi(`⚠ 受阻 · 解除后回指步骤 ${targetCircle}`, `⚠ Blocked · Resumes at Step ${targetCircle}`)
+          ? bi(`⚠ 卡住了 · 解决后回到步骤 ${targetCircle}`, `⚠ Blocked · Back to Step ${targetCircle}`)
           : branch.status === 'doing'
-            ? bi(`⇢ 推进中 · 完成后回指步骤 ${targetCircle}`, `⇢ Running · Returns to Step ${targetCircle}`)
-            : bi(`⇢ 待启动 · 回指步骤 ${targetCircle}`, `⇢ Standby · Returns to Step ${targetCircle}`)
+            ? bi(`⇢ 进行中 · 做完回到步骤 ${targetCircle}`, `⇢ Running · Back to Step ${targetCircle}`)
+            : bi(`⇢ 待开始 · 做完回到步骤 ${targetCircle}`, `⇢ Waiting · Back to Step ${targetCircle}`)
 
       return h(
         'div',
@@ -13223,7 +13223,7 @@ window.__ModuleLoader__.load({
                 ? h('button', {
                     type: 'button',
                     className: 'dnb-flow-mini-btn',
-                    title: bi('打开子代理对话窗格', 'Open subagent chat pane'),
+                    title: bi('打开子代理聊天窗口', 'Open subagent chat'),
                     onClick: () => openSubagentChat(branch.agent),
                   }, h(Icon, { name: 'chat', size: 11 }))
                 : null,
@@ -13231,7 +13231,7 @@ window.__ModuleLoader__.load({
                 ? h('button', {
                     type: 'button',
                     className: 'dnb-flow-mini-btn',
-                    title: bi('查看/编辑关联任务', 'Inspect/edit linked task'),
+                    title: bi('查看或修改对应任务', 'View or edit linked task'),
                     onClick: () => patch({ selectedTaskId: store.selectedTaskId === branch.primaryTask.id ? '' : branch.primaryTask.id }),
                   }, h(Icon, { name: 'sliders', size: 11 }))
                 : null,
@@ -13264,7 +13264,7 @@ window.__ModuleLoader__.load({
               type: 'button',
               className: 'dnb-flow-return-badge',
               'data-status': branch.status,
-              title: bi(`点击定位回指目标：步骤 ${targetCircle} ${branch.returnTargetTitle}`, `Jump to return target: Step ${targetCircle} ${branch.returnTargetTitle}`),
+              title: bi(`跳到步骤 ${targetCircle} ${branch.returnTargetTitle}`, `Jump to Step ${targetCircle}: ${branch.returnTargetTitle}`),
               onClick: () => onJumpToStage && onJumpToStage(branch.returnTargetId),
             },
             h('span', null, returnText),
@@ -13400,7 +13400,7 @@ window.__ModuleLoader__.load({
         h('input', {
           className: 'dnb-input',
           style: { flex: 1, height: 30, borderRadius: 99, padding: '0 12px', fontSize: 12 },
-          placeholder: `+ 追加第 ${stages.length + 1} 步规划节点（回车添加）…`,
+          placeholder: `添加第 ${stages.length + 1} 步（回车保存）…`,
           value: newStepDraft,
           onChange: e => setNewStepDraft(e.target.value),
           onKeyDown: e => { if (e.key === 'Enter') appendPlanStep() },
@@ -13421,13 +13421,13 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'dnb-empty', style: { padding: '14px 10px 10px' } },
-            h('div', { style: { marginBottom: 10 } }, bi('暂无推进步骤或任务节点', 'No execution steps or task nodes yet')),
+            h('div', { style: { marginBottom: 10 } }, bi('还没有步骤或任务', 'No steps or tasks yet')),
             onTriggerAiPlan
               ? h('button', {
                   type: 'button',
                   className: 'dnb-pill dnb-pill-accent',
                   onClick: onTriggerAiPlan,
-                }, h(Icon, { name: 'sparkles', size: 13 }), bi('让模型按步骤规划任务流程', 'Ask Lead to Plan Execution Steps'))
+                }, h(Icon, { name: 'sparkles', size: 13 }), bi('让主对话帮你拆出步骤', 'Ask main chat to plan steps'))
               : null,
           ),
           addStepRow,
@@ -13472,8 +13472,8 @@ window.__ModuleLoader__.load({
               h(
                 'div',
                 { className: 'dnb-flow-rail-meta' },
-                bi(`${stats.doneStages || 0}/${stats.totalStages || stages.length} 步已绿`, `${stats.doneStages || 0}/${stats.totalStages || stages.length} steps green`),
-                stats.runningAgents > 0 ? bi(` · ${stats.runningAgents} 代理运行`, ` · ${stats.runningAgents} active`) : '',
+                bi(`已完成 ${stats.doneStages || 0}/${stats.totalStages || stages.length} 步`, `${stats.doneStages || 0}/${stats.totalStages || stages.length} steps done`),
+                stats.runningAgents > 0 ? bi(` · ${stats.runningAgents} 个在跑`, ` · ${stats.runningAgents} active`) : '',
               ),
             )
           : null,
@@ -13539,12 +13539,12 @@ window.__ModuleLoader__.load({
             )
 
             const taskSummaryParts = []
-            if (blockedTaskCount > 0) taskSummaryParts.push(`${blockedTaskCount} 受阻`)
-            if (liveTaskCount > 0) taskSummaryParts.push(`${liveTaskCount} 推进`)
-            if (doneTaskCount > 0) taskSummaryParts.push(`${doneTaskCount} 已完`)
+            if (blockedTaskCount > 0) taskSummaryParts.push(`${blockedTaskCount} 卡住`)
+            if (liveTaskCount > 0) taskSummaryParts.push(`${liveTaskCount} 进行中`)
+            if (doneTaskCount > 0) taskSummaryParts.push(`${doneTaskCount} 完成`)
             const taskSummaryLabel = taskSummaryParts.length > 0
               ? taskSummaryParts.join(' · ')
-              : (stage.allTasks.length > 0 ? `${stage.allTasks.length} 任务` : '')
+              : (stage.allTasks.length > 0 ? `${stage.allTasks.length} 项任务` : '')
 
             const openMenuFromEvent = e => {
               if (!canBindStepMenu || typeof stepApi.onOpenStepMenu !== 'function') return
@@ -13596,7 +13596,7 @@ window.__ModuleLoader__.load({
                       className: 'dnb-flow-step-num',
                       'data-status': stage.status,
                       disabled: !canToggleStage,
-                      title: canToggleStage ? (stage.done ? '点击标为未完成' : '点击标为已完成（变绿并推进下一步）') : stage.title,
+                      title: canToggleStage ? (stage.done ? '改回未完成' : '标为已完成，继续下一步') : stage.title,
                       onClick: e => {
                         e.stopPropagation()
                         if (!canToggleStage) return
@@ -13648,7 +13648,7 @@ window.__ModuleLoader__.load({
                           type: 'button',
                           className: 'dnb-flow-step-text-btn',
                           style: { color: 'var(--dnb-accent)' },
-                          title: bi('让模型用大白话解释这条是什么意思、为什么有这个步骤', 'Ask model for a plain-language explanation of this step'),
+                          title: bi('用大白话解释这一步', 'Explain this step simply'),
                           onClick: () => stepApi.onExplainStep(stage.planIndex, stage.title),
                         }, bi('解释', 'Explain'))
                       : null,
@@ -13657,22 +13657,22 @@ window.__ModuleLoader__.load({
                           type: 'button',
                           className: 'dnb-flow-step-text-btn',
                           'data-active': stepApi.consultIdx === stage.planIndex ? '1' : '0',
-                          title: bi('拉起咨询抽屉（可问主模型或参谋长当场解读）', 'Open consultation drawer (Lead or Chief)'),
+                          title: bi('打开提问框，问主对话或参谋长', 'Ask main chat or Chief'),
                           onClick: () => stepApi.onConsultStep(stage.planIndex),
-                        }, bi('咨询', 'Ask'))
+                        }, bi('提问', 'Ask'))
                       : null,
                     h('button', {
                       type: 'button',
                       className: 'dnb-flow-mini-btn',
                       'data-active': isAddingHere ? '1' : '0',
-                      title: bi('在此步骤下添加子任务或延展子代理', 'Add subtask or assign subagent to this step'),
+                      title: bi('给这一步加子任务或找助手', 'Add subtask or assign subagent'),
                       onClick: () => setAddingToStageId(isAddingHere ? '' : stage.id),
                     }, h(Icon, { name: 'plus', size: 12 })),
                     canBindStepMenu && typeof stepApi.onOpenStepMenu === 'function'
                       ? h('button', {
                           type: 'button',
                           className: 'dnb-flow-mini-btn',
-                          title: bi('步骤更多操作（问参谋/标完成/删除）', 'More actions (Ask Chief / Mark done / Delete)'),
+                          title: bi('更多操作：问参谋、标完成、删除', 'More: Ask Chief, Done, Delete'),
                           onClick: openMenuFromEvent,
                         }, '⋯')
                       : null,
@@ -13680,7 +13680,7 @@ window.__ModuleLoader__.load({
                       ? h('button', {
                           type: 'button',
                           className: 'dnb-flow-mini-btn',
-                          title: isStageExpanded ? bi('收起此步子任务与支线', 'Collapse step subtasks & branches') : bi('拉起此步子任务与支线', 'Expand step subtasks & branches'),
+                          title: isStageExpanded ? bi('收起这一步的子任务', 'Collapse step subtasks') : bi('展开这一步的子任务', 'Expand step subtasks'),
                           onClick: () => toggleStageExpand(stage, isStageExpanded),
                         }, h(Icon, {
                           name: 'chevron',
@@ -13702,7 +13702,7 @@ window.__ModuleLoader__.load({
                       h('input', {
                         className: 'dnb-input',
                         style: { flex: 1, height: 28, fontSize: 11.5, padding: '0 10px' },
-                        placeholder: bi(`步骤 ${flowCircledNum(stage.index)} 子任务标题…`, `Step ${flowCircledNum(stage.index)} subtask title…`),
+                        placeholder: bi(`给第 ${flowCircledNum(stage.index)} 步加个子任务…`, `Subtask for Step ${flowCircledNum(stage.index)}…`),
                         value: stageTaskTitle,
                         onChange: e => setStageTaskTitle(e.target.value),
                         onKeyDown: e => { if (e.key === 'Enter') submitStageSubtask(stage) },
@@ -13710,7 +13710,7 @@ window.__ModuleLoader__.load({
                       h('input', {
                         className: 'dnb-input',
                         style: { width: 92, height: 28, fontSize: 11.5, padding: '0 8px' },
-                        placeholder: '@子代理(可选)',
+                        placeholder: '@找谁做（选填）',
                         value: stageTaskAgent,
                         onChange: e => setStageTaskAgent(e.target.value),
                         onKeyDown: e => { if (e.key === 'Enter') submitStageSubtask(stage) },
@@ -13721,7 +13721,7 @@ window.__ModuleLoader__.load({
                         style: { height: 28, padding: '0 10px', fontSize: 11.5 },
                         disabled: !stageTaskTitle.trim(),
                         onClick: () => submitStageSubtask(stage),
-                      }, '挂入'),
+                      }, '添加'),
                     )
                   : null,
 
@@ -13789,7 +13789,7 @@ window.__ModuleLoader__.load({
                                 h(
                                   'span',
                                   { className: 'dnb-flow-done-fold-hint' },
-                                  doneFoldExpanded ? bi('收起 ▴', 'Fold ▴') : bi('拉起 ▾', 'Pull ▾'),
+                                  doneFoldExpanded ? bi('收起 ▴', 'Hide ▴') : bi('展开 ▾', 'Show ▾'),
                                 ),
                               ),
                               doneFoldExpanded
@@ -13857,7 +13857,7 @@ window.__ModuleLoader__.load({
                       }),
                     ),
                     stage.status === 'done'
-                      ? h('span', { className: 'dnb-flow-conn-tag' }, '推进至下一步')
+                      ? h('span', { className: 'dnb-flow-conn-tag' }, '进入下一步')
                       : null,
                   )
                 : null,
@@ -14074,7 +14074,7 @@ window.__ModuleLoader__.load({
           }
 
       if (!stages.length) {
-        return h('div', { className: 'dnb-empty' }, bi('暂无推进流程拓扑数据', 'No flow topology data yet'))
+        return h('div', { className: 'dnb-empty' }, bi('还没有流程图数据', 'No workflow data yet'))
       }
 
       return h(
@@ -14315,7 +14315,7 @@ window.__ModuleLoader__.load({
                   fontSize: 9.8,
                   fontWeight: ab.status === 'done' ? 600 : 500,
                   fill: ab.status === 'done' ? p.badgeFg : palette.muted,
-                }, `${flowAgentStatusLabel(ab.status)} · ${bi('↩ 回指 ', '↩ -> ')}${targetCircle}`),
+                }, `${flowAgentStatusLabel(ab.status)} · ${bi('↩ 回到 ', '↩ -> ')}${targetCircle}`),
               )
             }),
           ),
@@ -14388,31 +14388,31 @@ window.__ModuleLoader__.load({
       const lines = []
       lines.push(`# ${L('DSH 参谋长 · 任务复盘战报', 'DSH Chief · Session Retrospective Report')}`)
       lines.push('')
-      lines.push(`- **${L('会话标识', 'Session')}**: \`${sessLabel}\``)
+      lines.push(`- **${L('当前会话', 'Session')}**: \`${sessLabel}\``)
       lines.push(`- **${L('导出时间', 'Generated')}**: ${nowStr}`)
-      lines.push(`- **${L('运行模式与权限', 'Mode & Tier')}**: ${runStr} · ${permStr}`)
-      lines.push(`- **${L('核心总目标', 'Core Objective')}**: ${b.objective ? String(b.objective).trim() : L('（未设定核心总目标）', '(Not set)')}`)
+      lines.push(`- **${L('模式与权限', 'Mode & Tier')}**: ${runStr} · ${permStr}`)
+      lines.push(`- **${L('总目标', 'Main Goal')}**: ${b.objective ? String(b.objective).trim() : L('（还没定总目标）', '(Not set)')}`)
       if (b.goalApproval && b.goalApproval.status === 'approved') {
         lines.push(`- **${L('结项状态', 'Goal Status')}**: ✅ ${L('已批准结项', 'Approved')}`)
       } else if (b.mode === 'goal') {
-        lines.push(`- **${L('结项状态', 'Goal Status')}**: 🎯 ${L('目标督导进行中', 'Goal supervision active')}`)
+        lines.push(`- **${L('结项状态', 'Goal Status')}**: 🎯 ${L('正在按目标推进', 'Working toward goal')}`)
       }
       lines.push('')
 
       // Section 1: Planning Pipeline Progress
-      lines.push(`## ${L('一、规划推进流程', '1. Workflow Plan Progress')} (${doneSteps}/${steps.length})`)
+      lines.push(`## ${L('一、推进步骤', '1. Plan Steps')} (${doneSteps}/${steps.length})`)
       if (steps.length > 0) {
         steps.forEach((s, idx) => {
           const icon = s.done ? '✅' : (b.cursor && b.cursor.step && s.text.includes(b.cursor.step) ? '🔵' : '⬜')
           lines.push(`- ${icon} **${L(`步骤 ${idx + 1}`, `Step ${idx + 1}`)}**: ${s.text}${s.summary ? ` — *${s.summary}*` : ''}`)
         })
       } else {
-        lines.push(`- ${L('暂无显式规划步骤。', 'No explicit workflow plan steps recorded.')}`)
+        lines.push(`- ${L('还没有列出计划步骤。', 'No plan steps yet.')}`)
       }
       lines.push('')
 
       // Section 2: Tasks & Verified Evidence
-      lines.push(`## ${L('二、任务完成情况与验收证据', '2. Tasks & Verification Evidence')} (${doneTasks.length}/${tasks.length} ${L('已完成', 'Done')})`)
+      lines.push(`## ${L('二、任务进度和结果', '2. Tasks & Results')} (${doneTasks.length}/${tasks.length} ${L('已完成', 'Done')})`)
       const pushTaskGroup = (title, list) => {
         if (!list.length) return
         lines.push(`### ${title} (${list.length})`)
@@ -14420,23 +14420,23 @@ window.__ModuleLoader__.load({
           const owner = t.subagent || t.owner
           const ownerTag = owner ? ` (@${shortAgentName(owner)})` : ''
           lines.push(`- **${t.title}**${ownerTag} [${statusLabel(t.status)}]`)
-          if (t.evidence) lines.push(`  - ${L('验收依据', 'Evidence')}: ${t.evidence}`)
-          if (t.note && t.status !== 'done') lines.push(`  - ${L('备注/阻塞', 'Note')}: ${t.note}`)
+          if (t.evidence) lines.push(`  - ${L('结果说明', 'Evidence')}: ${t.evidence}`)
+          if (t.note && t.status !== 'done') lines.push(`  - ${L('备注/卡点', 'Note')}: ${t.note}`)
         }
         lines.push('')
       }
       if (tasks.length > 0) {
-        pushTaskGroup(L('受阻 / 待处理', 'Blocked'), blockedTasks)
+        pushTaskGroup(L('受阻任务', 'Blocked'), blockedTasks)
         pushTaskGroup(L('推进中', 'In Progress'), doingTasks)
         pushTaskGroup(L('已完成', 'Completed'), doneTasks)
         pushTaskGroup(L('待推进', 'To Do'), todoTasks)
       } else {
-        lines.push(`- ${L('当前看板无任务条目。', 'No task entries recorded.')}`, '')
+        lines.push(`- ${L('任务列表是空的。', 'No tasks yet.')}`, '')
       }
 
       // Section 3: Subagents snapshot
       if (workers.length > 0) {
-        lines.push(`## ${L('三、协同子代理概览', '3. Subagent Roster')} (${workers.length})`)
+        lines.push(`## ${L('三、协作成员情况', '3. Subagents')} (${workers.length})`)
         for (const w of workers.slice(0, 16)) {
           const stateIcon = w.status === 'running' ? '🔵' : (w.status === 'error' ? '🔴' : '🟢')
           lines.push(`- ${stateIcon} \`@${shortAgentName(w.name)}\` — ${w.status || 'idle'}${w.updatedAt ? ` (${timeLabel(w.updatedAt)})` : ''}`)
@@ -14446,7 +14446,7 @@ window.__ModuleLoader__.load({
 
       // Section 4: Chief Situation Digest
       if (narText) {
-        lines.push(`## ${L('四、参谋长态势摘要', '4. Chief Situation Digest')}`)
+        lines.push(`## ${L('四、当前进度摘要', '4. Progress Summary')}`)
         lines.push(narText)
         lines.push('')
       }
@@ -14456,7 +14456,7 @@ window.__ModuleLoader__.load({
       const forbidden = Array.isArray(bounds.forbidden) ? bounds.forbidden : []
       const notes = Array.isArray(bounds.notes) ? bounds.notes : []
       if (facts.length > 0 || allowed.length > 0 || forbidden.length > 0 || notes.length > 0 || activeWalls.length > 0) {
-        lines.push(`## ${L('五、纪律沉淀与生效边界', '5. Key Facts & Active Guardrails')}`)
+        lines.push(`## ${L('五、重要记事和规则', '5. Notes & Rules')}`)
         for (const f of facts.slice(0, 15)) {
           lines.push(`- **[${f.category || 'fact'}]** ${f.text}`)
         }
@@ -14470,12 +14470,12 @@ window.__ModuleLoader__.load({
       }
 
       // Section 6: Chief LLM Ledger & Budget Status
-      lines.push(`## ${L('六、参谋长 LLM 调用账本与托管预算', '6. Chief LLM Ledger & Managed Budget')}`)
-      lines.push(`- **${L('累计消耗', 'Cumulative')}**: ${ledger.totalCalls || 0} ${L('次', 'calls')} · ${fmtTokenCount(ledger.totalTokens || 0)} tokens (${L('输入', 'in')} ${fmtTokenCount(ledger.totalInputTokens || 0)} / ${L('输出', 'out')} ${fmtTokenCount(ledger.totalOutputTokens || 0)})`)
+      lines.push(`## ${L('六、模型用量与托管上限', '6. Model Usage & Budget')}`)
+      lines.push(`- **${L('累计用量', 'Total used')}**: ${ledger.totalCalls || 0} ${L('次', 'calls')} · ${fmtTokenCount(ledger.totalTokens || 0)} tokens (${L('输入', 'in')} ${fmtTokenCount(ledger.totalInputTokens || 0)} / ${L('输出', 'out')} ${fmtTokenCount(ledger.totalOutputTokens || 0)})`)
       lines.push(`- **${L('分类明细', 'Breakdown')}**: ${L('问答', 'Q&A')} ${byCat.chat?.calls || 0} (${fmtTokenCount(byCat.chat?.tokens || 0)}) · ${L('巡检', 'Patrol')} ${byCat.review?.calls || 0} (${fmtTokenCount(byCat.review?.tokens || 0)}) · ${L('梦境漫游', 'Dream Roam')} ${byCat.dream?.calls || 0} (${fmtTokenCount(byCat.dream?.tokens || 0)})`)
       const maxCalls = ledger.budget?.maxCalls ?? meta.managedBudgetMaxCalls ?? 30
       const maxTokens = ledger.budget?.maxTokens ?? meta.managedBudgetMaxTokens ?? 300_000
-      lines.push(`- **${L('本轮托管统计', 'Current Managed Run')}**: ${mr.calls || 0}/${maxCalls || '∞'} ${L('次', 'calls')} · ${fmtTokenCount(mr.tokens || 0)}/${maxTokens ? fmtTokenCount(maxTokens) : '∞'} tokens${mr.tripped ? ` (**🛑 ${L('已触发硬预算熔断', 'TRIPPED')}: ${mr.trippedReason || ''}**)` : ''}`)
+      lines.push(`- **${L('本次托管用量', 'This Managed Run')}**: ${mr.calls || 0}/${maxCalls || '∞'} ${L('次', 'calls')} · ${fmtTokenCount(mr.tokens || 0)}/${maxTokens ? fmtTokenCount(maxTokens) : '∞'} tokens${mr.tripped ? ` (**🛑 ${L('已达上限并自动停下', 'Budget limit reached')}: ${mr.trippedReason || ''}**)` : ''}`)
       lines.push('')
 
       return redactReportSecrets(lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n')
@@ -14581,7 +14581,7 @@ window.__ModuleLoader__.load({
           ...(resetStalePlan ? { resetStalePlan: true } : {}),
         })
         if (res && res.ok) {
-          patch({ notice: setGoal ? '🎯 已设为长期目标并开启督导' : '核心目标已保存' })
+          patch({ notice: setGoal ? '🎯 已设为目标，会帮你盯着做完' : '目标已保存' })
         }
       }
 
@@ -14600,7 +14600,7 @@ window.__ModuleLoader__.load({
         const cleanCurrent = String(current || '').trim()
         if (!isGoalMode) {
           if (!cleanCurrent) {
-            patch({ error: '请先输入本阶段核心目标，再开启目标督导' })
+            patch({ error: '请先写好目标，再点设为目标' })
             return
           }
           if (cleanCurrent !== savedObj && steps.length > 0) {
@@ -14612,7 +14612,7 @@ window.__ModuleLoader__.load({
           return
         }
         void act({ action: 'mode.set', mode: 'plan' })
-        patch({ notice: '已退出目标督导，切回标准计划推进模式' })
+        patch({ notice: '已取消目标锁定，切回普通计划模式' })
       }
 
       const keepIds = list => list.map(s => (s && s.summary ? { id: s.id, text: s.text, done: s.done, summary: s.summary } : { id: s.id, text: s.text, done: s.done }))
@@ -14650,7 +14650,7 @@ window.__ModuleLoader__.load({
             headers: { 'content-type': 'application/json' },
             body: JSON.stringify({ session: store.sessionId, text: q }),
           })
-          const reply = (out && (out.reply || out.answer || out.text)) || '暂无更多上下文记录，可点「问主模型」由主对话直接解答。'
+          const reply = (out && (out.reply || out.answer || out.text)) || '暂时查不到更多资料，点「问主对话」让 AI 直接回答。'
           setSecAnswers(prev => ({ ...prev, [idx]: reply }))
         } catch (error) {
           patch({ error: String((error && error.message) || error) })
@@ -14724,7 +14724,7 @@ window.__ModuleLoader__.load({
                     className: 'dnb-input',
                     style: { flex: 1, height: 27, fontSize: 11.5 },
                     autoFocus: true,
-                    placeholder: '自由输入对这一步的疑问（回车问主模型）…',
+                    placeholder: '写下你对这一步的疑问，回车问主对话…',
                     value: consultDraft,
                     onChange: e => setConsultDraft(e.target.value),
                     onKeyDown: e => {
@@ -14757,13 +14757,13 @@ window.__ModuleLoader__.load({
                         '咨询小任务步骤',
                       )
                     },
-                  }, '问模型'),
+                  }, '问主对话'),
                   h('button', {
                     type: 'button',
                     className: 'dnb-pill',
                     style: { height: 27, padding: '0 8px', fontSize: 11, flexShrink: 0, color: 'var(--dnb-accent)' },
                     disabled: isSecAsking,
-                    title: '不打断主对话，让 DSH 参谋长结合上下文直接在此处下方给出通俗解答',
+                    title: '不打断主对话，让参谋长直接在下面解释',
                     onClick: () => {
                       const q = consultDraft.trim()
                       setConsultDraft('')
@@ -14794,13 +14794,13 @@ window.__ModuleLoader__.load({
                   'div',
                   { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 } },
                   h('span', { style: { fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-accent)' } },
-                    isSecAsking ? '✦ DSH 参谋长正在结合上下文解读此步…' : '✦ DSH 参谋长步骤解读'),
+                    isSecAsking ? '✦ 参谋长正在查资料准备解释…' : '✦ 参谋长解释'),
                   !isSecAsking
                     ? h('button', {
                         type: 'button',
                         className: 'dnb-icon-btn',
                         style: { width: 18, height: 18 },
-                        title: '收起解读',
+                        title: '收起解释',
                         onClick: () => setSecAnswers(prev => {
                           const copy = { ...prev }
                           delete copy[i]
@@ -14857,7 +14857,7 @@ window.__ModuleLoader__.load({
             open: !objCollapsed,
             onToggle: () => patch({ planObjCollapsed: !objCollapsed }),
             title: bi('核心目标', 'Core Objective'),
-            headTitle: objCollapsed ? bi('点击拉起编辑核心目标', 'Expand core objective') : bi('点击收起核心目标卡', 'Collapse core objective'),
+            headTitle: objCollapsed ? bi('展开并修改目标', 'Expand goal') : bi('收起目标卡片', 'Collapse goal'),
             showPullHint: false,
             style: (isInterventionLocked || isGoalMode)
               ? {
@@ -14871,17 +14871,17 @@ window.__ModuleLoader__.load({
                   React.Fragment,
                   null,
                   isInterventionLocked
-                    ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, bi('🔒 锁定', '🔒 Locked'))
+                    ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, bi('🔒 已锁定', '🔒 Locked'))
                     : null,
                   isGoalMode
-                    ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, bi('🎯 督导中', '🎯 Goal'))
+                    ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, bi('🎯 盯着做', '🎯 Goal On'))
                     : null,
                 )
               : null,
             headerExtra: !objCollapsed && board && board.objectiveAt && objective === null
               ? h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', flexShrink: 0 } }, timeLabel(board.objectiveAt))
               : null,
-            preview: (current || '').trim() ? clampTitle(String(current).trim(), 30) : bi('未设置核心目标', 'No objective set'),
+            preview: (current || '').trim() ? clampTitle(String(current).trim(), 30) : bi('还没填目标', 'No goal yet'),
             actions: h(
               React.Fragment,
               null,
@@ -14889,7 +14889,7 @@ window.__ModuleLoader__.load({
                 type: 'button',
                 className: 'dnb-pill',
                 style: { height: 22, padding: '0 6px', fontSize: 10.5 },
-                title: bi('一键导出干净的 Markdown 任务复盘战报 (.md)', 'Export clean Markdown retrospective report (.md)'),
+                title: bi('导出整理好的任务报告 (.md)', 'Export clean task report (.md)'),
                 onClick: () => {
                   const md = buildSessionReportMarkdown({
                     board,
@@ -14901,9 +14901,9 @@ window.__ModuleLoader__.load({
                   })
                   const dl = downloadSessionReportMarkdown(md, view.sessionId)
                   if (dl && dl.ok) {
-                    patch({ notice: bi('📄 已导出复盘战报：', '📄 Exported report: ') + dl.filename })
+                    patch({ notice: bi('📄 已导出任务报告：', '📄 Exported report: ') + dl.filename })
                   } else {
-                    copyText(md, bi('📄 复盘战报 Markdown 已复制到剪贴板', '📄 Report Markdown copied to clipboard'))
+                    copyText(md, bi('📄 任务报告已复制到剪贴板', '📄 Report copied to clipboard'))
                   }
                 },
               }, bi('📄 战报', '📄 Report')),
@@ -14920,15 +14920,15 @@ window.__ModuleLoader__.load({
                   fontWeight: 600,
                 },
                 title: isGoalMode
-                  ? bi('退出目标督导并切回标准计划模式', 'Exit goal supervision mode')
-                  : bi('设为长期目标并开启督导：达成后需您拍板结项才结束', 'Enable Goal Mode (requires your sign-off to close)'),
+                  ? bi('取消目标锁定，切回普通模式', 'Exit goal mode')
+                  : bi('设为目标后参谋会盯着做，最后由你确认结束', 'Lock goal; ends only after your approval'),
                 onClick: toggleGoalMode,
               }, isGoalMode ? bi('退出目标', 'Exit Goal') : bi('🎯 设为目标', '🎯 Set Goal')),
               h('button', {
                 type: 'button',
                 className: 'dnb-pill dnb-pill-accent',
                 style: { height: 22, padding: '0 8px', fontSize: 10.5 },
-                title: bi('根据长期目标让模型拆解推进流步骤与任务图并派发子代理', 'Ask lead model to plan steps, task graph & dispatch subagents'),
+                title: bi('按目标让主对话拆成步骤，再派给子代理做', 'Break goal into steps and assign subagents'),
                 onClick: () => {
                   if (typeof onTriggerPlanGraph === 'function') {
                     onTriggerPlanGraph(current)
@@ -14940,7 +14940,7 @@ window.__ModuleLoader__.load({
                   void askLeadModel(prompt, '拆解任务图')
                   patch({ tab: 'tasks' })
                 },
-              }, h(Icon, { name: 'sparkles', size: 11 }), bi('拆解任务图', 'Plan Graph')),
+              }, h(Icon, { name: 'sparkles', size: 11 }), bi('拆成步骤', 'Break Down')),
             ),
           },
           h('textarea', {
@@ -14950,8 +14950,8 @@ window.__ModuleLoader__.load({
               : { minHeight: 50 },
             readOnly: isInterventionLocked,
             placeholder: isInterventionLocked
-              ? bi('主动强介入进行中，核心目标已锁定…', 'Strong intervention active; objective locked…')
-              : bi('输入当前阶段核心目标，点击右上「🎯 设为目标」即可开启持续督导…', 'Enter core objective, click "🎯 Set Goal" for supervision…'),
+              ? bi('强介入开启中，目标暂时不能改…', 'Strong intervention on; goal locked…')
+              : bi('写下你想实现的目标，再点右上「🎯 设为目标」…', 'Write your goal, then click "🎯 Set Goal"…'),
             value: current,
             onChange: e => { if (!isInterventionLocked) setObjective(e.target.value) },
             onBlur: () => { if (!isInterventionLocked) saveObjective() },
@@ -14980,8 +14980,8 @@ window.__ModuleLoader__.load({
                 (isInterventionLocked || isGoalMode)
                   ? h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
                       isInterventionLocked
-                        ? '🔒 强介入监督目的地已锁定，关闭强介入可解锁'
-                        : '🎯 目标督导生效中，达成后向您请示结项')
+                        ? '🔒 强介入开启时目标已锁，关掉强介入才能改'
+                        : '🎯 正在盯着做完，好了会请你点确认')
                   : h('span', null),
                 h(
                   'div',
@@ -14991,9 +14991,9 @@ window.__ModuleLoader__.load({
                         type: 'button',
                         className: 'dnb-pill',
                         style: { height: 21, padding: '0 8px', fontSize: 10.5, borderColor: 'rgba(245, 158, 11, 0.42)', color: '#fbbf24' },
-                        title: '关闭主动强介入以解锁修改核心目标',
+                        title: '关掉强介入后就能改目标',
                         onClick: () => void updateSecConfig({ emergencyStopIntervention: true }),
-                      }, '🔓 停用强介入以解锁')
+                      }, '🔓 关掉强介入并解锁')
                     : null,
                   !isInterventionLocked && objective !== null
                     ? h('button', {
@@ -15008,14 +15008,14 @@ window.__ModuleLoader__.load({
                         type: 'button',
                         className: 'dnb-text-filter-btn',
                         style: { fontSize: 10.5 },
-                        title: '让模型用大白话解释这个长期目标的核心问题与解决思路',
+                        title: '用大白话讲讲这个目标卡在哪、怎么做',
                         onClick: () => {
                           void askLeadModel(
                             `请用通俗易懂的大白话给我解释一下当前核心目标「${String(current).trim().slice(0, 120)}」：核心卡点是什么、整体打算怎么解决？`,
                             '咨询核心目标',
                           )
                         },
-                      }, '咨询目标')
+                      }, '解释目标')
                     : null,
                 ),
               )
@@ -15039,7 +15039,7 @@ window.__ModuleLoader__.load({
                 },
               },
               h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text)', fontWeight: 600 } },
-                `检测到您修改了核心目标，下方小任务板还有 ${steps.length} 条旧步骤：`),
+                `你改了目标，下面还有 ${steps.length} 条旧步骤：`),
               h(
                 'div',
                 { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
@@ -15048,7 +15048,7 @@ window.__ModuleLoader__.load({
                   className: 'dnb-mini-btn',
                   'data-tone': 'amber',
                   onClick: () => void commitObjective(Boolean(view.planResetPrompt.setGoal), true),
-                }, '清空旧步骤并重来'),
+                }, '删掉旧步骤重来'),
                 h('button', {
                   type: 'button',
                   className: 'dnb-mini-btn',
@@ -15069,7 +15069,7 @@ window.__ModuleLoader__.load({
           ? h(
               'div',
               { className: 'dnb-goal-approval-card', style: { marginTop: 10 } },
-              h('div', { style: { fontSize: 12, fontWeight: 700, color: '#30d158' } }, '🎯 参谋长判定目标已达标 · 等待您拍板结项'),
+              h('div', { style: { fontSize: 12, fontWeight: 700, color: '#30d158' } }, '🎯 参谋长觉得目标完成了，等你确认结束'),
               goalApproval.summary
                 ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text)', lineHeight: 1.5 } }, goalApproval.summary)
                 : null,
@@ -15084,7 +15084,7 @@ window.__ModuleLoader__.load({
                       color: 'var(--dnb-text-2)',
                       whiteSpace: 'pre-wrap',
                     },
-                  }, '验证依据：' + goalApproval.evidence)
+                  }, '检查结果：' + goalApproval.evidence)
                 : null,
               rejectingGoal
                 ? h(
@@ -15093,7 +15093,7 @@ window.__ModuleLoader__.load({
                     h('input', {
                       className: 'dnb-input',
                       style: { height: 26, fontSize: 11.5, flex: 1 },
-                      placeholder: '填写驳回原因或补充要求…',
+                      placeholder: '写下哪里不满意，或补充新要求…',
                       value: rejectReason,
                       onChange: e => setRejectReason(e.target.value),
                       onKeyDown: e => {
@@ -15114,7 +15114,7 @@ window.__ModuleLoader__.load({
                         setRejectingGoal(false)
                         setRejectReason('')
                       }),
-                    }, '提交驳回'),
+                    }, '退回重做'),
                     h('button', {
                       type: 'button',
                       className: 'dnb-pill',
@@ -15140,7 +15140,7 @@ window.__ModuleLoader__.load({
                         setRejectingGoal(true)
                         setRejectReason('')
                       },
-                    }, '↩ 驳回继续'),
+                    }, '↩ 退回继续'),
                   ),
             )
           : null,
@@ -15160,8 +15160,8 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { style: { display: 'flex', alignItems: 'baseline', gap: 6 } },
-                  h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, bi('推进任务板', 'Task Progress Board')),
-                  h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } }, bi('步骤与任务清单 · 点条目可解释/咨询/展开', 'Steps & Tasks · click item to inspect or ask')),
+                  h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, bi('任务进度板', 'Task Board')),
+                  h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } }, bi('点任一条可展开详情或提问', 'Click any item for details or Q&A')),
                 ),
                 (steps.length || taskBoardExtra)
                   ? h('span', null, [steps.length ? `${doneCount} / ${steps.length} 步` : '', taskBoardExtra || ''].filter(Boolean).join(' · '))
@@ -15193,7 +15193,7 @@ window.__ModuleLoader__.load({
                             {
                               className: 'dnb-cell dnb-cell-hover',
                               style: { cursor: 'pointer' },
-                              title: '点击打开咨询与操作菜单（可问这条是什么意思、为什么有这步）',
+                              title: '打开菜单：可提问、标完成或删除',
                               onClick: e => {
                                 e.preventDefault()
                                 e.stopPropagation()
@@ -15209,7 +15209,7 @@ window.__ModuleLoader__.load({
                               'span',
                               {
                                 className: 'dnb-ring',
-                                title: step.done ? '点击标回未完成' : '点击标记已完成',
+                                title: step.done ? '改回未完成' : '标为已完成',
                                 style: step.done
                                   ? { background: '#30d158', borderColor: '#30d158', cursor: 'pointer' }
                                   : { cursor: 'pointer' },
@@ -15242,7 +15242,7 @@ window.__ModuleLoader__.load({
                               h('button', {
                                 className: 'dnb-pill',
                                 style: { height: 22, padding: '0 7px', fontSize: 11, color: 'var(--dnb-accent)' },
-                                title: '让模型用大白话解释这条是什么意思、为什么有这个步骤',
+                                title: '用大白话解释这一步',
                                 onClick: e => {
                                   e.stopPropagation()
                                   void askLeadModel(buildExplainPrompt(step.text, i), '咨询步骤含义')
@@ -15252,13 +15252,13 @@ window.__ModuleLoader__.load({
                                 className: 'dnb-pill',
                                 'data-active': isConsulting ? '1' : '0',
                                 style: { height: 22, padding: '0 7px', fontSize: 11 },
-                                title: '展开咨询框，自由提问关于这一步的任何疑问',
+                                title: '打开提问框，问这一步不懂的地方',
                                 onClick: e => {
                                   e.stopPropagation()
                                   setConsultIdx(isConsulting ? -1 : i)
                                   setConsultDraft('')
                                 },
-                              }, '咨询'),
+                              }, '提问'),
                             ),
                           ),
                           renderStepConsult(i, step),
@@ -15278,7 +15278,7 @@ window.__ModuleLoader__.load({
                         h('input', {
                           className: 'dnb-input',
                           style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1, fontSize: 12 },
-                          placeholder: '添加一条步骤（回车新增）…',
+                          placeholder: '加一个新步骤，按回车保存…',
                           value: newStepText,
                           onChange: e => setNewStepText(e.target.value),
                           onKeyDown: e => {
@@ -15301,7 +15301,7 @@ window.__ModuleLoader__.load({
                 : h(
                     'div',
                     { className: 'dnb-group' },
-                    h('div', { className: 'dnb-empty', style: { padding: '16px 12px 10px' } }, '任务板暂无步骤或任务（模型调用 plan.set / todo_write / task.add 时会自动同步到这里）'),
+                    h('div', { className: 'dnb-empty', style: { padding: '16px 12px 10px' } }, '还没有步骤和任务。AI 列好计划后会自动显示在这里，你也能自己添加'),
                     h(
                       'div',
                       {
@@ -15312,7 +15312,7 @@ window.__ModuleLoader__.load({
                       h('input', {
                         className: 'dnb-input',
                         style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1, fontSize: 12 },
-                        placeholder: '手动添加一条步骤（回车新增）…',
+                        placeholder: '自己加一步，按回车保存…',
                         value: newStepText,
                         onChange: e => setNewStepText(e.target.value),
                         onKeyDown: e => {
@@ -15329,7 +15329,7 @@ window.__ModuleLoader__.load({
         // ==================== Zone 4: Collapsible Cross-Session Handoff & Chief Deployment ====================
         (() => {
           const targets = Array.isArray(view.targets) ? view.targets : []
-          const options = [{ id: 'new', label: '新建独立会话并部署参谋' }].concat(
+          const options = [{ id: 'new', label: '新开一个窗口，把参谋带过去' }].concat(
             targets
               .filter(item => item && item.id !== view.sessionId)
               .map(item => ({
@@ -15346,10 +15346,10 @@ window.__ModuleLoader__.load({
           const isCustom = Boolean((handoffObj.customText && handoffObj.customText.trim()) || hMeta.isCustom)
           const hSource = isCustom ? (handoffObj.source || hMeta.source || 'human') : 'auto'
           const sourceBadge = hSource === 'human'
-            ? { label: '✏️ 人类手改', tone: 'accent' }
+            ? { label: '✏️ 你改过', tone: 'accent' }
             : hSource === 'chief'
-              ? { label: '✦ 参谋已同步', tone: 'green' }
-              : { label: '自动渲染', tone: undefined }
+              ? { label: '✦ 参谋已更新', tone: 'green' }
+              : { label: '自动生成', tone: undefined }
 
           const buildTransferOpts = () => ({
             deployChief: true,
@@ -15362,8 +15362,8 @@ window.__ModuleLoader__.load({
             {
               open: !handoffCollapsed,
               onToggle: () => patch({ handoffSectionCollapsed: !handoffCollapsed }),
-              title: bi('🚀 跨会话接力 & 部署参谋', '🚀 Cross-Session Handoff & Deploy'),
-              headTitle: handoffCollapsed ? bi('点击拉起跨会话接力与部署面板', 'Expand handoff & deploy card') : bi('点击收起跨会话接力面板', 'Collapse handoff card'),
+              title: bi('🚀 换新窗口接着做', '🚀 Continue in New Window'),
+              headTitle: handoffCollapsed ? bi('展开换窗口交接设置', 'Expand handoff options') : bi('收起交接设置', 'Collapse handoff options'),
               bodyStyle: { padding: 10, display: 'flex', flexDirection: 'column', gap: 8 },
               badges: h('span', {
                 className: 'dnb-tag',
@@ -15386,24 +15386,24 @@ window.__ModuleLoader__.load({
                 className: 'dnb-mini-btn',
                 'data-tone': isPinned ? 'amber' : undefined,
                 title: isPinned
-                  ? bi('已定住交接单：参谋长摘要更新时不会覆盖您手写/审定的内容，点击可解除定住', 'Handoff pinned: Chief digest updates will not overwrite it; click to unpin')
-                  : bi('定住交接单后，参谋长提炼摘要时将禁止自动覆写交接单', 'Pin handoff to prevent automatic digest overwrite'),
+                  ? bi('已定住，更新不会盖掉你的修改；再点解锁', 'Pinned: updates keep your edits; click to unpin')
+                  : bi('定住后，自动更新不会覆盖你的内容', 'Stop auto updates from overwriting your edits'),
                 onClick: () => void toggleHandoffPin(!isPinned),
               }, isPinned ? bi('📌 已定住', '📌 Pinned') : bi('📌 定住防改', '📌 Pin')),
             },
             h(
               'div',
               { style: { fontSize: 11, color: 'var(--dnb-text-2)' } },
-              bi('工作档案跟随策略（同步模型/纪律/战术开关，强介入默认安全置关）：', 'Archive transfer policy (syncs model/facts safely with intervention off):'),
+              bi('选要带去新窗口的档案。模型和规则会一起同步，强介入默认关闭保安全：', 'Pick archives to bring along. Settings sync too, with intervention off:'),
             ),
             h(
               'div',
               { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
               [
-                { key: 'none', label: bi('不带工作档案', 'No archives') },
-                { key: 'mounted', label: bi('仅挂桌面备查', 'Desktop only') },
-                { key: 'drawer', label: bi('带整个抽屉', 'Folder drawer') },
-                { key: 'all', label: bi('全柜工作档案', 'All session') },
+                { key: 'none', label: bi('不带档案', 'No archives') },
+                { key: 'mounted', label: bi('只带认知桌面的资料', 'Cognitive desktop only') },
+                { key: 'drawer', label: bi('带选中的分类抽屉', 'Selected folder') },
+                { key: 'all', label: bi('带本窗口全部档案', 'All window archives') },
               ].map(p =>
                 h('button', {
                   key: p.key,
@@ -15424,8 +15424,8 @@ window.__ModuleLoader__.load({
                   value: view.deployDrawer || ((drawers[0] && drawers[0].id) || 'inbox'),
                   onChange: e => patch({ deployDrawer: e.target.value }),
                 }, drawers.length
-                  ? drawers.map(d => h('option', { key: d.id, value: d.id }, `${d.label} (${d.count || 0} 卷)`))
-                  : [h('option', { key: 'inbox', value: 'inbox' }, '未归类收件箱 (加载抽屉中…)')])
+                  ? drawers.map(d => h('option', { key: d.id, value: d.id }, `${d.label} (${d.count || 0} 份)`))
+                  : [h('option', { key: 'inbox', value: 'inbox' }, '未分类收件箱（加载中…）')])
               : null,
             h(
               'div',
@@ -15436,7 +15436,7 @@ window.__ModuleLoader__.load({
                 style: { flex: 1, height: 30, fontSize: 11.5 },
                 disabled: Boolean(view.handoffBusy),
                 onClick: () => void requestTransferWithGuard('create', buildTransferOpts()),
-              }, bi('🚀 新建窗口并部署参谋长', '🚀 New Window & Deploy Chief')),
+              }, bi('🚀 新开窗口接着做', '🚀 Open New Window & Continue')),
               h('button', {
                 type: 'button',
                 className: 'dnb-pill',
@@ -15444,7 +15444,7 @@ window.__ModuleLoader__.load({
                 disabled: Boolean(view.handoffBusy),
                 onClick: async () => {
                   const text = store.handoffText || (await loadHandoff())?.text || ''
-                  if (text) copyText(text, bi('自包含交接单已复制', 'Handoff packet copied'))
+                  if (text) copyText(text, bi('交接单已复制', 'Handoff copied'))
                 },
               }, h(Icon, { name: 'copy', size: 12 }), bi('复制交接单', 'Copy Handoff')),
             ),
@@ -15463,7 +15463,7 @@ window.__ModuleLoader__.load({
                 style: { height: 28, padding: '0 10px', fontSize: 11.5 },
                 disabled: Boolean(view.handoffBusy),
                 onClick: () => void requestTransferWithGuard(target === 'new' ? 'create' : target, buildTransferOpts()),
-              }, '投递并部署'),
+              }, '发到选中窗口'),
             ),
             h(
               'div',
@@ -15485,7 +15485,7 @@ window.__ModuleLoader__.load({
                     patch({ handoffEditing: true, handoffDraft: curText })
                     setShowHandoffPreview(false)
                   },
-                }, view.handoffEditing ? '收起编辑' : '✏️ 编辑交接单'),
+                }, view.handoffEditing ? '收起编辑' : '✏️ 修改交接单'),
                 h('button', {
                   type: 'button',
                   className: 'dnb-mini-btn',
@@ -15499,9 +15499,9 @@ window.__ModuleLoader__.load({
                   ? h('button', {
                       type: 'button',
                       className: 'dnb-mini-btn',
-                      title: '放弃手工版本，恢复由系统与参谋实时渲染交接单',
+                      title: '放弃你的修改，改回自动生成',
                       onClick: () => void resetHandoffAuto(),
-                    }, '↺ 恢复自动')
+                    }, '↺ 改回自动生成')
                   : null,
               ),
               view.transferNote
@@ -15524,7 +15524,7 @@ window.__ModuleLoader__.load({
                       padding: '8px 10px',
                     },
                     value: view.handoffDraft || '',
-                    placeholder: '在此手动修订交接单（支持 Markdown）。可点击下方「保存并定住」防止被参谋长自动覆写…',
+                    placeholder: '在这里改交接单（支持 Markdown）。点下方「📌 保存并定住」就不怕被覆盖…',
                     onChange: e => patch({ handoffDraft: e.target.value }),
                   }),
                   h(
@@ -15588,7 +15588,7 @@ window.__ModuleLoader__.load({
                     setContextMenu(null)
                     void askStepViaChief(idx, stepTitle)
                   },
-                }, '✦ 让参谋长当场解读（不打断主对话）'),
+                }, '✦ 让参谋长解释（不打断主对话）'),
                 h('div', {
                   className: 'dnb-menu-item',
                   onClick: () => {
@@ -15596,7 +15596,7 @@ window.__ModuleLoader__.load({
                     setConsultIdx(idx)
                     setConsultDraft('')
                   },
-                }, '💬 针对此步自由提问…'),
+                }, '💬 对这一步随便提问…'),
                 h('div', {
                   className: 'dnb-menu-item',
                   style: { borderTop: '1px solid var(--dnb-border)', marginTop: 3, paddingTop: 6 },
@@ -15607,7 +15607,7 @@ window.__ModuleLoader__.load({
                       : `小任务板第 ${idx + 1} 步「${stepTitle}」目前进展如何，有没有遇到卡点？`
                     void askLeadModel(q, '询问步骤进展')
                   },
-                }, isDone ? '询问这步具体结果' : '询问进度'),
+                }, isDone ? '问这一步改了什么' : '问这一步做到哪了'),
                 isDone
                   ? h('div', {
                       className: 'dnb-menu-item',
@@ -15617,7 +15617,7 @@ window.__ModuleLoader__.load({
                         next[idx] = { ...next[idx], done: false }
                         pushSteps(next)
                       },
-                    }, '标回未完成')
+                    }, '改回未完成')
                   : h('div', {
                       className: 'dnb-menu-item',
                       onClick: () => {
@@ -15627,7 +15627,7 @@ window.__ModuleLoader__.load({
                           '核验勾选步骤',
                         )
                       },
-                    }, '请模型勾选完成'),
+                    }, '让 AI 检查并标完成'),
                 h('div', {
                   className: 'dnb-menu-item',
                   style: { color: '#ff453a', borderTop: '1px solid var(--dnb-border)', marginTop: 3, paddingTop: 6 },
@@ -15709,13 +15709,13 @@ window.__ModuleLoader__.load({
           h('input', {
             className: 'dnb-input',
             style: { borderRadius: 99, paddingLeft: 12, height: 32 },
-            placeholder: '检索记忆…',
+            placeholder: '搜记忆…',
             value: store.memAsk || '',
             onChange: e => patch({ memAsk: e.target.value, memReply: '', memHits: null, memNote: '' }),
             onKeyDown: e => { if (e.key === 'Enter') runAsk() },
           }),
           (store.memAsk || '').trim()
-            ? h('button', { className: 'dnb-primary-btn', style: { height: 30 }, onClick: runAsk }, '查询')
+            ? h('button', { className: 'dnb-primary-btn', style: { height: 30 }, onClick: runAsk }, '搜索')
             : null,
           h('button', {
             className: 'dnb-pill',
@@ -15752,7 +15752,7 @@ window.__ModuleLoader__.load({
               ),
               h('textarea', {
                 className: 'dnb-area',
-                placeholder: '输入需要持久记住的结论或约束…',
+                placeholder: '写下要长期记住的要求或结论…',
                 value: store.memText || '',
                 onChange: e => patch({ memText: e.target.value }),
               }),
@@ -15774,7 +15774,7 @@ window.__ModuleLoader__.load({
                 h('div', { className: 'dnb-group' }, (section.items || []).map(item => h(MemoryCard, { item, key: item.id }))),
               ),
             )
-          : h('div', { className: 'dnb-empty' }, '暂无记忆条目'),
+          : h('div', { className: 'dnb-empty' }, '还没有记住任何内容'),
       )
     }
 
@@ -15819,7 +15819,7 @@ window.__ModuleLoader__.load({
         h('div', { style: { height: 6 } }),
         h('input', {
           className: 'dnb-input',
-          placeholder: '标签（逗号分隔）',
+          placeholder: '标签（用逗号隔开）',
           value: store.editNoteTags || '',
           onChange: e => patch({ editNoteTags: e.target.value }),
           onKeyDown: e => { if (e.key === 'Enter') { e.preventDefault(); submit() } },
@@ -15905,7 +15905,7 @@ window.__ModuleLoader__.load({
                       style: { width: 24, height: 24, color: '#ff453a' },
                       title: '删除',
                       onClick: () => {
-                        if (!confirm('删除笔记「' + clampTitle(note.title || note.body, 16) + '」？')) return
+                        if (!confirm('确定删掉笔记「' + clampTitle(note.title || note.body, 16) + '」吗？')) return
                         void act({ action: 'note.remove', noteId: note.id, scope: note.shared ? 'shared' : '' })
                       },
                     }, h(Icon, { name: 'trash', size: 12 })),
@@ -15922,7 +15922,7 @@ window.__ModuleLoader__.load({
                 ),
               )
             })
-          : h('div', { className: 'dnb-empty' }, '暂无工作笔记'),
+          : h('div', { className: 'dnb-empty' }, '还没有笔记'),
       )
     }
 
@@ -15968,12 +15968,12 @@ window.__ModuleLoader__.load({
       const tokensPct = maxTokens > 0 ? Math.min(100, Math.round(((mr.tokens || 0) / maxTokens) * 100)) : 0
       const uiLangVal = view.uiLangPref || meta.uiLang || getUiLangPref()
       const notifPermLabel = notifPerm === 'granted'
-        ? bi('桌面已授权', 'Granted')
+        ? bi('已允许通知', 'Allowed')
         : notifPerm === 'denied'
-          ? bi('浏览器已拦截', 'Blocked')
+          ? bi('浏览器已屏蔽', 'Blocked')
           : notifPerm === 'default'
             ? bi('待授权', 'Prompt')
-            : bi('面板提醒', 'Toast')
+            : bi('仅面板内提醒', 'In-Panel Only')
 
       const commitCallsCap = () => {
         if (callsDraft === null) return
@@ -15986,13 +15986,13 @@ window.__ModuleLoader__.load({
       return h(
         React.Fragment,
         null,
-        // 1. One-Click Scenario Presets
+        // 1. Scenario Presets
         h(
           AccCard,
           {
             open: presetsOpen,
             onToggle: () => setPresetsOpen(v => !v),
-            title: bi('🚀 一键开箱场景预设', '🚀 One-Click Scenario Presets'),
+            title: bi('🚀 常用场景预设', '🚀 Scenario Presets'),
             badges: h('span', { className: 'dnb-acc-badge', 'data-tone': activePreset ? 'accent' : undefined },
               activePreset
                 ? (presets.find(p => p.id === activePreset)?.title || activePreset)
@@ -16029,14 +16029,14 @@ window.__ModuleLoader__.load({
           {
             open: notifyOpen,
             onToggle: () => setNotifyOpen(v => !v),
-            title: bi('🔔 离桌通知与轻提示音', '🔔 Away Alerts & Gentle Chime'),
+            title: bi('🔔 离开电脑时的提醒和声音', '🔔 Away Alerts & Sound'),
             badges: h('span', { className: 'dnb-acc-badge', 'data-tone': notifPerm === 'granted' ? 'green' : undefined }, notifPermLabel),
-            preview: meta.notifyEnabled !== false ? bi('关键节点已启用提醒', 'Milestone alerts active') : bi('提醒已关闭', 'Alerts muted'),
+            preview: meta.notifyEnabled !== false ? bi('重要节点会通知你', 'Alerts on') : bi('通知已关', 'Alerts off'),
             actions: h('button', {
               type: 'button',
               className: 'dnb-pill',
               style: { height: 21, padding: '0 7px', fontSize: 10.5 },
-              title: bi('立即测试一条桌面通知与提示音', 'Send a test notification & chime now'),
+              title: bi('发一条测试通知，试试弹窗和声音', 'Send a test alert and sound'),
               onClick: async () => {
                 if (notifPerm === 'default') {
                   const p = await requestNotificationPermission()
@@ -16047,7 +16047,7 @@ window.__ModuleLoader__.load({
                     id: 'test-' + Date.now(),
                     kind: 'managed_auto_sleep',
                     level: 'success',
-                    body: bi('离桌托管提醒管道工作正常（待批 / 撞墙 / 断流 / 熔断 / 休眠均会及时触达）。', 'Alert channel working (approvals / walls / rescues / budget / sleep).'),
+                    body: bi('提醒功能正常。需要批准、被规则挡住、重连或到上限时都会通知你。', 'Alerts work. You’ll get notified on approvals, blocks, retries, or limits.'),
                   },
                   { sound: true },
                 )
@@ -16060,9 +16060,9 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
             h('div', { style: { minWidth: 0 } },
-              h('div', { style: { fontSize: 12.5 } }, bi('关键节点系统桌面通知', 'Desktop notifications at milestones')),
+              h('div', { style: { fontSize: 12.5 } }, bi('重要节点弹出电脑桌面通知', 'Desktop alerts at key moments')),
               h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
-                bi('待审批 / 待提权 / 撞物理墙 / 断流救活 / 预算熔断 / 自动休眠', 'Approvals / Elevation / Guard Walls / Rescue / Budget / Sleep')),
+                bi('需要你批准、命中物理驻墙（拦截规则）、重连或到上限时通知', 'On approvals, guard-wall blocks, retries, or limits')),
             ),
             h(Switch, {
               checked: meta.notifyEnabled !== false,
@@ -16078,12 +16078,12 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-            h('span', { style: { fontSize: 12.5 } }, bi('轻柔提示音（默认关闭）', 'Gentle chime sound (off by default)')),
+            h('span', { style: { fontSize: 12.5 } }, bi('响一下轻提示音（默认关闭）', 'Play a soft sound (off by default)')),
             h(Switch, {
               checked: Boolean(meta.notifySound),
               onChange: on => {
                 if (on) {
-                  fireChiefAlertNotification({ kind: 'auto_continue_rescue', level: 'info', body: bi('提示音已启用', 'Chime enabled') }, { sound: true })
+                  fireChiefAlertNotification({ kind: 'auto_continue_rescue', level: 'info', body: bi('提示音已打开', 'Sound on') }, { sound: true })
                 }
                 void updateSecConfig({ notifySound: on })
               },
@@ -16097,18 +16097,18 @@ window.__ModuleLoader__.load({
           {
             open: ledgerOpen,
             onToggle: () => setLedgerOpen(v => !v),
-            title: bi('📊 参谋长 LLM 账本与托管硬预算', '📊 Chief LLM Ledger & Budget Breaker'),
+            title: bi('📊 参谋花费统计与托管上限', '📊 Chief Usage & Budget Cap'),
             badges: mr.tripped
-              ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'red' }, bi('🛑 已熔断', '🛑 Tripped'))
+              ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'red' }, bi('🛑 已到上限停下', '🛑 Cap Reached'))
               : h('span', { className: 'dnb-acc-badge' }, `${ledger.totalCalls || 0}${bi('次', '')} · ${fmtTok(ledger.totalTokens || 0)}`),
             preview: `${bi('本轮托管', 'Managed run')} ${mr.calls || 0}/${maxCalls || '∞'}`,
             actions: h('button', {
               type: 'button',
               className: 'dnb-pill',
               style: { height: 21, padding: '0 7px', fontSize: 10.5 },
-              title: bi('清零本轮托管次数与 Token 计数器并解除熔断状态', 'Reset managed run call/token counters'),
+              title: bi('清零本轮托管的次数和 Token，恢复可用', 'Reset call and token counts for this run'),
               onClick: () => void updateSecConfig({ resetManagedBudget: true }),
-            }, bi('↺ 重置计数', '↺ Reset')),
+            }, bi('↺ 清零计数', '↺ Reset')),
             bodyStyle: { padding: '8px 11px 10px' },
           },
           mr.tripped
@@ -16127,16 +16127,16 @@ window.__ModuleLoader__.load({
                   },
                 },
                 '🛑 ',
-                mr.trippedReason || bi('本轮托管已触及硬预算上限并自动切回「⏸ 关停」（人工问答仍不受影响）。', 'Hard budget limit reached; Managed mode auto-stopped (manual Q&A still works).'),
+                mr.trippedReason || bi('本轮托管已到上限，自动切回「⏸ 关停」。你手动提问不受影响。', 'Budget limit reached; switched to "⏸ Off". Manual questions still work.'),
               )
             : null,
           h(
             'div',
             { className: 'dnb-ledger-grid' },
             [
-              { key: 'chat', label: bi('问答 / 咨询', 'Q&A'), item: byCat.chat || {} },
-              { key: 'review', label: bi('巡检 / 督导', 'Patrol'), item: byCat.review || {} },
-              { key: 'dream', label: bi('梦境 / 档案', 'Dream'), item: byCat.dream || {} },
+              { key: 'chat', label: bi('你问参谋', 'Q&A'), item: byCat.chat || {} },
+              { key: 'review', label: bi('巡检 / 盯着做', 'Patrol'), item: byCat.review || {} },
+              { key: 'dream', label: bi('梦境漫游 / 整理档案', 'Dream Roam'), item: byCat.dream || {} },
             ].map(cat =>
               h(
                 'div',
@@ -16150,7 +16150,7 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'dnb-budget-row' },
             h('div', { className: 'dnb-budget-meta' },
-              h('span', null, bi('本轮托管后台次数', 'Managed Calls / Run')),
+              h('span', null, bi('本轮托管已调用次数', 'Calls used this run')),
               h('span', null, `${mr.calls || 0} / ${maxCalls > 0 ? maxCalls : '∞'}`),
             ),
             h('div', { className: 'dnb-budget-bar' },
@@ -16166,7 +16166,7 @@ window.__ModuleLoader__.load({
             'div',
             { className: 'dnb-budget-row' },
             h('div', { className: 'dnb-budget-meta' },
-              h('span', null, bi('本轮托管 Token 上限', 'Managed Tokens / Run')),
+              h('span', null, bi('本轮托管已用 Token', 'Tokens used this run')),
               h('span', null, `${fmtTok(mr.tokens || 0)} / ${maxTokens > 0 ? fmtTok(maxTokens) : '∞'}`),
             ),
             h('div', { className: 'dnb-budget-bar' },
@@ -16181,7 +16181,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 6, flexWrap: 'wrap' } },
-            h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('单次托管次数上限 (0=不限)', 'Call cap (0=∞)')),
+            h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('每次托管最多调用几次 (0=不限)', 'Max calls per run (0=∞)')),
             h('input', {
               type: 'number',
               className: 'dnb-input',
@@ -16197,7 +16197,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 6, flexWrap: 'wrap' } },
-            h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('Token 上限', 'Token Cap')),
+            h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('Token 最多用多少', 'Max Tokens')),
             h(
               'div',
               { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
@@ -16227,7 +16227,7 @@ window.__ModuleLoader__.load({
             open: langOpen,
             onToggle: () => setLangOpen(v => !v),
             title: bi('🌐 界面语言 / Interface Language', '🌐 Interface Language / 界面语言'),
-            preview: uiLangVal === 'en' ? 'English' : (uiLangVal === 'zh' ? '简体中文' : bi('自动跟随宿主', 'Auto (Follow Host)')),
+            preview: uiLangVal === 'en' ? 'English' : (uiLangVal === 'zh' ? '简体中文' : bi('自动跟随主界面', 'Auto (Follow App)')),
             bodyStyle: { padding: '8px 11px' },
           },
           h(
@@ -16259,13 +16259,13 @@ window.__ModuleLoader__.load({
             title: bi('自动化设置', 'Automation Settings'),
             showPullHint: false,
             headerExtra: h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } },
-              bi('跨会话接力已收口至「任务」页底部', 'Cross-session handoff lives in Tasks tab')),
+              bi('换窗口交接的功能在「任务」页最下面', 'Handoff options are at the bottom of Tasks')),
             bodyStyle: { padding: 0 },
           },
           h(
             'div',
             { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-            h('span', { style: { fontSize: 12.5 } }, bi('每轮自动注入摘要', 'Inject digest every turn')),
+            h('span', { style: { fontSize: 12.5 } }, bi('每轮对话自动带上进度摘要', 'Attach progress summary every turn')),
             h(Switch, {
               checked: !!view.autoInject,
               onChange: on => {
@@ -16277,7 +16277,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-            h('span', { style: { fontSize: 12.5 } }, bi('空转自动提醒', 'Idle & spin reminders')),
+            h('span', { style: { fontSize: 12.5 } }, bi('AI 卡住或偷懒时自动提醒', 'Remind AI if stuck or idle')),
             h(Switch, {
               checked: !!view.guardIdle,
               onChange: on => {
@@ -16289,7 +16289,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-            h('span', { style: { fontSize: 12.5 } }, bi('单会话提醒上限', 'Max nudges / session')),
+            h('span', { style: { fontSize: 12.5 } }, bi('一个窗口最多提醒几次', 'Max reminders per window')),
             h(
               'div',
               { style: { display: 'flex', alignItems: 'center', gap: 6 } },
@@ -16317,7 +16317,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-            h('span', { style: { fontSize: 12.5 } }, bi('短回复字数线', 'Short-reply char threshold')),
+            h('span', { style: { fontSize: 12.5 } }, bi('回复太短就提醒的字数门槛', 'Min reply length before reminder')),
             h('input', {
               type: 'number',
               className: 'dnb-input',
@@ -16449,14 +16449,14 @@ window.__ModuleLoader__.load({
             { style: { display: 'flex', gap: 4 } },
             h('button', {
               className: 'dnb-icon-btn',
-              title: editing ? '取消编辑' : '编辑详情',
+              title: editing ? '取消修改' : '修改任务详情',
               'data-active': editing ? '1' : '0',
               onClick: () => editing ? patch({ editTaskId: '' }) : openTaskEditor(task),
             }, h(Icon, { name: 'edit', size: 13 })),
             h('button', {
               className: 'dnb-icon-btn',
               style: { color: '#ff453a' },
-              title: '删除节点',
+              title: '删掉这条任务',
               onClick: () => {
                 patch({ selectedTaskId: '', editTaskId: '' })
                 void act({ action: 'task.remove', id: task.id })
@@ -16497,7 +16497,7 @@ window.__ModuleLoader__.load({
             h('input', {
               className: 'dnb-input',
               style: { width: 108, height: 28, padding: '0 9px', borderRadius: 99, fontSize: 11.5 },
-              placeholder: '子代理名…',
+              placeholder: '填子代理名称…',
               value: dispatchAgent,
               onChange: e => setDispatchAgent(e.target.value),
             }),
@@ -16507,8 +16507,8 @@ window.__ModuleLoader__.load({
               value: dispatchProvider,
               onChange: e => setDispatchProvider(e.target.value),
             },
-              h('option', { value: 'spawn' }, '独立上下文'),
-              h('option', { value: 'fork' }, '继承上下文'),
+              h('option', { value: 'spawn' }, '新建空白对话'),
+              h('option', { value: 'fork' }, '带当前对话背景'),
             ),
             h('button', {
               className: 'dnb-primary-btn',
@@ -16519,7 +16519,7 @@ window.__ModuleLoader__.load({
               ? h('button', {
                   className: 'dnb-pill',
                   style: { height: 28 },
-                  title: '忽略前置依赖直接启动',
+                  title: '不等前面做完，直接开始',
                   onClick: () => triggerDispatch(true),
                 }, '强制')
               : null,
@@ -16544,7 +16544,7 @@ window.__ModuleLoader__.load({
             h('input', {
               className: 'dnb-input',
               style: { flex: 1, height: 28, padding: '0 10px', borderRadius: 99, fontSize: 11.5 },
-              placeholder: '补充执行指令（回车发送）…',
+              placeholder: '补充要求，按回车发给它…',
               value: dispatchPrompt,
               onChange: e => setDispatchPrompt(e.target.value),
               onKeyDown: e => {
@@ -16568,7 +16568,7 @@ window.__ModuleLoader__.load({
                     setDispatchPrompt('')
                     void act({ action: 'team.steer', id: task.id, agent: assignedName, message: msg })
                   },
-                }, '引导')
+                }, '发过去')
               : null,
           ),
         ),
@@ -16583,10 +16583,10 @@ window.__ModuleLoader__.load({
             value: task.parentId || '',
             onChange: e => void act({ action: 'task.update', id: task.id, parentId: e.target.value }),
           },
-            h('option', { value: '' }, '顶层节点'),
+            h('option', { value: '' }, '最上层任务'),
             allTasks
               .filter(t => t.id !== task.id)
-              .map(t => h('option', { key: t.id, value: t.id }, '父级: ' + clampTitle(t.title, 10))),
+              .map(t => h('option', { key: t.id, value: t.id }, '属于: ' + clampTitle(t.title, 10))),
           ),
           (board && Array.isArray(board.plan) && board.plan.length > 0)
             ? h(
@@ -16595,28 +16595,28 @@ window.__ModuleLoader__.load({
                 h('select', {
                   className: 'dnb-pill',
                   style: { height: 24, padding: '0 8px', maxWidth: 146 },
-                  title: '该任务所属的推进步骤',
+                  title: '这条任务属于哪一步',
                   value: task.planStepId || '',
                   onChange: e => {
                     patch({ editTaskPlanStepId: e.target.value })
                     void act({ action: 'task.update', id: task.id, planStepId: e.target.value })
                   },
                 },
-                  h('option', { value: '' }, '步骤: 自动归位'),
+                  h('option', { value: '' }, '步骤: 自动匹配'),
                   board.plan.map((s, idx) => h('option', { key: s.id, value: s.id }, `步骤 ${idx + 1}: ${clampTitle(s.text, 9)}`)),
                 ),
                 h('select', {
                   className: 'dnb-pill',
                   style: { height: 24, padding: '0 8px', maxWidth: 146 },
-                  title: '子代理或任务完成后回指的目标步骤',
+                  title: '做完后把结果交回哪一步',
                   value: task.targetPlanStepId || '',
                   onChange: e => {
                     patch({ editTaskTargetPlanStepId: e.target.value })
                     void act({ action: 'task.update', id: task.id, targetPlanStepId: e.target.value })
                   },
                 },
-                  h('option', { value: '' }, '回指: 同归属步'),
-                  board.plan.map((s, idx) => h('option', { key: s.id, value: s.id }, `回指 ${idx + 1}: ${clampTitle(s.text, 9)}`)),
+                  h('option', { value: '' }, '交回: 当前这一步'),
+                  board.plan.map((s, idx) => h('option', { key: s.id, value: s.id }, `交回 ${idx + 1}: ${clampTitle(s.text, 9)}`)),
                 ),
               )
             : null,
@@ -16647,7 +16647,7 @@ window.__ModuleLoader__.load({
             value: '',
             onChange: e => addDep(e.target.value),
           },
-            h('option', { value: '' }, '+ 前置依赖'),
+            h('option', { value: '' }, '+ 先等谁做完'),
             allTasks
               .filter(t => t.id !== task.id && !(task.blockedBy || []).includes(t.id))
               .map(t => h('option', { key: t.id, value: t.id }, clampTitle(t.title, 11))),
@@ -16667,13 +16667,13 @@ window.__ModuleLoader__.load({
               }),
               h('input', {
                 className: 'dnb-input',
-                placeholder: '意图 (Intent)',
+                placeholder: '为什么要做（目的）',
                 value: store.editTaskIntent,
                 onChange: e => patch({ editTaskIntent: e.target.value }),
               }),
               h('input', {
                 className: 'dnb-input',
-                placeholder: '验收依据 (Evidence)',
+                placeholder: '怎么才算做完（检查标准）',
                 value: store.editTaskEvidence,
                 onChange: e => patch({ editTaskEvidence: e.target.value }),
               }),
@@ -16693,7 +16693,7 @@ window.__ModuleLoader__.load({
           : h(
               'div',
               { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', display: 'flex', flexDirection: 'column', gap: 3 } },
-              task.intent ? h('div', null, '意图 · ' + task.intent) : null,
+              task.intent ? h('div', null, '目的 · ' + task.intent) : null,
               task.evidence ? h('div', { style: { color: '#30d158' } }, '结论 · ' + task.evidence) : null,
               task.note ? h('div', null, task.note) : null,
             ),
@@ -16724,7 +16724,7 @@ window.__ModuleLoader__.load({
                     h('input', {
                       className: 'dnb-input',
                       style: { height: 26, fontSize: 11.5 },
-                      placeholder: '添加待验证假设…',
+                      placeholder: '加一条要确认的问题…',
                       value: newAssumption,
                       onChange: e => setNewAssumption(e.target.value),
                       onKeyDown: e => { if (e.key === 'Enter') addAssumption() },
@@ -16790,7 +16790,7 @@ window.__ModuleLoader__.load({
           h('input', {
             className: 'dnb-input',
             style: { borderRadius: 99, paddingLeft: 13, height: 32, flex: 1 },
-            placeholder: '添加新任务或子目标（回车直接创建）…',
+            placeholder: '写下新任务，按回车加上…',
             value: text,
             onChange: e => setText(e.target.value),
             onKeyDown: e => { if (e.key === 'Enter') submit() },
@@ -16811,10 +16811,10 @@ window.__ModuleLoader__.load({
                 className: 'dnb-pill',
                 style: { flex: '1 1 112px', height: 26, padding: '0 8px', fontSize: 11 },
                 value: planStepId,
-                title: '选择挂入哪个顺序推进步骤',
+                title: '放到哪一步下面',
                 onChange: e => setPlanStepId(e.target.value),
               },
-                h('option', { value: '' }, '步骤：自动归入当前步'),
+                h('option', { value: '' }, '步骤：自动放到当前步'),
                 planSteps.map((s, idx) => h('option', { key: s.id, value: s.id }, `步骤 ${idx + 1} · ${clampTitle(s.text, 12)}`)),
               )
             : null,
@@ -16822,20 +16822,20 @@ window.__ModuleLoader__.load({
             className: 'dnb-pill',
             style: { flex: '1 1 112px', height: 26, padding: '0 8px', fontSize: 11 },
             value: parentId,
-            title: '选择挂载在哪个父级任务之下',
+            title: '作为哪个大任务的子任务',
             onChange: e => setParentId(e.target.value),
           },
-            h('option', { value: '' }, '父节点：顶层直属'),
-            allTasks.map(t => h('option', { key: t.id, value: t.id }, '父级 · ' + clampTitle(t.title, 13))),
+            h('option', { value: '' }, '父级：最上层任务'),
+            allTasks.map(t => h('option', { key: t.id, value: t.id }, '属于 · ' + clampTitle(t.title, 13))),
           ),
           h('select', {
             className: 'dnb-pill',
             style: { flex: '1 1 112px', height: 26, padding: '0 8px', fontSize: 11 },
             value: blockedById,
-            title: '选择需要先完成的前置依赖任务',
+            title: '选一个要先做完的任务',
             onChange: e => setBlockedById(e.target.value),
           },
-            h('option', { value: '' }, '前置依赖：无'),
+            h('option', { value: '' }, '先等谁：不用等'),
             openTasks.map(t => h('option', { key: t.id, value: t.id }, '等待 · ' + clampTitle(t.title, 13))),
           ),
           knownAgents.length > 0
@@ -16843,19 +16843,19 @@ window.__ModuleLoader__.load({
                 className: 'dnb-pill',
                 style: { flex: '1 1 110px', height: 26, padding: '0 8px', fontSize: 11 },
                 value: ownerPick,
-                title: '直接指派给现有子代理或自定义子代理',
+                title: '交给哪个子代理去做',
                 onChange: e => setOwnerPick(e.target.value),
               },
-                h('option', { value: '' }, '指派：@主代理'),
-                knownAgents.map(a => h('option', { key: a.name, value: a.name }, '指派：@' + shortAgentName(a.name, true))),
-                h('option', { value: '__custom__' }, '+ 自定义新子代理…'),
+                h('option', { value: '' }, '交给：@主对话'),
+                knownAgents.map(a => h('option', { key: a.name, value: a.name }, '交给：@' + shortAgentName(a.name, true))),
+                h('option', { value: '__custom__' }, '+ 新建子代理…'),
               )
             : null,
           (knownAgents.length === 0 || ownerPick === '__custom__')
             ? h('input', {
                 className: 'dnb-input',
                 style: { flex: '1 1 100px', minWidth: 96, height: 26, borderRadius: 99, padding: '0 10px', fontSize: 11 },
-                placeholder: '@指派子代理（选填）',
+                placeholder: '@交给哪个子代理（选填）',
                 value: knownAgents.length === 0 ? ownerPick : customOwner,
                 onChange: e => knownAgents.length === 0 ? setOwnerPick(e.target.value) : setCustomOwner(e.target.value),
                 onKeyDown: e => { if (e.key === 'Enter') submit() },
@@ -16914,7 +16914,7 @@ window.__ModuleLoader__.load({
                       background: isDoing ? 'rgba(10, 132, 255, 0.10)' : isBlocked ? STATUS_BG.blocked : 'transparent',
                     }),
               },
-              title: '切换状态为 ' + STATUS_LABEL[next],
+              title: '标为 ' + STATUS_LABEL[next],
               onClick: e => {
                 e.stopPropagation()
                 void act({ action: 'task.update', id: task.id, status: next })
@@ -16957,13 +16957,13 @@ window.__ModuleLoader__.load({
                 : null,
             ),
             task.intent
-              ? h('div', { style: { fontSize: 11, color: 'var(--dnb-text-2)', marginTop: 2 } }, '意图 · ' + task.intent)
+              ? h('div', { style: { fontSize: 11, color: 'var(--dnb-text-2)', marginTop: 2 } }, '目的 · ' + task.intent)
               : null,
             task.evidence
               ? h('div', { style: { fontSize: 11, color: '#30d158', marginTop: 2 } }, '结论 · ' + task.evidence)
               : null,
             (Array.isArray(task.blockedBy) && task.blockedBy.length && !isDone)
-              ? h('div', { style: { fontSize: 11, color: '#fbbf24', marginTop: 2 } }, '等待前置 ' + task.blockedBy.length + ' 项')
+              ? h('div', { style: { fontSize: 11, color: '#fbbf24', marginTop: 2 } }, '先等 ' + task.blockedBy.length + ' 项做完')
               : null,
           ),
           h(StatusBadge, { status: task.status }),
@@ -16994,12 +16994,12 @@ window.__ModuleLoader__.load({
             h('button', {
               className: 'dnb-pyr-act-btn',
               'data-accent': '1',
-              title: '让模型用大白话解释这条任务是什么意思、为什么需要这一步',
+              title: '用大白话解释这一步',
               onClick: e => { e.stopPropagation(); explainTaskMeaning(task, board) },
             }, h(Icon, { name: 'sparkles', size: 11 }), '解释'),
             h('button', {
               className: 'dnb-pyr-act-btn',
-              title: '派发或唤醒子代理执行此任务',
+              title: '让子代理开始或继续做这件事',
               onClick: e => {
                 e.stopPropagation()
                 void act({
@@ -17011,9 +17011,9 @@ window.__ModuleLoader__.load({
             }, h(Icon, { name: 'play', size: 10.5 }), isDoing ? '唤醒' : '派发'),
             h('button', {
               className: 'dnb-pyr-act-btn',
-              title: '在金字塔树中框选高亮负责推进此任务的代理',
+              title: '在组织树里高亮负责的代理',
               onClick: e => { e.stopPropagation(); focusObjectiveInPyramid(isFocused ? '' : task.id) },
-            }, h(Icon, { name: 'target', size: 11 }), isFocused ? '取消框选' : '框选'),
+            }, h(Icon, { name: 'target', size: 11 }), isFocused ? '取消高亮' : '高亮'),
             h('button', {
               className: 'dnb-pyr-act-btn',
               onClick: e => {
@@ -17427,8 +17427,8 @@ window.__ModuleLoader__.load({
             const maxY = Math.max(...framedNodes.map(n => n.y + n.h)) + 12
             const isBlockedFocus = focusedTask.status === 'blocked'
             const agentCount = framedNodes.filter(n => n.kind === 'agent').length
-            const badgeLabel = (isBlockedFocus ? '⚠ 受阻关联 · ' : '🎯 正在推进 · ')
-              + (agentCount > 0 ? `${agentCount} 名子代理` : '主代理直管')
+            const badgeLabel = (isBlockedFocus ? '⚠ 卡住了 · ' : '🎯 进行中 · ')
+              + (agentCount > 0 ? `${agentCount} 个子代理` : '主对话自己在做')
               + ' ▸ ' + clampTitle(focusedTask.title || focusedTask.id, 12)
             spotlight = {
               x: minX,
@@ -17508,7 +17508,7 @@ window.__ModuleLoader__.load({
       const triggerAiPlanGraph = () => {
         const goal = (board && board.objective ? `针对「${board.objective.slice(0, 80)}」，` : '')
         const sent = sendToComposer(goal + '请先调用 chief_board 的 plan.set 定好一二三四五顺序推进步骤，再用 graph.plan（填入对应 planStepId 与可选 targetPlanStepId）和 task.dispatch 调度子代理支线推进。')
-        patch({ notice: sent || '请在对话中让模型规划流程任务图' })
+        patch({ notice: sent || '请在主对话里让 AI 帮你拆出步骤' })
       }
 
       /* ---------------- Expandable Attention-First Organization Tree ---------------- */
@@ -17577,7 +17577,7 @@ window.__ModuleLoader__.load({
                       h(Icon, { name: 'check', size: 11, style: { color: '#22c55e' } }),
                       bi(`已完成 ${doneItems.length} 项任务`, `${doneItems.length} done tasks`),
                     ),
-                    h('span', { className: 'dnb-flow-done-fold-hint' }, doneExpanded ? bi('收起 ▴', 'Fold ▴') : bi('拉起 ▾', 'Pull ▾')),
+                    h('span', { className: 'dnb-flow-done-fold-hint' }, doneExpanded ? bi('收起 ▴', 'Hide ▴') : bi('展开 ▾', 'Show ▾')),
                   ),
                   doneExpanded ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 5 } }, doneItems.map(wrapTaskItem)) : null,
                 )
@@ -17655,7 +17655,7 @@ window.__ModuleLoader__.load({
               {
                 className: 'dnb-pyr-node-head',
                 onClick: handleToggleDetail,
-                title: detailOpen ? '点击收起详情' : '点击拉起任务详情与操作',
+                title: detailOpen ? '收起详情' : '展开详情和操作',
               },
               kids.length > 0
                 ? h('button', {
@@ -17681,7 +17681,7 @@ window.__ModuleLoader__.load({
                   style: isDone
                     ? { width: 16, height: 16, background: '#22c55e', borderColor: '#22c55e', color: '#fff', flexShrink: 0 }
                     : { width: 16, height: 16, borderColor: STATUS_HEX[task.status] || STATUS_HEX.todo, flexShrink: 0 },
-                  title: '点击切换为 ' + (STATUS_LABEL[nextStatus] || nextStatus),
+                  title: '标为 ' + (STATUS_LABEL[nextStatus] || nextStatus),
                   onClick: e => {
                     e.stopPropagation()
                     void act({ action: 'task.update', id: task.id, status: nextStatus })
@@ -17711,13 +17711,13 @@ window.__ModuleLoader__.load({
                 ? h('span', {
                     className: 'dnb-tag',
                     style: { fontSize: 9.5, background: 'rgba(245, 158, 11, 0.16)', color: '#fbbf24', flexShrink: 0 },
-                    title: '存在未完成前置依赖',
+                    title: '还有前面没做完的任务在等',
                   }, `⏳${unresolvedDeps.length}`)
                 : null,
               kids.length > 0
                 ? h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, bi(`${kids.length}子项`, `${kids.length} sub`))
                 : null,
-              h('span', { className: 'dnb-pyr-detail-pill' }, detailOpen ? bi('收起 ▴', 'Fold ▴') : bi('详情 ▾', 'Details ▾')),
+              h('span', { className: 'dnb-pyr-detail-pill' }, detailOpen ? bi('收起 ▴', 'Hide ▴') : bi('详情 ▾', 'Details ▾')),
             ),
 
             // Expanded Pull-Open Detail Drawer (hidden by default!)
@@ -17741,18 +17741,18 @@ window.__ModuleLoader__.load({
                                   key: d.id,
                                   className: 'dnb-tag',
                                   style: { background: 'rgba(245, 158, 11, 0.16)', color: '#fbbf24', fontSize: 10.5 },
-                                }, '⏳ 等待前置：' + clampTitle(d.title || d.id, 14)),
+                                }, '⏳ 先等做完：' + clampTitle(d.title || d.id, 14)),
                               ),
                               doneDeps.map(d =>
                                 h('span', {
                                   key: d.id,
                                   className: 'dnb-tag',
                                   style: { background: STATUS_BG.done, color: '#30d158', fontSize: 10.5 },
-                                }, '✓ 前置就绪：' + clampTitle(d.title || d.id, 12)),
+                                }, '✓ 已准备好：' + clampTitle(d.title || d.id, 12)),
                               ),
                             )
                           : null,
-                        task.intent ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, '意图 · ' + task.intent) : null,
+                        task.intent ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, '目的 · ' + task.intent) : null,
                         task.evidence ? h('div', { style: { fontSize: 11.5, color: '#30d158', lineHeight: 1.42, wordBreak: 'break-word' } }, '结论 · ' + task.evidence) : null,
                         task.note ? h('div', { style: { fontSize: 11.5, color: isBlocked ? '#ff6961' : 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, task.note) : null,
                         Array.isArray(task.assumptions) && task.assumptions.length > 0
@@ -17810,13 +17810,13 @@ window.__ModuleLoader__.load({
                       type: 'button',
                       className: 'dnb-pyr-act-btn',
                       'data-accent': '1',
-                      title: '让模型用通俗大白话解释这条任务',
+                      title: '用大白话解释这条任务',
                       onClick: () => explainTaskMeaning(task, board),
                     }, h(Icon, { name: 'sparkles', size: 11 }), '解释'),
                     h('button', {
                       type: 'button',
                       className: 'dnb-pyr-act-btn',
-                      title: '派发或唤醒子代理推进此任务',
+                      title: '让子代理开始或继续做这件事',
                       onClick: () => void act({
                         action: 'task.dispatch',
                         id: task.id,
@@ -17835,7 +17835,7 @@ window.__ModuleLoader__.load({
                       ? h('button', {
                           type: 'button',
                           className: 'dnb-pyr-act-btn',
-                          onClick: () => { if (!openSubagentChat(matchedAgent)) patch({ notice: '该子代理暂无独立会话面板' }) },
+                          onClick: () => { if (!openSubagentChat(matchedAgent)) patch({ notice: '这个子代理没有单独的聊天窗口' }) },
                         }, h(Icon, { name: 'chat', size: 11 }), '对话')
                       : null,
                     h('button', {
@@ -17843,7 +17843,7 @@ window.__ModuleLoader__.load({
                       className: 'dnb-pyr-act-btn',
                       style: isFocusedTarget ? { borderColor: '#409cff', color: '#409cff', background: 'rgba(10,132,255,0.14)' } : undefined,
                       onClick: () => focusObjectiveInPyramid(isFocusedTarget ? '' : task.id),
-                    }, h(Icon, { name: 'target', size: 11 }), isFocusedTarget ? '已框选' : '框选'),
+                    }, h(Icon, { name: 'target', size: 11 }), isFocusedTarget ? '已高亮' : '高亮'),
                     h('button', {
                       type: 'button',
                       className: 'dnb-pyr-act-btn',
@@ -17895,7 +17895,7 @@ window.__ModuleLoader__.load({
         const directTasks = tasksByAgent.get(agentObj.name) || []
         const totalKids = subAgents.length + directTasks.length
         const tierLabel = tier === 1 ? '一级代理' : `${tier}级代理`
-        const desc = agentObj.taskTitle || agentObj.description || (isRunning ? '正在推进分配任务…' : (directTasks.length ? `挂载 ${directTasks.length} 项任务` : '待命 / 已完成回报'))
+        const desc = agentObj.taskTitle || agentObj.description || (isRunning ? '正在干活…' : (directTasks.length ? `手头 ${directTasks.length} 项任务` : '空闲 / 已完成'))
 
         const focusTone = isAgentFocused
           ? (focusedTask && focusedTask.status === 'blocked' ? 'blocked' : 'doing')
@@ -17931,14 +17931,14 @@ window.__ModuleLoader__.load({
               {
                 className: 'dnb-pyr-node-head',
                 onClick: () => togglePyrDetail(nodeKey),
-                title: detailOpen ? '点击收起代理操作' : '点击拉起代理详情与指令按钮',
+                title: detailOpen ? '收起操作' : '展开详情和操作',
               },
               totalKids > 0
                 ? h('button', {
                     type: 'button',
                     className: 'dnb-flow-mini-btn',
                     style: { width: 18, height: 18, flexShrink: 0 },
-                    title: childrenOpen ? '收起下级子代理与任务' : `展开 ${totalKids} 个下级子节点`,
+                    title: childrenOpen ? '收起下面负责的任务' : `展开 ${totalKids} 个下级任务`,
                     onClick: e => {
                       e.stopPropagation()
                       togglePyrNode(nodeKey)
@@ -17973,7 +17973,7 @@ window.__ModuleLoader__.load({
               !detailOpen && desc
                 ? h('span', { className: 'dnb-acc-preview', style: { fontSize: 11 } }, desc)
                 : null,
-              h('span', { className: 'dnb-pyr-detail-pill' }, detailOpen ? bi('收起 ▴', 'Fold ▴') : bi('详情 ▾', 'Details ▾')),
+              h('span', { className: 'dnb-pyr-detail-pill' }, detailOpen ? bi('收起 ▴', 'Hide ▴') : bi('详情 ▾', 'Details ▾')),
             ),
 
             // Expanded Pull-Open Agent Details & Action Strip
@@ -17992,21 +17992,21 @@ window.__ModuleLoader__.load({
                           type: 'button',
                           className: 'dnb-pyr-act-btn',
                           'data-accent': '1',
-                          title: bi('在分屏打开该子代理独立会话视图', 'Open split pane for subagent'),
+                          title: bi('分屏打开这个子代理的聊天窗口', 'Open subagent chat in split view'),
                           onClick: () => {
-                            if (!openSubagentChat(agentObj)) patch({ notice: bi('该子代理暂无独立会话视图', 'No dedicated view for this subagent') })
+                            if (!openSubagentChat(agentObj)) patch({ notice: bi('这个子代理没有单独的聊天窗口', 'No dedicated chat for this subagent') })
                           },
                         }, h(Icon, { name: 'chat', size: 11 }), bi('分屏对话', 'Split Chat'))
                       : null,
                     h('button', {
                       type: 'button',
                       className: 'dnb-pyr-act-btn',
-                      title: bi('锁定底部参谋长输入栏直接给该子代理递话或插话', 'Lock bottom input to steer/relay to this subagent'),
+                      title: bi('选中它，在底栏输入框直接发消息', 'Target this subagent in bottom input'),
                       onClick: () => {
                         patch({
                           secTarget: agentObj.name,
                           secMode: isRunning ? 'steer' : 'followup',
-                          notice: bi('已在下方锁定 @', 'Locked target @') + shortAgentName(agentObj.name, true) + bi('，输入指令回车即达', ', type instruction & Enter'),
+                          notice: bi('已选中 @', 'Selected @') + shortAgentName(agentObj.name, true) + bi('，在下面输入回车发送', ', type below and press Enter'),
                         })
                         focusSecInput()
                       },
@@ -18122,7 +18122,7 @@ window.__ModuleLoader__.load({
                 ? h(
                     'div',
                     { className: 'dnb-pyr-spot-tag', 'data-blocked': spotTone === 'blocked' ? '1' : '0' },
-                    spotTone === 'blocked' ? '⚠ 受阻关联代理 · @' + shortAgentName(ag.name, true) : '🎯 正在推进 · @' + shortAgentName(ag.name, true),
+                    spotTone === 'blocked' ? '⚠ 卡在这个代理 · @' + shortAgentName(ag.name, true) : '🎯 正在做 · @' + shortAgentName(ag.name, true),
                   )
                 : null,
               renderGrandAgentSubtree(ag, 1, visitedAgents, visitedTaskIds),
@@ -18162,7 +18162,7 @@ window.__ModuleLoader__.load({
                       type: 'button',
                       className: 'dnb-flow-mini-btn',
                       style: { width: 18, height: 18, flexShrink: 0 },
-                      title: groupOpen ? '收起直管任务' : `展开 ${leadDirectRoots.length} 项直管任务`,
+                      title: groupOpen ? '收起主对话任务' : `展开 ${leadDirectRoots.length} 项主对话任务`,
                       onClick: e => {
                         e.stopPropagation()
                         togglePyrNode(groupKey)
@@ -18173,9 +18173,9 @@ window.__ModuleLoader__.load({
                       style: { transform: groupOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' },
                     })),
                     h(Icon, { name: 'agentLead', size: 12, style: { color: '#60a5fa', flexShrink: 0 } }),
-                    h('span', { style: { fontWeight: 700, fontSize: 12, color: 'var(--dnb-text)' } }, bi('主代理直管任务', 'Lead Direct Tasks')),
+                    h('span', { style: { fontWeight: 700, fontSize: 12, color: 'var(--dnb-text)' } }, bi('主对话自己做的任务', 'Main Chat Tasks')),
                     h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, bi(`${leadDirectRoots.length} 项`, `${leadDirectRoots.length}`)),
-                    h('span', { className: 'dnb-pyr-detail-pill' }, groupDetailOpen ? bi('收起 ▴', 'Fold ▴') : bi('操作 ▾', 'Actions ▾')),
+                    h('span', { className: 'dnb-pyr-detail-pill' }, groupDetailOpen ? bi('收起 ▴', 'Hide ▴') : bi('操作 ▾', 'Actions ▾')),
                   ),
                   groupDetailOpen
                     ? h(
@@ -18188,7 +18188,7 @@ window.__ModuleLoader__.load({
                             type: 'button',
                             className: 'dnb-pyr-act-btn',
                             onClick: () => {
-                              patch({ secTarget: 'lead', secMode: 'steer', notice: bi('已在下方锁定 @主对话', 'Locked target @Lead') })
+                              patch({ secTarget: 'lead', secMode: 'steer', notice: bi('已选中 @主对话，在下面发消息', 'Selected @Lead') })
                               focusSecInput()
                             },
                           }, h(Icon, { name: 'send', size: 10.5 }), bi('@主对话', '@Lead')),
@@ -18250,7 +18250,7 @@ window.__ModuleLoader__.load({
               'data-spotlight': apexSpotlightTone || undefined,
               style: treeItems.length > 0 ? { cursor: 'pointer' } : undefined,
               title: treeItems.length > 0
-                ? (leadOpen ? bi('点击收起主代理下级任务与子代理', 'Collapse Lead tasks & subagents') : bi('点击展开主代理下级任务与子代理', 'Expand Lead tasks & subagents'))
+                ? (leadOpen ? bi('收起下面的子代理和任务', 'Collapse tasks & subagents') : bi('展开下面的子代理和任务', 'Expand tasks & subagents'))
                 : undefined,
               onClick: treeItems.length > 0 ? toggleLeadOpen : undefined,
             },
@@ -18265,7 +18265,7 @@ window.__ModuleLoader__.load({
                       type: 'button',
                       className: 'dnb-flow-mini-btn',
                       style: { width: 18, height: 18, flexShrink: 0 },
-                      title: leadOpen ? bi('收起组织树下级节点', 'Collapse org tree children') : bi('展开组织树下级节点', 'Expand org tree children'),
+                      title: leadOpen ? bi('收起组织树下一级', 'Collapse org tree') : bi('展开组织树下一级', 'Expand org tree'),
                       onClick: e => {
                         e.stopPropagation()
                         toggleLeadOpen()
@@ -18294,13 +18294,13 @@ window.__ModuleLoader__.load({
                   ? h('span', { className: 'dnb-acc-count', style: { color: '#409cff' } }, bi(`${runningKidsCount} 运行`, `${runningKidsCount} active`))
                   : null,
                 doingTotal > 0
-                  ? h('span', { className: 'dnb-acc-count', style: { color: '#409cff' } }, bi(`${doingTotal} 推进`, `${doingTotal} doing`))
+                  ? h('span', { className: 'dnb-acc-count', style: { color: '#409cff' } }, bi(`${doingTotal} 进行中`, `${doingTotal} doing`))
                   : null,
                 blockedTotal > 0
-                  ? h('span', { className: 'dnb-acc-count', style: { color: '#ff453a' } }, bi(`${blockedTotal} 受阻`, `${blockedTotal} blocked`))
+                  ? h('span', { className: 'dnb-acc-count', style: { color: '#ff453a' } }, bi(`${blockedTotal} 卡住`, `${blockedTotal} blocked`))
                   : null,
                 doneTotal > 0
-                  ? h('span', { className: 'dnb-acc-count', style: { color: '#30d158' } }, bi(`${doneTotal}/${allTasks.length} 完`, `${doneTotal}/${allTasks.length} done`))
+                  ? h('span', { className: 'dnb-acc-count', style: { color: '#30d158' } }, bi(`${doneTotal}/${allTasks.length} 完成`, `${doneTotal}/${allTasks.length} done`))
                   : null,
               ),
               h(
@@ -18311,14 +18311,14 @@ window.__ModuleLoader__.load({
                   className: 'dnb-mini-btn',
                   'data-tone': 'accent',
                   style: { height: 22, padding: '0 7px', fontSize: 10.5 },
-                  title: bi('让主对话模型将目标拆解为任务图并调度子代理', 'Ask Lead model to decompose objective & dispatch subagents'),
+                  title: bi('让主对话把目标拆成步骤，分给子代理做', 'Break goal into steps and assign subagents'),
                   onClick: e => {
                     e.stopPropagation()
                     triggerAiPlanGraph()
                   },
                 }, h(Icon, { name: 'sparkles', size: 10.5 }), bi('拆解', 'Plan')),
                 treeItems.length > 0
-                  ? h('span', { className: 'dnb-acc-pull-hint' }, leadOpen ? bi('收起 ▴', 'Fold ▴') : bi('拉起 ▾', 'Pull ▾'))
+                  ? h('span', { className: 'dnb-acc-pull-hint' }, leadOpen ? bi('收起 ▴', 'Hide ▴') : bi('展开 ▾', 'Show ▾'))
                   : null,
               ),
             ),
@@ -18599,13 +18599,13 @@ window.__ModuleLoader__.load({
               fill: 'var(--dnb-text-2, #aeaeb2)',
               fontSize: 11.5,
               fontWeight: 600,
-            }, `+${node.hiddenAgents.length} 名空闲子代理`),
+            }, `+${node.hiddenAgents.length} 个空闲助手`),
             h('text', {
               x: x + w / 2, y: y + 35,
               textAnchor: 'middle',
               fill: 'var(--dnb-accent, #0a84ff)',
               fontSize: 10,
-            }, '点击展开全部'),
+            }, '点这里展开'),
           )
         }
 
@@ -18620,7 +18620,7 @@ window.__ModuleLoader__.load({
             : isRunning
               ? '#0a84ff'
               : 'var(--dnb-border-strong, rgba(140,140,150,0.4))'
-          const desc = ag.taskTitle || ag.description || (isRunning ? '正在执行任务…' : '待命 / 已完成')
+          const desc = ag.taskTitle || ag.description || (isRunning ? '正在干活…' : '空闲 / 已完成')
 
           return h(
             'g',
@@ -18904,8 +18904,8 @@ window.__ModuleLoader__.load({
           open: !topoCollapsed,
           onToggle: () => patch({ topoSectionCollapsed: !topoCollapsed }),
           className: 'dnb-topo-card',
-          title: bi('可视化工作拓扑', 'Work Topology'),
-          headTitle: topoCollapsed ? bi('点击拉起可视化工作拓扑（流程画布 / 组织树）', 'Expand work topology (Flow Canvas / Org Tree)') : bi('点击收起可视化工作拓扑', 'Collapse work topology'),
+          title: bi('任务关系图', 'Work Map'),
+          headTitle: topoCollapsed ? bi('展开任务关系图（流程画布 / 组织树）', 'Expand work map (Flow Canvas / Org Tree)') : bi('收起任务关系图', 'Collapse work map'),
           headerExtra: flowStages.length > 0
             ? h(
                 'div',
@@ -18923,7 +18923,7 @@ window.__ModuleLoader__.load({
                         type: 'button',
                         className: 'dnb-acc-mini-mile',
                         'data-status': st.status,
-                        title: bi(`步骤 ${st.index}: ${st.title}（点击定位到下方任务板）`, `Step ${st.index}: ${st.title} (jump to board)`),
+                        title: bi(`步骤 ${st.index}: ${st.title}（跳到对应任务）`, `Step ${st.index}: ${st.title} (jump to task)`),
                         onClick: () => jumpToBoardStage(st.id),
                       },
                       st.status === 'done' ? h(Icon, { name: 'check', size: 9 }) : String(st.index),
@@ -18940,7 +18940,7 @@ window.__ModuleLoader__.load({
             : null,
           count: flowStages.length > 0 ? bi(`${flowStats.doneStages || 0}/${flowStats.totalStages || flowStages.length} 步`, `${flowStats.doneStages || 0}/${flowStats.totalStages || flowStages.length} steps`) : '',
           badges: runningAgentsCount > 0
-            ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'accent' }, bi(`${runningAgentsCount} 代理`, `${runningAgentsCount} active`))
+            ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'accent' }, bi(`${runningAgentsCount} 个在忙`, `${runningAgentsCount} active`))
             : null,
           actions: !topoCollapsed
             ? h(
@@ -18951,7 +18951,7 @@ window.__ModuleLoader__.load({
                   className: 'dnb-seg-btn',
                   style: { padding: '2px 8px', fontSize: 10.5 },
                   'data-active': topoViewMode === 'canvas' ? '1' : '0',
-                  title: bi('顺序推进流 + 子代理分支与回指箭头 SVG 流程画布', 'Sequential stages + subagent branches SVG flow canvas'),
+                  title: bi('流程画布：看步骤顺序和子代理分工', 'Flow Canvas: step order and subagents'),
                   onClick: () => patch({ taskViewMode: 'canvas' }),
                 }, bi('流程画布', 'Flow Canvas')),
                 h('button', {
@@ -18959,7 +18959,7 @@ window.__ModuleLoader__.load({
                   className: 'dnb-seg-btn',
                   style: { padding: '2px 8px', fontSize: 10.5 },
                   'data-active': topoViewMode === 'graph' ? '1' : '0',
-                  title: bi('按主/子代理层级展开拉起的组织树', 'Expandable Lead / Subagent hierarchy tree'),
+                  title: bi('组织树：按上下级看谁负责哪块任务', 'Org Tree: see who owns each task'),
                   onClick: () => patch({ taskViewMode: 'graph' }),
                 }, h(Icon, { name: 'network', size: 10.5 }), bi('组织树', 'Org Tree')),
               )
@@ -18974,7 +18974,7 @@ window.__ModuleLoader__.load({
                 { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
                 h(Icon, { name: 'target', size: 13 }),
                 h('span', { style: { wordBreak: 'break-word' } },
-                  (focusedTask.status === 'blocked' ? bi('已框选受阻关联代理：', 'Focused blocked agents: ') : bi('已框选正在推进的子代理：', 'Focused active subagents: '))
+                  (focusedTask.status === 'blocked' ? bi('已高亮卡住的代理：', 'Highlighted blocked: ') : bi('已高亮正在做的子代理：', 'Highlighted active: '))
                   + (focusInfo && focusInfo.agentNames.length
                       ? focusInfo.agentNames.map(n => '@' + shortAgentName(n, true)).join(bi('、', ', '))
                       : bi('@主代理', '@Lead'))),
@@ -18993,7 +18993,7 @@ window.__ModuleLoader__.load({
                   className: 'dnb-pill',
                   style: { height: 21, padding: '0 7px', fontSize: 10.5 },
                   onClick: () => patch({ focusTaskId: '' }),
-                }, bi('退出框选 ×', 'Unfocus ×')),
+                }, bi('取消高亮 ×', 'Clear ×')),
               ),
             )
           : null,
@@ -19011,12 +19011,12 @@ window.__ModuleLoader__.load({
                     className: 'dnb-pill',
                     style: { height: 22, padding: '0 8px', fontSize: 10.5 },
                     onClick: () => patch({ graphDir: isLR ? 'TD' : 'LR' }),
-                  }, isLR ? bi('横向流', 'Horizontal') : bi('竖向流', 'Vertical')),
+                  }, isLR ? bi('横着排', 'Horizontal') : bi('竖着排', 'Vertical')),
                   h(
                     'div',
                     { style: { display: 'flex', gap: 3, alignItems: 'center' } },
                     h('button', { type: 'button', className: 'dnb-pill', style: { height: 22, padding: '0 7px' }, onClick: () => setZoom(z => Math.max(0.42, +(z - 0.12).toFixed(2))) }, '−'),
-                    h('button', { type: 'button', className: 'dnb-pill', style: { height: 22, padding: '0 7px', fontSize: 10.5 }, onClick: fitZoom, title: bi('点击自动适配当前宽度', 'Auto-fit canvas width') }, Math.round(zoom * 100) + '%'),
+                    h('button', { type: 'button', className: 'dnb-pill', style: { height: 22, padding: '0 7px', fontSize: 10.5 }, onClick: fitZoom, title: bi('自动调整大小适应窗口', 'Fit to window width') }, Math.round(zoom * 100) + '%'),
                     h('button', { type: 'button', className: 'dnb-pill', style: { height: 22, padding: '0 7px' }, onClick: () => setZoom(z => Math.min(1.6, +(z + 0.12).toFixed(2))) }, '+'),
                   ),
                 ),
@@ -19042,21 +19042,21 @@ window.__ModuleLoader__.load({
           : h(
               'div',
               { className: 'dnb-empty', style: { padding: '14px 10px' } },
-              h('div', { style: { marginBottom: 8 } }, bi('暂无推进流程或任务拓扑', 'No work topology or flow graph yet')),
+              h('div', { style: { marginBottom: 8 } }, bi('还没有任务关系图，先添加步骤或拆解任务', 'No work map yet')),
               h('button', {
                 type: 'button',
                 className: 'dnb-pill dnb-pill-accent',
                 onClick: triggerAiPlanGraph,
-              }, h(Icon, { name: 'sparkles', size: 12 }), bi('让模型规划推进流程', 'Ask Lead to Plan Execution Flow')),
+              }, h(Icon, { name: 'sparkles', size: 12 }), bi('让主对话帮你拆出步骤', 'Ask main chat to plan steps')),
             ),
       )
 
       // ==================== Zone 3: Unified Progress Task Board (Merged Flow + Plan Board) ====================
       const renderUnifiedBoard = stepApi => {
         const taskMetaParts = []
-        if (blockedTotal > 0) taskMetaParts.push(bi(`${blockedTotal} 受阻`, `${blockedTotal} blocked`))
-        if (doingTotal > 0) taskMetaParts.push(bi(`${doingTotal} 推进`, `${doingTotal} active`))
-        if (doneTotal > 0) taskMetaParts.push(bi(`${doneTotal} 已完`, `${doneTotal} done`))
+        if (blockedTotal > 0) taskMetaParts.push(bi(`${blockedTotal} 卡住`, `${blockedTotal} blocked`))
+        if (doingTotal > 0) taskMetaParts.push(bi(`${doingTotal} 进行中`, `${doingTotal} active`))
+        if (doneTotal > 0) taskMetaParts.push(bi(`${doneTotal} 完成`, `${doneTotal} done`))
         const taskCountLabel = taskMetaParts.length > 0
           ? taskMetaParts.join(' · ')
           : (allTasks.length ? bi(`${doneTotal}/${allTasks.length} 任务`, `${doneTotal}/${allTasks.length} tasks`) : '')
@@ -19068,8 +19068,8 @@ window.__ModuleLoader__.load({
             open: !boardCollapsed,
             onToggle: () => patch({ boardSectionCollapsed: !boardCollapsed }),
             className: 'dnb-board-card',
-            title: bi('推进任务板', 'Progress Task Board'),
-            headTitle: boardCollapsed ? bi('点击拉起推进任务板', 'Expand Progress Task Board') : bi('点击收起推进任务板', 'Collapse Progress Task Board'),
+            title: bi('任务进度板', 'Task Board'),
+            headTitle: boardCollapsed ? bi('展开任务进度板', 'Expand Task Board') : bi('收起任务进度板', 'Collapse Task Board'),
             count: [planSteps.length > 0 ? bi(`${planDoneCount}/${planSteps.length} 步`, `${planDoneCount}/${planSteps.length} steps`) : '', taskCountLabel].filter(Boolean).join(' · '),
             actions: h(
               React.Fragment,
@@ -19079,7 +19079,7 @@ window.__ModuleLoader__.load({
                 className: 'dnb-pill',
                 'data-active': addTaskOpen ? '1' : '0',
                 style: { height: 22, padding: '0 7px', fontSize: 10.5 },
-                title: addTaskOpen ? bi('收起新增任务表单', 'Close add-task form') : bi('展开新增任务表单', 'Add new task'),
+                title: addTaskOpen ? bi('收起添加框', 'Close form') : bi('手动加一条任务', 'Add a task'),
                 onClick: () => {
                   if (boardCollapsed) patch({ boardSectionCollapsed: false })
                   setAddTaskOpen(v => !v)
@@ -19090,12 +19090,12 @@ window.__ModuleLoader__.load({
                     type: 'button',
                     className: 'dnb-mini-btn',
                     'data-tone': expandAllStages ? 'accent' : undefined,
-                    title: expandAllStages ? bi('切回聚焦模式（自动折叠已完成与未开始步骤）', 'Switch back to focused mode') : bi('一键展开全部步骤', 'Expand all steps'),
+                    title: expandAllStages ? bi('只展开当前步，折叠其他步骤', 'Focus on current step only') : bi('展开全部步骤', 'Expand all steps'),
                     onClick: () => {
                       if (boardCollapsed) patch({ boardSectionCollapsed: false })
                       setExpandAllStages(v => !v)
                     },
-                  }, expandAllStages ? bi('仅看聚焦', 'Focused') : bi('全展开', 'Expand All'))
+                  }, expandAllStages ? bi('只看当前', 'Focused') : bi('全部展开', 'Expand All'))
                 : null,
             ),
           },
@@ -19202,7 +19202,7 @@ window.__ModuleLoader__.load({
                   setContextMenu(null)
                   focusObjectiveInPyramid(t.id)
                 },
-              }, h(Icon, { name: 'target', size: 13 }), '框选负责代理'),
+              }, h(Icon, { name: 'target', size: 13 }), '高亮负责的代理'),
               h('div', {
                 className: 'dnb-menu-item',
                 style: { color: 'var(--dnb-accent)', fontWeight: 500 },
@@ -19211,7 +19211,7 @@ window.__ModuleLoader__.load({
                   setContextMenu(null)
                   explainTaskMeaning(t, board)
                 },
-              }, h(Icon, { name: 'sparkles', size: 13 }), '问含义与原因'),
+              }, h(Icon, { name: 'sparkles', size: 13 }), '用大白话解释'),
               h('div', {
                 className: 'dnb-menu-item',
                 onClick: () => {
@@ -19223,7 +19223,7 @@ window.__ModuleLoader__.load({
                     agent: t.subagent || t.owner || ('worker-' + String(t.id).slice(-4)),
                   })
                 },
-              }, h(Icon, { name: 'play', size: 13 }), '派发子代理'),
+              }, h(Icon, { name: 'play', size: 13 }), '交给子代理做'),
               h('div', {
                 className: 'dnb-menu-item',
                 onClick: () => {
@@ -19231,7 +19231,7 @@ window.__ModuleLoader__.load({
                   setContextMenu(null)
                   openTaskEditor(t)
                 },
-              }, h(Icon, { name: 'edit', size: 13 }), '编辑节点'),
+              }, h(Icon, { name: 'edit', size: 13 }), '修改任务'),
               contextMenu.task.status !== 'done'
                 ? h('div', {
                     className: 'dnb-menu-item',
@@ -19321,12 +19321,12 @@ window.__ModuleLoader__.load({
       const vs = item && item.viewerStatus && typeof item.viewerStatus === 'object' ? item.viewerStatus : null
       const fullLabel = (vs && vs.label) || (vs && vs.badgeText) || (
         item && item.takenOut
-          ? '桌面在读 · 主代理与参谋同看'
+          ? '已放到桌面：主对话和参谋都能看'
           : scope === 'precipitated'
-            ? '仅人类可见 · 双端严格隔离'
+            ? '仅你可见：主对话和参谋都看不到'
             : scope === 'global'
-              ? (item && item.chiefMounted ? '参谋参阅中 · 主对话 0 泄露' : (item && item.hasHook ? '参谋见钩可拉 · 主对话 0 泄露' : '仅人类可见（未织钩）'))
-              : (item && item.leadPulled ? '主代理已拉阅 · 参谋可读' : (item && item.hasHook ? '主见钩可拉 · 参谋可读' : '仅参谋可读（未织钩）'))
+              ? (item && item.chiefMounted ? '参谋正在看 · 主对话看不到' : (item && item.hasHook ? '参谋可按关键词查看 · 主对话看不到' : '仅你可见（还没打标签）'))
+              : (item && item.leadPulled ? '主对话已查看 · 参谋也能看' : (item && item.hasHook ? '主对话可按关键词查看 · 参谋能看' : '仅参谋能看（还没打标签）'))
       )
       let shortText = '参谋'
       let dataViewer = 'chief'
@@ -19356,7 +19356,7 @@ window.__ModuleLoader__.load({
       const isGlobalEditor = editorScope === 'global'
       const folderList = Array.isArray(folders) && folders.length
         ? folders
-        : [{ id: 'coords', label: '工程坐标与部署锚点' }, { id: 'incidents', label: '排障实录与硬事实' }, { id: 'inbox', label: '待分拣工作便签' }]
+        : [{ id: 'coords', label: '项目入口与配置' }, { id: 'incidents', label: '问题排查记录' }, { id: 'inbox', label: '待整理便签' }]
 
       const updateField = patchObj => {
         patch({ archiveEditor: { ...editor, ...patchObj } })
@@ -19378,8 +19378,8 @@ window.__ModuleLoader__.load({
           body,
           upsertByTitle: !isEdit ? false : undefined,
         }, isEdit
-          ? (isGlobalEditor ? '全局卷宗已更新' : '本局卷宗已更新')
-          : (isGlobalEditor ? '已存入全局档案柜' : '已封存入本局档案柜'))
+          ? (isGlobalEditor ? '已更新全局档案' : '已更新本局档案')
+          : (isGlobalEditor ? '已存到全局档案' : '已存到本局档案'))
         if (out && out.ok) {
           const savedItem = out.item
           const nextOpenFolders = { ...(store.archiveOpenFolders || {}) }
@@ -19408,7 +19408,7 @@ window.__ModuleLoader__.load({
           h('span', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-accent)' } },
             isGlobalEditor
               ? (isEdit ? '编辑全局档案' : '新建全局档案')
-              : (isEdit ? '编辑本局卷宗' : '新建本局卷宗')),
+              : (isEdit ? '编辑本局档案' : '新建本局档案')),
           h('button', {
             className: 'dnb-icon-btn',
             style: { width: 22, height: 22 },
@@ -19430,22 +19430,22 @@ window.__ModuleLoader__.load({
             value: editor.paperclip || 'silver',
             onChange: e => updateField({ paperclip: e.target.value }),
           },
-            h('option', { value: 'gold' }, '核心金针'),
-            h('option', { value: 'silver' }, '标准银针'),
-            h('option', { value: 'copper' }, '历史铜针'),
+            h('option', { value: 'gold' }, '金别针 · 核心'),
+            h('option', { value: 'silver' }, '银别针 · 常用'),
+            h('option', { value: 'copper' }, '铜别针 · 备用'),
           ),
         ),
         h('input', {
           className: 'dnb-input',
           style: { marginBottom: 6, fontWeight: 600 },
-          placeholder: '卷宗标题…',
+          placeholder: '输入档案标题…',
           value: editor.title || '',
           onChange: e => updateField({ title: e.target.value }),
         }),
         h('input', {
           className: 'dnb-input',
           style: { marginBottom: 6, fontSize: 11.5 },
-          placeholder: '一句话提要（选填）…',
+          placeholder: '一句话简介（可不填）…',
           value: editor.summary || '',
           onChange: e => updateField({ summary: e.target.value }),
         }),
@@ -19453,14 +19453,14 @@ window.__ModuleLoader__.load({
           className: 'dnb-textarea',
           rows: 5,
           style: { marginBottom: 6, fontSize: 12, lineHeight: 1.55 },
-          placeholder: '输入详细工程内容（支持 ## 小标题或键：值分段）…',
+          placeholder: '输入正文内容（支持 ## 小标题分段）…',
           value: editor.body || '',
           onChange: e => updateField({ body: e.target.value }),
         }),
         h('input', {
           className: 'dnb-input',
           style: { marginBottom: 8, fontSize: 11.5 },
-          placeholder: '关键词标签（逗号分隔）…',
+          placeholder: '关键词标签，用逗号隔开…',
           value: editor.tags || '',
           onChange: e => updateField({ tags: e.target.value }),
         }),
@@ -19472,7 +19472,7 @@ window.__ModuleLoader__.load({
             className: 'dnb-primary-btn',
             disabled: !(editor.title || '').trim() && !(editor.body || '').trim(),
             onClick: () => void saveDossier(),
-          }, isEdit ? '保存' : '存入档案柜'),
+          }, isEdit ? '保存' : '存到档案柜'),
         ),
       )
     }
@@ -19510,7 +19510,7 @@ window.__ModuleLoader__.load({
             {
               className: 'dnb-drawer-front',
               onClick: onToggle,
-              title: folder.hint || (drawerOpen ? '点击合上抽屉' : '点击拉开抽屉'),
+              title: folder.hint || (drawerOpen ? '收起' : '展开'),
             },
             h('span', { className: 'dnb-drawer-spine', style: { background: accent } }),
             h(Icon, {
@@ -19548,7 +19548,7 @@ window.__ModuleLoader__.load({
                     type: 'button',
                     className: 'dnb-icon-btn',
                     style: { width: 22, height: 22, color: 'var(--dnb-text-3)' },
-                    title: '抽屉操作',
+                    title: '更多操作',
                     onClick: () => setOpenMenuKey(menuOpen ? '' : menuId),
                   }, '⋯'),
                   menuOpen
@@ -19560,21 +19560,21 @@ window.__ModuleLoader__.load({
                               type: 'button',
                               className: 'dnb-more-item',
                               onClick: () => { setOpenMenuKey(''); onOrganize() },
-                            }, '✦ 整理本抽屉')
+                            }, '✦ 整理这个抽屉')
                           : null,
                         onCreateInFolder
                           ? h('button', {
                               type: 'button',
                               className: 'dnb-more-item',
                               onClick: () => { setOpenMenuKey(''); onCreateInFolder() },
-                            }, '+ 在此新建卷宗')
+                            }, '+ 在这里新建档案')
                           : null,
                         onPrecipitate && items.length > 0
                           ? h('button', {
                               type: 'button',
                               className: 'dnb-more-item',
                               onClick: () => { setOpenMenuKey(''); onPrecipitate() },
-                            }, '🧊 沉淀本抽屉')
+                            }, '🧊 转入冷藏库')
                           : null,
                       )
                     : null,
@@ -19588,7 +19588,7 @@ window.__ModuleLoader__.load({
                 { className: 'dnb-drawer-well' },
                 items.length > 0
                   ? h('div', { className: 'dnb-paper-stack' }, items.map((it, idx) => renderChild(it, idx)))
-                  : h('div', { style: { padding: '6px 4px', fontSize: 11, color: 'var(--dnb-text-3)' } }, '此抽屉暂空'),
+                  : h('div', { style: { padding: '6px 4px', fontSize: 11, color: 'var(--dnb-text-3)' } }, '里面还是空的'),
               )
             : null,
         ),
@@ -19673,7 +19673,7 @@ window.__ModuleLoader__.load({
         },
         h(PaperclipPin, {
           paperclip: item.paperclip,
-          onClick: () => void mutateArchiveApi({ op: 'cycleClip', archiveId: item.id, vaultScope: activeScope }, '已切换曲别针等级'),
+          onClick: () => void mutateArchiveApi({ op: 'cycleClip', archiveId: item.id, vaultScope: activeScope }, '已切换重要程度'),
         }),
 
         // Top-Down Paper Header + Hover Peek Drawer
@@ -19699,7 +19699,7 @@ window.__ModuleLoader__.load({
                     onChange: () => toggleSelectArchive(item.id, isGlobalScope ? 'global' : 'session', item.title),
                   })
                 : null,
-              h('div', { className: 'dnb-paper-title' }, item.title || '未命名卷宗'),
+              h('div', { className: 'dnb-paper-title' }, item.title || '未命名档案'),
             ),
             h(
               'div',
@@ -19777,7 +19777,7 @@ window.__ModuleLoader__.load({
                         border: '1px solid var(--dnb-border)',
                       },
                     },
-                    h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, '移至：'),
+                    h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, '移到：'),
                     (folders || []).map(f =>
                       h('button', {
                         key: f.id,
@@ -19789,7 +19789,7 @@ window.__ModuleLoader__.load({
                             archiveMoveId: '',
                             archiveOpenFolders: { ...(view.archiveOpenFolders || {}), [f.id]: true },
                           })
-                          void mutateArchiveApi({ op: 'moveFolder', archiveId: item.id, folder: f.id, vaultScope: activeScope }, '已移入「' + f.label + '」')
+                          void mutateArchiveApi({ op: 'moveFolder', archiveId: item.id, folder: f.id, vaultScope: activeScope }, '已移到「' + f.label + '」')
                         },
                       }, f.label),
                     ),
@@ -19802,7 +19802,7 @@ window.__ModuleLoader__.load({
                     'div',
                     { style: { padding: '6px 2px', fontSize: 11, color: 'var(--dnb-text-3)', display: 'flex', alignItems: 'center', gap: 6 } },
                     h(Icon, { name: 'refresh', size: 11.5, style: { animation: 'dnb-spin 0.9s linear infinite' } }),
-                    '调阅卷宗详情…',
+                    '加载中…',
                   )
                 : points.length > 0
                   ? points.map((pt, pIdx) => {
@@ -19853,20 +19853,20 @@ window.__ModuleLoader__.load({
                                 h('button', {
                                   type: 'button',
                                   className: 'dnb-mini-btn',
-                                  onClick: () => copyText(`【${item.title} · ${pt.title}】\n${pt.detail || pt.cue || ''}`, '已复制此条小点'),
+                                  onClick: () => copyText(`【${item.title} · ${pt.title}】\n${pt.detail || pt.cue || ''}`, '已复制这条内容'),
                                 }, '复制'),
                                 h('button', {
                                   type: 'button',
                                   className: 'dnb-mini-btn',
                                   'data-tone': 'accent',
                                   onClick: () => void deliverArchiveToChat(detail || item, pt),
-                                }, '递给对话'),
+                                }, '发给对话'),
                               ),
                             )
                           : null,
                       )
                     })
-                  : h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', padding: '2px 0' } }, '暂无结构化要点，可在右下方 ⋯ 重拆此卷。'),
+                  : h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', padding: '2px 0' } }, '还没拆出要点，点右下角 ⋯ 让参谋长整理一下。'),
 
               // Lossless Raw Body
               showRaw && detail
@@ -19905,10 +19905,10 @@ window.__ModuleLoader__.load({
                       if (!item.takenOut && !isBoundSession) return
                       void mutateArchiveApi(
                         { op: item.takenOut ? 'putBack' : 'takeOut', archiveId: item.id, vaultScope: activeScope },
-                        item.takenOut ? '已从桌面撤回档案柜' : '📌 已置顶到认知桌面',
+                        item.takenOut ? '已从桌面撤回' : '📌 已放到认知桌面',
                       )
                     },
-                  }, item.takenOut ? '撤出桌面' : '📌 置顶桌面'),
+                  }, item.takenOut ? '撤出桌面' : '📌 放上桌面'),
                   isGlobalScope
                     ? h('button', {
                         type: 'button',
@@ -19940,7 +19940,7 @@ window.__ModuleLoader__.load({
                   h('button', {
                     type: 'button',
                     className: 'dnb-mini-btn',
-                    title: '更多卷宗操作',
+                    title: '更多操作',
                     onClick: () => setOpenMenuKey(cardMenuOpen ? '' : menuId),
                   }, '⋯'),
                   cardMenuOpen
@@ -19955,7 +19955,7 @@ window.__ModuleLoader__.load({
                                 setOpenMenuKey('')
                                 openArchiveRelayModal([{ id: item.id, vaultScope: 'global', title: item.title }])
                               },
-                            }, '📨 递话给对话')
+                            }, '📨 发给主对话')
                           : null,
                         isGlobalScope
                           ? h('button', {
@@ -19964,17 +19964,17 @@ window.__ModuleLoader__.load({
                               disabled: !isBoundSession,
                               onClick: () => {
                                 setOpenMenuKey('')
-                                void mutateArchiveApi({ op: 'copyToSession', archiveId: item.id, vaultScope: 'global' }, '已无损调入本局')
+                                void mutateArchiveApi({ op: 'copyToSession', archiveId: item.id, vaultScope: 'global' }, '已复制到本局档案')
                               },
-                            }, '⤵️ 调入本局')
+                            }, '⤵️ 复制到本局')
                           : h('button', {
                               type: 'button',
                               className: 'dnb-more-item',
                               onClick: () => {
                                 setOpenMenuKey('')
-                                void mutateArchiveApi({ op: 'copyToGlobal', archiveId: item.id, vaultScope: 'session' }, '已升级存入全局档案柜')
+                                void mutateArchiveApi({ op: 'copyToGlobal', archiveId: item.id, vaultScope: 'session' }, '已存到全局档案')
                               },
-                            }, item.diffStatus === 'synced' ? '✓ 同步全局' : '🌐 升级入全局'),
+                            }, item.diffStatus === 'synced' ? '✓ 同步到全局' : '🌐 存到全局'),
                         isGlobalScope
                           ? h('button', {
                               type: 'button',
@@ -19987,12 +19987,12 @@ window.__ModuleLoader__.load({
                                     vaultScope: 'global',
                                     cabinetId: '',
                                     ids: [item.id],
-                                    label: `全局卷宗《${clampTitle(item.title, 24)}》`,
+                                    label: `全局档案《${clampTitle(item.title, 24)}》`,
                                     clearSource: false,
                                   },
                                 })
                               },
-                            }, '🧊 沉淀进冷藏柜')
+                            }, '🧊 转入冷藏库')
                           : null,
                         !isGlobalScope
                           ? h('button', {
@@ -20002,7 +20002,7 @@ window.__ModuleLoader__.load({
                                 setOpenMenuKey('')
                                 patch({ archiveMoveId: movingThis ? '' : item.id })
                               },
-                            }, '📁 移至抽屉')
+                            }, '📁 换个抽屉')
                           : null,
                         h('div', { className: 'dnb-more-sep' }),
                         h('button', {
@@ -20012,13 +20012,13 @@ window.__ModuleLoader__.load({
                             setOpenMenuKey('')
                             void requestOrganizeArchives({ ids: [item.id], scope: 'selected', vaultScope: activeScope })
                           },
-                        }, '✦ 请参谋重拆此卷'),
+                        }, '✦ 让参谋重整这份'),
                         points.length > 1
                           ? h('button', {
                               type: 'button',
                               className: 'dnb-more-item',
                               onClick: () => { setOpenMenuKey(''); toggleAllPoints() },
-                            }, allPointsExpanded ? '收起全部要点' : '展开全部要点')
+                            }, allPointsExpanded ? '全部收起' : '全部展开')
                           : null,
                         h('button', {
                           type: 'button',
@@ -20027,13 +20027,13 @@ window.__ModuleLoader__.load({
                             setOpenMenuKey('')
                             patch({ archiveRawView: { ...(view.archiveRawView || {}), [item.id]: !showRaw } })
                           },
-                        }, showRaw ? '隐藏原文' : '📄 原文对照'),
+                        }, showRaw ? '隐藏原文' : '📄 看原文'),
                         h('button', {
                           type: 'button',
                           className: 'dnb-more-item',
                           onClick: () => {
                             setOpenMenuKey('')
-                            void mutateArchiveApi({ op: 'cycleClip', archiveId: item.id, vaultScope: activeScope }, '已切换曲别针等级')
+                            void mutateArchiveApi({ op: 'cycleClip', archiveId: item.id, vaultScope: activeScope }, '已切换重要程度')
                           },
                         }, `📎 换曲别针 (${clip.short})`),
                         h('button', {
@@ -20045,21 +20045,21 @@ window.__ModuleLoader__.load({
                             patch({ archiveSelectMode: true })
                             toggleSelectArchive(item.id, isGlobalScope ? 'global' : 'session', item.title)
                           },
-                        }, isSelected ? '✓ 已勾选多选' : '☑️ 勾选加入批量递话'),
+                        }, isSelected ? '✓ 已勾选' : '☑️ 勾选批量递话'),
                         h('div', { className: 'dnb-more-sep' }),
                         h('button', {
                           type: 'button',
                           className: 'dnb-more-item',
                           onClick: () => { setOpenMenuKey(''); void openEditorForThis() },
-                        }, '✎ 编辑卷宗'),
+                        }, '✎ 编辑'),
                         h('button', {
                           type: 'button',
                           className: 'dnb-more-item',
                           'data-danger': '1',
                           onClick: () => {
                             setOpenMenuKey('')
-                            if (!confirm('确认删除卷宗《' + clampTitle(item.title, 20) + '》？')) return
-                            void mutateArchiveApi({ op: 'delete', archiveId: item.id, vaultScope: activeScope }, '已删除卷宗')
+                            if (!confirm('确定要删除《' + clampTitle(item.title, 20) + '》吗？')) return
+                            void mutateArchiveApi({ op: 'delete', archiveId: item.id, vaultScope: activeScope }, '已删除')
                           },
                         }, '🗑️ 删除'),
                       )
@@ -20181,10 +20181,10 @@ window.__ModuleLoader__.load({
                       e.stopPropagation()
                       void mutateArchiveApi(
                         { op: isFlipped ? 'sealBack' : 'flipOut', id: p.id, vaultScope: 'precipitated' },
-                        isFlipped ? '已封回冷藏库' : '📌 已置顶到认知桌面',
+                        isFlipped ? '已放回冷藏库' : '📌 已放到认知桌面',
                       )
                     },
-                  }, isFlipped ? '封回冷库' : '📌 置顶桌面'),
+                  }, isFlipped ? '放回冷库' : '📌 放上桌面'),
                   h('button', {
                     type: 'button',
                     className: 'dnb-mini-btn',
@@ -20213,17 +20213,17 @@ window.__ModuleLoader__.load({
                           disabled: !isBoundSession,
                           onClick: () => {
                             setOpenMenuKey('')
-                            void mutateArchiveApi({ op: 'pullPrecipitated', id: p.id, targetScope: 'session', vaultScope: 'precipitated' }, '已无损调入本局')
+                            void mutateArchiveApi({ op: 'pullPrecipitated', id: p.id, targetScope: 'session', vaultScope: 'precipitated' }, '已复制到本局')
                           },
-                        }, '⤵️ 调入本局'),
+                        }, '⤵️ 复制到本局'),
                         h('button', {
                           type: 'button',
                           className: 'dnb-more-item',
                           onClick: () => {
                             setOpenMenuKey('')
-                            void mutateArchiveApi({ op: 'pullPrecipitated', id: p.id, targetScope: 'global', vaultScope: 'precipitated' }, '已无损调入全局')
+                            void mutateArchiveApi({ op: 'pullPrecipitated', id: p.id, targetScope: 'global', vaultScope: 'precipitated' }, '已复制到全局')
                           },
-                        }, '🌐 调入全局'),
+                        }, '🌐 复制到全局'),
                         h('button', {
                           type: 'button',
                           className: 'dnb-more-item',
@@ -20233,7 +20233,7 @@ window.__ModuleLoader__.load({
                             patch({ archiveSelectMode: true })
                             toggleSelectArchive(p.id, 'precipitated', p.title)
                           },
-                        }, isSelected ? '✓ 已勾选多选' : '☑️ 勾选加入批量递话'),
+                        }, isSelected ? '✓ 已勾选' : '☑️ 勾选批量递话'),
                         h('div', { className: 'dnb-more-sep' }),
                         h('button', {
                           type: 'button',
@@ -20241,7 +20241,7 @@ window.__ModuleLoader__.load({
                           'data-danger': '1',
                           onClick: () => {
                             setOpenMenuKey('')
-                            if (!confirm('确认永久删除冷藏条目《' + clampTitle(p.title, 20) + '》？')) return
+                            if (!confirm('确定永久删除《' + clampTitle(p.title, 20) + '》吗？')) return
                             void mutateArchiveApi({ op: 'deletePrecipitated', id: p.id, vaultScope: 'precipitated' }, '已删除')
                           },
                         }, '🗑️ 删除'),
@@ -20412,8 +20412,8 @@ window.__ModuleLoader__.load({
               'div',
               { style: { display: 'flex', gap: 4 } },
               [
-                { key: 'unorganized', label: '整理待精编' + (meta.unorganizedCount ? ` (${meta.unorganizedCount})` : '') },
-                { key: 'all', label: '全部重梳' },
+                { key: 'unorganized', label: '只整理未梳理的' + (meta.unorganizedCount ? ` (${meta.unorganizedCount})` : '') },
+                { key: 'all', label: '全部重新整理' },
               ].map(opt =>
                 h('button', {
                   key: opt.key,
@@ -20436,7 +20436,7 @@ window.__ModuleLoader__.load({
             h('input', {
               className: 'dnb-input',
               style: { height: 27, fontSize: 11.5, borderRadius: 99, padding: '0 10px' },
-              placeholder: '补充整理要求（可选）…',
+              placeholder: '补充整理要求（可不填）…',
               value: view.archiveOrganizePrompt || '',
               onChange: e => patch({ archiveOrganizePrompt: e.target.value }),
               onKeyDown: e => { if (e.key === 'Enter') void requestOrganizeArchives({ vaultScope: targetScope }) },
@@ -20505,7 +20505,7 @@ window.__ModuleLoader__.load({
                                 title: it.title,
                               })))
                             },
-                          }, bi('📨 全桌面带要求递话', '📨 Relay Entire Desktop')),
+                          }, bi('📨 把桌面资料一起发给对话', '📨 Send Desktop Items to Chat')),
                           deskPinned.length > 1
                             ? h('button', {
                                 type: 'button',
@@ -20520,9 +20520,9 @@ window.__ModuleLoader__.load({
                                       await mutateArchiveApi({ op: 'unpinFromDesktop', archiveId: it.id, vaultScope: vs })
                                     }
                                   }
-                                  patch({ notice: bi('已全部撤回原档案柜抽屉', 'Returned all items to cabinets') })
+                                  patch({ notice: bi('已全部撤回档案柜', 'Moved all items back') })
                                 },
-                              }, bi('📥 全部撤回原柜', '📥 Unpin All to Cabinets'))
+                              }, bi('📥 全部撤下桌面', '📥 Remove All from Desktop'))
                             : null,
                         )
                       : null,
@@ -20530,20 +20530,20 @@ window.__ModuleLoader__.load({
                 : null,
             ),
           ),
-          h('div', { className: 'dnb-token-track', title: bi(`主对话桌面注入预算 ${usedTokens}/${tokenBudget} Tokens`, `Desktop injection budget ${usedTokens}/${tokenBudget} tokens`) },
+          h('div', { className: 'dnb-token-track', title: bi(`认知桌面：每轮发给主对话的资料（${usedTokens}/${tokenBudget} Tokens）`, `Cognitive Desktop: sent each turn (${usedTokens}/${tokenBudget} tokens)`) },
             h('div', { className: 'dnb-token-fill', 'data-warn': warnLevel, style: { width: Math.max(deskPinned.length ? 4 : 0, usagePct) + '%' } }),
           ),
           deskPinned.length === 0
             ? h(
                 'div',
                 { style: { padding: '22px 10px 16px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' } },
-                h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } }, bi('桌面空闲 · 当前未向主对话注入任何正文（0 Tokens）', 'Desktop empty · 0 tokens injected to Lead')),
-                h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, bi('仅带钩子的本局线索可供主代理按需拉阅；需要重点强调时可将卷宗摆到这里。', 'Hooked session clues remain pullable on demand; pin high-priority dossiers here.')),
+                h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } }, bi('认知桌面是空的：这里放的资料每轮都会发给主对话（最多 6 份 / 2,400 Tokens）', 'Desktop is empty. Pinned items are sent each turn (up to 6 / 2,400 tokens).')),
+                h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, bi('想让主对话一直记住的资料，可以从本局档案放过来。', 'Pin key notes from Session Vault so the main chat keeps seeing them.')),
                 h('button', {
                   type: 'button',
                   className: 'dnb-pill',
                   onClick: () => switchScope('session'),
-                }, bi('前往本局选档 →', 'Pick from Session Vault →')),
+                }, bi('去本局档案选资料 →', 'Pick from Session Vault →')),
               )
             : h(
                 'div',
@@ -20606,9 +20606,9 @@ window.__ModuleLoader__.load({
                           className: 'dnb-mini-btn',
                           onClick: () => {
                             if (vs === 'precipitated') {
-                              void mutateArchiveApi({ op: 'sealBack', id: it.id, vaultScope: 'precipitated' }, '已封回冷藏库')
+                              void mutateArchiveApi({ op: 'sealBack', id: it.id, vaultScope: 'precipitated' }, '已放回冷藏库')
                             } else {
-                              void mutateArchiveApi({ op: 'unpinFromDesktop', archiveId: it.id, vaultScope: vs }, '已撤回原档案柜')
+                              void mutateArchiveApi({ op: 'unpinFromDesktop', archiveId: it.id, vaultScope: vs }, '已撤下桌面')
                             }
                           },
                         }, '撤出'),
@@ -20634,7 +20634,7 @@ window.__ModuleLoader__.load({
                   },
                 },
                 h('span', { style: { color: '#c4b5fd', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-                  bi(`🫧 待归位 ${watchList.length} 卷（${watchList.slice(0, 2).map(w => w.title).join('、')}）`, `🫧 Pending Organize: ${watchList.length} (${watchList.slice(0, 2).map(w => w.title).join(', ')})`)),
+                  bi(`🫧 刚撤下 ${watchList.length} 份，建议整理一下（${watchList.slice(0, 2).map(w => w.title).join('、')}）`, `🫧 ${watchList.length} unpinned, ready to organize (${watchList.slice(0, 2).map(w => w.title).join(', ')})`)),
                 h('button', {
                   type: 'button',
                   className: 'dnb-mini-btn',
@@ -20657,24 +20657,24 @@ window.__ModuleLoader__.load({
         const stripMeta = activeScope === 'global'
           ? {
               color: '#a855f7',
-              title: bi(`全局档案柜 · ${globalItems.length} 卷`, `Global Vault · ${globalItems.length}`),
+              title: bi(`全局档案 · ${globalItems.length} 份`, `Global Vault · ${globalItems.length}`),
               sub: isBoundSession ? bi(`参谋参阅 ${globalItems.filter(it => it && it.chiefMounted).length}`, `Chief Ref ${globalItems.filter(it => it && it.chiefMounted).length}`) : '',
-              hint: bi('未织钩对参谋与主会话双盲；参谋整理织钩后仅参谋可见钩拉阅（主会话始终 0 泄露）', 'Blind until hooked; Chief pulls on demand (0 leak to Lead)'),
+              hint: bi('跨对话共用的资料。打标签后参谋长可按需查看，不发给主对话。', 'Shared across chats. Chief reads tagged notes on demand; never sent to main chat.'),
             }
           : activeScope === 'precipitated'
             ? {
                 color: '#94a3b8',
-                title: bi(`冷藏档案柜 · ${precipBadgeCount} 卷`, `Cold Vault · ${precipBadgeCount}`),
+                title: bi(`冷藏档案 · ${precipBadgeCount} 份`, `Cold Vault · ${precipBadgeCount}`),
                 sub: flippedSet.size > 0 ? bi(`已置顶 ${flippedSet.size}`, `Pinned ${flippedSet.size}`) : '',
-                hint: bi('100% 人类专属视图（主代理与参谋长均 0 泄露），关键词钩子仅供人类检索', '100% human-only vault (0 leak to Lead or Chief)'),
+                hint: bi('只给你自己看的私密资料，主对话和参谋长都看不到。', 'Private vault for you only. Main chat and Chief never see it.'),
               }
             : {
                 color: '#38bdf8',
-                title: bi(`本局档案柜 · ${sessionItems.length} 卷`, `Session Vault · ${sessionItems.length}`),
+                title: bi(`本局档案 · ${sessionItems.length} 份`, `Session Vault · ${sessionItems.length}`),
                 sub: isBoundSession && sessionItems.some(it => it && it.leadPulled)
                   ? bi(`主拉 ${sessionItems.filter(it => it && it.leadPulled).length}`, `Pulled ${sessionItems.filter(it => it && it.leadPulled).length}`)
                   : '',
-                hint: bi('参谋随时可读；未整理草稿主会话不可见；织钩后主代理见钩可用 archive.pull 拉阅', 'Readable by Chief; Lead sees hooks only for archive.pull'),
+                hint: bi('仅限当前对话的资料。打标签后主对话可按需查看。', 'For this chat only. Main chat can pull tagged notes on demand.'),
               }
 
         const topMenuOpen = openMenuKey === 'vault-top'
@@ -20701,7 +20701,7 @@ window.__ModuleLoader__.load({
               className: 'dnb-icon-btn',
               'data-active': view.archiveSearchOpen ? '1' : '0',
               style: { width: 24, height: 24 },
-              title: bi('筛选与搜索档案', 'Filter & Search Archives'),
+              title: bi('搜索或筛选档案', 'Search or filter archives'),
               onClick: () => patch({ archiveSearchOpen: !view.archiveSearchOpen }),
             }, h(Icon, { name: 'search', size: 13 })),
             activeScope !== 'precipitated'
@@ -20720,7 +20720,7 @@ window.__ModuleLoader__.load({
                 type: 'button',
                 className: 'dnb-icon-btn',
                 style: { width: 24, height: 24 },
-                title: bi('更多档案柜操作', 'More vault actions'),
+                title: bi('更多操作', 'More actions'),
                 onClick: () => setOpenMenuKey(topMenuOpen ? '' : 'vault-top'),
               }, '⋯'),
               topMenuOpen
@@ -20743,13 +20743,13 @@ window.__ModuleLoader__.load({
                                 },
                               })
                             },
-                          }, bi('+ 新建本局卷宗', '+ New Session Dossier')),
+                          }, bi('+ 新建本局档案', '+ New Session Note')),
                           h('button', {
                             type: 'button',
                             className: 'dnb-more-item',
                             disabled: Boolean(view.archiveHarvesting || !isBoundSession),
                             onClick: () => { setOpenMenuKey(''); void harvestArchivesApi('', { vaultScope: 'session' }) },
-                          }, view.archiveHarvesting ? bi('抢救中…', 'Harvesting…') : bi('📥 抢救对话细节', '📥 Harvest Chat Details')),
+                          }, view.archiveHarvesting ? bi('提取中…', 'Extracting…') : bi('📥 从对话里提取档案', '📥 Extract Notes from Chat')),
                           h('button', {
                             type: 'button',
                             className: 'dnb-more-item',
@@ -20759,7 +20759,7 @@ window.__ModuleLoader__.load({
                               const selSessionIds = selectedArchivesList.filter(s => s && s.vaultScope === 'session').map(s => s.id)
                               patch({ distillGlobalModal: { ids: selSessionIds.length > 0 ? selSessionIds : null, instruction: '', clearSource: false } })
                             },
-                          }, bi('✦ 提炼入全局', '✦ Distill to Global')),
+                          }, bi('✦ 整理进全局档案', '✦ Save to Global Vault')),
                           h('div', { className: 'dnb-more-sep' }),
                           h('button', {
                             type: 'button',
@@ -20778,7 +20778,7 @@ window.__ModuleLoader__.load({
                             className: 'dnb-more-item',
                             disabled: nonEmptySessionDrawers.length === 0,
                             onClick: () => { setOpenMenuKey(''); toggleAllSessionDrawers() },
-                          }, anySessionDrawerOpen ? bi('↕ 合上全部抽屉', '↕ Collapse Drawers') : bi('↕ 展开全部抽屉', '↕ Expand Drawers')),
+                          }, anySessionDrawerOpen ? bi('↕ 全部收起', '↕ Collapse All') : bi('↕ 全部展开', '↕ Expand All')),
                         )
                       : activeScope === 'global'
                         ? h(
@@ -20795,7 +20795,7 @@ window.__ModuleLoader__.load({
                                   },
                                 })
                               },
-                            }, bi('+ 新建全局档案', '+ New Global Dossier')),
+                            }, bi('+ 新建全局档案', '+ New Global Note')),
                             h('button', {
                               type: 'button',
                               className: 'dnb-more-item',
@@ -20806,7 +20806,7 @@ window.__ModuleLoader__.load({
                                   precipitateModal: { op: 'cabinet', vaultScope: 'global', cabinetId: '', label: bi('全局档案柜', 'Global Vault'), clearSource: false },
                                 })
                               },
-                            }, bi('🧊 沉淀入冷藏柜', '🧊 Seal into Cold Vault')),
+                            }, bi('🧊 转入冷藏库', '🧊 Move to Cold Vault')),
                             isBoundSession
                               ? h('button', {
                                   type: 'button',
@@ -20816,7 +20816,7 @@ window.__ModuleLoader__.load({
                                     setOpenMenuKey('')
                                     patch({ globalShowLocalOnlyDrawer: !view.globalShowLocalOnlyDrawer })
                                   },
-                                }, `⇄ 本局差分 (${diff.localOnlyCount || 0})`)
+                                }, `⇄ 本局独有 (${diff.localOnlyCount || 0})`)
                               : null,
                             h('div', { className: 'dnb-more-sep' }),
                           )
@@ -20829,7 +20829,7 @@ window.__ModuleLoader__.load({
                         setOpenMenuKey('')
                         patch({ archiveSelectMode: !view.archiveSelectMode })
                       },
-                    }, view.archiveSelectMode ? '✓ 退出批量多选' : '☑️ 批量多选递话'),
+                    }, view.archiveSelectMode ? '✓ 退出多选' : '☑️ 批量选中递话'),
                   )
                 : null,
             ),
@@ -20842,7 +20842,7 @@ window.__ModuleLoader__.load({
         if (!view.archiveSearchOpen) return null
         const cabinets = Array.isArray(view.archiveCabinets) && view.archiveCabinets.length
           ? view.archiveCabinets
-          : [{ id: view.archiveCabinetId || '', name: '默认工作分柜', count: sessionItems.length }]
+          : [{ id: view.archiveCabinetId || '', name: '默认分柜', count: sessionItems.length }]
         const activeCabId = view.archiveCabinetId || (cabinets[0] && cabinets[0].id) || ''
 
         return h(
@@ -20854,7 +20854,7 @@ window.__ModuleLoader__.load({
             h('input', {
               className: 'dnb-input',
               style: { height: 27, borderRadius: 99, padding: '0 10px', fontSize: 11.5 },
-              placeholder: '按标题、关键词钩子筛选…',
+              placeholder: '搜标题或关键词…',
               value: view.archiveQuery || '',
               onChange: e => patch({ archiveQuery: e.target.value }),
             }),
@@ -20996,8 +20996,8 @@ window.__ModuleLoader__.load({
           return h(
             'div',
             { className: 'dnb-group', style: { padding: '20px 14px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' } },
-            h('div', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } }, bi('空白新对话 · 暂未建立本局档案柜', 'Blank Session · Vault Not Created Yet')),
-            h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', maxWidth: 320 } }, bi('发送第一条对话后即自动隔离建柜，避免与历史对话串档。', 'Isolated session vault initializes automatically on first turn.')),
+            h('div', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } }, bi('新对话还没开始，本局档案暂未建立', 'New chat: session vault not created yet')),
+            h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', maxWidth: 320 } }, bi('发第一条消息后会自动建一个独立档案柜，不会和旧对话混在一起。', 'Starts an isolated vault on your first message so chats stay separate.')),
             h(
               'div',
               { style: { display: 'flex', gap: 6, marginTop: 4 } },
@@ -21021,7 +21021,7 @@ window.__ModuleLoader__.load({
                   className: 'dnb-strip-bar',
                   style: { '--dnb-strip-color': '#10b981', marginBottom: 8 },
                 },
-                h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi(`有 ${tempNotes.length} 篇本轮便签待入柜`, `${tempNotes.length} temp notes ready to store`)),
+                h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi(`有 ${tempNotes.length} 条临时便签可以存入档案`, `${tempNotes.length} temp notes ready to save`)),
                 h('button', {
                   type: 'button',
                   className: 'dnb-mini-btn',
@@ -21030,7 +21030,7 @@ window.__ModuleLoader__.load({
                     patch({ archiveSweeping: true })
                     try {
                       const noteIds = tempNotes.map(n => n && n.id).filter(Boolean)
-                      await mutateArchiveApi({ op: 'precipitateNotes', vaultScope: 'session', noteIds }, bi('已收纳入本局档案柜', 'Stored in Session Vault'))
+                      await mutateArchiveApi({ op: 'precipitateNotes', vaultScope: 'session', noteIds }, bi('已存进本局档案', 'Saved to Session Vault'))
                     } finally {
                       patch({ archiveSweeping: false })
                     }
@@ -21044,7 +21044,7 @@ window.__ModuleLoader__.load({
               ? h(
                   'div',
                   { className: 'dnb-empty' },
-                  query || clipFilter !== 'all' ? bi('没有匹配的卷宗', 'No matching dossiers') : bi('本局档案柜暂空（点右上 ⋯ 新建卷宗或抢救细节）', 'Session vault empty (click ⋯ above to add or harvest)'),
+                  query || clipFilter !== 'all' ? bi('没有找到匹配的档案', 'No matching notes') : bi('本局档案还是空的。点右上角 ⋯ 可以新建，或从对话里提取。', 'Session vault is empty. Click ⋯ above to add or extract notes.'),
                 )
               : h(
                   React.Fragment,
@@ -21102,8 +21102,8 @@ window.__ModuleLoader__.load({
           return h(
             'div',
             { className: 'dnb-group', style: { padding: '18px 14px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 8, alignItems: 'center' } },
-            h('div', { style: { fontSize: 12.5, fontWeight: 600, color: '#f59e0b' } }, '宿主内存模块版本偏旧，请重启 DSH 后访问独立全局库'),
-            h('button', { type: 'button', className: 'dnb-pill', onClick: () => void loadArchives(true, '', 'global') }, '重新检测'),
+            h('div', { style: { fontSize: 12.5, fontWeight: 600, color: '#f59e0b' } }, '系统版本较旧，请重启 DSH 后再看全局档案'),
+            h('button', { type: 'button', className: 'dnb-pill', onClick: () => void loadArchives(true, '', 'global') }, '重试'),
           )
         }
 
@@ -21135,7 +21135,7 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 11.5, color: 'var(--dnb-text-2)' } },
-                  h('span', null, `本局尚有 ${localBriefs.length} 卷可推入全局`),
+                  h('span', null, `本局还有 ${localBriefs.length} 份可以存到全局`),
                   h('button', {
                     type: 'button',
                     className: 'dnb-icon-btn',
@@ -21151,16 +21151,16 @@ window.__ModuleLoader__.load({
                     h('button', {
                       type: 'button',
                       className: 'dnb-mini-btn',
-                      onClick: () => void mutateArchiveApi({ op: 'copyToGlobal', archiveId: b.id, vaultScope: 'session' }, '已推送存入全局'),
-                    }, b.diffStatus === 'local_modified' ? '覆盖全局' : '推入全局'),
+                      onClick: () => void mutateArchiveApi({ op: 'copyToGlobal', archiveId: b.id, vaultScope: 'session' }, '已存到全局档案'),
+                    }, b.diffStatus === 'local_modified' ? '更新全局版本' : '存到全局'),
                   ),
                 ),
               )
             : null,
           view.archiveLoading && !view.globalVaultLoaded
-            ? h('div', { className: 'dnb-empty' }, bi('正在读取全局档案柜…', 'Loading global vault…'))
+            ? h('div', { className: 'dnb-empty' }, bi('正在加载全局档案…', 'Loading global vault…'))
             : nonEmptyG.length === 0
-              ? h('div', { className: 'dnb-empty' }, globalItems.length === 0 ? bi('全局档案柜暂空（从本局可提炼或新建）', 'Global vault empty (distill from session or add new)') : bi('没有匹配的全局档案', 'No matching global dossiers'))
+              ? h('div', { className: 'dnb-empty' }, globalItems.length === 0 ? bi('全局档案还是空的。可以从本局整理进来，或直接新建。', 'Global vault is empty. Save notes from a session or add one.') : bi('没有找到匹配的全局档案', 'No matching global notes'))
               : nonEmptyG.map(gf => {
                   const fItems = gByFolder.get(gf.id) || []
                   const gKey = 'global:' + gf.id
@@ -21181,7 +21181,7 @@ window.__ModuleLoader__.load({
                         cabinetId: '',
                         folder: gf.id,
                         ids: fItems.map(x => x.id),
-                        label: `全局抽屉「${gf.label}」(${fItems.length} 卷)`,
+                        label: `全局抽屉「${gf.label}」(${fItems.length} 份)`,
                         clearSource: false,
                       },
                     }),
@@ -21205,11 +21205,11 @@ window.__ModuleLoader__.load({
         const pFolderDefs = Array.isArray(view.precipitatedFolders) && view.precipitatedFolders.length
           ? view.precipitatedFolders
           : [
-              { id: 'coords', label: '工程坐标与路径', hint: '核心入口/脚本/端口', accent: '#38bdf8' },
-              { id: 'incidents', label: '排障实录与踩坑', hint: '高频异常与根因定位', accent: '#f59e0b' },
-              { id: 'contracts', label: '架构契约与规范', hint: '接口契约/安全边界', accent: '#a855f7' },
-              { id: 'ops', label: '通用运维经验', hint: '常用工程最佳实践', accent: '#10b981' },
-              { id: 'plans', label: '阶段蓝图归档', hint: '历史阶段里程碑', accent: '#64748b' },
+              { id: 'coords', label: '项目入口与路径', hint: '常用入口、脚本和端口', accent: '#38bdf8' },
+              { id: 'incidents', label: '踩坑与排查记录', hint: '常见问题和原因', accent: '#f59e0b' },
+              { id: 'contracts', label: '接口与规则约定', hint: '接口说明和安全要求', accent: '#a855f7' },
+              { id: 'ops', label: '日常操作经验', hint: '常用的好做法', accent: '#10b981' },
+              { id: 'plans', label: '旧版方案记录', hint: '过去的阶段规划', accent: '#64748b' },
             ]
         const pByFolder = new Map()
         for (const pf of pFolderDefs) pByFolder.set(pf.id, [])
@@ -21230,7 +21230,7 @@ window.__ModuleLoader__.load({
           renderVaultStripBar(),
           renderSearchAndFilterStrip(),
           filteredPrecip.length === 0
-            ? h('div', { className: 'dnb-empty' }, precipList.length === 0 ? bi('冷藏档案柜暂空（从全局柜可沉淀跨工程通用经验）', 'Cold vault empty (seal reusable experience from Global Vault)') : bi('没有匹配的冷藏条目', 'No matching cold entries'))
+            ? h('div', { className: 'dnb-empty' }, precipList.length === 0 ? bi('冷藏库还是空的。可以把全局档案里长期不改的经验转到这里。', 'Cold vault is empty. Move long-term notes here from Global Vault.') : bi('没有找到匹配的冷藏档案', 'No matching cold notes'))
             : nonEmptyDrawers.map(pf => {
                 const fItems = pByFolder.get(pf.id) || []
                 const isDrawerOpen = !(view.precipOpenDrawers && view.precipOpenDrawers[pf.id] === false)
@@ -21264,7 +21264,7 @@ window.__ModuleLoader__.load({
         // Clean 4-Tab Vault Segmented Bar (`📌 桌面 | 🗂️ 本局 | 🌐 全局 | 🧊 冷藏`)
         h(
           'div',
-          { className: 'dnb-vault-seg', role: 'tablist', 'aria-label': bi('桌面与三层档案柜', 'Desktop & Three-Tier Vaults') },
+          { className: 'dnb-vault-seg', role: 'tablist', 'aria-label': bi('桌面和三类档案柜', 'Desktop and Archive Vaults') },
           [
             { key: 'desktop', label: bi('📌 桌面', '📌 Desk'), count: deskPinned.length },
             { key: 'session', label: bi('🗂️ 本局', '🗂️ Session'), count: sessionBadgeCount },
@@ -21334,11 +21334,11 @@ window.__ModuleLoader__.load({
 
 
     const WALL_TYPE_META = {
-      forbid_cmd: { label: '🚫 禁跑命令', placeholder: '输入命令关键字或正则（如 npm publish、git push --force）…' },
-      forbid_path: { label: '🚧 禁碰路径', placeholder: '输入禁止读写目录或文件（如 .github/workflows、DSHGuard）…' },
-      restrict_write: { label: '🔐 仅限某目录可写', placeholder: '输入唯一允许写入的白名单目录绝对/相对路径…' },
-      require_approval_cmd: { label: '🛡️ 高危命令先请示', placeholder: '输入需强制拦停审批的命令特征（如 prisma migrate）…' },
-      deny_tool: { label: '⛔ 禁用工具', placeholder: '输入禁用的工具名（如 run_command、write_file）…' },
+      forbid_cmd: { label: '🚫 禁跑命令', placeholder: '输入禁跑的命令关键词（如 npm publish、git push --force）…' },
+      forbid_path: { label: '🚧 禁碰路径', placeholder: '输入禁止读写的文件夹或文件（如 .github/workflows、DSHGuard）…' },
+      restrict_write: { label: '🔐 仅限某目录可写', placeholder: '输入唯一允许写入的文件夹路径…' },
+      require_approval_cmd: { label: '🛡️ 高危命令先请示', placeholder: '输入运行前要先问你的命令（如 prisma migrate）…' },
+      deny_tool: { label: '⛔ 禁用工具', placeholder: '输入要禁用的工具名（如 run_command、write_file）…' },
     }
 
     function GuardWallsCard({ view }) {
@@ -21386,10 +21386,10 @@ window.__ModuleLoader__.load({
           onToggle: () => patch({ wallCollapsed: !collapsed }),
           className: 'dnb-wall-box',
           icon: h(Icon, { name: 'shieldSentinel', size: 13.5, style: { color: activeCount > 0 ? '#ef4444' : '#f87171', flexShrink: 0 } }),
-          title: bi('物理驻墙 · 事前硬拦截', 'Guard Wall · Pre-Tool Hard Block'),
+          title: bi('物理驻墙 · 执行前拦截', 'Guard Wall · Pre-Tool Block'),
           preview: walls.length
             ? `${activeCount} ${bi('生效', 'active')} · ${walls.slice(0, 2).map(w => w.title).join(bi('、', ', '))}`
-            : bi('全会话工具前拦截物理哨兵就绪', 'Session-wide pre-tool physical sentinel ready'),
+            : bi('物理驻墙：在模型运行工具前直接拦下危险操作', 'Blocks risky tool calls before they run'),
           bodyStyle: { padding: 0 },
           badges: h(
             'span',
@@ -21410,7 +21410,7 @@ window.__ModuleLoader__.load({
                 const nextOpen = !formOpen
                 patch({ wallFormOpen: nextOpen, ...(nextOpen ? { wallCollapsed: false } : {}) })
               },
-            }, formOpen ? '收起表单' : '+ 驻墙'),
+            }, formOpen ? '收起' : '+ 加规则'),
             h(
               'div',
               { className: 'dnb-more-wrap' },
@@ -21419,7 +21419,7 @@ window.__ModuleLoader__.load({
                 className: 'dnb-pill',
                 style: { height: 22, padding: '0 7px', fontSize: 10.5 },
                 'data-active': wallMenuOpen ? '1' : '0',
-                title: '更多筑墙与合并操作',
+                title: '更多规则与合并操作',
                 onClick: e => {
                   e.stopPropagation()
                   setWallMenuOpen(v => !v)
@@ -21433,7 +21433,7 @@ window.__ModuleLoader__.load({
                       type: 'button',
                       className: 'dnb-more-item',
                       disabled: view.secBusy,
-                      title: '让参谋长按你的大白话帮你手搓物理驻墙规则并发起一键落锁确认',
+                      title: '让参谋长按项目情况帮你写规则，确认后生效',
                       onClick: () => {
                         setWallMenuOpen(false)
                         void submitChiefBar(
@@ -21441,13 +21441,13 @@ window.__ModuleLoader__.load({
                           'craft_wall',
                         )
                       },
-                    }, h('span', null, view.secBusy && view.chiefQuickAction === 'craft_wall' ? '⏳ 正在手搓筑墙…' : '✨ 参谋手搓筑墙')),
+                    }, h('span', null, view.secBusy && view.chiefQuickAction === 'craft_wall' ? '⏳ 生成规则中…' : '✨ 让参谋长写规则')),
                     selectedIds.length >= 2
                       ? h('button', {
                           type: 'button',
                           className: 'dnb-more-item',
                           'data-danger': '1',
-                          title: '合并已勾选的同类型物理驻墙（若误选了不同拦截类型会弹出错误提醒阻止合并）',
+                          title: '把勾选的同类型规则合为一条',
                           onClick: () => {
                             setWallMenuOpen(false)
                             void mergeGuardWallsApi({ wallIds: selectedIds })
@@ -21457,7 +21457,7 @@ window.__ModuleLoader__.load({
                           ? h('button', {
                               type: 'button',
                               className: 'dnb-more-item',
-                              title: '仅按相同拦截类型自动合并多堵同类物理驻墙（禁碰路径只和禁碰路径合并，绝不跨类混并）',
+                              title: '按类型自动合并重复规则，不同类型不混并',
                               onClick: () => {
                                 setWallMenuOpen(false)
                                 void mergeGuardWallsApi({ autoGroup: true })
@@ -21500,7 +21500,7 @@ window.__ModuleLoader__.load({
                 h('input', {
                   className: 'dnb-input',
                   style: { flex: '1 1 140px', height: 28, fontSize: 11.5 },
-                  placeholder: '物理墙名称（如：锁死生产发布 / 保护核心配置）',
+                  placeholder: '给规则起个名（如：禁止发布到生产 / 保护配置）',
                   value: draftTitle,
                   onChange: e => patch({ wallDraftTitle: e.target.value }),
                 }),
@@ -21519,7 +21519,7 @@ window.__ModuleLoader__.load({
               h('input', {
                 className: 'dnb-input',
                 style: { height: 28, fontSize: 11.5 },
-                placeholder: (WALL_TYPE_META[draftField] && WALL_TYPE_META[draftField].placeholder) || '输入匹配规则（多项可用逗号分隔）',
+                placeholder: (WALL_TYPE_META[draftField] && WALL_TYPE_META[draftField].placeholder) || '输入拦截内容，多个用逗号隔开',
                 value: draftPattern,
                 onChange: e => patch({ wallDraftPattern: e.target.value }),
                 onKeyDown: e => { if (e.key === 'Enter') submitNewWall() },
@@ -21549,7 +21549,7 @@ window.__ModuleLoader__.load({
                   style: { height: 26, padding: '0 10px', fontSize: 11 },
                   disabled: !draftTitle.trim() || !draftPattern.trim() || view.busy,
                   onClick: submitNewWall,
-                }, '🧱 立即驻防落锁'),
+                }, '🧱 保存并启用'),
               ),
             )
           : null,
@@ -21570,7 +21570,7 @@ window.__ModuleLoader__.load({
                     h('span', { style: { fontSize: 12, fontWeight: 600, color: w.activeNow ? 'var(--dnb-text)' : 'var(--dnb-text-2)' } }, w.title),
                     h('span', { className: 'dnb-tag', style: { fontSize: 10 } }, typeMeta.label),
                     w.source === 'chief_crafted'
-                      ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: 'var(--dnb-accent)' } }, '参谋手搓')
+                      ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: 'var(--dnb-accent)' } }, '参谋生成')
                       : null,
                   ),
                   h(
@@ -21581,7 +21581,7 @@ window.__ModuleLoader__.load({
                           type: 'button',
                           className: 'dnb-bound-check',
                           'data-checked': isChecked ? '1' : '0',
-                          title: isChecked ? '已勾选，可点击「合并所选」与同类型物理墙合并' : '勾选以合并多条同类型物理驻墙（禁跨类型合并）',
+                          title: isChecked ? '已勾选，点右上角合并同类规则' : '勾选几条同类规则，可合并成一条',
                           onClick: () => toggleGuardWallSelect(w.id),
                         }, h(Icon, { name: 'check', size: 10.5 }))
                       : null,
@@ -21589,7 +21589,7 @@ window.__ModuleLoader__.load({
                       type: 'button',
                       className: 'dnb-icon-btn',
                       style: { width: 20, height: 20, flexShrink: 0, color: 'var(--dnb-text-3)' },
-                      title: '人工拆除该物理墙（AI 模型无权调用拆除）',
+                      title: '删除这条规则（AI 无法自己删）',
                       onClick: () => void removeGuardWallApi(w.id),
                     }, h(Icon, { name: 'x', size: 11 })),
                   ),
@@ -21626,7 +21626,7 @@ window.__ModuleLoader__.load({
           : h(
               'div',
               { style: { padding: '10px 12px', fontSize: 11, color: 'var(--dnb-text-3)' } },
-              '尚未手动筑墙。全会话工具前拦截物理哨兵已就绪，点击右上角「+ 驻墙」或让参谋长手搓一条即可全对话随身生效。',
+              '还没有自定义拦截规则。点右上角「+ 加规则」自己加一条，或让参谋长帮你写一条。',
             ),
       )
     }
@@ -21682,13 +21682,13 @@ window.__ModuleLoader__.load({
           onToggle: toggleColCollapsed,
           accentColor: dot,
           title: uiLabel,
-          headTitle: isColCollapsed ? bi(`点击拉开【${uiLabel}】`, `Expand ${uiLabel}`) : bi(`点击收起【${uiLabel}】`, `Collapse ${uiLabel}`),
+          headTitle: isColCollapsed ? bi(`展开「${uiLabel}」`, `Expand ${uiLabel}`) : bi(`收起「${uiLabel}」`, `Collapse ${uiLabel}`),
           icon: h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: dot, flexShrink: 0 } }),
           count: list.length ? String(list.length) : '',
           badges: pinnedCountInCol > 0
             ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, `📌${pinnedCountInCol}`)
             : null,
-          preview: list.length ? list.slice(0, 2).join('；') : '尚未添加规则',
+          preview: list.length ? list.slice(0, 2).join('；') : '还没有规则',
           bodyStyle: { padding: 0 },
           actions: list.length >= 2
             ? h('button', {
@@ -21704,14 +21704,14 @@ window.__ModuleLoader__.load({
                 },
                 disabled: Boolean(store.secBusy),
                 title: selected.length >= 2
-                  ? `请参谋长将勾选的 ${selected.length} 条零散规则总结成一条`
-                  : `请参谋长将【${label}】下的 ${list.length} 条零散规则浓缩总结成一条`,
+                  ? `把勾选的 ${selected.length} 条规则合并成一条`
+                  : `把「${label}」下的 ${list.length} 条规则精简成一条`,
                 onClick: () => void requestConsolidateBounds(field, selected.length >= 2 ? selected : []),
               },
               h(Icon, { name: 'sparkles', size: 10.5 }),
               isConsolidatingCol
-                ? '浓缩中…'
-                : (selected.length >= 2 ? `${selected.length} 条合一` : '总结成一条'))
+                ? '整理中…'
+                : (selected.length >= 2 ? `合并 ${selected.length} 条` : '合并为一条'))
             : null,
         },
         list.map((item, idx) => {
@@ -21735,8 +21735,8 @@ window.__ModuleLoader__.load({
               className: 'dnb-pin-stamp',
               'data-pinned': isPinned ? '1' : '0',
               title: isPinned
-                ? '📌 已定住（全局跨任务共享）· 点击取下图钉改为仅本任务有效'
-                : '仅当前任务生效 · 点击盖上小图钉定住为全局共享',
+                ? '已固定到全局，点一下改回仅本次有效'
+                : '仅本次有效，点一下固定到全局',
               onClick: () => void toggleBoundPin(field, item, !isPinned),
             }, h(Icon, { name: 'pinStamp', size: 13 })),
 
@@ -21783,7 +21783,7 @@ window.__ModuleLoader__.load({
                 ? h('button', {
                     className: 'dnb-bound-check',
                     'data-checked': isChecked ? '1' : '0',
-                    title: isChecked ? '已选入待合并零散边界' : '勾选以挑出多条零散边界合并成一条',
+                    title: isChecked ? '已勾选，可合并成一条' : '勾选多条规则后合并成一条',
                     onClick: () => toggleBoundSelect(field, item),
                   }, h(Icon, { name: 'check', size: 10.5 }))
                 : null,
@@ -21791,7 +21791,7 @@ window.__ModuleLoader__.load({
                 ? h('button', {
                     className: 'dnb-icon-btn dnb-row-actions',
                     style: { width: 22, height: 22 },
-                    title: '编辑条文',
+                    title: '编辑',
                     onClick: () => {
                       setEditingItem(item)
                       setEditingVal(item)
@@ -21801,7 +21801,7 @@ window.__ModuleLoader__.load({
               h('button', {
                 className: 'dnb-icon-btn dnb-row-actions',
                 style: { width: 22, height: 22, color: '#ff453a' },
-                title: '删除此条边界',
+                title: '删除这条规则',
                 onClick: () => void removeBoundRule(field, item),
               }, h(Icon, { name: 'x', size: 12 })),
             ),
@@ -21813,7 +21813,7 @@ window.__ModuleLoader__.load({
           h('button', {
             className: 'dnb-pin-stamp',
             'data-pinned': pinDraft ? '1' : '0',
-            title: pinDraft ? '📌 新增时直接定住为全局共享（点击切换为仅本任务）' : '新增时仅本任务有效（点击小图钉切换为全局共享）',
+            title: pinDraft ? '新规则会固定到全局（点图钉切换）' : '新规则仅本次有效（点图钉固定）',
             onClick: () => patch({ boundPinDraft: { ...(store.boundPinDraft || {}), [field]: !pinDraft } }),
           }, h(Icon, { name: 'pinStamp', size: 12.5 })),
           h('input', {
@@ -21821,7 +21821,7 @@ window.__ModuleLoader__.load({
             style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1 },
             placeholder: full
               ? '已达上限'
-              : (pinDraft ? '添加全局共享规则（跨任务生效）…' : '添加当前任务规则（点左侧图钉可定住全局）…'),
+              : (pinDraft ? '输入全局规则（所有任务都生效）…' : '输入本任务规则（点左边图钉可固定到全局）…'),
             disabled: full,
             value: draft,
             onChange: e => patch({ boundDraft: { ...store.boundDraft, [field]: e.target.value } }),
@@ -21832,7 +21832,7 @@ window.__ModuleLoader__.load({
                 className: 'dnb-pill dnb-pill-accent',
                 style: { height: 24 },
                 onClick: commit,
-              }, pinDraft ? '📌 定住添加' : '添加')
+              }, pinDraft ? '📌 固定添加' : '添加')
             : null,
         ),
       )
@@ -21885,8 +21885,8 @@ window.__ModuleLoader__.load({
             {
               style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 },
               title: bi(
-                `当前已定住 ${totalPinnedCount} 条全局共享边界（点击每条规则前的小图钉即可跨任务固定）`,
-                `${totalPinnedCount} pinned global boundaries (click the pin icon on any rule to persist across tasks)`,
+                `已固定 ${totalPinnedCount} 条全局规则（点图钉切换）`,
+                `${totalPinnedCount} global rules pinned (click pin to toggle)`,
               ),
             },
             h('span', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } }, bi('红线边界', 'Redlines & Bounds')),
@@ -21901,7 +21901,7 @@ window.__ModuleLoader__.load({
               className: 'dnb-pill',
               style: { height: 25, padding: '0 9px', fontSize: 11 },
               disabled: view.secBusy,
-              title: '让 DSH 参谋长结合当前撞墙记录与会话纪律提炼新边界，并发起请示供你拍板',
+              title: '让参谋长根据本次踩坑整理出新规则',
               onClick: () => {
                 void submitChiefBar(
                   '请结合当前会话的踩坑撞墙记录、工具权限约束与工作约定，简明分点总结工作边界，并务必完整填入 JSON 的 boundProposals 数组向我发起边界注入请示（若提到具体条文请每条都放进 boundProposals）。',
@@ -21917,7 +21917,7 @@ window.__ModuleLoader__.load({
                 className: 'dnb-pill',
                 style: { height: 25, padding: '0 7px', fontSize: 11 },
                 'data-active': view.boundMoreMenuOpen ? '1' : '0',
-                title: '更多边界维护选项',
+                title: '更多规则操作',
                 onClick: () => patch({ boundMoreMenuOpen: !view.boundMoreMenuOpen }),
               }, '⋯'),
               view.boundMoreMenuOpen
@@ -21931,18 +21931,18 @@ window.__ModuleLoader__.load({
                         patch({ boundMoreMenuOpen: false })
                         toggleAllBoundSections()
                       },
-                    }, h('span', null, allSectionsCollapsed ? '↕ 展开全部分组' : '↕ 收起全部分组')),
+                    }, h('span', null, allSectionsCollapsed ? '↕ 全部展开' : '↕ 全部收起')),
                     hasConsolidatableCol
                       ? h('button', {
                           type: 'button',
                           className: 'dnb-more-item',
                           disabled: view.secBusy,
-                          title: '请 DSH 参谋长把当前零散、重复的多条重要边界浓缩合并成一条高密度总则',
+                          title: '让参谋长把零散、重复的规则合并精简',
                           onClick: () => {
                             patch({ boundMoreMenuOpen: false })
                             void requestConsolidateBounds('', [])
                           },
-                        }, h('span', null, view.boundConsolidating === 'all' ? '浓缩中…' : '✦ 零散总结成一条'))
+                        }, h('span', null, view.boundConsolidating === 'all' ? '整理中…' : '✦ 全部精简合并'))
                       : null,
                   )
                 : null,
@@ -21966,7 +21966,7 @@ window.__ModuleLoader__.load({
           {
             open: showEnv,
             onToggle: () => setShowEnv(v => !v),
-            title: bi('运行环境信息', 'Runtime Environment'),
+            title: bi('运行环境', 'Runtime Info'),
             count: rows.length ? String(rows.length) : '',
             preview: info.workspaceRoot || info.sessionWorkingDirectory || info.workingDirectory || '',
             bodyStyle: { padding: 0 },
@@ -22072,14 +22072,14 @@ window.__ModuleLoader__.load({
               style: { padding: '3px 10px', fontSize: 11.5 },
               'data-active': subTab === 'digest' ? '1' : '0',
               onClick: () => patch({ secSubTab: 'digest' }),
-            }, bi('摘要', 'Digest')),
+            }, bi('摘要', 'Summary')),
             h('button', {
               type: 'button',
               className: 'dnb-seg-btn',
               style: { padding: '3px 10px', fontSize: 11.5 },
               'data-active': subTab !== 'digest' ? '1' : '0',
               onClick: () => patch({ secSubTab: 'facts' }),
-            }, bi('纪律与条目', 'Disciplines & Facts'), facts.length ? h('span', { className: 'dnb-seg-dot' }, String(facts.length)) : null),
+            }, bi('长期规矩', 'Long-Term Rules'), facts.length ? h('span', { className: 'dnb-seg-dot' }, String(facts.length)) : null),
           ),
           subTab === 'digest'
             ? (() => {
@@ -22097,14 +22097,14 @@ window.__ModuleLoader__.load({
                     sessionId: view.sessionId,
                   })
                   if (copyOnly) {
-                    copyText(md, bi('📋 复盘战报 Markdown 已复制到剪贴板', '📋 Retrospective Markdown copied'))
+                    copyText(md, bi('📋 复盘报告已复制到剪贴板', '📋 Report copied to clipboard'))
                     return
                   }
                   const dl = downloadSessionReportMarkdown(md, view.sessionId)
                   if (dl && dl.ok) {
-                    patch({ notice: bi('📄 已导出复盘战报：', '📄 Exported report: ') + dl.filename })
+                    patch({ notice: bi('📄 已导出复盘报告：', '📄 Exported report: ') + dl.filename })
                   } else {
-                    copyText(md, bi('📄 复盘战报 Markdown 已复制到剪贴板', '📋 Retrospective Markdown copied'))
+                    copyText(md, bi('📄 复盘报告已复制到剪贴板', '📋 Report copied to clipboard'))
                   }
                 }
                 const nextLangPref = () => {
@@ -22119,7 +22119,7 @@ window.__ModuleLoader__.load({
                     className: 'dnb-pill',
                     style: { height: 25, padding: '0 9px', fontSize: 11, gap: 4 },
                     disabled: Boolean(view.secBusy),
-                    title: bi('向参谋长咨询当前局势与可行建议（无建议或超出能力范围会直接说明，不强行凑执行）', 'Consult Chief on current situation & next advice'),
+                    title: bi('问问参谋长现在进展顺不顺、卡在哪、接下来怎么走', 'Ask Chief how things are going, what is blocked, and what to do next'),
                     onClick: () => void submitChiefBar(
                       '请结合当前任务进展、对话上下文、边界红线与团队状态，给我坦诚、接地气的参谋建议：当前有什么需要关注的卡点或更好的推进方向？若一切顺利暂无建议，或涉及非参谋与会话能处理的事项，直接实话告诉我即可，不要强行凑执行项。',
                       'consult_chief',
@@ -22138,14 +22138,14 @@ window.__ModuleLoader__.load({
                     },
                     disabled: view.secRegenerating || narrative.summarizing,
                     title: narrative.hasUnsummarizedChanges
-                      ? bi('上下文有新进展，点击让参谋长按需提炼最新摘要（平时后台不空转耗费 Token）', 'New context changes detected; click to refresh digest on demand')
-                      : bi('立即让参谋长提炼结构化摘要', 'Refresh structured digest now'),
+                      ? bi('对话有了新内容，点这里更新摘要（平时不后台自动跑，省 Token）', 'New chat updates found. Click to update the summary without extra background cost.')
+                      : bi('让参谋长重新整理一份最新摘要', 'Update the summary now'),
                     onClick: () => void loadChiefView(true, { syncHandoff: !isHandoffPinned && syncOnDigest }),
                   },
                     (view.secRegenerating || narrative.summarizing)
                       ? h(Icon, { name: 'refresh', size: 11, style: { animation: 'dnb-spin 0.9s linear infinite' } })
                       : h(Icon, { name: 'sparkles', size: 11 }),
-                    (view.secRegenerating || narrative.summarizing) ? bi('提炼中…', 'Distilling…') : bi('提炼摘要', 'Distill'),
+                    (view.secRegenerating || narrative.summarizing) ? bi('整理中…', 'Updating…') : bi('更新摘要', 'Update Summary'),
                     (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
                       ? h('span', {
                           style: {
@@ -22166,7 +22166,7 @@ window.__ModuleLoader__.load({
                       className: 'dnb-pill',
                       style: { height: 25, padding: '0 7px', fontSize: 11 },
                       'data-active': view.chiefMoreMenuOpen ? '1' : '0',
-                      title: bi('战报导出、交接同步与语言切换', 'Report export, handoff sync & language'),
+                      title: bi('导出报告、更新交接单或切换语言', 'Export report, sync handoff, or switch language'),
                       onClick: () => patch({ chiefMoreMenuOpen: !view.chiefMoreMenuOpen }),
                     }, '⋯'),
                     view.chiefMoreMenuOpen
@@ -22180,7 +22180,7 @@ window.__ModuleLoader__.load({
                               patch({ chiefMoreMenuOpen: false })
                               exportReport(false)
                             },
-                          }, h('span', null, bi('📄 导出复盘战报 (.md)', '📄 Export Report (.md)'))),
+                          }, h('span', null, bi('📄 导出复盘报告 (.md)', '📄 Export Report (.md)'))),
                           h('button', {
                             type: 'button',
                             className: 'dnb-more-item',
@@ -22188,7 +22188,7 @@ window.__ModuleLoader__.load({
                               patch({ chiefMoreMenuOpen: false })
                               exportReport(true)
                             },
-                          }, h('span', null, bi('📋 复制复盘战报 Markdown', '📋 Copy Markdown Report'))),
+                          }, h('span', null, bi('📋 复制复盘报告 (Markdown)', '📋 Copy Report (Markdown)'))),
                           h('div', { className: 'dnb-more-sep' }),
                           h('button', {
                             type: 'button',
@@ -22196,26 +22196,26 @@ window.__ModuleLoader__.load({
                             'data-active': (!isHandoffPinned && syncOnDigest) ? '1' : '0',
                             disabled: isHandoffPinned,
                             title: isHandoffPinned
-                              ? bi('交接单已被人类定住锁定，参谋长不可覆盖', 'Handoff pinned by human; locked against auto-overwrite')
-                              : bi('开启后，点击「提炼摘要」完成时会自动一键同步更新交接单', 'Auto-sync handoff packet after digest distillation'),
+                              ? bi('交接单已被你定住防改，参谋长不会覆盖它', 'Handoff is pinned by you, so Chief will not overwrite it.')
+                              : bi('开启后，每次更新摘要时都会顺便更新交接单', 'Update the handoff card automatically whenever you refresh the summary.'),
                             onClick: () => {
                               patch({ chiefMoreMenuOpen: false })
                               void toggleSyncHandoffOnDigest(!syncOnDigest)
                             },
                           },
-                            h('span', null, isHandoffPinned ? bi('🔒 交接已定住', '🔒 Handoff Pinned') : bi('提炼时自动同步交接单', 'Auto-sync handoff on distill')),
+                            h('span', null, isHandoffPinned ? bi('🔒 交接单已定住', '🔒 Handoff Pinned') : bi('更新摘要时同步交接单', 'Auto-sync handoff on update')),
                             h('span', { style: { fontSize: 10.5, opacity: 0.78 } }, isHandoffPinned ? bi('锁定', 'Locked') : (syncOnDigest ? bi('开', 'On') : bi('关', 'Off'))),
                           ),
                           h('button', {
                             type: 'button',
                             className: 'dnb-more-item',
                             disabled: isHandoffPinned || view.secRegenerating || narrative.summarizing,
-                            title: isHandoffPinned ? bi('交接单已被人类定住，无法一键同步覆盖', 'Handoff is pinned') : bi('将当前参谋摘要与态势一键写入交接单', 'Write current digest to handoff'),
+                            title: isHandoffPinned ? bi('交接单已定住防改，不能覆盖', 'Handoff is pinned and cannot be overwritten.') : bi('把当前摘要写进交接单', 'Copy the current summary into the handoff card'),
                             onClick: () => {
                               patch({ chiefMoreMenuOpen: false })
                               void loadChiefView(false, { syncHandoff: true })
                             },
-                          }, h('span', null, isHandoffPinned ? bi('🔒 交接已定住', '🔒 Handoff Pinned') : bi('↪ 立即更新交接单', '↪ Sync Handoff Now'))),
+                          }, h('span', null, isHandoffPinned ? bi('🔒 交接单已定住', '🔒 Handoff Pinned') : bi('↪ 立即更新交接单', '↪ Sync Handoff Now'))),
                           h('div', { className: 'dnb-more-sep' }),
                           h('button', {
                             type: 'button',
@@ -22240,11 +22240,11 @@ window.__ModuleLoader__.load({
         subTab === 'digest'
           ? (() => {
               const digestStatusText = (narrative.summarizing || view.secRegenerating)
-                ? bi('正在提炼最新上下文…', 'Distilling latest context…')
+                ? bi('正在整理最新进展…', 'Updating summary…')
                 : narrative.isLiveZeroToken
-                  ? bi('实时看板速览 · 零 Token', 'Live board overview · 0 tokens')
-                  : ((narrative.at ? bi('更新于 ', 'Updated ') + relativeTimeLabel(narrative.at) : bi('已提炼', 'Distilled'))
-                      + (narrative.hasUnsummarizedChanges ? bi(' · 有新进展待提炼', ' · New updates') : ''))
+                  ? bi('实时状态（不额外耗 Token）', 'Live overview (no extra tokens)')
+                  : ((narrative.at ? bi('更新于 ', 'Updated ') + relativeTimeLabel(narrative.at) : bi('已更新', 'Updated'))
+                      + (narrative.hasUnsummarizedChanges ? bi(' · 有新进展', ' · New updates') : ''))
               const digestPreview = sixGoalRows && sixGoalRows[0]
                 ? clampTitle(sixGoalRows[0].body, 28)
                 : digestStatusText
@@ -22262,8 +22262,8 @@ window.__ModuleLoader__.load({
                   {
                     open: !view.chiefDigestCollapsed,
                     onToggle: () => patch({ chiefDigestCollapsed: !view.chiefDigestCollapsed }),
-                    title: useSixBriefCards ? bi('⚡ 极简目标战报', '⚡ Concise Goal Brief') : bi('态势摘要', 'Situation Digest'),
-                    headTitle: view.chiefDigestCollapsed ? bi('点击拉起态势摘要', 'Expand situation digest') : bi('点击收起态势摘要', 'Collapse situation digest'),
+                    title: useSixBriefCards ? bi('⚡ 极简目标汇报', '⚡ Brief Goal Summary') : bi('当前进展摘要', 'Current Summary'),
+                    headTitle: view.chiefDigestCollapsed ? bi('点击展开摘要', 'Click to expand summary') : bi('点击收起摘要', 'Click to collapse summary'),
                     preview: digestPreview,
                     headerExtra: !view.chiefDigestCollapsed
                       ? h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', whiteSpace: 'nowrap' } }, digestStatusText)
@@ -22282,7 +22282,7 @@ window.__ModuleLoader__.load({
                             type: 'button',
                             className: 'dnb-acc-badge',
                             style: { cursor: 'pointer', border: '1px solid var(--dnb-border)', background: 'var(--dnb-fill)' },
-                            title: bi('查看参谋长 LLM 账本与托管硬预算上限', 'View Chief LLM ledger & hard budget caps'),
+                            title: bi('查看用量统计和托管模式上限', 'View usage stats and Managed mode limits'),
                             onClick: e => {
                               e.stopPropagation()
                               patch({ settingsOpen: true })
@@ -22322,7 +22322,7 @@ window.__ModuleLoader__.load({
                           ),
                         )
                       : h('p', { className: 'dnb-prose-p' },
-                          '当前会话尚未沉淀持久规矩或阶段结论。你可以在下方许愿框直接立规矩、整档案、定边界或吩咐参谋长调度。'),
+                          '目前还没有记下长期规矩或总结。你可以在下面的输入框立规矩、存资料、设拦截规则，或让参谋长去干活。'),
                 ),
 
                 // Partitioned Chief Q&A Turn Collections vs System / Execution Receipts
@@ -22363,7 +22363,7 @@ window.__ModuleLoader__.load({
                                 ? h('span', { className: 'dnb-receipt-badge' },
                                     item.isOneStopReport
                                       ? '🏁 一站式战报回执'
-                                      : (item.resumeTaskId ? '⚡ 授权续跑回执' : '📋 执行回执'))
+                                      : (item.resumeTaskId ? '⚡ 授权后继续结果' : '📋 操作记录'))
                                 : h('span', { className: 'dnb-qa-badge', 'data-role': 'chief' }, '✦ 参谋回答'),
                             ),
                             h(
@@ -22372,7 +22372,7 @@ window.__ModuleLoader__.load({
                               effortBadge
                                 ? h('span', {
                                     className: 'dnb-chat-effort-badge',
-                                    title: item.thinkingEffortMode === 'auto' ? '自适应换挡本次实际生效思考强度' : '本次回复固定思考强度',
+                                    title: item.thinkingEffortMode === 'auto' ? '这次回答自动选的思考深度' : '这次回答手动设的思考深度',
                                   }, effortBadge)
                                 : null,
                               h('span', null, timeLabel(item.at)),
@@ -22398,7 +22398,7 @@ window.__ModuleLoader__.load({
                         {
                           open: showHistory,
                           onToggle: () => setShowHistory(v => !v),
-                          title: bi('参谋问答与回执', 'Chief Q&A & Receipts'),
+                          title: bi('问答与操作记录', 'Q&A & Action Log'),
                           count: `${turns.length}`,
                           bodyStyle: { padding: 0 },
                           actions: h(
@@ -22407,7 +22407,7 @@ window.__ModuleLoader__.load({
                             [
                               { key: 'all', label: `${bi('全部', 'All')} ${turns.length}` },
                               { key: 'qa', label: `${bi('问答', 'Q&A')} ${qaCount}` },
-                              { key: 'receipt', label: `${bi('回执', 'Receipts')} ${receiptCount}` },
+                              { key: 'receipt', label: `${bi('记录', 'Log')} ${receiptCount}` },
                             ].map(opt =>
                               h('button', {
                                 key: opt.key,
@@ -22425,7 +22425,7 @@ window.__ModuleLoader__.load({
                                   type: 'button',
                                   className: 'dnb-text-filter-btn',
                                   style: { marginLeft: 2 },
-                                  title: allTurnsCollapsed ? bi('展开全部会话条目', 'Expand all turns') : bi('收起全部会话条目', 'Collapse all turns'),
+                                  title: allTurnsCollapsed ? bi('展开全部记录', 'Expand all items') : bi('收起全部记录', 'Collapse all items'),
                                   onClick: () => {
                                     if (!showHistory) {
                                       setShowHistory(true)
@@ -22473,7 +22473,7 @@ window.__ModuleLoader__.load({
                                         'div',
                                         {
                                           className: 'dnb-turn-question',
-                                          title: isTurnCollapsed ? '点击拉开该轮对话与回执' : '点击收起该轮对话与回执',
+                                          title: isTurnCollapsed ? '点击展开这轮对话' : '点击收起这轮对话',
                                           onClick: toggleTurn,
                                         },
                                         h(
@@ -22484,7 +22484,7 @@ window.__ModuleLoader__.load({
                                             { style: { display: 'flex', alignItems: 'center', gap: 5 } },
                                             h('span', { className: 'dnb-qa-badge', 'data-role': 'user' }, '🙋 你的提问'),
                                             repliesToShow.length > 0
-                                              ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `含 ${repliesToShow.length} 条回复/回执`)
+                                              ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `${repliesToShow.length} 条回复`)
                                               : null,
                                           ),
                                           h(
@@ -22541,7 +22541,7 @@ window.__ModuleLoader__.load({
                                         'div',
                                         {
                                           className: 'dnb-turn-question',
-                                          title: isTurnCollapsed ? '点击拉开该组回执' : '点击收起该组回执',
+                                          title: isTurnCollapsed ? '点击展开这组记录' : '点击收起这组记录',
                                           onClick: toggleTurn,
                                         },
                                         h(
@@ -22550,9 +22550,9 @@ window.__ModuleLoader__.load({
                                           h(
                                             'div',
                                             { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                                            h('span', { className: 'dnb-receipt-badge' }, '📋 系统回执集合'),
+                                            h('span', { className: 'dnb-receipt-badge' }, '📋 系统自动记录'),
                                             repliesToShow.length > 0
-                                              ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `含 ${repliesToShow.length} 条回执`)
+                                              ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `${repliesToShow.length} 条记录`)
                                               : null,
                                           ),
                                           h(
@@ -22582,7 +22582,7 @@ window.__ModuleLoader__.load({
                               }),
                             )
                           : h('div', { className: 'dnb-cell', style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } },
-                              chatFilter === 'receipt' ? '暂无执行与系统回执记录' : '暂无问答对话记录'),
+                              chatFilter === 'receipt' ? '还没有操作记录' : '还没有提问记录'),
                       )
                     })()
                   : null,
@@ -22596,9 +22596,9 @@ window.__ModuleLoader__.load({
                 {
                   open: !view.chiefFactsCollapsed,
                   onToggle: () => patch({ chiefFactsCollapsed: !view.chiefFactsCollapsed }),
-                  title: bi('持久纪律与团队约定', 'Persistent Disciplines & Facts'),
+                  title: bi('长期规矩与约定', 'Long-Term Rules & Notes'),
                   count: facts.length ? String(facts.length) : '',
-                  preview: facts.length ? clampTitle(facts[0].text || '', 28) : bi('尚未设定长期纪律', 'No facts saved yet'),
+                  preview: facts.length ? clampTitle(facts[0].text || '', 28) : bi('还没有长期规矩', 'No rules saved yet'),
                   bodyStyle: { padding: 0 },
                 },
                 h(
@@ -22613,7 +22613,7 @@ window.__ModuleLoader__.load({
                   h('input', {
                     className: 'dnb-input',
                     style: { height: 28, borderRadius: 99, padding: '0 11px', fontSize: 12 },
-                    placeholder: bi('立一条长期规矩或团队约定…', 'Add a discipline or project rule…'),
+                    placeholder: bi('写一条长期规矩或约定…', 'Add a long-term rule or note…'),
                     value: view.secNewFactText || '',
                     onChange: e => patch({ secNewFactText: e.target.value }),
                     onKeyDown: e => { if (e.key === 'Enter') submitNewFact() },
@@ -22650,7 +22650,7 @@ window.__ModuleLoader__.load({
                             h('button', {
                               className: 'dnb-icon-btn',
                               style: { width: 22, height: 22, color: fact.pinned ? 'var(--dnb-accent)' : undefined },
-                              title: fact.pinned ? '取消锁定（允许参谋长自动修订）' : '锁定置顶',
+                              title: fact.pinned ? '取消固定（允许参谋长自动修改）' : '固定住，不让参谋长自动改',
                               onClick: () => void mutateFact({ op: 'pin', id: fact.id, pinned: !fact.pinned }),
                             }, h(Icon, { name: 'pin', size: 11.5 })),
                             h('button', {
@@ -22699,7 +22699,7 @@ window.__ModuleLoader__.load({
                           : h('div', { style: { fontSize: 12.5, color: 'var(--dnb-text)', lineHeight: 1.55, wordBreak: 'break-word' } }, fact.text),
                       )
                     })
-                  : h('div', { className: 'dnb-empty', style: { padding: '16px 12px', borderTop: '1px solid var(--dnb-border)' } }, '暂无持久纪律条目'),
+                  : h('div', { className: 'dnb-empty', style: { padding: '16px 12px', borderTop: '1px solid var(--dnb-border)' } }, '还没有长期规矩'),
               ),
 
               // Collapsible Raw Turn Memory (Original MemoryTab) inside unified AccCard
@@ -22708,9 +22708,9 @@ window.__ModuleLoader__.load({
                 {
                   open: Boolean(view.secShowRawTurns),
                   onToggle: () => patch({ secShowRawTurns: !view.secShowRawTurns }),
-                  title: '每轮原始自动流水记录',
+                  title: '每轮对话的自动记录',
                   count: view.memCount ? String(view.memCount) : '',
-                  preview: '按轮次追溯历史事实与记忆检索',
+                  preview: '按对话轮次查看以前记下的内容',
                 },
                 h(MemoryTab, { board }),
               ),
@@ -22767,12 +22767,12 @@ window.__ModuleLoader__.load({
           badgeText: '默认模式',
           badgeTone: 'green',
           bullets: [
-            '读取看板和允许访问的项目状态',
-            '分析任务、提供建议',
-            '不修改工作区',
-            '不修改主代理和子代理工作流',
+            '只看任务看板和项目情况',
+            '帮你分析问题、提建议',
+            '不会改你的任何文件',
+            '不会插手主对话和子代理的活',
           ],
-          footer: '只观察、只分析、只建议。',
+          footer: '只看不改，只在你问时给建议。',
         },
         {
           key: 'assistant',
@@ -22784,13 +22784,12 @@ window.__ModuleLoader__.load({
           badgeText: '',
           badgeTone: '',
           bullets: [
-            '顾问模式全部能力',
-            '管理自己的参谋系统',
-            '修改自己的记忆、档案和看板配置',
-            '不直接修改项目工作区',
-            '不接管主代理工作流',
+            '包含 L0 顾问的全部能力',
+            '可自己整理记忆、档案和任务看板',
+            '不会直接改你的项目文件',
+            '不会直接插话打断主对话',
           ],
-          footer: '允许自主维护参谋系统。',
+          footer: '只整理笔记和看板，不碰你的项目代码。',
         },
         {
           key: 'strategist',
@@ -22799,16 +22798,16 @@ window.__ModuleLoader__.load({
           shortLabel: 'L2 参谋',
           title: 'L2 · 参谋模式',
           code: 'ADVISOR WITH APPROVAL',
-          badgeText: '逐项授权',
+          badgeText: '逐项问你',
           badgeTone: 'blue',
           bullets: [
-            '助手模式全部能力',
-            '可以申请修改工作区文件',
-            '可以申请修改主对话和子代理工作流',
-            '每项受控操作执行前弹窗',
-            '用户确认后才能执行',
+            '包含 L1 助手的全部能力',
+            '想改项目文件前会先发请求',
+            '想调整主对话或子代理时也会先请示',
+            '每次重要操作都会弹窗问你',
+            '你点同意后才会执行',
           ],
-          footer: 'Agent 提出操作，用户决定是否执行。',
+          footer: '先提出修改方案，等你点头同意再动手。',
         },
         {
           key: 'chief',
@@ -22817,16 +22816,16 @@ window.__ModuleLoader__.load({
           shortLabel: 'L3 参谋长',
           title: 'L3 · 参谋长模式',
           code: 'CHIEF OF STAFF',
-          badgeText: '主动风险知悉',
+          badgeText: '需确认风险',
           badgeTone: 'amber',
           bullets: [
-            '参谋模式全部能力',
-            '获得更高的自主执行权限',
-            '可以切换主代理',
-            '可以协调子代理及其工作流',
-            '启用前必须阅读风险声明并主动勾选确认',
+            '包含 L2 参谋的全部能力',
+            '不用逐个问你，可直接动手推进',
+            '可以切换主对话的模型或状态',
+            '可以协调子代理怎么干活',
+            '开启前需要先看风险说明并打勾确认',
           ],
-          footer: '用户明确接受更高自主权带来的操作风险。',
+          footer: '权限很高，开启前请确认你了解风险。',
         },
       ]
       const activePermObj = PERM_OPTIONS.find(p => p.key === permMode) || PERM_OPTIONS[0]
@@ -22902,11 +22901,11 @@ window.__ModuleLoader__.load({
         void updateSecConfig({ tacticalModes: { ...tm, [key]: val } })
       }
       const placeholder = secImages.length > 0
-        ? bi('已附 ' + secImages.length + ' 张图，回车可直接发送或补充说明…', `${secImages.length} image(s) attached; Enter to send…`)
+        ? bi('已放 ' + secImages.length + ' 张图，按回车直接发送，或写点说明…', `${secImages.length} image(s) attached. Press Enter to send or add text…`)
         : (activeTarget === 'auto'
-            ? bi('✦ 许愿框：整理/提炼档案、设定边界、重设任务、调整协同网络或吩咐参谋长…', '✦ Command Chief: organize archives, set guards, adjust plan, dispatch or ask…')
+            ? bi('直接说你想让它做什么：整理档案、设拦截规则、改计划或问问题…', 'Tell Chief what to do: organize archives, set guard rules, edit plans, or ask…')
             : activeTarget === 'all'
-              ? bi('向全体成员广播（', 'Broadcast to all (') + modeObj.label + ')…'
+              ? bi('给所有人发消息（', 'Message everyone (') + modeObj.label + ')…'
               : (bi('给 @', 'To @') + shortAgentName(activePeer ? activePeer.name : activeTarget, true) + ' ' + modeObj.label + '…'))
 
       return h(
@@ -22944,7 +22943,7 @@ window.__ModuleLoader__.load({
               h(
                 'div',
                 { className: 'dnb-tactical-head' },
-                h('span', { style: { fontSize: 12, fontWeight: 700, color: 'var(--dnb-text)' } }, '🎛 参谋长战术驾驶舱'),
+                h('span', { style: { fontSize: 12, fontWeight: 700, color: 'var(--dnb-text)' } }, '🎛 参谋长控制面板'),
                 h('button', {
                   type: 'button',
                   className: 'dnb-icon-btn',
@@ -22962,7 +22961,7 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { style: { flex: 1, minWidth: 0 } },
-                  h('div', { style: { fontSize: 12, fontWeight: 600, color: tm.intervention ? '#f59e0b' : 'var(--dnb-text)' } }, '⚡ 主动强介入（随四档权限联动）'),
+                  h('div', { style: { fontSize: 12, fontWeight: 600, color: tm.intervention ? '#f59e0b' : 'var(--dnb-text)' } }, '⚡ 强介入（权限越高，管得越直接）'),
                   h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } },
                     INTERVENTION_TIER_DESC[permMode] || INTERVENTION_TIER_DESC.advisor),
                 ),
@@ -22971,12 +22970,12 @@ window.__ModuleLoader__.load({
                   { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
                   h(
                     'div',
-                    { className: 'dnb-stepper', title: '连续主动介入轮数上限（从 1 轮点「-」可切为 ♾️ 无限督导）' },
+                    { className: 'dnb-stepper', title: '最多连续推动多少轮（降到 1 轮后再点「-」可改为 ♾️ 不限轮数）' },
                     h('button', {
                       type: 'button',
                       disabled: isUnlimitedTurns,
                       style: isUnlimitedTurns ? { opacity: 0.35, cursor: 'not-allowed' } : undefined,
-                      title: isUnlimitedTurns ? '当前已为无限轮次' : (maxTurns <= 1 ? '点按将弹窗确认是否切换为 ♾️ 无限督导' : '减少轮次上限'),
+                      title: isUnlimitedTurns ? '现在是不限轮数' : (maxTurns <= 1 ? '再点一次会弹窗确认开启 ♾️ 不限轮数' : '减少轮数上限'),
                       onClick: () => {
                         if (isUnlimitedTurns) return
                         toggleTacticalField('maxInterventionTurns', maxTurns <= 1 ? 0 : maxTurns - 1)
@@ -23007,13 +23006,13 @@ window.__ModuleLoader__.load({
                     'div',
                     { style: { flex: 1, minWidth: 0 } },
                     h('div', { style: { fontSize: 12, fontWeight: 600, color: isSmartCompact ? 'var(--dnb-accent)' : 'var(--dnb-text)' } },
-                      '🗜 压缩前抢救 + 自动压缩（每轮核查）'),
+                      '🗜 存好资料再自动压缩（每轮检查）'),
                     h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1, lineHeight: 1.4 } },
                       isSmartCompact
-                        ? '✦ 智选已开启：每轮结束后由参谋长与主对话在阶段收口处协同压缩'
+                        ? '✦ 智选压缩已开：会在每段任务做完时，先存好关键资料再压缩'
                         : (thresholdMode === 'tokens'
-                            ? `每轮结束后核查：上下文达 ${thresholdInputVal} 时先抢救实档再静默压缩`
-                            : `每轮结束后核查：占用达 ${pct}% 时先抢救实档再压缩`)),
+                            ? `每轮检查：对话长度到 ${thresholdInputVal} 时先存档再自动压缩`
+                            : `每轮检查：对话占满 ${pct}% 时先存档再自动压缩`)),
                   ),
                   h(
                     'div',
@@ -23023,8 +23022,8 @@ window.__ModuleLoader__.load({
                       className: 'dnb-mini-btn',
                       'data-tone': isSmartCompact ? 'accent' : undefined,
                       title: isSmartCompact
-                        ? '当前已开启 ✦ 智选（每轮协同判断压缩时机）；点击切回固定阈值模式'
-                        : '开启 ✦ 智选：由参谋长与主对话在阶段收口处协同把控压缩时机',
+                        ? '已开启 ✦ 智选压缩，点这里切回按固定大小压缩'
+                        : '开启 ✦ 智选压缩：在每段任务做完时自动先存档再压缩',
                       onClick: () => toggleTacticalField('smartCompact', !isSmartCompact),
                     }, isSmartCompact ? '✦ 智选中' : '✦ 智选'),
                     h(Switch, { checked: Boolean(tm.autoCompact), onChange: v => toggleTacticalField('autoCompact', v) }),
@@ -23062,12 +23061,12 @@ window.__ModuleLoader__.load({
                             color: thresholdMode === 'tokens' ? 'var(--dnb-primary-fg, #fff)' : 'var(--dnb-text-2)',
                           },
                           onClick: () => toggleTacticalField('compactThresholdMode', 'tokens'),
-                        }, '自填上下文'),
+                        }, '按 Token 数'),
                       ),
                       thresholdMode === 'pct'
                         ? h('select', {
                             value: String(pct),
-                            title: '选择触发抢救与自动压缩的上下文占用比例（10%–95%，低于 25% 会提示过早压缩风险）',
+                            title: '对话占满多少比例时自动存档并压缩（10%–95%，低于 25% 会提醒）',
                             style: {
                               height: 26,
                               minWidth: 74,
@@ -23090,8 +23089,8 @@ window.__ModuleLoader__.load({
                             h('input', {
                               type: 'text',
                               value: thresholdInputVal,
-                              placeholder: '如 1M 或 64(默认K)',
-                              title: '输入 1M 即 1M tokens；不填单位默认为 K（如填 64 即 64K）；低于 32K 会警告',
+                              placeholder: '比如 1M 或 64（默认单位 K）',
+                              title: '填 1M 就是 1M tokens；不写单位默认是 K（比如 64 就是 64K）；低于 32K 会提醒',
                               style: {
                                 width: 112,
                                 height: 26,
@@ -23135,10 +23134,10 @@ window.__ModuleLoader__.load({
                         padding: '3px 7px',
                       },
                     }, isLowTokenThreshold
-                      ? `⚠️ 当前自填阈值（${tm.compactThresholdInput || '低于32K'}）低于安全建议线 32K，可能导致上下文频繁压缩丢失现场细节`
+                      ? `⚠️ 你填的 ${tm.compactThresholdInput || '低于 32K'} 太小了（建议至少 32K），压缩太勤容易丢细节`
                       : (view.compactLowWarning
                           ? ('⚠️ ' + view.compactLowWarning)
-                          : `⚠️ 当前压缩比例（${pct}%）低于 25%，可能导致上下文过早频繁压缩，建议设为 30%–80%`))
+                          : `⚠️ 现在设的 ${pct}% 太低了，压缩太勤容易丢细节，建议选 30%–80%`))
                   : null,
               ),
               // Row 3: Strict Verify
@@ -23148,8 +23147,8 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { style: { flex: 1, minWidth: 0 } },
-                  h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '✓ 严格实证核验'),
-                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '要求结论附文件/命令证据，未核实不放行结项'),
+                  h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '✓ 完工前核实证据'),
+                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '必须贴出文件或命令运行结果，没核实就不算完工'),
                 ),
                 h(Switch, { checked: Boolean(tm.strictVerify), onChange: v => toggleTacticalField('strictVerify', v) }),
               ),
@@ -23172,9 +23171,9 @@ window.__ModuleLoader__.load({
                         filter: tm.redlineSentinel ? 'drop-shadow(0 0 4px rgba(239,68,68,0.45))' : undefined,
                       },
                     }),
-                    '红线越界哨兵',
+                    '红线哨兵',
                   ),
-                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '触碰禁止红线或物理驻墙时立即高优拦截'),
+                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '碰到禁止红线或物理驻墙（拦截规则）时马上拦住'),
                 ),
                 h(Switch, { checked: Boolean(tm.redlineSentinel), tone: 'red', onChange: v => toggleTacticalField('redlineSentinel', v) }),
               ),
@@ -23185,8 +23184,8 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { style: { flex: 1, minWidth: 0 } },
-                  h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '📝 极简战报模式'),
-                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '分结构多条短句汇报、剥离繁琐数字参数（细节归其他页）'),
+                  h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '📝 极简汇报模式'),
+                  h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '只用几句大白话汇报重点，少放复杂数字'),
                 ),
                 h(Switch, { checked: Boolean(tm.conciseBrief), onChange: v => toggleTacticalField('conciseBrief', v) }),
               ),
@@ -23207,20 +23206,20 @@ window.__ModuleLoader__.load({
                     h(
                       'div',
                       { className: 'dnb-team-effort-info' },
-                      h('div', { className: 'dnb-team-effort-title' }, '团队思考强度（主/子代理）'),
+                      h('div', { className: 'dnb-team-effort-title' }, '主对话和子代理的思考深度'),
                       h('div', { className: 'dnb-team-effort-sub' },
                         teamMode === 'manual'
-                          ? '手动模式：参谋长不自动调节，由你自行掌控'
-                          : '默认自动：由参谋长按当前权限范围自动调节'),
+                          ? '手动：参谋长不插手，由你自己调'
+                          : '自动（默认）：参谋长按任务难度帮你调'),
                     ),
                     h(
                       'div',
-                      { className: 'dnb-team-effort-seg', role: 'group', 'aria-label': '团队思考强度调控模式' },
+                      { className: 'dnb-team-effort-seg', role: 'group', 'aria-label': '团队思考深度调整方式' },
                       h('button', {
                         type: 'button',
                         className: 'dnb-team-effort-btn',
                         'data-active': teamMode === 'auto' ? '1' : '0',
-                        title: '默认自动：由参谋长按当前权限范围自动调节主对话与子代理思考强度',
+                        title: '自动：按任务难度帮你调主对话和子代理的思考深度',
                         onClick: () => {
                           if (teamMode !== 'auto') void updateSecConfig({ teamEffortMode: 'auto' })
                         },
@@ -23229,7 +23228,7 @@ window.__ModuleLoader__.load({
                         type: 'button',
                         className: 'dnb-team-effort-btn',
                         'data-active': teamMode === 'manual' ? '1' : '0',
-                        title: '手动模式：参谋长停止自动调节主对话与子代理思考强度',
+                        title: '手动：参谋长不再改动主对话和子代理的思考深度',
                         onClick: () => {
                           if (teamMode !== 'manual') void updateSecConfig({ teamEffortMode: 'manual' })
                         },
@@ -23248,7 +23247,7 @@ window.__ModuleLoader__.load({
                   style: { width: '100%', justifyContent: 'space-between', padding: '4px 6px', fontSize: 10.5 },
                   onClick: () => patch({ chiefDisclaimerOpen: !view.chiefDisclaimerOpen }),
                 },
-                  h('span', null, 'ⓘ 模型能力与规则冲突说明'),
+                  h('span', null, 'ⓘ 注意事项：模型效果和规则冲突'),
                   h('span', { style: { fontSize: 10, opacity: 0.7 } }, view.chiefDisclaimerOpen ? '▴ 收起' : '▾ 展开'),
                 ),
                 view.chiefDisclaimerOpen
@@ -23256,12 +23255,12 @@ window.__ModuleLoader__.load({
                       'div',
                       { className: 'dnb-disclaimer-box', style: { marginTop: 4 } },
                       h('div', { style: { marginBottom: 4 } },
-                        h('strong', null, '免责声明 1（模型依赖）：'),
-                        '参谋长的一切自动审查、强介入驱动、压缩前抢救与红线拦截能力均高度依赖您为参谋长配置的底层大模型能力与上下文质量，不同模型在规划严谨度与遵循指令上的表现存在客观差异。',
+                        h('strong', null, '说明 1（模型能力）：'),
+                        '自动检查、存档压缩和规则拦截的效果，主要看你给参谋长选了哪个大模型。不同模型在拆任务和听指令上的表现差别很大。',
                       ),
                       h('div', null,
-                        h('strong', null, '免责声明 2（规则冲突）：'),
-                        '若主会话或当前项目中挂载了过多的系统提示词（System Prompt）、Rules 或硬性规则，可能与本插件的自主干预逻辑产生指令冲突，进而导致介入循环异常、提前熔断或执行偏离预期。',
+                        h('strong', null, '说明 2（规则冲突）：'),
+                        '如果你在项目里加了太多其他的提示词或全局 Rules，可能会和本插件的规则打架，导致重复提醒或跑偏。',
                       ),
                     )
                   : null,
@@ -23320,10 +23319,10 @@ window.__ModuleLoader__.load({
                     'data-tone': 'accent',
                     onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen }),
                     title: isSmartCompact
-                      ? '✦ 智选已开启：参谋长与主对话协同把控压缩时机'
+                      ? '✦ 智选压缩已开：会在合适时机先存档再压缩'
                       : (thresholdMode === 'tokens'
-                          ? `固定上下文压缩线：${tm.compactThresholdInput || '64K'}`
-                          : `按比例自动压缩线：${pct}%`),
+                          ? `到 ${tm.compactThresholdInput || '64K'} 时自动存档并压缩`
+                          : `占用达 ${pct}% 时自动存档并压缩`),
                   }, isSmartCompact ? '✦ 智选压缩' : `🗜 自动压缩 ${thresholdMode === 'tokens' ? (tm.compactThresholdInput || '64K') : (pct + '%')}`)
                 : null,
               tm.redlineSentinel
@@ -23338,14 +23337,14 @@ window.__ModuleLoader__.load({
                 ? h('span', {
                     className: 'dnb-tac-chip',
                     style: { borderColor: 'rgba(255,69,58,0.45)', color: '#ff453a', background: 'rgba(255,69,58,0.1)' },
-                    title: guard.circuitReason || '已触发自动防死循环熔断',
-                  }, '⛔ 已熔断')
+                    title: guard.circuitReason || '连续出错太多次，已自动停下',
+                  }, '⛔ 已停机')
                 : null,
               tm.intervention
                 ? h('button', {
                     type: 'button',
                     className: 'dnb-stop-btn',
-                    title: '立即急停主动强介入与后台自驱，保留当前计划',
+                    title: '马上打断后台推进，当前任务计划会保留',
                     onClick: () => void updateSecConfig({ emergencyStopIntervention: true }),
                   }, '⏹ 急停')
                 : null,
@@ -23367,13 +23366,13 @@ window.__ModuleLoader__.load({
                 h(
                   'div',
                   { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '2px 2px 2px' } },
-                  h('span', { style: { fontSize: 12.5, fontWeight: 700, color: 'var(--dnb-text)' } }, 'DSH Chief 四级权限模型（严格会话隔离）'),
+                  h('span', { style: { fontSize: 12.5, fontWeight: 700, color: 'var(--dnb-text)' } }, '权限档位（只对当前对话有效）'),
                   h('button', {
                     type: 'button',
                     className: 'dnb-mini-btn',
-                    title: '查看 6 级安全流水线实时判定与审计日志',
+                    title: '查看每次操作的安全检查记录',
                     onClick: () => patch({ secPermMenuOpen: false, auditLogModalOpen: true }),
-                  }, `📜 审计 (${auditCount})`),
+                  }, `📜 安全记录 (${auditCount})`),
                 ),
                 PERM_OPTIONS.map(opt => {
                   const active = permMode === opt.key
@@ -23425,9 +23424,9 @@ window.__ModuleLoader__.load({
                 }),
                 h(
                   'div',
-                  { className: 'dnb-pipe-bar', title: '统一 6 级安全架构流水线' },
-                  h('span', { style: { fontWeight: 700, color: 'var(--dnb-text-2)', marginRight: 2 } }, '流水线:'),
-                  ['用户模式', '操作请求', '安全卫兵硬性规则', '权限判定', '执行器', '审计日志'].map((step, idx, arr) =>
+                  { className: 'dnb-pipe-bar', title: '每次操作都要经过这 6 道安全检查' },
+                  h('span', { style: { fontWeight: 700, color: 'var(--dnb-text-2)', marginRight: 2 } }, '检查流程:'),
+                  ['当前权限', '发起请求', '硬红线检查', '权限检查', '执行操作', '记入日志'].map((step, idx, arr) =>
                     h(
                       React.Fragment,
                       { key: step },
@@ -23458,8 +23457,8 @@ window.__ModuleLoader__.load({
                 },
               },
               h('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-                `⬆️ 模型申请提权：${CHIEF_PERMISSION_LABELS[pendingElevationObj.fromMode] || pendingElevationObj.fromMode} → ${CHIEF_PERMISSION_LABELS[pendingElevationObj.targetMode] || pendingElevationObj.targetMode}`),
-              h('span', { style: { flexShrink: 0, textDecoration: 'underline' } }, '去审批 →'),
+                `⬆️ 参谋申请升权限：${CHIEF_PERMISSION_LABELS[pendingElevationObj.fromMode] || pendingElevationObj.fromMode} → ${CHIEF_PERMISSION_LABELS[pendingElevationObj.targetMode] || pendingElevationObj.targetMode}`),
+              h('span', { style: { flexShrink: 0, textDecoration: 'underline' } }, '去确认 →'),
             )
           : null,
 
@@ -23481,8 +23480,8 @@ window.__ModuleLoader__.load({
                 },
               },
               h('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-                `🛡️ ${pendingApprovalsList[0].operationLabel || '受控操作'}（等待逐项授权 ${pendingApprovalsList.length} 项）`),
-              h('span', { style: { flexShrink: 0, textDecoration: 'underline' } }, '弹窗确认 →'),
+                `🛡️ ${pendingApprovalsList[0].operationLabel || '敏感操作'}（还有 ${pendingApprovalsList.length} 项等你确认）`),
+              h('span', { style: { flexShrink: 0, textDecoration: 'underline' } }, '点此确认 →'),
             )
           : null,
 
@@ -23494,7 +23493,7 @@ window.__ModuleLoader__.load({
             type: 'button',
             className: 'dnb-sec-chip',
             'data-active': view.secPermMenuOpen ? '1' : '0',
-            title: `${activePermObj.title}（${activePermObj.code}）— ${activePermObj.footer}（点击切换四级权限模型）`,
+            title: `${activePermObj.title} — ${activePermObj.footer}（点这里切权限）`,
             onClick: () => patch({ secPermMenuOpen: !view.secPermMenuOpen, tacticalMenuOpen: false, secModelMenuOpen: false, secPaceMenuOpen: false }),
           },
             h('span', {
@@ -23513,9 +23512,9 @@ window.__ModuleLoader__.load({
           h('button', {
             className: 'dnb-sec-chip',
             'data-active': activeTarget === 'auto' ? '1' : '0',
-            title: bi('由 DSH 参谋长研判实时进展、亲自实权查改/调度子代理或拆话递给对应成员', 'Let DSH Chief analyze state, coordinate or route relays'),
+            title: bi('发给参谋长处理：它会自动查进度、协调子代理或转达消息', 'Send to DSH Chief to check progress, coordinate subagents, or pass messages'),
             onClick: () => patch({ secTarget: 'auto' }),
-          }, bi('✦ 参谋/拆话', '✦ Chief')),
+          }, bi('✦ 找参谋长', '✦ Chief')),
           targetChips.map(p =>
             h('button', {
               key: p.key,
@@ -23543,7 +23542,7 @@ window.__ModuleLoader__.load({
             ? h('button', {
                 className: 'dnb-sec-chip',
                 style: { marginLeft: 'auto', color: 'var(--dnb-text-2)', borderColor: 'var(--dnb-border-strong)' },
-                title: modeObj.hint + '（点击切换）',
+                title: modeObj.hint + '（点这里切换）',
                 onClick: () => {
                   const idx = RELAY_MODES.findIndex(m => m.key === modeObj.key)
                   const next = RELAY_MODES[(idx + 1) % RELAY_MODES.length]
@@ -23598,7 +23597,7 @@ window.__ModuleLoader__.load({
             className: 'dnb-plus-btn',
             'data-active': (view.tacticalMenuOpen || activeChipsCount > 0) ? '1' : '0',
             'data-danger': tm.intervention ? '1' : '0',
-            title: '打开参谋长战术驾驶舱（强介入 / 智选压缩 / 红线哨兵 / 核验开关）',
+            title: '打开开关面板：可设强介入、智选压缩、红线哨兵和思考深度',
             onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen, secPermMenuOpen: false, secModelMenuOpen: false, secPaceMenuOpen: false }),
           }, h(Icon, { name: view.tacticalMenuOpen ? 'x' : 'plus', size: 14, style: { display: 'block', verticalAlign: 0 } })),
           h('input', {
@@ -23621,7 +23620,7 @@ window.__ModuleLoader__.load({
               disabled: Boolean(view.secBusy) || secImages.length >= SEC_MAX_IMAGES,
               title: secImages.length >= SEC_MAX_IMAGES
                 ? `最多可附 ${SEC_MAX_IMAGES} 张图片`
-                : '上传图片（支持拖拽或 Ctrl+V 粘贴截图）',
+                : '上传图片（可直接拖进来，或按 Ctrl+V 粘贴截图）',
               onClick: () => {
                 if (fileInputRef.current) fileInputRef.current.click()
               },
@@ -23663,7 +23662,7 @@ window.__ModuleLoader__.load({
             type: 'button',
             className: 'dnb-sec-send',
             disabled: !canSend,
-            title: '发送给 DSH 参谋长',
+            title: '发给 DSH 参谋长',
             onClick: () => void submitChiefBar(),
           },
             view.secBusy
@@ -23729,7 +23728,7 @@ window.__ModuleLoader__.load({
         if (mail.detachedFromCluster) {
           ensureDrawer('detached', {
             kind: 'detached',
-            title: bi('已脱离协同历史（已隔离不注入）', 'Detached History (Isolated)'),
+            title: bi('已断开的历史（不发给主对话）', 'Disconnected History (Isolated)'),
             colors: [{ dot: '#8e8e93', bg: 'rgba(142,142,147,0.1)', border: 'rgba(142,142,147,0.3)' }],
             order: 99,
             defaultOpen: false,
@@ -23748,7 +23747,7 @@ window.__ModuleLoader__.load({
             .map(id => colorForRootSession(id, selfRootId))
           ensureDrawer('broadcast', {
             kind: 'broadcast',
-            title: bi('🌐 全网广播 (@全体)', '🌐 Broadcast (@All)'),
+            title: bi('🌐 全体广播 (@全体)', '🌐 Broadcast (@All)'),
             colors: cols.length ? cols : [SESSION_PALETTE[0], SESSION_PALETTE[1]],
             order: 0,
             defaultOpen: true,
@@ -23760,7 +23759,7 @@ window.__ModuleLoader__.load({
           const sorted = uniqueRoots.slice().sort()
           ensureDrawer('multi:' + sorted.join('|'), {
             kind: 'cross',
-            title: `🔀 ${sorted.slice(0, 3).map(labelForRoot).join(' · ')}${sorted.length > 3 ? bi(` 等${sorted.length}窗`, ` +${sorted.length}`) : ''} ${bi('多方协同', 'Group Relay')}`,
+            title: `🔀 ${sorted.slice(0, 3).map(labelForRoot).join(' · ')}${sorted.length > 3 ? bi(` 等${sorted.length}个窗口`, ` +${sorted.length}`) : ''} ${bi('多窗对话', 'Group Chat')}`,
             colors: sorted.slice(0, 4).map(id => colorForRootSession(id, selfRootId)),
             order: 1,
             defaultOpen: true,
@@ -23772,7 +23771,7 @@ window.__ModuleLoader__.load({
           if (pair.length >= 2 && pair[0] !== pair[1]) {
             ensureDrawer('pair:' + pair.join('|'), {
               kind: 'cross',
-              title: `↔ ${labelForRoot(pair[0])} ↔ ${labelForRoot(pair[1])} ${bi('跨窗传话', 'Cross-Window')}`,
+              title: `↔ ${labelForRoot(pair[0])} ↔ ${labelForRoot(pair[1])} ${bi('跨窗消息', 'Cross-Window')}`,
               colors: pair.map(id => colorForRootSession(id, selfRootId)),
               order: 2,
               defaultOpen: true,
@@ -23784,7 +23783,7 @@ window.__ModuleLoader__.load({
         const col = colorForRootSession(internalRoot, selfRootId)
         ensureDrawer('internal:' + internalRoot, {
           kind: 'internal',
-          title: `📁 ${labelForRoot(internalRoot)} ${bi('内部信箱', 'Internal')}`,
+          title: `📁 ${labelForRoot(internalRoot)} ${bi('内部消息', 'Internal')}`,
           colors: [col],
           order: internalRoot === selfRootId ? 3 : 4,
           defaultOpen: internalRoot === selfRootId,
@@ -23809,12 +23808,12 @@ window.__ModuleLoader__.load({
           {
             open: !view.peersNetCollapsed,
             onToggle: () => patch({ peersNetCollapsed: !view.peersNetCollapsed }),
-            title: bi('当前互通对话网络', 'Connected Peer Network'),
+            title: bi('已连接的对话和助手', 'Connected Chats & Agents'),
             headTitle: hasLinkedNetwork
-              ? bi('已入网的独立对话会自动共享进度与协同信箱；断开联动后参谋摘要立即净化隔离', 'Linked sessions share progress & relay mail; unlinking isolates digests cleanly.')
+              ? bi('连上的窗口会共享进度和消息。断开后两边资料会立刻分开，互不影响。', 'Linked windows share progress and messages. Unlinking separates their summaries right away.')
               : undefined,
             count: peers.length ? String(peers.length) : '',
-            preview: peers.length ? peers.slice(0, 3).map(p => p.name).join(' · ') : bi('等待会话连接…', 'Waiting for connections…'),
+            preview: peers.length ? peers.slice(0, 3).map(p => p.name).join(' · ') : bi('等待连接对话…', 'Waiting for chats…'),
             bodyStyle: { padding: 0 },
             actions: h(
               React.Fragment,
@@ -23825,7 +23824,7 @@ window.__ModuleLoader__.load({
                     className: 'dnb-pill',
                     style: { height: 22, fontSize: 10.5, padding: '0 7px', borderStyle: 'dashed' },
                     onClick: () => patch({ showInternalProbes: !view.showInternalProbes }),
-                  }, view.showInternalProbes ? bi('隐藏内部探针', 'Hide Probes') : bi(`内部探针 (${hiddenProbePeers.length})`, `Probes (${hiddenProbePeers.length})`))
+                  }, view.showInternalProbes ? bi('隐藏后台检查', 'Hide Checks') : bi(`后台检查 (${hiddenProbePeers.length})`, `Checks (${hiddenProbePeers.length})`))
                 : null,
               peers.length > 1
                 ? h('button', {
@@ -23833,10 +23832,10 @@ window.__ModuleLoader__.load({
                     className: 'dnb-pill dnb-pill-accent',
                     style: { height: 22, fontSize: 10.5, padding: '0 8px' },
                     onClick: () => {
-                      patch({ secTarget: 'all', secMode: 'steer', notice: bi('已选择向全体成员广播递话', 'Target set to broadcast @All') })
+                      patch({ secTarget: 'all', secMode: 'steer', notice: bi('已选好发给所有人，请在下方输入', 'Sending to everyone; type below') })
                       focusSecInput()
                     },
-                  }, bi('@全体广播', '@Broadcast'))
+                  }, bi('@发给全体', '@Message All'))
                 : null,
             ),
           },
@@ -23906,9 +23905,9 @@ window.__ModuleLoader__.load({
                       ? h('button', {
                           className: 'dnb-pill',
                           style: { height: 24, padding: '0 8px', fontSize: 10.5 },
-                          title: bi('在分栏打开子代理实时流', 'Open subagent live stream in split pane'),
+                          title: bi('在分屏查看子代理对话', 'View subagent chat in split pane'),
                           onClick: () => {
-                            if (!openSubagentChat(peer)) patch({ notice: bi('该子代理暂无独立面板视图', 'No dedicated pane view for this subagent') })
+                            if (!openSubagentChat(peer)) patch({ notice: bi('这个子代理没有独立聊天窗口', 'This subagent has no separate chat pane') })
                           },
                         }, h(Icon, { name: 'chat', size: 11 }), bi('分屏', 'Split'))
                       : null,
@@ -23920,7 +23919,7 @@ window.__ModuleLoader__.load({
                         patch({
                           secTarget: peer.key,
                           secMode: isRunning ? 'steer' : 'followup',
-                          notice: bi('已在下方锁定 @', 'Locked target @') + peer.name,
+                          notice: bi('已选好发给 @', 'Sending to @') + peer.name,
                         })
                         focusSecInput()
                       },
@@ -23928,7 +23927,7 @@ window.__ModuleLoader__.load({
                   ),
                 )
               })
-            : h('div', { className: 'dnb-empty', style: { padding: '16px 12px' } }, '等待会话连接…'),
+            : h('div', { className: 'dnb-empty', style: { padding: '16px 12px' } }, bi('还没有连接其他对话…', 'Waiting for chats…')),
         ),
 
         // Section 2: Cross-Window Federation Switches (with pollution warning before link)
@@ -23938,9 +23937,9 @@ window.__ModuleLoader__.load({
             open: fedOpen,
             onToggle: () => patch({ peersFedCollapsed: fedOpen }),
             icon: h(Icon, { name: 'link', size: 12.5, style: { color: 'var(--dnb-text-2)' } }),
-            title: bi('跨窗口独立会话联动', 'Cross-Window Session Federation'),
+            title: bi('连接其他对话窗口', 'Connect Other Windows'),
             count: otherSessions.length ? `${otherSessions.filter(s => s.linked).length}/${otherSessions.length}` : '0',
-            preview: bi('多开独立主对话窗口后可在此开启联动', 'Open another standalone session window to link here'),
+            preview: bi('同时开了多个窗口时可在这里连接', 'Link multiple open chat windows here'),
             bodyStyle: { padding: 0 },
           },
           otherSessions.length
@@ -23988,7 +23987,7 @@ window.__ModuleLoader__.load({
                 )
               })
             : h('div', { style: { padding: '12px 14px', fontSize: 11.5, color: 'var(--dnb-text-3)', lineHeight: 1.5 } },
-                '当你同时打开多个独立主对话窗口时，这里会出现联动开关——接入后共享进度与信箱（接入无关任务会提示防污染警告）。'),
+                bi('同时打开多个对话窗口时，这里会出现开关。连上后会共享进度和消息；如果任务无关，会先弹出提醒。', 'Switches appear here when multiple chat windows are open. Linked windows share progress and messages, with a warning for unrelated tasks.')),
         ),
 
         // Section 3: Color-Coded Collapsible Drawer Mailbox
@@ -23998,9 +23997,9 @@ window.__ModuleLoader__.load({
             open: !view.peersMailCollapsed,
             onToggle: () => patch({ peersMailCollapsed: !view.peersMailCollapsed }),
             icon: h(Icon, { name: 'mail', size: 12.5, style: { color: 'var(--dnb-text-2)' } }),
-            title: bi('参谋部协同信箱', 'Chief Collaboration Mailbox'),
+            title: bi('协同消息记录', 'Team Messages'),
             count: mailbox.length ? String(mailbox.length) : '',
-            preview: drawerList.length ? bi(`${drawerList.length} 个通道抽屉`, `${drawerList.length} channel drawers`) : bi('暂无协同通信记录', 'No relay messages yet'),
+            preview: drawerList.length ? bi(`${drawerList.length} 组消息`, `${drawerList.length} groups`) : bi('还没有消息记录', 'No messages yet'),
             actions: h(
               'div',
               { className: 'dnb-text-filter-bar', style: { padding: 0, gap: 3 } },
@@ -24111,7 +24110,7 @@ window.__ModuleLoader__.load({
                         }, drawer.title),
                         h('span', { className: 'dnb-acc-count', style: { fontSize: 10 } }, `${drawer.items.length}`),
                       ),
-                      h('span', { className: 'dnb-acc-pull-hint' }, isOpen ? bi('收起 ▴', 'Fold ▴') : bi('拉起 ▾', 'Pull ▾')),
+                      h('span', { className: 'dnb-acc-pull-hint' }, isOpen ? bi('收起 ▴', 'Collapse ▴') : bi('展开 ▾', 'Expand ▾')),
                     ),
                     isOpen
                       ? drawer.items.slice(0, 15).map(mail => {
@@ -24153,7 +24152,7 @@ window.__ModuleLoader__.load({
                   )
                 }),
               )
-            : h('div', { className: 'dnb-empty', style: { padding: '16px 12px' } }, '当前筛选下暂无协同通信记录'),
+            : h('div', { className: 'dnb-empty', style: { padding: '16px 12px' } }, bi('这个分类下还没有消息', 'No messages in this filter')),
         ),
       )
     }
@@ -24195,7 +24194,7 @@ window.__ModuleLoader__.load({
                 'data-tone': tone,
                 role: 'status',
                 'aria-live': 'polite',
-                title: '点击任意处解除毛玻璃遮罩，恢复操作（外框流光表示参谋长仍在运作）',
+                title: '点任意处收起遮罩继续操作（外框亮着说明后台还在跑）',
                 onClick: e => {
                   e.stopPropagation()
                   setDismissedKey(fxKey)
@@ -24224,7 +24223,7 @@ window.__ModuleLoader__.load({
               h(
                 'div',
                 { className: 'dnb-chief-fx-hint' },
-                bi('点击任意处收起遮罩继续操作 · 外框流光表示仍在运作', 'Click anywhere to dismiss blur · glowing border stays active'),
+                bi('点任意处收起遮罩，外框亮着说明后台还在跑', 'Click anywhere to hide overlay. Glowing border means still working.'),
               ),
             )
           : null,
@@ -24317,7 +24316,7 @@ window.__ModuleLoader__.load({
                 : h(TasksTab, { board, view })
 
       const cursorText = board && board.cursor && (board.cursor.next || board.cursor.step || board.cursor.blocked)
-        ? (board.cursor.blocked ? '受阻 · ' + board.cursor.blocked : (board.cursor.next || board.cursor.step))
+        ? (board.cursor.blocked ? '卡住了：' + board.cursor.blocked : (board.cursor.next || board.cursor.step))
         : ''
 
       return h(
@@ -24342,7 +24341,7 @@ window.__ModuleLoader__.load({
             h('span', {
               className: 'dnb-title',
               style: { display: 'inline-flex', alignItems: 'center', gap: 5 },
-              title: `${bi(BRAND_NAME, 'DSH Chief')} v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? (view.staleBackendDetected ? bi(`（宿主内存后端仍为 v${meta.backendBuild}，重载后同步）`, ` (backend in RAM v${meta.backendBuild}; reload to sync)`) : bi('（前后端已同步）', ' (synced)')) : ''}${view.sessionId ? ` · ${bi('会话', 'Session')} ${shortSession(view.sessionId)}` : ''}`,
+              title: `${bi(BRAND_NAME, 'DSH Chief')} v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? (view.staleBackendDetected ? bi(`（后台还是旧版 v${meta.backendBuild}，重启 DSH 后生效）`, ` (background is still v${meta.backendBuild}; restart DSH to update)`) : bi('（版本已同步）', ' (synced)')) : ''}${view.sessionId ? ` · ${bi('对话', 'Chat')} ${shortSession(view.sessionId)}` : ''}`,
             },
               h(Icon, { name: 'sparkles', size: 14, style: { color: 'var(--dnb-accent)' } }),
               bi(BRAND_NAME, 'DSH Chief'),
@@ -24353,7 +24352,7 @@ window.__ModuleLoader__.load({
               'data-active': view.settingsOpen ? '1' : '0',
               'aria-label': bi('设置', 'Settings'),
               'aria-pressed': view.settingsOpen ? 'true' : 'false',
-              title: bi('设置（情景预设 / 通知 / 预算账本 / 语言）', 'Settings (Presets / Alerts / Budget / Language)'),
+              title: bi('设置：模式预设、桌面通知、用量上限和语言', 'Settings: presets, alerts, usage caps, and language'),
               onClick: () => {
                 setGearDeg(d => d + 180)
                 patch({
@@ -24368,14 +24367,14 @@ window.__ModuleLoader__.load({
               className: 'dnb-ver-chip',
               'data-stale': view.staleBackendDetected ? '1' : '0',
               title: view.staleBackendDetected
-                ? bi(`前端面板 v${EXPECTED_BACKEND_BUILD} · 宿主内存后端仍为 v${meta.backendBuild || '旧版'}（重载插件或重启客户端后同步）`, `UI v${EXPECTED_BACKEND_BUILD} · Host backend v${meta.backendBuild || 'older'} (restart DSH to sync)`)
-                : bi(`DSH 参谋长版本：v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? '（前后端已同步）' : ''}`, `DSH Chief v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? ' (synced)' : ''}`),
-            }, view.staleBackendDetected ? `${bi('旧后端', 'Stale')} · v${EXPECTED_BACKEND_BUILD}` : ('v' + EXPECTED_BACKEND_BUILD)),
+                ? bi(`面板已更新到 v${EXPECTED_BACKEND_BUILD}，后台还是 v${meta.backendBuild || '旧版'}，重启 DSH 后即可同步`, `UI is v${EXPECTED_BACKEND_BUILD}, background is still v${meta.backendBuild || 'older'}. Restart DSH to sync.`)
+                : bi(`DSH 参谋长 v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? '（版本已同步）' : ''}`, `DSH Chief v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? ' (synced)' : ''}`),
+            }, view.staleBackendDetected ? `${bi('待重启', 'Restart')} · v${EXPECTED_BACKEND_BUILD}` : ('v' + EXPECTED_BACKEND_BUILD)),
             meta.linkedPeersCount > 0
               ? h('button', {
                   className: 'dnb-head-pill',
                   style: { height: 21, padding: '0 6px', fontSize: 10.5, color: 'var(--dnb-accent)' },
-                  title: bi('已串联跨窗口会话，点击查看协同网络', 'Linked peer sessions; click to view'),
+                  title: bi('已连上其他对话窗口，点击查看', 'Linked to other chat windows. Click to view.'),
                   onClick: () => patch({ tab: 'peers', settingsOpen: false }),
                 }, h(Icon, { name: 'link', size: 10.5 }), String(meta.linkedPeersCount))
               : null,
@@ -24389,9 +24388,9 @@ window.__ModuleLoader__.load({
                   const eff = meta.modelRef || meta.resolvedModelRef || meta.followModelRef || ''
                   const label = fullModelWithChannel(eff, cat)
                   if (!meta.modelRef) {
-                    return bi('正在自动跟随主对话模型', 'Following lead session model') + (label ? ': ' + label + ' [' + eff + ']' : '') + bi('（点击可切换专职参谋长模型）', ' (click to pin Chief model)')
+                    return bi('正在跟着主对话用同一个模型', 'Using the main chat model') + (label ? ': ' + label + ' [' + eff + ']' : '') + bi('（点这里可单独指定模型）', ' (click to pick a separate model)')
                   }
-                  return bi('已固定参谋长专职模型：', 'Pinned Chief model: ') + (label || eff) + ' [' + eff + ']' + bi('（点击可切回跟随主对话）', ' (click to unpin)')
+                  return bi('参谋长单独使用的模型：', 'Chief model: ') + (label || eff) + ' [' + eff + ']' + bi('（点这里切回跟着主对话）', ' (click to follow main chat)')
                 })(),
                 onClick: () => {
                   const nextOpen = !view.secModelMenuOpen
@@ -24415,7 +24414,7 @@ window.__ModuleLoader__.load({
                       : (meta.paceMode === 'auto' ? 'managed' : (meta.paceMode === 'smart' ? 'patrol' : 'off')))
                 return h(
                   'div',
-                  { className: 'dnb-run-mode-pill', role: 'group', 'aria-label': bi('参谋运行模式', 'Chief run mode') },
+                  { className: 'dnb-run-mode-pill', role: 'group', 'aria-label': bi('后台运行模式', 'Background run mode') },
                   RUN_MODE_OPTIONS.map(opt => {
                     const rm = runModeMeta(opt.key)
                     return h('button', {
@@ -24443,12 +24442,12 @@ window.__ModuleLoader__.load({
               h('button', {
                 className: 'dnb-icon-btn',
                 'data-active': view.searchOpen ? '1' : '0',
-                title: bi('搜索与问参谋长', 'Search & Ask Chief'),
+                title: bi('搜索或问参谋长', 'Search or ask Chief'),
                 onClick: () => patch({ searchOpen: !view.searchOpen, askHits: null }),
               }, h(Icon, { name: 'search', size: 15 })),
               h('button', {
                 className: 'dnb-icon-btn',
-                title: bi('同步刷新', 'Refresh'),
+                title: bi('刷新状态', 'Refresh'),
                 onClick: () => {
                   void refresh()
                   if (view.tab === 'archive') void loadArchives(true)
@@ -24457,7 +24456,7 @@ window.__ModuleLoader__.load({
               }, h(Icon, { name: 'refresh', size: 15, style: view.busy ? { animation: 'dnb-spin 0.9s linear infinite' } : undefined })),
               h('button', {
                 className: 'dnb-icon-btn',
-                title: isPage ? bi('返回会话', 'Back to Session') : bi('收起', 'Collapse'),
+                title: isPage ? bi('回到对话', 'Back to Chat') : bi('收起', 'Collapse'),
                 onClick: () => {
                   if (closeChief()) return
                   if (isPage) {
@@ -24493,7 +24492,7 @@ window.__ModuleLoader__.load({
                       gap: 6.5,
                       cursor: 'pointer',
                     },
-                    title: '点击跳转金字塔视角查看推进/受阻子代理',
+                    title: '点这里查看正在跑或卡住的子代理',
                     onClick: () => {
                       const targetTask = (board.cursor.expectedTaskId && tasks.find(t => t && t.id === board.cursor.expectedTaskId))
                         || tasks.find(t => t && (board.cursor.blocked ? t.status === 'blocked' : t.status === 'doing'))
@@ -24575,7 +24574,7 @@ window.__ModuleLoader__.load({
                     gap: 8,
                   },
                 },
-                h('span', null, '⚠ 检测到宿主进程仍在运行旧版内存模块（当前面板 v' + EXPECTED_BACKEND_BUILD + (meta.backendBuild ? '，内存后端 v' + meta.backendBuild : '') + '），请重启 DeepSeek Harness 客户端或重载插件后完全生效。'),
+                h('span', null, '⚠ 后台还在跑旧版本（面板 v' + EXPECTED_BACKEND_BUILD + (meta.backendBuild ? '，后台 v' + meta.backendBuild : '') + '），请重启 DeepSeek Harness 或重新加载插件后生效。'),
                 h('span', { style: { cursor: 'pointer', paddingLeft: 6, flexShrink: 0 }, onClick: () => patch({ staleBackendDismissed: true }) }, '×'),
               )
             : null,
@@ -24599,7 +24598,7 @@ window.__ModuleLoader__.load({
                     gap: 8,
                   },
                 },
-                h('span', null, '⚠ ' + (view.hostCompat.warning || '当前 DSH 宿主版本不支持命名子代理 API，请升级至 >= 0.2.2-rc.2。')),
+                h('span', null, '⚠ ' + (view.hostCompat.warning || '当前 DSH 版本太旧，不支持子代理协作功能，请升级到 0.2.2-rc.2 或以上。')),
                 h('span', { style: { cursor: 'pointer', paddingLeft: 6, flexShrink: 0 }, onClick: () => patch({ hostCompatDismissed: true }) }, '×'),
               )
             : null,
@@ -24920,7 +24919,7 @@ window.__ModuleLoader__.load({
                   id: SIDE_ID,
                   order: 40,
                   title: () => bi(BRAND_NAME, 'DSH Chief'),
-                  description: () => bi('摘要 · 推进流程拓扑 · 跨对话协同 · 工程档案柜 · 宰相边界', 'Digest · Workflow Topology · Peer Sync · Archives · Guardrails'),
+                  description: () => bi('管摘要、任务、窗口协同、档案和边界规则', 'Manage summaries, tasks, window sync, archives, and guard rules'),
                   icon: ChiefIcon,
                 },
               ],
