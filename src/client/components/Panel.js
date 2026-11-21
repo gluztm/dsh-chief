@@ -104,7 +104,7 @@ function ChiefWorkStageOverlay({ fx }) {
             'data-tone': tone,
             role: 'status',
             'aria-live': 'polite',
-            title: '点击任意处解除毛玻璃遮罩，恢复操作（外框流光表示参谋长仍在运作）',
+            title: '点任意处收起遮罩继续操作（外框亮着说明后台还在跑）',
             onClick: e => {
               e.stopPropagation()
               setDismissedKey(fxKey)
@@ -133,7 +133,7 @@ function ChiefWorkStageOverlay({ fx }) {
           h(
             'div',
             { className: 'dnb-chief-fx-hint' },
-            bi('点击任意处收起遮罩继续操作 · 外框流光表示仍在运作', 'Click anywhere to dismiss blur · glowing border stays active'),
+            bi('点任意处收起遮罩，外框亮着说明后台还在跑', 'Click anywhere to hide overlay. Glowing border means still working.'),
           ),
         )
       : null,
@@ -226,7 +226,7 @@ function PanelInner(props) {
             : h(TasksTab, { board, view })
 
   const cursorText = board && board.cursor && (board.cursor.next || board.cursor.step || board.cursor.blocked)
-    ? (board.cursor.blocked ? '受阻 · ' + board.cursor.blocked : (board.cursor.next || board.cursor.step))
+    ? (board.cursor.blocked ? '卡住了：' + board.cursor.blocked : (board.cursor.next || board.cursor.step))
     : ''
 
   return h(
@@ -251,7 +251,7 @@ function PanelInner(props) {
         h('span', {
           className: 'dnb-title',
           style: { display: 'inline-flex', alignItems: 'center', gap: 5 },
-          title: `${bi(BRAND_NAME, 'DSH Chief')} v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? (view.staleBackendDetected ? bi(`（宿主内存后端仍为 v${meta.backendBuild}，重载后同步）`, ` (backend in RAM v${meta.backendBuild}; reload to sync)`) : bi('（前后端已同步）', ' (synced)')) : ''}${view.sessionId ? ` · ${bi('会话', 'Session')} ${shortSession(view.sessionId)}` : ''}`,
+          title: `${bi(BRAND_NAME, 'DSH Chief')} v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? (view.staleBackendDetected ? bi(`（后台还是旧版 v${meta.backendBuild}，重启 DSH 后生效）`, ` (background is still v${meta.backendBuild}; restart DSH to update)`) : bi('（版本已同步）', ' (synced)')) : ''}${view.sessionId ? ` · ${bi('对话', 'Chat')} ${shortSession(view.sessionId)}` : ''}`,
         },
           h(Icon, { name: 'sparkles', size: 14, style: { color: 'var(--dnb-accent)' } }),
           bi(BRAND_NAME, 'DSH Chief'),
@@ -262,7 +262,7 @@ function PanelInner(props) {
           'data-active': view.settingsOpen ? '1' : '0',
           'aria-label': bi('设置', 'Settings'),
           'aria-pressed': view.settingsOpen ? 'true' : 'false',
-          title: bi('设置（情景预设 / 通知 / 预算账本 / 语言）', 'Settings (Presets / Alerts / Budget / Language)'),
+          title: bi('设置：模式预设、桌面通知、用量上限和语言', 'Settings: presets, alerts, usage caps, and language'),
           onClick: () => {
             setGearDeg(d => d + 180)
             patch({
@@ -277,14 +277,14 @@ function PanelInner(props) {
           className: 'dnb-ver-chip',
           'data-stale': view.staleBackendDetected ? '1' : '0',
           title: view.staleBackendDetected
-            ? bi(`前端面板 v${EXPECTED_BACKEND_BUILD} · 宿主内存后端仍为 v${meta.backendBuild || '旧版'}（重载插件或重启客户端后同步）`, `UI v${EXPECTED_BACKEND_BUILD} · Host backend v${meta.backendBuild || 'older'} (restart DSH to sync)`)
-            : bi(`DSH 参谋长版本：v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? '（前后端已同步）' : ''}`, `DSH Chief v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? ' (synced)' : ''}`),
-        }, view.staleBackendDetected ? `${bi('旧后端', 'Stale')} · v${EXPECTED_BACKEND_BUILD}` : ('v' + EXPECTED_BACKEND_BUILD)),
+            ? bi(`面板已更新到 v${EXPECTED_BACKEND_BUILD}，后台还是 v${meta.backendBuild || '旧版'}，重启 DSH 后即可同步`, `UI is v${EXPECTED_BACKEND_BUILD}, background is still v${meta.backendBuild || 'older'}. Restart DSH to sync.`)
+            : bi(`DSH 参谋长 v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? '（版本已同步）' : ''}`, `DSH Chief v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? ' (synced)' : ''}`),
+        }, view.staleBackendDetected ? `${bi('待重启', 'Restart')} · v${EXPECTED_BACKEND_BUILD}` : ('v' + EXPECTED_BACKEND_BUILD)),
         meta.linkedPeersCount > 0
           ? h('button', {
               className: 'dnb-head-pill',
               style: { height: 21, padding: '0 6px', fontSize: 10.5, color: 'var(--dnb-accent)' },
-              title: bi('已串联跨窗口会话，点击查看协同网络', 'Linked peer sessions; click to view'),
+              title: bi('已连上其他对话窗口，点击查看', 'Linked to other chat windows. Click to view.'),
               onClick: () => patch({ tab: 'peers', settingsOpen: false }),
             }, h(Icon, { name: 'link', size: 10.5 }), String(meta.linkedPeersCount))
           : null,
@@ -298,9 +298,9 @@ function PanelInner(props) {
               const eff = meta.modelRef || meta.resolvedModelRef || meta.followModelRef || ''
               const label = fullModelWithChannel(eff, cat)
               if (!meta.modelRef) {
-                return bi('正在自动跟随主对话模型', 'Following lead session model') + (label ? ': ' + label + ' [' + eff + ']' : '') + bi('（点击可切换专职参谋长模型）', ' (click to pin Chief model)')
+                return bi('正在跟着主对话用同一个模型', 'Using the main chat model') + (label ? ': ' + label + ' [' + eff + ']' : '') + bi('（点这里可单独指定模型）', ' (click to pick a separate model)')
               }
-              return bi('已固定参谋长专职模型：', 'Pinned Chief model: ') + (label || eff) + ' [' + eff + ']' + bi('（点击可切回跟随主对话）', ' (click to unpin)')
+              return bi('参谋长单独使用的模型：', 'Chief model: ') + (label || eff) + ' [' + eff + ']' + bi('（点这里切回跟着主对话）', ' (click to follow main chat)')
             })(),
             onClick: () => {
               const nextOpen = !view.secModelMenuOpen
@@ -324,7 +324,7 @@ function PanelInner(props) {
                   : (meta.paceMode === 'auto' ? 'managed' : (meta.paceMode === 'smart' ? 'patrol' : 'off')))
             return h(
               'div',
-              { className: 'dnb-run-mode-pill', role: 'group', 'aria-label': bi('参谋运行模式', 'Chief run mode') },
+              { className: 'dnb-run-mode-pill', role: 'group', 'aria-label': bi('后台运行模式', 'Background run mode') },
               RUN_MODE_OPTIONS.map(opt => {
                 const rm = runModeMeta(opt.key)
                 return h('button', {
@@ -352,12 +352,12 @@ function PanelInner(props) {
           h('button', {
             className: 'dnb-icon-btn',
             'data-active': view.searchOpen ? '1' : '0',
-            title: bi('搜索与问参谋长', 'Search & Ask Chief'),
+            title: bi('搜索或问参谋长', 'Search or ask Chief'),
             onClick: () => patch({ searchOpen: !view.searchOpen, askHits: null }),
           }, h(Icon, { name: 'search', size: 15 })),
           h('button', {
             className: 'dnb-icon-btn',
-            title: bi('同步刷新', 'Refresh'),
+            title: bi('刷新状态', 'Refresh'),
             onClick: () => {
               void refresh()
               if (view.tab === 'archive') void loadArchives(true)
@@ -366,7 +366,7 @@ function PanelInner(props) {
           }, h(Icon, { name: 'refresh', size: 15, style: view.busy ? { animation: 'dnb-spin 0.9s linear infinite' } : undefined })),
           h('button', {
             className: 'dnb-icon-btn',
-            title: isPage ? bi('返回会话', 'Back to Session') : bi('收起', 'Collapse'),
+            title: isPage ? bi('回到对话', 'Back to Chat') : bi('收起', 'Collapse'),
             onClick: () => {
               if (closeChief()) return
               if (isPage) {
@@ -402,7 +402,7 @@ function PanelInner(props) {
                   gap: 6.5,
                   cursor: 'pointer',
                 },
-                title: '点击跳转金字塔视角查看推进/受阻子代理',
+                title: '点这里查看正在跑或卡住的子代理',
                 onClick: () => {
                   const targetTask = (board.cursor.expectedTaskId && tasks.find(t => t && t.id === board.cursor.expectedTaskId))
                     || tasks.find(t => t && (board.cursor.blocked ? t.status === 'blocked' : t.status === 'doing'))
@@ -484,7 +484,7 @@ function PanelInner(props) {
                 gap: 8,
               },
             },
-            h('span', null, '⚠ 检测到宿主进程仍在运行旧版内存模块（当前面板 v' + EXPECTED_BACKEND_BUILD + (meta.backendBuild ? '，内存后端 v' + meta.backendBuild : '') + '），请重启 DeepSeek Harness 客户端或重载插件后完全生效。'),
+            h('span', null, '⚠ 后台还在跑旧版本（面板 v' + EXPECTED_BACKEND_BUILD + (meta.backendBuild ? '，后台 v' + meta.backendBuild : '') + '），请重启 DeepSeek Harness 或重新加载插件后生效。'),
             h('span', { style: { cursor: 'pointer', paddingLeft: 6, flexShrink: 0 }, onClick: () => patch({ staleBackendDismissed: true }) }, '×'),
           )
         : null,
@@ -508,7 +508,7 @@ function PanelInner(props) {
                 gap: 8,
               },
             },
-            h('span', null, '⚠ ' + (view.hostCompat.warning || '当前 DSH 宿主版本不支持命名子代理 API，请升级至 >= 0.2.2-rc.2。')),
+            h('span', null, '⚠ ' + (view.hostCompat.warning || '当前 DSH 版本太旧，不支持子代理协作功能，请升级到 0.2.2-rc.2 或以上。')),
             h('span', { style: { cursor: 'pointer', paddingLeft: 6, flexShrink: 0 }, onClick: () => patch({ hostCompatDismissed: true }) }, '×'),
           )
         : null,

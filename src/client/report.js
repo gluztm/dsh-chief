@@ -63,31 +63,31 @@ export function buildSessionReportMarkdown({
   const lines = []
   lines.push(`# ${L('DSH 参谋长 · 任务复盘战报', 'DSH Chief · Session Retrospective Report')}`)
   lines.push('')
-  lines.push(`- **${L('会话标识', 'Session')}**: \`${sessLabel}\``)
+  lines.push(`- **${L('当前会话', 'Session')}**: \`${sessLabel}\``)
   lines.push(`- **${L('导出时间', 'Generated')}**: ${nowStr}`)
-  lines.push(`- **${L('运行模式与权限', 'Mode & Tier')}**: ${runStr} · ${permStr}`)
-  lines.push(`- **${L('核心总目标', 'Core Objective')}**: ${b.objective ? String(b.objective).trim() : L('（未设定核心总目标）', '(Not set)')}`)
+  lines.push(`- **${L('模式与权限', 'Mode & Tier')}**: ${runStr} · ${permStr}`)
+  lines.push(`- **${L('总目标', 'Main Goal')}**: ${b.objective ? String(b.objective).trim() : L('（还没定总目标）', '(Not set)')}`)
   if (b.goalApproval && b.goalApproval.status === 'approved') {
     lines.push(`- **${L('结项状态', 'Goal Status')}**: ✅ ${L('已批准结项', 'Approved')}`)
   } else if (b.mode === 'goal') {
-    lines.push(`- **${L('结项状态', 'Goal Status')}**: 🎯 ${L('目标督导进行中', 'Goal supervision active')}`)
+    lines.push(`- **${L('结项状态', 'Goal Status')}**: 🎯 ${L('正在按目标推进', 'Working toward goal')}`)
   }
   lines.push('')
 
   // Section 1: Planning Pipeline Progress
-  lines.push(`## ${L('一、规划推进流程', '1. Workflow Plan Progress')} (${doneSteps}/${steps.length})`)
+  lines.push(`## ${L('一、推进步骤', '1. Plan Steps')} (${doneSteps}/${steps.length})`)
   if (steps.length > 0) {
     steps.forEach((s, idx) => {
       const icon = s.done ? '✅' : (b.cursor && b.cursor.step && s.text.includes(b.cursor.step) ? '🔵' : '⬜')
       lines.push(`- ${icon} **${L(`步骤 ${idx + 1}`, `Step ${idx + 1}`)}**: ${s.text}${s.summary ? ` — *${s.summary}*` : ''}`)
     })
   } else {
-    lines.push(`- ${L('暂无显式规划步骤。', 'No explicit workflow plan steps recorded.')}`)
+    lines.push(`- ${L('还没有列出计划步骤。', 'No plan steps yet.')}`)
   }
   lines.push('')
 
   // Section 2: Tasks & Verified Evidence
-  lines.push(`## ${L('二、任务完成情况与验收证据', '2. Tasks & Verification Evidence')} (${doneTasks.length}/${tasks.length} ${L('已完成', 'Done')})`)
+  lines.push(`## ${L('二、任务进度和结果', '2. Tasks & Results')} (${doneTasks.length}/${tasks.length} ${L('已完成', 'Done')})`)
   const pushTaskGroup = (title, list) => {
     if (!list.length) return
     lines.push(`### ${title} (${list.length})`)
@@ -95,23 +95,23 @@ export function buildSessionReportMarkdown({
       const owner = t.subagent || t.owner
       const ownerTag = owner ? ` (@${shortAgentName(owner)})` : ''
       lines.push(`- **${t.title}**${ownerTag} [${statusLabel(t.status)}]`)
-      if (t.evidence) lines.push(`  - ${L('验收依据', 'Evidence')}: ${t.evidence}`)
-      if (t.note && t.status !== 'done') lines.push(`  - ${L('备注/阻塞', 'Note')}: ${t.note}`)
+      if (t.evidence) lines.push(`  - ${L('结果说明', 'Evidence')}: ${t.evidence}`)
+      if (t.note && t.status !== 'done') lines.push(`  - ${L('备注/卡点', 'Note')}: ${t.note}`)
     }
     lines.push('')
   }
   if (tasks.length > 0) {
-    pushTaskGroup(L('受阻 / 待处理', 'Blocked'), blockedTasks)
+    pushTaskGroup(L('受阻任务', 'Blocked'), blockedTasks)
     pushTaskGroup(L('推进中', 'In Progress'), doingTasks)
     pushTaskGroup(L('已完成', 'Completed'), doneTasks)
     pushTaskGroup(L('待推进', 'To Do'), todoTasks)
   } else {
-    lines.push(`- ${L('当前看板无任务条目。', 'No task entries recorded.')}`, '')
+    lines.push(`- ${L('任务列表是空的。', 'No tasks yet.')}`, '')
   }
 
   // Section 3: Subagents snapshot
   if (workers.length > 0) {
-    lines.push(`## ${L('三、协同子代理概览', '3. Subagent Roster')} (${workers.length})`)
+    lines.push(`## ${L('三、协作成员情况', '3. Subagents')} (${workers.length})`)
     for (const w of workers.slice(0, 16)) {
       const stateIcon = w.status === 'running' ? '🔵' : (w.status === 'error' ? '🔴' : '🟢')
       lines.push(`- ${stateIcon} \`@${shortAgentName(w.name)}\` — ${w.status || 'idle'}${w.updatedAt ? ` (${timeLabel(w.updatedAt)})` : ''}`)
@@ -121,7 +121,7 @@ export function buildSessionReportMarkdown({
 
   // Section 4: Chief Situation Digest
   if (narText) {
-    lines.push(`## ${L('四、参谋长态势摘要', '4. Chief Situation Digest')}`)
+    lines.push(`## ${L('四、当前进度摘要', '4. Progress Summary')}`)
     lines.push(narText)
     lines.push('')
   }
@@ -131,7 +131,7 @@ export function buildSessionReportMarkdown({
   const forbidden = Array.isArray(bounds.forbidden) ? bounds.forbidden : []
   const notes = Array.isArray(bounds.notes) ? bounds.notes : []
   if (facts.length > 0 || allowed.length > 0 || forbidden.length > 0 || notes.length > 0 || activeWalls.length > 0) {
-    lines.push(`## ${L('五、纪律沉淀与生效边界', '5. Key Facts & Active Guardrails')}`)
+    lines.push(`## ${L('五、重要记事和规则', '5. Notes & Rules')}`)
     for (const f of facts.slice(0, 15)) {
       lines.push(`- **[${f.category || 'fact'}]** ${f.text}`)
     }
@@ -145,12 +145,12 @@ export function buildSessionReportMarkdown({
   }
 
   // Section 6: Chief LLM Ledger & Budget Status
-  lines.push(`## ${L('六、参谋长 LLM 调用账本与托管预算', '6. Chief LLM Ledger & Managed Budget')}`)
-  lines.push(`- **${L('累计消耗', 'Cumulative')}**: ${ledger.totalCalls || 0} ${L('次', 'calls')} · ${fmtTokenCount(ledger.totalTokens || 0)} tokens (${L('输入', 'in')} ${fmtTokenCount(ledger.totalInputTokens || 0)} / ${L('输出', 'out')} ${fmtTokenCount(ledger.totalOutputTokens || 0)})`)
+  lines.push(`## ${L('六、模型用量与托管上限', '6. Model Usage & Budget')}`)
+  lines.push(`- **${L('累计用量', 'Total used')}**: ${ledger.totalCalls || 0} ${L('次', 'calls')} · ${fmtTokenCount(ledger.totalTokens || 0)} tokens (${L('输入', 'in')} ${fmtTokenCount(ledger.totalInputTokens || 0)} / ${L('输出', 'out')} ${fmtTokenCount(ledger.totalOutputTokens || 0)})`)
   lines.push(`- **${L('分类明细', 'Breakdown')}**: ${L('问答', 'Q&A')} ${byCat.chat?.calls || 0} (${fmtTokenCount(byCat.chat?.tokens || 0)}) · ${L('巡检', 'Patrol')} ${byCat.review?.calls || 0} (${fmtTokenCount(byCat.review?.tokens || 0)}) · ${L('梦境漫游', 'Dream Roam')} ${byCat.dream?.calls || 0} (${fmtTokenCount(byCat.dream?.tokens || 0)})`)
   const maxCalls = ledger.budget?.maxCalls ?? meta.managedBudgetMaxCalls ?? 30
   const maxTokens = ledger.budget?.maxTokens ?? meta.managedBudgetMaxTokens ?? 300_000
-  lines.push(`- **${L('本轮托管统计', 'Current Managed Run')}**: ${mr.calls || 0}/${maxCalls || '∞'} ${L('次', 'calls')} · ${fmtTokenCount(mr.tokens || 0)}/${maxTokens ? fmtTokenCount(maxTokens) : '∞'} tokens${mr.tripped ? ` (**🛑 ${L('已触发硬预算熔断', 'TRIPPED')}: ${mr.trippedReason || ''}**)` : ''}`)
+  lines.push(`- **${L('本次托管用量', 'This Managed Run')}**: ${mr.calls || 0}/${maxCalls || '∞'} ${L('次', 'calls')} · ${fmtTokenCount(mr.tokens || 0)}/${maxTokens ? fmtTokenCount(maxTokens) : '∞'} tokens${mr.tripped ? ` (**🛑 ${L('已达上限并自动停下', 'Budget limit reached')}: ${mr.trippedReason || ''}**)` : ''}`)
   lines.push('')
 
   return redactReportSecrets(lines.join('\n').replace(/\n{3,}/g, '\n\n').trim() + '\n')

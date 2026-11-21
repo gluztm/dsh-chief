@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "DSH Chief",
-    "description": "Let AI manage AI — it minds the flow itself and stops a runaway before it costs you. No screen-sitting, no repeated confirmations; it keeps working while you are away, and asks before touching your workspace."
+    "description": "Right-sidebar plugin for DSH: tracks task progress, saves notes before context compaction, and asks before editing your workspace. Read-only by default."
   },
   "ui": {
     "brandName": "DSH Chief",
@@ -28,17 +28,17 @@
       "observer": {
         "title": "👁 Read-Only Observer",
         "tag": "L0 · ⏸ Off",
-        "desc": "Zero background burn or edits; read-only digest & low-effort summaries."
+        "desc": "Read-only: no automatic actions or edits; gives summaries and advice when asked."
       },
       "collab": {
         "title": "🤝 Daily Co-Pilot",
         "tag": "L2 · 🛡 Patrol",
-        "desc": "0 idle cost; wakes only on errors/walls with per-action approval popups."
+        "desc": "No background model calls while idle; steps in on errors or blocked walls and asks before important changes."
       },
       "away": {
         "title": "🚀 Away Managed",
         "tag": "L3 · 🤖 Managed",
-        "desc": "Continuous supervision, 80% auto-compact, 30-call/300K budget cap & alerts."
+        "desc": "Keeps watching progress, auto-compacts at 80%, stops after 30 calls or 300K tokens, and sends alerts at key points."
       }
     },
     "notify": {

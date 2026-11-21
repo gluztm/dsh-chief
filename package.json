@@ -3,7 +3,7 @@
   "version": "1.6.0",
   "icon": "icon.svg",
   "type": "module",
-  "description": "Right-sidebar supervisor for DeepSeek Harness (DSH): prevents context-compaction amnesia, monitors subagent DAGs, gates file edits and shell commands behind per-action approvals, breaks runaway loops, and hands off long sessions without bloating prompt tokens.",
+  "description": "Right-sidebar supervisor plugin for DeepSeek Harness (DSH): saves findings before compaction, monitors subagent workflows, checks file edits and shell commands against guard rules, stops repeat-error loops, and hands off long sessions.",
   "author": "gluztm",
   "license": "AGPL-3.0-only",
   "repository": {

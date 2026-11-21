@@ -376,7 +376,7 @@ export function PeersTab({ view }) {
     if (mail.detachedFromCluster) {
       ensureDrawer('detached', {
         kind: 'detached',
-        title: bi('已脱离协同历史（已隔离不注入）', 'Detached History (Isolated)'),
+        title: bi('已断开的历史（不发给主对话）', 'Disconnected History (Isolated)'),
         colors: [{ dot: '#8e8e93', bg: 'rgba(142,142,147,0.1)', border: 'rgba(142,142,147,0.3)' }],
         order: 99,
         defaultOpen: false,
@@ -395,7 +395,7 @@ export function PeersTab({ view }) {
         .map(id => colorForRootSession(id, selfRootId))
       ensureDrawer('broadcast', {
         kind: 'broadcast',
-        title: bi('🌐 全网广播 (@全体)', '🌐 Broadcast (@All)'),
+        title: bi('🌐 全体广播 (@全体)', '🌐 Broadcast (@All)'),
         colors: cols.length ? cols : [SESSION_PALETTE[0], SESSION_PALETTE[1]],
         order: 0,
         defaultOpen: true,
@@ -407,7 +407,7 @@ export function PeersTab({ view }) {
       const sorted = uniqueRoots.slice().sort()
       ensureDrawer('multi:' + sorted.join('|'), {
         kind: 'cross',
-        title: `🔀 ${sorted.slice(0, 3).map(labelForRoot).join(' · ')}${sorted.length > 3 ? bi(` 等${sorted.length}窗`, ` +${sorted.length}`) : ''} ${bi('多方协同', 'Group Relay')}`,
+        title: `🔀 ${sorted.slice(0, 3).map(labelForRoot).join(' · ')}${sorted.length > 3 ? bi(` 等${sorted.length}个窗口`, ` +${sorted.length}`) : ''} ${bi('多窗对话', 'Group Chat')}`,
         colors: sorted.slice(0, 4).map(id => colorForRootSession(id, selfRootId)),
         order: 1,
         defaultOpen: true,
@@ -419,7 +419,7 @@ export function PeersTab({ view }) {
       if (pair.length >= 2 && pair[0] !== pair[1]) {
         ensureDrawer('pair:' + pair.join('|'), {
           kind: 'cross',
-          title: `↔ ${labelForRoot(pair[0])} ↔ ${labelForRoot(pair[1])} ${bi('跨窗传话', 'Cross-Window')}`,
+          title: `↔ ${labelForRoot(pair[0])} ↔ ${labelForRoot(pair[1])} ${bi('跨窗消息', 'Cross-Window')}`,
           colors: pair.map(id => colorForRootSession(id, selfRootId)),
           order: 2,
           defaultOpen: true,
@@ -431,7 +431,7 @@ export function PeersTab({ view }) {
     const col = colorForRootSession(internalRoot, selfRootId)
     ensureDrawer('internal:' + internalRoot, {
       kind: 'internal',
-      title: `📁 ${labelForRoot(internalRoot)} ${bi('内部信箱', 'Internal')}`,
+      title: `📁 ${labelForRoot(internalRoot)} ${bi('内部消息', 'Internal')}`,
       colors: [col],
       order: internalRoot === selfRootId ? 3 : 4,
       defaultOpen: internalRoot === selfRootId,
@@ -666,7 +666,7 @@ export function PeersTab({ view }) {
                 className: 'dnb-pill',
                 style: { height: 22, fontSize: 10.5, padding: '0 7px', borderStyle: 'dashed' },
                 onClick: () => patch({ showInternalProbes: !view.showInternalProbes }),
-              }, view.showInternalProbes ? bi('隐藏内部探针', 'Hide Probes') : bi(`内部探针 (${hiddenProbePeers.length})`, `Probes (${hiddenProbePeers.length})`))
+              }, view.showInternalProbes ? bi('隐藏后台检查', 'Hide Checks') : bi(`后台检查 (${hiddenProbePeers.length})`, `Checks (${hiddenProbePeers.length})`))
             : null,
           peers.length > 1
             ? h('button', {
@@ -674,10 +674,10 @@ export function PeersTab({ view }) {
                 className: 'dnb-pill dnb-pill-accent',
                 style: { height: 22, fontSize: 10.5, padding: '0 8px' },
                 onClick: () => {
-                  patch({ secTarget: 'all', secMode: 'steer', notice: bi('已选择向全体成员广播递话', 'Target set to broadcast @All') })
+                  patch({ secTarget: 'all', secMode: 'steer', notice: bi('已选好发给所有人，请在下方输入', 'Sending to everyone; type below') })
                   focusSecInput()
                 },
-              }, bi('@全体广播', '@Broadcast'))
+              }, bi('@发给全体', '@Message All'))
             : null,
         ),
       },
@@ -1297,11 +1297,11 @@ export function PeersTab({ view }) {
         open: fedOpen,
         onToggle: () => patch({ peersFedCollapsed: fedOpen }),
         icon: h(Icon, { name: 'link', size: 12.5, style: { color: 'var(--dnb-text-2)' } }),
-        title: bi('跨窗口独立会话联动', 'Cross-Window Session Federation'),
+        title: bi('连接其他对话窗口', 'Connect Other Windows'),
         count: otherSessions.length ? `${otherSessions.filter(s => s.linked).length}/${otherSessions.length}` : '0',
         preview: bubbleLocked
           ? bi('🔒 编队工作中已锁定联动关系', '🔒 Federation locked during active work')
-          : bi('多开独立主对话窗口后可在此开启联动', 'Open another standalone session window to link here'),
+          : bi('同时开了多个窗口时可在这里连接', 'Link multiple open chat windows here'),
         bodyStyle: { padding: 0 },
       },
       otherSessions.length
@@ -1363,9 +1363,9 @@ export function PeersTab({ view }) {
         open: !view.peersMailCollapsed,
         onToggle: () => patch({ peersMailCollapsed: !view.peersMailCollapsed }),
         icon: h(Icon, { name: 'mail', size: 12.5, style: { color: 'var(--dnb-text-2)' } }),
-        title: bi('参谋部协同信箱', 'Chief Collaboration Mailbox'),
+        title: bi('协同消息记录', 'Team Messages'),
         count: mailbox.length ? String(mailbox.length) : '',
-        preview: drawerList.length ? bi(`${drawerList.length} 个通道抽屉`, `${drawerList.length} channel drawers`) : bi('暂无协同通信记录', 'No relay messages yet'),
+        preview: drawerList.length ? bi(`${drawerList.length} 组消息`, `${drawerList.length} groups`) : bi('还没有消息记录', 'No messages yet'),
         actions: h(
           'div',
           { className: 'dnb-text-filter-bar', style: { padding: 0, gap: 3 } },
@@ -1476,7 +1476,7 @@ export function PeersTab({ view }) {
                     }, drawer.title),
                     h('span', { className: 'dnb-acc-count', style: { fontSize: 10 } }, `${drawer.items.length}`),
                   ),
-                  h('span', { className: 'dnb-acc-pull-hint' }, isOpen ? bi('收起 ▴', 'Fold ▴') : bi('拉起 ▾', 'Pull ▾')),
+                  h('span', { className: 'dnb-acc-pull-hint' }, isOpen ? bi('收起 ▴', 'Collapse ▴') : bi('展开 ▾', 'Expand ▾')),
                 ),
                 isOpen
                   ? drawer.items.slice(0, 15).map(mail => {
@@ -1518,7 +1518,7 @@ export function PeersTab({ view }) {
               )
             }),
           )
-        : h('div', { className: 'dnb-empty', style: { padding: '16px 12px' } }, '当前筛选下暂无协同通信记录'),
+        : h('div', { className: 'dnb-empty', style: { padding: '16px 12px' } }, bi('这个分类下还没有消息', 'No messages in this filter')),
     ),
   )
 }

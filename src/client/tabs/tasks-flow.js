@@ -37,7 +37,7 @@ function flowAgentStatusLabel(status) {
     case 'done': return bi('已交卷', 'Returned')
     case 'doing': return bi('运行中', 'Running')
     case 'blocked': return bi('受阻/待批', 'Blocked')
-    default: return bi('待命', 'Standby')
+    default: return bi('等待中', 'Waiting')
   }
 }
 
@@ -467,7 +467,7 @@ function FlowMiniTaskItem({ task, board, stageById, onExplainTask, onOpenEditor,
           style: isDone
             ? { background: '#22c55e', borderColor: '#22c55e', color: '#fff', flexShrink: 0 }
             : { borderColor: meta.hex, flexShrink: 0 },
-          title: '点击切换为 ' + STATUS_LABEL[next],
+          title: '切换为 ' + STATUS_LABEL[next],
           onClick: e => {
             e.stopPropagation()
             void act({ action: 'task.update', id: task.id, status: next })
@@ -503,7 +503,7 @@ function FlowMiniTaskItem({ task, board, stageById, onExplainTask, onOpenEditor,
           ? h('button', {
               type: 'button',
               className: 'dnb-flow-mini-btn',
-              title: '咨询大白话含义',
+              title: '用大白话解释这条',
               onClick: () => onExplainTask(task),
             }, h(Icon, { name: 'sparkles', size: 11 }))
           : null,
@@ -521,14 +521,14 @@ function FlowMiniTaskItem({ task, board, stageById, onExplainTask, onOpenEditor,
           type: 'button',
           className: 'dnb-flow-mini-btn',
           'data-active': isFocused ? '1' : '0',
-          title: isFocused ? '取消框选' : '框选定位',
+          title: isFocused ? '取消高亮定位' : '在图里高亮定位',
           onClick: () => focusObjectiveInPyramid(isFocused ? '' : task.id),
         }, h(Icon, { name: 'target', size: 10.5 })),
         onOpenEditor
           ? h('button', {
               type: 'button',
               className: 'dnb-flow-mini-btn',
-              title: '编辑节点',
+              title: '修改任务',
               onClick: () => onOpenEditor(task),
             }, h(Icon, { name: 'edit', size: 10.5 }))
           : null,
@@ -552,12 +552,12 @@ function FlowAgentBranchCard({
   const meta = FLOW_STATUS_META[branch.status] || FLOW_STATUS_META.todo
   const targetCircle = flowCircledNum(branch.returnTargetIndex)
   const returnText = branch.status === 'done'
-    ? (branch.isCrossStep ? bi(`↩ 已完成 · 交卷指向步骤 ${targetCircle}`, `↩ Done · Hands off to Step ${targetCircle}`) : bi(`↩ 已完成 · 回指步骤 ${targetCircle}`, `↩ Done · Returns to Step ${targetCircle}`))
+    ? (branch.isCrossStep ? bi(`↩ 已完成 · 结果交给步骤 ${targetCircle}`, `↩ Done · Hands off to Step ${targetCircle}`) : bi(`↩ 已完成 · 回到步骤 ${targetCircle}`, `↩ Done · Back to Step ${targetCircle}`))
     : branch.status === 'blocked'
-      ? bi(`⚠ 受阻 · 解除后回指步骤 ${targetCircle}`, `⚠ Blocked · Resumes at Step ${targetCircle}`)
+      ? bi(`⚠ 卡住了 · 解决后回到步骤 ${targetCircle}`, `⚠ Blocked · Back to Step ${targetCircle}`)
       : branch.status === 'doing'
-        ? bi(`⇢ 推进中 · 完成后回指步骤 ${targetCircle}`, `⇢ Running · Returns to Step ${targetCircle}`)
-        : bi(`⇢ 待启动 · 回指步骤 ${targetCircle}`, `⇢ Standby · Returns to Step ${targetCircle}`)
+        ? bi(`⇢ 进行中 · 做完回到步骤 ${targetCircle}`, `⇢ Running · Back to Step ${targetCircle}`)
+        : bi(`⇢ 待开始 · 做完回到步骤 ${targetCircle}`, `⇢ Waiting · Back to Step ${targetCircle}`)
 
   return h(
     'div',
@@ -595,7 +595,7 @@ function FlowAgentBranchCard({
             ? h('button', {
                 type: 'button',
                 className: 'dnb-flow-mini-btn',
-                title: bi('打开子代理对话窗格', 'Open subagent chat pane'),
+                title: bi('打开子代理聊天窗口', 'Open subagent chat'),
                 onClick: () => openSubagentChat(branch.agent),
               }, h(Icon, { name: 'chat', size: 11 }))
             : null,
@@ -603,7 +603,7 @@ function FlowAgentBranchCard({
             ? h('button', {
                 type: 'button',
                 className: 'dnb-flow-mini-btn',
-                title: bi('查看/编辑关联任务', 'Inspect/edit linked task'),
+                title: bi('查看或修改对应任务', 'View or edit linked task'),
                 onClick: () => patch({ selectedTaskId: store.selectedTaskId === branch.primaryTask.id ? '' : branch.primaryTask.id }),
               }, h(Icon, { name: 'sliders', size: 11 }))
             : null,
@@ -636,7 +636,7 @@ function FlowAgentBranchCard({
           type: 'button',
           className: 'dnb-flow-return-badge',
           'data-status': branch.status,
-          title: bi(`点击定位回指目标：步骤 ${targetCircle} ${branch.returnTargetTitle}`, `Jump to return target: Step ${targetCircle} ${branch.returnTargetTitle}`),
+          title: bi(`跳到步骤 ${targetCircle} ${branch.returnTargetTitle}`, `Jump to Step ${targetCircle}: ${branch.returnTargetTitle}`),
           onClick: () => onJumpToStage && onJumpToStage(branch.returnTargetId),
         },
         h('span', null, returnText),
@@ -772,7 +772,7 @@ export function TaskFlowPipelineView({
     h('input', {
       className: 'dnb-input',
       style: { flex: 1, height: 30, borderRadius: 99, padding: '0 12px', fontSize: 12 },
-      placeholder: `+ 追加第 ${stages.length + 1} 步规划节点（回车添加）…`,
+      placeholder: `添加第 ${stages.length + 1} 步（回车保存）…`,
       value: newStepDraft,
       onChange: e => setNewStepDraft(e.target.value),
       onKeyDown: e => { if (e.key === 'Enter') appendPlanStep() },
@@ -793,13 +793,13 @@ export function TaskFlowPipelineView({
       h(
         'div',
         { className: 'dnb-empty', style: { padding: '14px 10px 10px' } },
-        h('div', { style: { marginBottom: 10 } }, bi('暂无推进步骤或任务节点', 'No execution steps or task nodes yet')),
+        h('div', { style: { marginBottom: 10 } }, bi('还没有步骤或任务', 'No steps or tasks yet')),
         onTriggerAiPlan
           ? h('button', {
               type: 'button',
               className: 'dnb-pill dnb-pill-accent',
               onClick: onTriggerAiPlan,
-            }, h(Icon, { name: 'sparkles', size: 13 }), bi('让模型按步骤规划任务流程', 'Ask Lead to Plan Execution Steps'))
+            }, h(Icon, { name: 'sparkles', size: 13 }), bi('让主对话帮你拆出步骤', 'Ask main chat to plan steps'))
           : null,
       ),
       addStepRow,
@@ -844,8 +844,8 @@ export function TaskFlowPipelineView({
           h(
             'div',
             { className: 'dnb-flow-rail-meta' },
-            bi(`${stats.doneStages || 0}/${stats.totalStages || stages.length} 步已绿`, `${stats.doneStages || 0}/${stats.totalStages || stages.length} steps green`),
-            stats.runningAgents > 0 ? bi(` · ${stats.runningAgents} 代理运行`, ` · ${stats.runningAgents} active`) : '',
+            bi(`已完成 ${stats.doneStages || 0}/${stats.totalStages || stages.length} 步`, `${stats.doneStages || 0}/${stats.totalStages || stages.length} steps done`),
+            stats.runningAgents > 0 ? bi(` · ${stats.runningAgents} 个在跑`, ` · ${stats.runningAgents} active`) : '',
           ),
         )
       : null,
@@ -911,12 +911,12 @@ export function TaskFlowPipelineView({
         )
 
         const taskSummaryParts = []
-        if (blockedTaskCount > 0) taskSummaryParts.push(`${blockedTaskCount} 受阻`)
-        if (liveTaskCount > 0) taskSummaryParts.push(`${liveTaskCount} 推进`)
-        if (doneTaskCount > 0) taskSummaryParts.push(`${doneTaskCount} 已完`)
+        if (blockedTaskCount > 0) taskSummaryParts.push(`${blockedTaskCount} 卡住`)
+        if (liveTaskCount > 0) taskSummaryParts.push(`${liveTaskCount} 进行中`)
+        if (doneTaskCount > 0) taskSummaryParts.push(`${doneTaskCount} 完成`)
         const taskSummaryLabel = taskSummaryParts.length > 0
           ? taskSummaryParts.join(' · ')
-          : (stage.allTasks.length > 0 ? `${stage.allTasks.length} 任务` : '')
+          : (stage.allTasks.length > 0 ? `${stage.allTasks.length} 项任务` : '')
 
         const openMenuFromEvent = e => {
           if (!canBindStepMenu || typeof stepApi.onOpenStepMenu !== 'function') return
@@ -968,7 +968,7 @@ export function TaskFlowPipelineView({
                   className: 'dnb-flow-step-num',
                   'data-status': stage.status,
                   disabled: !canToggleStage,
-                  title: canToggleStage ? (stage.done ? '点击标为未完成' : '点击标为已完成（变绿并推进下一步）') : stage.title,
+                  title: canToggleStage ? (stage.done ? '改回未完成' : '标为已完成，继续下一步') : stage.title,
                   onClick: e => {
                     e.stopPropagation()
                     if (!canToggleStage) return
@@ -1020,7 +1020,7 @@ export function TaskFlowPipelineView({
                       type: 'button',
                       className: 'dnb-flow-step-text-btn',
                       style: { color: 'var(--dnb-accent)' },
-                      title: bi('让模型用大白话解释这条是什么意思、为什么有这个步骤', 'Ask model for a plain-language explanation of this step'),
+                      title: bi('用大白话解释这一步', 'Explain this step simply'),
                       onClick: () => stepApi.onExplainStep(stage.planIndex, stage.title),
                     }, bi('解释', 'Explain'))
                   : null,
@@ -1029,22 +1029,22 @@ export function TaskFlowPipelineView({
                       type: 'button',
                       className: 'dnb-flow-step-text-btn',
                       'data-active': stepApi.consultIdx === stage.planIndex ? '1' : '0',
-                      title: bi('拉起咨询抽屉（可问主模型或参谋长当场解读）', 'Open consultation drawer (Lead or Chief)'),
+                      title: bi('打开提问框，问主对话或参谋长', 'Ask main chat or Chief'),
                       onClick: () => stepApi.onConsultStep(stage.planIndex),
-                    }, bi('咨询', 'Ask'))
+                    }, bi('提问', 'Ask'))
                   : null,
                 h('button', {
                   type: 'button',
                   className: 'dnb-flow-mini-btn',
                   'data-active': isAddingHere ? '1' : '0',
-                  title: bi('在此步骤下添加子任务或延展子代理', 'Add subtask or assign subagent to this step'),
+                  title: bi('给这一步加子任务或找助手', 'Add subtask or assign subagent'),
                   onClick: () => setAddingToStageId(isAddingHere ? '' : stage.id),
                 }, h(Icon, { name: 'plus', size: 12 })),
                 canBindStepMenu && typeof stepApi.onOpenStepMenu === 'function'
                   ? h('button', {
                       type: 'button',
                       className: 'dnb-flow-mini-btn',
-                      title: bi('步骤更多操作（问参谋/标完成/删除）', 'More actions (Ask Chief / Mark done / Delete)'),
+                      title: bi('更多操作：问参谋、标完成、删除', 'More: Ask Chief, Done, Delete'),
                       onClick: openMenuFromEvent,
                     }, '⋯')
                   : null,
@@ -1052,7 +1052,7 @@ export function TaskFlowPipelineView({
                   ? h('button', {
                       type: 'button',
                       className: 'dnb-flow-mini-btn',
-                      title: isStageExpanded ? bi('收起此步子任务与支线', 'Collapse step subtasks & branches') : bi('拉起此步子任务与支线', 'Expand step subtasks & branches'),
+                      title: isStageExpanded ? bi('收起这一步的子任务', 'Collapse step subtasks') : bi('展开这一步的子任务', 'Expand step subtasks'),
                       onClick: () => toggleStageExpand(stage, isStageExpanded),
                     }, h(Icon, {
                       name: 'chevron',
@@ -1074,7 +1074,7 @@ export function TaskFlowPipelineView({
                   h('input', {
                     className: 'dnb-input',
                     style: { flex: 1, height: 28, fontSize: 11.5, padding: '0 10px' },
-                    placeholder: bi(`步骤 ${flowCircledNum(stage.index)} 子任务标题…`, `Step ${flowCircledNum(stage.index)} subtask title…`),
+                    placeholder: bi(`给第 ${flowCircledNum(stage.index)} 步加个子任务…`, `Subtask for Step ${flowCircledNum(stage.index)}…`),
                     value: stageTaskTitle,
                     onChange: e => setStageTaskTitle(e.target.value),
                     onKeyDown: e => { if (e.key === 'Enter') submitStageSubtask(stage) },
@@ -1082,7 +1082,7 @@ export function TaskFlowPipelineView({
                   h('input', {
                     className: 'dnb-input',
                     style: { width: 92, height: 28, fontSize: 11.5, padding: '0 8px' },
-                    placeholder: '@子代理(可选)',
+                    placeholder: '@找谁做（选填）',
                     value: stageTaskAgent,
                     onChange: e => setStageTaskAgent(e.target.value),
                     onKeyDown: e => { if (e.key === 'Enter') submitStageSubtask(stage) },
@@ -1093,7 +1093,7 @@ export function TaskFlowPipelineView({
                     style: { height: 28, padding: '0 10px', fontSize: 11.5 },
                     disabled: !stageTaskTitle.trim(),
                     onClick: () => submitStageSubtask(stage),
-                  }, '挂入'),
+                  }, '添加'),
                 )
               : null,
 
@@ -1161,7 +1161,7 @@ export function TaskFlowPipelineView({
                             h(
                               'span',
                               { className: 'dnb-flow-done-fold-hint' },
-                              doneFoldExpanded ? bi('收起 ▴', 'Fold ▴') : bi('拉起 ▾', 'Pull ▾'),
+                              doneFoldExpanded ? bi('收起 ▴', 'Hide ▴') : bi('展开 ▾', 'Show ▾'),
                             ),
                           ),
                           doneFoldExpanded
@@ -1229,7 +1229,7 @@ export function TaskFlowPipelineView({
                   }),
                 ),
                 stage.status === 'done'
-                  ? h('span', { className: 'dnb-flow-conn-tag' }, '推进至下一步')
+                  ? h('span', { className: 'dnb-flow-conn-tag' }, '进入下一步')
                   : null,
               )
             : null,
@@ -1446,7 +1446,7 @@ export function TaskFlowCanvasView({
       }
 
   if (!stages.length) {
-    return h('div', { className: 'dnb-empty' }, bi('暂无推进流程拓扑数据', 'No flow topology data yet'))
+    return h('div', { className: 'dnb-empty' }, bi('还没有流程图数据', 'No workflow data yet'))
   }
 
   return h(
@@ -1687,7 +1687,7 @@ export function TaskFlowCanvasView({
               fontSize: 9.8,
               fontWeight: ab.status === 'done' ? 600 : 500,
               fill: ab.status === 'done' ? p.badgeFg : palette.muted,
-            }, `${flowAgentStatusLabel(ab.status)} · ${bi('↩ 回指 ', '↩ -> ')}${targetCircle}`),
+            }, `${flowAgentStatusLabel(ab.status)} · ${bi('↩ 回到 ', '↩ -> ')}${targetCircle}`),
           )
         }),
       ),

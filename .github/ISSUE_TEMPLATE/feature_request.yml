@@ -1,5 +1,5 @@
 name: ✨ 功能建议 (Feature Request)
-description: 提出关于多代理调度、冷存储档案柜或治理交互的改进想法
+description: 建议新功能或改进面板交互、任务跟踪、档案管理与拦截规则
 title: "[Feature]: "
 labels: ["enhancement"]
 body:
@@ -7,13 +7,13 @@ body:
     id: problem
     attributes:
       label: 使用场景与痛点 (Problem / Use Case)
-      description: 你在指挥多智能体或管理工程记忆时遇到了什么不便？
+      description: 平时用 DSH 时遇到了什么卡点或不顺手的地方？
     validations:
       required: true
   - type: textarea
     id: solution
     attributes:
       label: 期望方案 (Proposed Solution)
-      description: 你希望 DSH 参谋长如何交互或处理？
+      description: 你希望面板怎么帮你处理，或者长成什么样？
     validations:
       required: true

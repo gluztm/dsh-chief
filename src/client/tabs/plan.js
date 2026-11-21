@@ -83,7 +83,7 @@ export function PlanTab({
       ...(resetStalePlan ? { resetStalePlan: true } : {}),
     })
     if (res && res.ok) {
-      patch({ notice: setGoal ? '🎯 已设为长期目标并开启督导' : '核心目标已保存' })
+      patch({ notice: setGoal ? '🎯 已设为目标，会帮你盯着做完' : '目标已保存' })
     }
   }
 
@@ -102,7 +102,7 @@ export function PlanTab({
     const cleanCurrent = String(current || '').trim()
     if (!isGoalMode) {
       if (!cleanCurrent) {
-        patch({ error: '请先输入本阶段核心目标，再开启目标督导' })
+        patch({ error: '请先写好目标，再点设为目标' })
         return
       }
       if (cleanCurrent !== savedObj && steps.length > 0) {
@@ -114,7 +114,7 @@ export function PlanTab({
       return
     }
     void act({ action: 'mode.set', mode: 'plan' })
-    patch({ notice: '已退出目标督导，切回标准计划推进模式' })
+    patch({ notice: '已取消目标锁定，切回普通计划模式' })
   }
 
   const keepIds = list => list.map(s => (s && s.summary ? { id: s.id, text: s.text, done: s.done, summary: s.summary } : { id: s.id, text: s.text, done: s.done }))
@@ -152,7 +152,7 @@ export function PlanTab({
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ session: store.sessionId, text: q }),
       })
-      const reply = (out && (out.reply || out.answer || out.text)) || '暂无更多上下文记录，可点「问主模型」由主对话直接解答。'
+      const reply = (out && (out.reply || out.answer || out.text)) || '暂时查不到更多资料，点「问主对话」让 AI 直接回答。'
       setSecAnswers(prev => ({ ...prev, [idx]: reply }))
     } catch (error) {
       patch({ error: String((error && error.message) || error) })
@@ -226,7 +226,7 @@ export function PlanTab({
                 className: 'dnb-input',
                 style: { flex: 1, height: 27, fontSize: 11.5 },
                 autoFocus: true,
-                placeholder: '自由输入对这一步的疑问（回车问主模型）…',
+                placeholder: '写下你对这一步的疑问，回车问主对话…',
                 value: consultDraft,
                 onChange: e => setConsultDraft(e.target.value),
                 onKeyDown: e => {
@@ -259,13 +259,13 @@ export function PlanTab({
                     '咨询小任务步骤',
                   )
                 },
-              }, '问模型'),
+              }, '问主对话'),
               h('button', {
                 type: 'button',
                 className: 'dnb-pill',
                 style: { height: 27, padding: '0 8px', fontSize: 11, flexShrink: 0, color: 'var(--dnb-accent)' },
                 disabled: isSecAsking,
-                title: '不打断主对话，让 DSH 参谋长结合上下文直接在此处下方给出通俗解答',
+                title: '不打断主对话，让参谋长直接在下面解释',
                 onClick: () => {
                   const q = consultDraft.trim()
                   setConsultDraft('')
@@ -296,13 +296,13 @@ export function PlanTab({
               'div',
               { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 } },
               h('span', { style: { fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-accent)' } },
-                isSecAsking ? '✦ DSH 参谋长正在结合上下文解读此步…' : '✦ DSH 参谋长步骤解读'),
+                isSecAsking ? '✦ 参谋长正在查资料准备解释…' : '✦ 参谋长解释'),
               !isSecAsking
                 ? h('button', {
                     type: 'button',
                     className: 'dnb-icon-btn',
                     style: { width: 18, height: 18 },
-                    title: '收起解读',
+                    title: '收起解释',
                     onClick: () => setSecAnswers(prev => {
                       const copy = { ...prev }
                       delete copy[i]
@@ -359,7 +359,7 @@ export function PlanTab({
         open: !objCollapsed,
         onToggle: () => patch({ planObjCollapsed: !objCollapsed }),
         title: bi('核心目标', 'Core Objective'),
-        headTitle: objCollapsed ? bi('点击拉起编辑核心目标', 'Expand core objective') : bi('点击收起核心目标卡', 'Collapse core objective'),
+        headTitle: objCollapsed ? bi('展开并修改目标', 'Expand goal') : bi('收起目标卡片', 'Collapse goal'),
         showPullHint: false,
         style: (isInterventionLocked || isGoalMode)
           ? {
@@ -373,17 +373,17 @@ export function PlanTab({
               React.Fragment,
               null,
               isInterventionLocked
-                ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, bi('🔒 锁定', '🔒 Locked'))
+                ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, bi('🔒 已锁定', '🔒 Locked'))
                 : null,
               isGoalMode
-                ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, bi('🎯 督导中', '🎯 Goal'))
+                ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, bi('🎯 盯着做', '🎯 Goal On'))
                 : null,
             )
           : null,
         headerExtra: !objCollapsed && board && board.objectiveAt && objective === null
           ? h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', flexShrink: 0 } }, timeLabel(board.objectiveAt))
           : null,
-        preview: (current || '').trim() ? clampTitle(String(current).trim(), 30) : bi('未设置核心目标', 'No objective set'),
+        preview: (current || '').trim() ? clampTitle(String(current).trim(), 30) : bi('还没填目标', 'No goal yet'),
         actions: h(
           React.Fragment,
           null,
@@ -391,7 +391,7 @@ export function PlanTab({
             type: 'button',
             className: 'dnb-pill',
             style: { height: 22, padding: '0 6px', fontSize: 10.5 },
-            title: bi('一键导出干净的 Markdown 任务复盘战报 (.md)', 'Export clean Markdown retrospective report (.md)'),
+            title: bi('导出整理好的任务报告 (.md)', 'Export clean task report (.md)'),
             onClick: () => {
               const md = buildSessionReportMarkdown({
                 board,
@@ -403,9 +403,9 @@ export function PlanTab({
               })
               const dl = downloadSessionReportMarkdown(md, view.sessionId)
               if (dl && dl.ok) {
-                patch({ notice: bi('📄 已导出复盘战报：', '📄 Exported report: ') + dl.filename })
+                patch({ notice: bi('📄 已导出任务报告：', '📄 Exported report: ') + dl.filename })
               } else {
-                copyText(md, bi('📄 复盘战报 Markdown 已复制到剪贴板', '📄 Report Markdown copied to clipboard'))
+                copyText(md, bi('📄 任务报告已复制到剪贴板', '📄 Report copied to clipboard'))
               }
             },
           }, bi('📄 战报', '📄 Report')),
@@ -422,15 +422,15 @@ export function PlanTab({
               fontWeight: 600,
             },
             title: isGoalMode
-              ? bi('退出目标督导并切回标准计划模式', 'Exit goal supervision mode')
-              : bi('设为长期目标并开启督导：达成后需您拍板结项才结束', 'Enable Goal Mode (requires your sign-off to close)'),
+              ? bi('取消目标锁定，切回普通模式', 'Exit goal mode')
+              : bi('设为目标后参谋会盯着做，最后由你确认结束', 'Lock goal; ends only after your approval'),
             onClick: toggleGoalMode,
           }, isGoalMode ? bi('退出目标', 'Exit Goal') : bi('🎯 设为目标', '🎯 Set Goal')),
           h('button', {
             type: 'button',
             className: 'dnb-pill dnb-pill-accent',
             style: { height: 22, padding: '0 8px', fontSize: 10.5 },
-            title: bi('根据长期目标让模型拆解推进流步骤与任务图并派发子代理', 'Ask lead model to plan steps, task graph & dispatch subagents'),
+            title: bi('按目标让主对话拆成步骤，再派给子代理做', 'Break goal into steps and assign subagents'),
             onClick: () => {
               if (typeof onTriggerPlanGraph === 'function') {
                 onTriggerPlanGraph(current)
@@ -442,7 +442,7 @@ export function PlanTab({
               void askLeadModel(prompt, '拆解任务图')
               patch({ tab: 'tasks' })
             },
-          }, h(Icon, { name: 'sparkles', size: 11 }), bi('拆解任务图', 'Plan Graph')),
+          }, h(Icon, { name: 'sparkles', size: 11 }), bi('拆成步骤', 'Break Down')),
         ),
       },
       h('textarea', {
@@ -452,8 +452,8 @@ export function PlanTab({
           : { minHeight: 50 },
         readOnly: isInterventionLocked,
         placeholder: isInterventionLocked
-          ? bi('主动强介入进行中，核心目标已锁定…', 'Strong intervention active; objective locked…')
-          : bi('输入当前阶段核心目标，点击右上「🎯 设为目标」即可开启持续督导…', 'Enter core objective, click "🎯 Set Goal" for supervision…'),
+          ? bi('强介入开启中，目标暂时不能改…', 'Strong intervention on; goal locked…')
+          : bi('写下你想实现的目标，再点右上「🎯 设为目标」…', 'Write your goal, then click "🎯 Set Goal"…'),
         value: current,
         onChange: e => { if (!isInterventionLocked) setObjective(e.target.value) },
         onBlur: () => { if (!isInterventionLocked) saveObjective() },
@@ -482,8 +482,8 @@ export function PlanTab({
             (isInterventionLocked || isGoalMode)
               ? h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
                   isInterventionLocked
-                    ? '🔒 强介入监督目的地已锁定，关闭强介入可解锁'
-                    : '🎯 目标督导生效中，达成后向您请示结项')
+                    ? '🔒 强介入开启时目标已锁，关掉强介入才能改'
+                    : '🎯 正在盯着做完，好了会请你点确认')
               : h('span', null),
             h(
               'div',
@@ -493,9 +493,9 @@ export function PlanTab({
                     type: 'button',
                     className: 'dnb-pill',
                     style: { height: 21, padding: '0 8px', fontSize: 10.5, borderColor: 'rgba(245, 158, 11, 0.42)', color: '#fbbf24' },
-                    title: '关闭主动强介入以解锁修改核心目标',
+                    title: '关掉强介入后就能改目标',
                     onClick: () => void updateSecConfig({ emergencyStopIntervention: true }),
-                  }, '🔓 停用强介入以解锁')
+                  }, '🔓 关掉强介入并解锁')
                 : null,
               !isInterventionLocked && objective !== null
                 ? h('button', {
@@ -510,14 +510,14 @@ export function PlanTab({
                     type: 'button',
                     className: 'dnb-text-filter-btn',
                     style: { fontSize: 10.5 },
-                    title: '让模型用大白话解释这个长期目标的核心问题与解决思路',
+                    title: '用大白话讲讲这个目标卡在哪、怎么做',
                     onClick: () => {
                       void askLeadModel(
                         `请用通俗易懂的大白话给我解释一下当前核心目标「${String(current).trim().slice(0, 120)}」：核心卡点是什么、整体打算怎么解决？`,
                         '咨询核心目标',
                       )
                     },
-                  }, '咨询目标')
+                  }, '解释目标')
                 : null,
             ),
           )
@@ -541,7 +541,7 @@ export function PlanTab({
             },
           },
           h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text)', fontWeight: 600 } },
-            `检测到您修改了核心目标，下方小任务板还有 ${steps.length} 条旧步骤：`),
+            `你改了目标，下面还有 ${steps.length} 条旧步骤：`),
           h(
             'div',
             { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
@@ -550,7 +550,7 @@ export function PlanTab({
               className: 'dnb-mini-btn',
               'data-tone': 'amber',
               onClick: () => void commitObjective(Boolean(view.planResetPrompt.setGoal), true),
-            }, '清空旧步骤并重来'),
+            }, '删掉旧步骤重来'),
             h('button', {
               type: 'button',
               className: 'dnb-mini-btn',
@@ -571,7 +571,7 @@ export function PlanTab({
       ? h(
           'div',
           { className: 'dnb-goal-approval-card', style: { marginTop: 10 } },
-          h('div', { style: { fontSize: 12, fontWeight: 700, color: '#30d158' } }, '🎯 参谋长判定目标已达标 · 等待您拍板结项'),
+          h('div', { style: { fontSize: 12, fontWeight: 700, color: '#30d158' } }, '🎯 参谋长觉得目标完成了，等你确认结束'),
           goalApproval.summary
             ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text)', lineHeight: 1.5 } }, goalApproval.summary)
             : null,
@@ -586,7 +586,7 @@ export function PlanTab({
                   color: 'var(--dnb-text-2)',
                   whiteSpace: 'pre-wrap',
                 },
-              }, '验证依据：' + goalApproval.evidence)
+              }, '检查结果：' + goalApproval.evidence)
             : null,
           rejectingGoal
             ? h(
@@ -595,7 +595,7 @@ export function PlanTab({
                 h('input', {
                   className: 'dnb-input',
                   style: { height: 26, fontSize: 11.5, flex: 1 },
-                  placeholder: '填写驳回原因或补充要求…',
+                  placeholder: '写下哪里不满意，或补充新要求…',
                   value: rejectReason,
                   onChange: e => setRejectReason(e.target.value),
                   onKeyDown: e => {
@@ -616,7 +616,7 @@ export function PlanTab({
                     setRejectingGoal(false)
                     setRejectReason('')
                   }),
-                }, '提交驳回'),
+                }, '退回重做'),
                 h('button', {
                   type: 'button',
                   className: 'dnb-pill',
@@ -642,7 +642,7 @@ export function PlanTab({
                     setRejectingGoal(true)
                     setRejectReason('')
                   },
-                }, '↩ 驳回继续'),
+                }, '↩ 退回继续'),
               ),
         )
       : null,
@@ -662,8 +662,8 @@ export function PlanTab({
             h(
               'div',
               { style: { display: 'flex', alignItems: 'baseline', gap: 6 } },
-              h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, bi('推进任务板', 'Task Progress Board')),
-              h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } }, bi('步骤与任务清单 · 点条目可解释/咨询/展开', 'Steps & Tasks · click item to inspect or ask')),
+              h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, bi('任务进度板', 'Task Board')),
+              h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } }, bi('点任一条可展开详情或提问', 'Click any item for details or Q&A')),
             ),
             (steps.length || taskBoardExtra)
               ? h('span', null, [steps.length ? `${doneCount} / ${steps.length} 步` : '', taskBoardExtra || ''].filter(Boolean).join(' · '))
@@ -695,7 +695,7 @@ export function PlanTab({
                         {
                           className: 'dnb-cell dnb-cell-hover',
                           style: { cursor: 'pointer' },
-                          title: '点击打开咨询与操作菜单（可问这条是什么意思、为什么有这步）',
+                          title: '打开菜单：可提问、标完成或删除',
                           onClick: e => {
                             e.preventDefault()
                             e.stopPropagation()
@@ -711,7 +711,7 @@ export function PlanTab({
                           'span',
                           {
                             className: 'dnb-ring',
-                            title: step.done ? '点击标回未完成' : '点击标记已完成',
+                            title: step.done ? '改回未完成' : '标为已完成',
                             style: step.done
                               ? { background: '#30d158', borderColor: '#30d158', cursor: 'pointer' }
                               : { cursor: 'pointer' },
@@ -744,7 +744,7 @@ export function PlanTab({
                           h('button', {
                             className: 'dnb-pill',
                             style: { height: 22, padding: '0 7px', fontSize: 11, color: 'var(--dnb-accent)' },
-                            title: '让模型用大白话解释这条是什么意思、为什么有这个步骤',
+                            title: '用大白话解释这一步',
                             onClick: e => {
                               e.stopPropagation()
                               void askLeadModel(buildExplainPrompt(step.text, i), '咨询步骤含义')
@@ -754,13 +754,13 @@ export function PlanTab({
                             className: 'dnb-pill',
                             'data-active': isConsulting ? '1' : '0',
                             style: { height: 22, padding: '0 7px', fontSize: 11 },
-                            title: '展开咨询框，自由提问关于这一步的任何疑问',
+                            title: '打开提问框，问这一步不懂的地方',
                             onClick: e => {
                               e.stopPropagation()
                               setConsultIdx(isConsulting ? -1 : i)
                               setConsultDraft('')
                             },
-                          }, '咨询'),
+                          }, '提问'),
                         ),
                       ),
                       renderStepConsult(i, step),
@@ -780,7 +780,7 @@ export function PlanTab({
                     h('input', {
                       className: 'dnb-input',
                       style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1, fontSize: 12 },
-                      placeholder: '添加一条步骤（回车新增）…',
+                      placeholder: '加一个新步骤，按回车保存…',
                       value: newStepText,
                       onChange: e => setNewStepText(e.target.value),
                       onKeyDown: e => {
@@ -803,7 +803,7 @@ export function PlanTab({
             : h(
                 'div',
                 { className: 'dnb-group' },
-                h('div', { className: 'dnb-empty', style: { padding: '16px 12px 10px' } }, '任务板暂无步骤或任务（模型调用 plan.set / todo_write / task.add 时会自动同步到这里）'),
+                h('div', { className: 'dnb-empty', style: { padding: '16px 12px 10px' } }, '还没有步骤和任务。AI 列好计划后会自动显示在这里，你也能自己添加'),
                 h(
                   'div',
                   {
@@ -814,7 +814,7 @@ export function PlanTab({
                   h('input', {
                     className: 'dnb-input',
                     style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1, fontSize: 12 },
-                    placeholder: '手动添加一条步骤（回车新增）…',
+                    placeholder: '自己加一步，按回车保存…',
                     value: newStepText,
                     onChange: e => setNewStepText(e.target.value),
                     onKeyDown: e => {
@@ -831,7 +831,7 @@ export function PlanTab({
     // ==================== Zone 4: Collapsible Cross-Session Handoff & Chief Deployment ====================
     (() => {
       const targets = Array.isArray(view.targets) ? view.targets : []
-      const options = [{ id: 'new', label: '新建独立会话并部署参谋' }].concat(
+      const options = [{ id: 'new', label: '新开一个窗口，把参谋带过去' }].concat(
         targets
           .filter(item => item && item.id !== view.sessionId)
           .map(item => ({
@@ -848,10 +848,10 @@ export function PlanTab({
       const isCustom = Boolean((handoffObj.customText && handoffObj.customText.trim()) || hMeta.isCustom)
       const hSource = isCustom ? (handoffObj.source || hMeta.source || 'human') : 'auto'
       const sourceBadge = hSource === 'human'
-        ? { label: '✏️ 人类手改', tone: 'accent' }
+        ? { label: '✏️ 你改过', tone: 'accent' }
         : hSource === 'chief'
-          ? { label: '✦ 参谋已同步', tone: 'green' }
-          : { label: '自动渲染', tone: undefined }
+          ? { label: '✦ 参谋已更新', tone: 'green' }
+          : { label: '自动生成', tone: undefined }
 
       const buildTransferOpts = () => ({
         deployChief: true,
@@ -864,8 +864,8 @@ export function PlanTab({
         {
           open: !handoffCollapsed,
           onToggle: () => patch({ handoffSectionCollapsed: !handoffCollapsed }),
-          title: bi('🚀 跨会话接力 & 部署参谋', '🚀 Cross-Session Handoff & Deploy'),
-          headTitle: handoffCollapsed ? bi('点击拉起跨会话接力与部署面板', 'Expand handoff & deploy card') : bi('点击收起跨会话接力面板', 'Collapse handoff card'),
+          title: bi('🚀 换新窗口接着做', '🚀 Continue in New Window'),
+          headTitle: handoffCollapsed ? bi('展开换窗口交接设置', 'Expand handoff options') : bi('收起交接设置', 'Collapse handoff options'),
           bodyStyle: { padding: 10, display: 'flex', flexDirection: 'column', gap: 8 },
           badges: h('span', {
             className: 'dnb-tag',
@@ -888,24 +888,24 @@ export function PlanTab({
             className: 'dnb-mini-btn',
             'data-tone': isPinned ? 'amber' : undefined,
             title: isPinned
-              ? bi('已定住交接单：参谋长摘要更新时不会覆盖您手写/审定的内容，点击可解除定住', 'Handoff pinned: Chief digest updates will not overwrite it; click to unpin')
-              : bi('定住交接单后，参谋长提炼摘要时将禁止自动覆写交接单', 'Pin handoff to prevent automatic digest overwrite'),
+              ? bi('已定住，更新不会盖掉你的修改；再点解锁', 'Pinned: updates keep your edits; click to unpin')
+              : bi('定住后，自动更新不会覆盖你的内容', 'Stop auto updates from overwriting your edits'),
             onClick: () => void toggleHandoffPin(!isPinned),
           }, isPinned ? bi('📌 已定住', '📌 Pinned') : bi('📌 定住防改', '📌 Pin')),
         },
         h(
           'div',
           { style: { fontSize: 11, color: 'var(--dnb-text-2)' } },
-          bi('工作档案跟随策略（同步模型/纪律/战术开关，强介入默认安全置关）：', 'Archive transfer policy (syncs model/facts safely with intervention off):'),
+          bi('选要带去新窗口的档案。模型和规则会一起同步，强介入默认关闭保安全：', 'Pick archives to bring along. Settings sync too, with intervention off:'),
         ),
         h(
           'div',
           { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
           [
-            { key: 'none', label: bi('不带工作档案', 'No archives') },
-            { key: 'mounted', label: bi('仅挂桌面备查', 'Desktop only') },
-            { key: 'drawer', label: bi('带整个抽屉', 'Folder drawer') },
-            { key: 'all', label: bi('全柜工作档案', 'All session') },
+            { key: 'none', label: bi('不带档案', 'No archives') },
+            { key: 'mounted', label: bi('只带认知桌面的资料', 'Cognitive desktop only') },
+            { key: 'drawer', label: bi('带选中的分类抽屉', 'Selected folder') },
+            { key: 'all', label: bi('带本窗口全部档案', 'All window archives') },
           ].map(p =>
             h('button', {
               key: p.key,
@@ -926,8 +926,8 @@ export function PlanTab({
               value: view.deployDrawer || ((drawers[0] && drawers[0].id) || 'inbox'),
               onChange: e => patch({ deployDrawer: e.target.value }),
             }, drawers.length
-              ? drawers.map(d => h('option', { key: d.id, value: d.id }, `${d.label} (${d.count || 0} 卷)`))
-              : [h('option', { key: 'inbox', value: 'inbox' }, '未归类收件箱 (加载抽屉中…)')])
+              ? drawers.map(d => h('option', { key: d.id, value: d.id }, `${d.label} (${d.count || 0} 份)`))
+              : [h('option', { key: 'inbox', value: 'inbox' }, '未分类收件箱（加载中…）')])
           : null,
         h(
           'div',
@@ -938,7 +938,7 @@ export function PlanTab({
             style: { flex: 1, height: 30, fontSize: 11.5 },
             disabled: Boolean(view.handoffBusy),
             onClick: () => void requestTransferWithGuard('create', buildTransferOpts()),
-          }, bi('🚀 新建窗口并部署参谋长', '🚀 New Window & Deploy Chief')),
+          }, bi('🚀 新开窗口接着做', '🚀 Open New Window & Continue')),
           h('button', {
             type: 'button',
             className: 'dnb-pill',
@@ -946,7 +946,7 @@ export function PlanTab({
             disabled: Boolean(view.handoffBusy),
             onClick: async () => {
               const text = store.handoffText || (await loadHandoff())?.text || ''
-              if (text) copyText(text, bi('自包含交接单已复制', 'Handoff packet copied'))
+              if (text) copyText(text, bi('交接单已复制', 'Handoff copied'))
             },
           }, h(Icon, { name: 'copy', size: 12 }), bi('复制交接单', 'Copy Handoff')),
         ),
@@ -965,7 +965,7 @@ export function PlanTab({
             style: { height: 28, padding: '0 10px', fontSize: 11.5 },
             disabled: Boolean(view.handoffBusy),
             onClick: () => void requestTransferWithGuard(target === 'new' ? 'create' : target, buildTransferOpts()),
-          }, '投递并部署'),
+          }, '发到选中窗口'),
         ),
         h(
           'div',
@@ -987,7 +987,7 @@ export function PlanTab({
                 patch({ handoffEditing: true, handoffDraft: curText })
                 setShowHandoffPreview(false)
               },
-            }, view.handoffEditing ? '收起编辑' : '✏️ 编辑交接单'),
+            }, view.handoffEditing ? '收起编辑' : '✏️ 修改交接单'),
             h('button', {
               type: 'button',
               className: 'dnb-mini-btn',
@@ -1001,9 +1001,9 @@ export function PlanTab({
               ? h('button', {
                   type: 'button',
                   className: 'dnb-mini-btn',
-                  title: '放弃手工版本，恢复由系统与参谋实时渲染交接单',
+                  title: '放弃你的修改，改回自动生成',
                   onClick: () => void resetHandoffAuto(),
-                }, '↺ 恢复自动')
+                }, '↺ 改回自动生成')
               : null,
           ),
           view.transferNote
@@ -1026,7 +1026,7 @@ export function PlanTab({
                   padding: '8px 10px',
                 },
                 value: view.handoffDraft || '',
-                placeholder: '在此手动修订交接单（支持 Markdown）。可点击下方「保存并定住」防止被参谋长自动覆写…',
+                placeholder: '在这里改交接单（支持 Markdown）。点下方「📌 保存并定住」就不怕被覆盖…',
                 onChange: e => patch({ handoffDraft: e.target.value }),
               }),
               h(
@@ -1090,7 +1090,7 @@ export function PlanTab({
                 setContextMenu(null)
                 void askStepViaChief(idx, stepTitle)
               },
-            }, '✦ 让参谋长当场解读（不打断主对话）'),
+            }, '✦ 让参谋长解释（不打断主对话）'),
             h('div', {
               className: 'dnb-menu-item',
               onClick: () => {
@@ -1098,7 +1098,7 @@ export function PlanTab({
                 setConsultIdx(idx)
                 setConsultDraft('')
               },
-            }, '💬 针对此步自由提问…'),
+            }, '💬 对这一步随便提问…'),
             h('div', {
               className: 'dnb-menu-item',
               style: { borderTop: '1px solid var(--dnb-border)', marginTop: 3, paddingTop: 6 },
@@ -1109,7 +1109,7 @@ export function PlanTab({
                   : `小任务板第 ${idx + 1} 步「${stepTitle}」目前进展如何，有没有遇到卡点？`
                 void askLeadModel(q, '询问步骤进展')
               },
-            }, isDone ? '询问这步具体结果' : '询问进度'),
+            }, isDone ? '问这一步改了什么' : '问这一步做到哪了'),
             isDone
               ? h('div', {
                   className: 'dnb-menu-item',
@@ -1119,7 +1119,7 @@ export function PlanTab({
                     next[idx] = { ...next[idx], done: false }
                     pushSteps(next)
                   },
-                }, '标回未完成')
+                }, '改回未完成')
               : h('div', {
                   className: 'dnb-menu-item',
                   onClick: () => {
@@ -1129,7 +1129,7 @@ export function PlanTab({
                       '核验勾选步骤',
                     )
                   },
-                }, '请模型勾选完成'),
+                }, '让 AI 检查并标完成'),
             h('div', {
               className: 'dnb-menu-item',
               style: { color: '#ff453a', borderTop: '1px solid var(--dnb-border)', marginTop: 3, paddingTop: 6 },
@@ -1211,13 +1211,13 @@ export function MemoryTab() {
       h('input', {
         className: 'dnb-input',
         style: { borderRadius: 99, paddingLeft: 12, height: 32 },
-        placeholder: '检索记忆…',
+        placeholder: '搜记忆…',
         value: store.memAsk || '',
         onChange: e => patch({ memAsk: e.target.value, memReply: '', memHits: null, memNote: '' }),
         onKeyDown: e => { if (e.key === 'Enter') runAsk() },
       }),
       (store.memAsk || '').trim()
-        ? h('button', { className: 'dnb-primary-btn', style: { height: 30 }, onClick: runAsk }, '查询')
+        ? h('button', { className: 'dnb-primary-btn', style: { height: 30 }, onClick: runAsk }, '搜索')
         : null,
       h('button', {
         className: 'dnb-pill',
@@ -1254,7 +1254,7 @@ export function MemoryTab() {
           ),
           h('textarea', {
             className: 'dnb-area',
-            placeholder: '输入需要持久记住的结论或约束…',
+            placeholder: '写下要长期记住的要求或结论…',
             value: store.memText || '',
             onChange: e => patch({ memText: e.target.value }),
           }),
@@ -1276,7 +1276,7 @@ export function MemoryTab() {
             h('div', { className: 'dnb-group' }, (section.items || []).map(item => h(MemoryCard, { item, key: item.id }))),
           ),
         )
-      : h('div', { className: 'dnb-empty' }, '暂无记忆条目'),
+      : h('div', { className: 'dnb-empty' }, '还没有记住任何内容'),
   )
 }
 
@@ -1321,7 +1321,7 @@ function NoteEditor({ note }) {
     h('div', { style: { height: 6 } }),
     h('input', {
       className: 'dnb-input',
-      placeholder: '标签（逗号分隔）',
+      placeholder: '标签（用逗号隔开）',
       value: store.editNoteTags || '',
       onChange: e => patch({ editNoteTags: e.target.value }),
       onKeyDown: e => { if (e.key === 'Enter') { e.preventDefault(); submit() } },
@@ -1407,7 +1407,7 @@ function NotesTab({ board }) {
                   style: { width: 24, height: 24, color: '#ff453a' },
                   title: '删除',
                   onClick: () => {
-                    if (!confirm('删除笔记「' + clampTitle(note.title || note.body, 16) + '」？')) return
+                    if (!confirm('确定删掉笔记「' + clampTitle(note.title || note.body, 16) + '」吗？')) return
                     void act({ action: 'note.remove', noteId: note.id, scope: note.shared ? 'shared' : '' })
                   },
                 }, h(Icon, { name: 'trash', size: 12 })),
@@ -1424,7 +1424,7 @@ function NotesTab({ board }) {
             ),
           )
         })
-      : h('div', { className: 'dnb-empty' }, '暂无工作笔记'),
+      : h('div', { className: 'dnb-empty' }, '还没有笔记'),
   )
 }
 
@@ -1470,12 +1470,12 @@ export function HandoffTab({ view }) {
   const tokensPct = maxTokens > 0 ? Math.min(100, Math.round(((mr.tokens || 0) / maxTokens) * 100)) : 0
   const uiLangVal = view.uiLangPref || meta.uiLang || getUiLangPref()
   const notifPermLabel = notifPerm === 'granted'
-    ? bi('桌面已授权', 'Granted')
+    ? bi('已允许通知', 'Allowed')
     : notifPerm === 'denied'
-      ? bi('浏览器已拦截', 'Blocked')
+      ? bi('浏览器已屏蔽', 'Blocked')
       : notifPerm === 'default'
         ? bi('待授权', 'Prompt')
-        : bi('面板提醒', 'Toast')
+        : bi('仅面板内提醒', 'In-Panel Only')
 
   const commitCallsCap = () => {
     if (callsDraft === null) return
@@ -1488,13 +1488,13 @@ export function HandoffTab({ view }) {
   return h(
     React.Fragment,
     null,
-    // 1. One-Click Scenario Presets
+    // 1. Scenario Presets
     h(
       AccCard,
       {
         open: presetsOpen,
         onToggle: () => setPresetsOpen(v => !v),
-        title: bi('🚀 一键开箱场景预设', '🚀 One-Click Scenario Presets'),
+        title: bi('🚀 常用场景预设', '🚀 Scenario Presets'),
         badges: h('span', { className: 'dnb-acc-badge', 'data-tone': activePreset ? 'accent' : undefined },
           activePreset
             ? (presets.find(p => p.id === activePreset)?.title || activePreset)
@@ -1531,14 +1531,14 @@ export function HandoffTab({ view }) {
       {
         open: notifyOpen,
         onToggle: () => setNotifyOpen(v => !v),
-        title: bi('🔔 离桌通知与轻提示音', '🔔 Away Alerts & Gentle Chime'),
+        title: bi('🔔 离开电脑时的提醒和声音', '🔔 Away Alerts & Sound'),
         badges: h('span', { className: 'dnb-acc-badge', 'data-tone': notifPerm === 'granted' ? 'green' : undefined }, notifPermLabel),
-        preview: meta.notifyEnabled !== false ? bi('关键节点已启用提醒', 'Milestone alerts active') : bi('提醒已关闭', 'Alerts muted'),
+        preview: meta.notifyEnabled !== false ? bi('重要节点会通知你', 'Alerts on') : bi('通知已关', 'Alerts off'),
         actions: h('button', {
           type: 'button',
           className: 'dnb-pill',
           style: { height: 21, padding: '0 7px', fontSize: 10.5 },
-          title: bi('立即测试一条桌面通知与提示音', 'Send a test notification & chime now'),
+          title: bi('发一条测试通知，试试弹窗和声音', 'Send a test alert and sound'),
           onClick: async () => {
             if (notifPerm === 'default') {
               const p = await requestNotificationPermission()
@@ -1549,7 +1549,7 @@ export function HandoffTab({ view }) {
                 id: 'test-' + Date.now(),
                 kind: 'managed_auto_sleep',
                 level: 'success',
-                body: bi('离桌托管提醒管道工作正常（待批 / 撞墙 / 断流 / 熔断 / 休眠均会及时触达）。', 'Alert channel working (approvals / walls / rescues / budget / sleep).'),
+                body: bi('提醒功能正常。需要批准、被规则挡住、重连或到上限时都会通知你。', 'Alerts work. You’ll get notified on approvals, blocks, retries, or limits.'),
               },
               { sound: true },
             )
@@ -1562,9 +1562,9 @@ export function HandoffTab({ view }) {
         'div',
         { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
         h('div', { style: { minWidth: 0 } },
-          h('div', { style: { fontSize: 12.5 } }, bi('关键节点系统桌面通知', 'Desktop notifications at milestones')),
+          h('div', { style: { fontSize: 12.5 } }, bi('重要节点弹出电脑桌面通知', 'Desktop alerts at key moments')),
           h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
-            bi('待审批 / 待提权 / 撞物理墙 / 断流救活 / 预算熔断 / 自动休眠', 'Approvals / Elevation / Guard Walls / Rescue / Budget / Sleep')),
+            bi('需要你批准、命中物理驻墙（拦截规则）、重连或到上限时通知', 'On approvals, guard-wall blocks, retries, or limits')),
         ),
         h(Switch, {
           checked: meta.notifyEnabled !== false,
@@ -1580,12 +1580,12 @@ export function HandoffTab({ view }) {
       h(
         'div',
         { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-        h('span', { style: { fontSize: 12.5 } }, bi('轻柔提示音（默认关闭）', 'Gentle chime sound (off by default)')),
+        h('span', { style: { fontSize: 12.5 } }, bi('响一下轻提示音（默认关闭）', 'Play a soft sound (off by default)')),
         h(Switch, {
           checked: Boolean(meta.notifySound),
           onChange: on => {
             if (on) {
-              fireChiefAlertNotification({ kind: 'auto_continue_rescue', level: 'info', body: bi('提示音已启用', 'Chime enabled') }, { sound: true })
+              fireChiefAlertNotification({ kind: 'auto_continue_rescue', level: 'info', body: bi('提示音已打开', 'Sound on') }, { sound: true })
             }
             void updateSecConfig({ notifySound: on })
           },
@@ -1599,18 +1599,18 @@ export function HandoffTab({ view }) {
       {
         open: ledgerOpen,
         onToggle: () => setLedgerOpen(v => !v),
-        title: bi('📊 参谋长 LLM 账本与托管硬预算', '📊 Chief LLM Ledger & Budget Breaker'),
+        title: bi('📊 参谋花费统计与托管上限', '📊 Chief Usage & Budget Cap'),
         badges: mr.tripped
-          ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'red' }, bi('🛑 已熔断', '🛑 Tripped'))
+          ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'red' }, bi('🛑 已到上限停下', '🛑 Cap Reached'))
           : h('span', { className: 'dnb-acc-badge' }, `${ledger.totalCalls || 0}${bi('次', '')} · ${fmtTok(ledger.totalTokens || 0)}`),
         preview: `${bi('本轮托管', 'Managed run')} ${mr.calls || 0}/${maxCalls || '∞'}`,
         actions: h('button', {
           type: 'button',
           className: 'dnb-pill',
           style: { height: 21, padding: '0 7px', fontSize: 10.5 },
-          title: bi('清零本轮托管次数与 Token 计数器并解除熔断状态', 'Reset managed run call/token counters'),
+          title: bi('清零本轮托管的次数和 Token，恢复可用', 'Reset call and token counts for this run'),
           onClick: () => void updateSecConfig({ resetManagedBudget: true }),
-        }, bi('↺ 重置计数', '↺ Reset')),
+        }, bi('↺ 清零计数', '↺ Reset')),
         bodyStyle: { padding: '8px 11px 10px' },
       },
       mr.tripped
@@ -1629,16 +1629,16 @@ export function HandoffTab({ view }) {
               },
             },
             '🛑 ',
-            mr.trippedReason || bi('本轮托管已触及硬预算上限并自动切回「⏸ 关停」（人工问答仍不受影响）。', 'Hard budget limit reached; Managed mode auto-stopped (manual Q&A still works).'),
+            mr.trippedReason || bi('本轮托管已到上限，自动切回「⏸ 关停」。你手动提问不受影响。', 'Budget limit reached; switched to "⏸ Off". Manual questions still work.'),
           )
         : null,
       h(
         'div',
         { className: 'dnb-ledger-grid' },
         [
-          { key: 'chat', label: bi('问答 / 咨询', 'Q&A'), item: byCat.chat || {} },
-          { key: 'review', label: bi('巡检 / 督导', 'Patrol'), item: byCat.review || {} },
-          { key: 'dream', label: bi('梦境 / 档案', 'Dream'), item: byCat.dream || {} },
+          { key: 'chat', label: bi('你问参谋', 'Q&A'), item: byCat.chat || {} },
+          { key: 'review', label: bi('巡检 / 盯着做', 'Patrol'), item: byCat.review || {} },
+          { key: 'dream', label: bi('梦境漫游 / 整理档案', 'Dream Roam'), item: byCat.dream || {} },
         ].map(cat =>
           h(
             'div',
@@ -1652,7 +1652,7 @@ export function HandoffTab({ view }) {
         'div',
         { className: 'dnb-budget-row' },
         h('div', { className: 'dnb-budget-meta' },
-          h('span', null, bi('本轮托管后台次数', 'Managed Calls / Run')),
+          h('span', null, bi('本轮托管已调用次数', 'Calls used this run')),
           h('span', null, `${mr.calls || 0} / ${maxCalls > 0 ? maxCalls : '∞'}`),
         ),
         h('div', { className: 'dnb-budget-bar' },
@@ -1668,7 +1668,7 @@ export function HandoffTab({ view }) {
         'div',
         { className: 'dnb-budget-row' },
         h('div', { className: 'dnb-budget-meta' },
-          h('span', null, bi('本轮托管 Token 上限', 'Managed Tokens / Run')),
+          h('span', null, bi('本轮托管已用 Token', 'Tokens used this run')),
           h('span', null, `${fmtTok(mr.tokens || 0)} / ${maxTokens > 0 ? fmtTok(maxTokens) : '∞'}`),
         ),
         h('div', { className: 'dnb-budget-bar' },
@@ -1683,7 +1683,7 @@ export function HandoffTab({ view }) {
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 6, flexWrap: 'wrap' } },
-        h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('单次托管次数上限 (0=不限)', 'Call cap (0=∞)')),
+        h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('每次托管最多调用几次 (0=不限)', 'Max calls per run (0=∞)')),
         h('input', {
           type: 'number',
           className: 'dnb-input',
@@ -1699,7 +1699,7 @@ export function HandoffTab({ view }) {
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 6, flexWrap: 'wrap' } },
-        h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('Token 上限', 'Token Cap')),
+        h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('Token 最多用多少', 'Max Tokens')),
         h(
           'div',
           { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
@@ -1729,7 +1729,7 @@ export function HandoffTab({ view }) {
         open: langOpen,
         onToggle: () => setLangOpen(v => !v),
         title: bi('🌐 界面语言 / Interface Language', '🌐 Interface Language / 界面语言'),
-        preview: uiLangVal === 'en' ? 'English' : (uiLangVal === 'zh' ? '简体中文' : bi('自动跟随宿主', 'Auto (Follow Host)')),
+        preview: uiLangVal === 'en' ? 'English' : (uiLangVal === 'zh' ? '简体中文' : bi('自动跟随主界面', 'Auto (Follow App)')),
         bodyStyle: { padding: '8px 11px' },
       },
       h(
@@ -1761,13 +1761,13 @@ export function HandoffTab({ view }) {
         title: bi('自动化设置', 'Automation Settings'),
         showPullHint: false,
         headerExtra: h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } },
-          bi('跨会话接力已收口至「任务」页底部', 'Cross-session handoff lives in Tasks tab')),
+          bi('换窗口交接的功能在「任务」页最下面', 'Handoff options are at the bottom of Tasks')),
         bodyStyle: { padding: 0 },
       },
       h(
         'div',
         { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-        h('span', { style: { fontSize: 12.5 } }, bi('每轮自动注入摘要', 'Inject digest every turn')),
+        h('span', { style: { fontSize: 12.5 } }, bi('每轮对话自动带上进度摘要', 'Attach progress summary every turn')),
         h(Switch, {
           checked: !!view.autoInject,
           onChange: on => {
@@ -1779,7 +1779,7 @@ export function HandoffTab({ view }) {
       h(
         'div',
         { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-        h('span', { style: { fontSize: 12.5 } }, bi('空转自动提醒', 'Idle & spin reminders')),
+        h('span', { style: { fontSize: 12.5 } }, bi('AI 卡住或偷懒时自动提醒', 'Remind AI if stuck or idle')),
         h(Switch, {
           checked: !!view.guardIdle,
           onChange: on => {
@@ -1791,7 +1791,7 @@ export function HandoffTab({ view }) {
       h(
         'div',
         { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-        h('span', { style: { fontSize: 12.5 } }, bi('单会话提醒上限', 'Max nudges / session')),
+        h('span', { style: { fontSize: 12.5 } }, bi('一个窗口最多提醒几次', 'Max reminders per window')),
         h(
           'div',
           { style: { display: 'flex', alignItems: 'center', gap: 6 } },
@@ -1819,7 +1819,7 @@ export function HandoffTab({ view }) {
       h(
         'div',
         { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-        h('span', { style: { fontSize: 12.5 } }, bi('短回复字数线', 'Short-reply char threshold')),
+        h('span', { style: { fontSize: 12.5 } }, bi('回复太短就提醒的字数门槛', 'Min reply length before reminder')),
         h('input', {
           type: 'number',
           className: 'dnb-input',

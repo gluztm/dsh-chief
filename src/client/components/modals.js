@@ -104,7 +104,7 @@ export function ModelPickerPopover({ view }) {
       },
       h('div', { style: { padding: '6px 10px 8px', borderBottom: '1px solid var(--dnb-border)', marginBottom: 4 } },
         h('div', { style: { fontSize: 10.5, fontWeight: 700, color: 'var(--dnb-text-3)', marginBottom: 4 } },
-          bi('🧠 参谋长思考强度（拖住弧线调挡 · 点中心自动）', '🧠 Chief Reasoning Effort (drag arc · tap center for Auto)')),
+          bi('🧠 思考深度（拖弧线调整 · 点中间自动）', '🧠 Thinking Depth (drag arc · tap center for Auto)')),
         h(EffortFanGauge, {
           compact: true,
           value: (view.chiefMeta && view.chiefMeta.thinkingEffort) || 'auto',
@@ -112,7 +112,7 @@ export function ModelPickerPopover({ view }) {
         }),
       ),
       h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } },
-        bi('选择参谋长专职模型', 'Select Dedicated Chief Model')),
+        bi('选择参谋长使用的模型', 'Choose Chief Model')),
       h(
         'div',
         {
@@ -124,7 +124,7 @@ export function ModelPickerPopover({ view }) {
           },
         },
         h('div', { style: { minWidth: 0, flex: 1 } },
-          h('div', null, bi('✦ 自动跟随主对话模型', '✦ Auto-follow Lead Model')),
+          h('div', null, bi('✦ 跟随主对话模型', '✦ Follow main chat model')),
           followSubtitle
             ? h('div', {
                 style: { fontSize: 10.5, color: 'var(--dnb-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -180,7 +180,7 @@ export function ModelPickerPopover({ view }) {
       ),
       !providers.length
         ? h('div', { style: { padding: '8px 10px', fontSize: 11, color: 'var(--dnb-text-3)' } },
-            catalog ? bi('未检测到额外模型提供商，将自动跟随主对话模型。', 'No extra providers found; following lead model.') : bi('加载模型列表中…', 'Loading models…'))
+            catalog ? bi('没有其他可用模型，默认跟随主对话。', 'No extra providers found; following main chat.') : bi('正在加载模型…', 'Loading models…'))
         : null,
       h(
         'div',
@@ -235,7 +235,7 @@ export function PacePickerPopover({ view }) {
         },
       },
       h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } },
-        bi('参谋长三态运行模式（与战术正交）', 'Chief Run Mode (orthogonal to tactics)')),
+        bi('选择参谋长的工作方式', 'Choose how Chief runs')),
       RUN_MODE_OPTIONS.map(opt => {
         const rm = runModeMeta(opt.key)
         const active = currentRunMode === opt.key
@@ -275,50 +275,50 @@ export function PacePickerPopover({ view }) {
 }
 
 function describeSuggestionMeta(sug) {
-  if (!sug) return { typeLabel: '参谋建议', impact: '协同调整', expect: '按建议推进', tone: 'var(--dnb-accent)', bg: 'rgba(10, 132, 255, 0.12)' }
+  if (!sug) return { typeLabel: '建议', impact: '调整协作方式', expect: '按建议继续', tone: 'var(--dnb-accent)', bg: 'rgba(10, 132, 255, 0.12)' }
   if (sug.kind === 'archive_op') {
     return {
-      typeLabel: '📌 档案注入/桌面建议',
-      impact: `影响：${sug.targetLabel || '📌 认知桌面'}（不越级改动冷库）`,
-      expect: '预期：确认后执行桌面置顶/撤回或一次性递送主对话',
+      typeLabel: '📌 认知桌面调整',
+      impact: `会调整：${sug.targetLabel || '📌 认知桌面'}（每轮发给主对话的少量资料）`,
+      expect: '确认后会把资料固定到桌面、撤下，或发给主对话',
       tone: '#f59e0b',
       bg: 'rgba(245, 158, 11, 0.13)',
     }
   }
   if (sug.kind === 'model_effort') {
     return {
-      typeLabel: '🧠 模型思考调挡建议',
-      impact: `影响：调整 ${sug.targetLabel || '@lead'} 思考深度`,
-      expect: '预期：按建议实时热切换下一轮模型推理深度',
+      typeLabel: '🧠 调整思考深度',
+      impact: `会调整 ${sug.targetLabel || '@主对话'} 的思考深度`,
+      expect: '确认后下一轮会按新深度思考',
       tone: '#a5b4fc',
       bg: 'rgba(99, 102, 241, 0.16)',
     }
   }
   if (sug.kind === 'goal_approval') {
     return {
-      typeLabel: '🎯 目标结项请示',
-      impact: '影响：锁定/完结当前主目标与验收状态',
-      expect: '预期：核心目标标为达成并停止继续催跑',
+      typeLabel: '🎯 申请确认完成目标',
+      impact: '会把当前总目标标为已完成',
+      expect: '确认后不再继续催着往下跑',
       tone: '#30d158',
       bg: 'rgba(48, 209, 88, 0.12)',
     }
   }
   if (sug.kind === 'guard_wall') {
     return {
-      typeLabel: '🧱 物理驻墙提案',
-      impact: `影响：${sug.targetLabel || '🌐 全局随身驻墙'}（事前物理硬拦截）`,
-      expect: '预期：确认后写入 guard-walls.json，所有代理触线即刻物理阻断',
+      typeLabel: '🧱 新增物理驻墙',
+      impact: `范围：${sug.targetLabel || '🌐 所有项目通用'}（触发规则会直接拦下）`,
+      expect: '确认后生效，助手踩到红线时会被直接拦住',
       tone: '#f87171',
       bg: 'rgba(239, 68, 68, 0.13)',
     }
   }
   if (sug.kind === 'wall_removal') {
     const spec = (sug.wallRemovalSpec && typeof sug.wallRemovalSpec === 'object') ? sug.wallRemovalSpec : {}
-    const actText = spec.action === 'remove' ? '永久移除该物理驻墙' : '暂挂休眠该物理驻墙'
+    const actText = spec.action === 'remove' ? '永久删掉这条物理驻墙' : '暂时停用这条物理驻墙'
     return {
-      typeLabel: '⚠️ 参谋请示拆墙（需人工批准）',
-      impact: `影响：${spec.wallTitle || sug.targetLabel || '目标物理驻墙'}（L0–L3 均须人类审批）`,
-      expect: `预期：批准后${actText}，参谋绝无权越权自拆`,
+      typeLabel: '⚠️ 申请关闭物理驻墙（需你确认）',
+      impact: `涉及：${spec.wallTitle || sug.targetLabel || '这条物理驻墙'}（所有模式都要你同意）`,
+      expect: `同意后会${actText}，参谋长不能自己关闭`,
       tone: '#ef4444',
       bg: 'rgba(239, 68, 68, 0.18)',
     }
@@ -327,26 +327,26 @@ function describeSuggestionMeta(sug) {
     const colLabel = sug.boundField === 'allowed' ? '必做事项' : (sug.boundField === 'notes' ? '注意事项' : '禁止红线')
     const repCount = Array.isArray(sug.replaces) ? sug.replaces.filter(Boolean).length : 0
     return {
-      typeLabel: repCount > 0 ? `🏛 边界浓缩 (${repCount} 合 1)` : `🏛 ${colLabel}请示`,
-      impact: sug.pinGlobal ? '影响：📌 全局定住边界（跨所有任务生效）' : '影响：本任务会话工作边界（实时生效）',
-      expect: repCount > 0 ? `预期：替换并清理 ${repCount} 条零散旧边界` : `预期：写入${colLabel}并广播全体代理遵照执行`,
+      typeLabel: repCount > 0 ? `🏛 合并边界 (${repCount} 合 1)` : `🏛 新增${colLabel}`,
+      impact: sug.pinGlobal ? '📌 会固定为所有任务通用的规则' : '只对当前这次对话生效',
+      expect: repCount > 0 ? `会合并掉 ${repCount} 条零散规则` : `会加入${colLabel}，让所有助手一起遵守`,
       tone: '#fbbf24',
       bg: 'rgba(245, 158, 11, 0.12)',
     }
   }
   if (sug.kind === 'advice') {
     return {
-      typeLabel: '💡 参谋长主动建议',
-      impact: `影响：向 @${shortAgentName(sug.targetLabel || sug.target || '主对话')} 递交协同建议`,
-      expect: '预期：按建议纠偏方向或补全缺失验证步骤',
+      typeLabel: '💡 参谋长建议',
+      impact: `发给 @${shortAgentName(sug.targetLabel || sug.target || '主对话')} 的参考建议`,
+      expect: '按建议调整方向或补上漏掉的检查',
       tone: 'var(--dnb-accent)',
       bg: 'rgba(10, 132, 255, 0.12)',
     }
   }
   return {
-    typeLabel: '✦ 参谋协同建议',
-    impact: `影响：向 @${shortAgentName(sug.targetLabel || sug.target || '主对话')} 发送${sug.mode === 'steer' ? '实时插话' : '顺延指令'}`,
-    expect: '预期：按拟定草案执行下一步动作并同步看板',
+    typeLabel: '✦ 协作建议',
+    impact: `发给 @${shortAgentName(sug.targetLabel || sug.target || '主对话')} 的${sug.mode === 'steer' ? '插话提示' : '后续消息'}`,
+    expect: '确认后会发给对方，并更新进度',
     tone: 'var(--dnb-accent)',
     bg: 'rgba(10, 132, 255, 0.10)',
   }
@@ -390,7 +390,7 @@ export function SuggestionBanner({ view }) {
         h('span', { style: { fontSize: 12, fontWeight: 700, color: 'var(--dnb-text)' } },
           `💡 参谋长建议 (${suggestions.length})`),
         h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
-          `已勾选 ${canExecuteCount}/${suggestions.length} 项 · 统一执行并产出回执`),
+          `已选 ${canExecuteCount}/${suggestions.length} 项，点右侧一起执行`),
       ),
       h(
         'div',
@@ -400,7 +400,7 @@ export function SuggestionBanner({ view }) {
           className: 'dnb-pill',
           style: { height: 26, padding: '0 9px', fontSize: 11, color: 'var(--dnb-text-3)' },
           disabled: Boolean(view.secBusy),
-          title: '忽略当前全部待处理建议',
+          title: '忽略上面所有建议',
           onClick: () => void dismissPendingSuggestions(suggestions),
         }, '全部忽略'),
         h('button', {
@@ -409,8 +409,8 @@ export function SuggestionBanner({ view }) {
           style: { height: 26, padding: '0 12px', fontSize: 11.5, fontWeight: 700 },
           disabled: Boolean(view.secBusy) || canExecuteCount === 0,
           title: selectedGoalCount > 0 && selectedNonGoalCount > 0
-            ? '在当前权限与红线范围内批量执行所选建议（含目标结项请示）并统一汇报回执'
-            : '在当前权限与红线范围内统一执行所选建议并输出执行回执',
+            ? '按当前权限和红线执行选中的建议（包括完成确认），并给你汇报结果'
+            : '按当前权限和红线执行选中的建议，并给你汇报结果',
           onClick: () => void executePendingSuggestions({
             ids: selectedList.map(s => s.id),
             includeGoalApproval: selectedGoalCount > 0,
@@ -465,13 +465,13 @@ export function SuggestionBanner({ view }) {
                   type: 'button',
                   className: 'dnb-mini-btn',
                   onClick: () => setExpandedId(openDraft ? '' : sug.id),
-                }, openDraft ? '收起内容' : '详情')
+                }, openDraft ? '收起' : '详情')
               : null,
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
               style: { width: 20, height: 20 },
-              title: '忽略此条建议',
+              title: '忽略这条建议',
               onClick: () => void decideSuggestion(sug, 'dismiss'),
             }, h(Icon, { name: 'x', size: 12 })),
           ),
@@ -489,7 +489,7 @@ export function SuggestionBanner({ view }) {
         ),
         replacesList.length > 0
           ? h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 4 } },
-              `整合替代 ${replacesList.length} 条旧规：` + replacesList.slice(0, 3).map(r => '「' + clampTitle(r, 14) + '」').join('、'))
+              `会合并这 ${replacesList.length} 条旧规则：` + replacesList.slice(0, 3).map(r => '「' + clampTitle(r, 14) + '」').join('、'))
           : null,
         openDraft && sug.draftText
           ? h('div', {
@@ -564,7 +564,7 @@ export function InterventionConfirmModal({ view, board }) {
   const permMode = ['advisor', 'assistant', 'strategist', 'chief'].includes(meta.permissionMode) ? meta.permissionMode : 'advisor'
   const trimmedDraft = String(objDraft || '').trim()
   const triggerObjRedFlash = (hintMsg) => {
-    setObjGuardHint(hintMsg || '请先明确核心总目标并点击右上角「🔒 锁定」，再开启强介入！')
+    setObjGuardHint(hintMsg || '请先写好总目标，再点右上角「锁定目标」，然后开启强介入。')
     setObjFlashRed(false)
     const fire = () => setObjFlashRed(true)
     if (typeof requestAnimationFrame === 'function') requestAnimationFrame(fire)
@@ -586,7 +586,7 @@ export function InterventionConfirmModal({ view, board }) {
   const handleSuggestObjective = async () => {
     if (suggestBusy) return
     if (objLocked) {
-      patch({ notice: '当前核心目标输入框已锁定，请先点击「解锁」后再点建议或微调' })
+      patch({ notice: '目标已锁定，先点「已锁定目标」解锁后再改。' })
       return
     }
     const curText = String(objDraft || '').trim()
@@ -633,7 +633,7 @@ export function InterventionConfirmModal({ view, board }) {
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚡ 启用「主动强介入」— 设定核心目标与风险核对'),
+        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚡ 开启强介入：确认目标与安全规则'),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -666,8 +666,8 @@ export function InterventionConfirmModal({ view, board }) {
           { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
           h('span', { style: { fontWeight: 700, color: objLocked ? 'var(--dnb-text)' : '#ff6961' } },
             objLocked
-              ? '🎯 强介入核心总目标（已锁定 · 开启后立即推进）'
-              : '🎯 强介入核心总目标（须先点右侧「锁定目标」才可开启）'),
+              ? '🎯 总目标（已锁定，开启后马上开始）'
+              : '🎯 总目标（写好后请点右侧「锁定目标」）'),
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 5 } },
@@ -677,20 +677,20 @@ export function InterventionConfirmModal({ view, board }) {
               'data-tone': 'blue',
               disabled: suggestBusy || objLocked,
               title: trimmedDraft && !(lastWasAiGuess && trimmedDraft === lastAiText.trim())
-                ? '在您输入框已有文字的基础上由参谋长微调润色'
-                : '由参谋长结合对话现状自动猜测建议（可反复点击继续换角度猜意图）',
+                ? '根据你写的内容，让参谋长帮你改得更清楚'
+                : '让参谋长按当前对话帮你写一个目标，可多点几次换个写法',
               onClick: () => void handleSuggestObjective(),
             }, suggestBusy
-              ? '推演中…'
-              : (trimmedDraft && !(lastWasAiGuess && trimmedDraft === lastAiText.trim()) ? '✦ 微调建议' : '✦ 建议')),
+              ? '生成中…'
+              : (trimmedDraft && !(lastWasAiGuess && trimmedDraft === lastAiText.trim()) ? '✦ 帮我改改' : '✦ 帮我写')),
             h('button', {
               type: 'button',
               className: 'dnb-mini-btn',
               'data-tone': objLocked ? 'amber' : 'red',
-              title: objLocked ? '点击解锁以继续编辑或点建议' : '点击锁定明确后的核心总目标，解锁“开启强介入”开关',
+              title: objLocked ? '点一下解锁就能修改' : '确认目标没问题后点这里锁定',
               onClick: () => {
                 if (!objLocked && !trimmedDraft) {
-                  triggerObjRedFlash('请先填写明确的核心总目标，再点选「锁定目标」！')
+                  triggerObjRedFlash('请先写清楚总目标，再点「锁定目标」。')
                   return
                 }
                 setObjLocked(v => {
@@ -709,7 +709,7 @@ export function InterventionConfirmModal({ view, board }) {
           className: 'dnb-input',
           rows: 3,
           readOnly: objLocked,
-          placeholder: '输入核心目标，或留空直接点右上「✦ 建议」让参谋长为您揣摩填写（可反复点建议）…',
+          placeholder: '写下你要完成的目标；留空直接点右上角「✦ 帮我写」也可以…',
           style: {
             width: '100%',
             minHeight: 62,
@@ -732,14 +732,14 @@ export function InterventionConfirmModal({ view, board }) {
           },
         }),
         suggestRationale
-          ? h('div', { style: { fontSize: 11, color: '#60a5fa', lineHeight: 1.4 } }, '💡 参谋长思路：' + suggestRationale)
+          ? h('div', { style: { fontSize: 11, color: '#60a5fa', lineHeight: 1.4 } }, '💡 为什么这么定：' + suggestRationale)
           : null,
         h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', lineHeight: 1.4 } },
           !trimmedDraft
-            ? h('span', { style: { color: '#ff6961', fontWeight: 600 } }, objGuardHint || '⚠ 请先明确核心总目标（可自行填写或点「✦ 建议」），再点击「锁定目标」。')
+            ? h('span', { style: { color: '#ff6961', fontWeight: 600 } }, objGuardHint || '⚠ 请先写好目标（也可以点「✦ 帮我写」），然后点「锁定目标」。')
             : (!objLocked
-                ? h('span', { style: { color: '#ff6961', fontWeight: 600 } }, objGuardHint || '⚠ 尚差一步：请点击右上「🔓 锁定目标」确认锁定后，方可开启强介入（开启后将立即开始推进）。')
-                : '✓ 核心总目标已锁定：点击下方开启强介入后，将直接锁定本目标并立即开始推进，无需再发“继续”。')),
+                ? h('span', { style: { color: '#ff6961', fontWeight: 600 } }, objGuardHint || '⚠ 还差一步：点右上角「🔓 锁定目标」，才能开启强介入。')
+                : '✓ 目标已锁定。点下方按钮就会马上按这个目标往下跑，不用再发“继续”。')),
       ),
       // Live Boundaries & Guard Walls Readback (Physical Guard Walls + Forbidden Redlines)
       h(
@@ -762,14 +762,14 @@ export function InterventionConfirmModal({ view, board }) {
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 } },
-            h('strong', null, '🛡️ 已设防线核对：'),
+            h('strong', null, '🛡️ 安全规则检查：'),
             noDefenseRules
-              ? h('span', { style: { color: '#ff453a', fontWeight: 600 } }, '未设物理驻墙与禁止红线（强介入风险较高）')
+              ? h('span', { style: { color: '#ff453a', fontWeight: 600 } }, '还没设物理驻墙和禁止红线（直接自动跑风险较高）')
               : h(
                   React.Fragment,
                   null,
                   h('span', { style: { color: activeWalls.length > 0 ? '#f87171' : 'var(--dnb-text-3)', fontWeight: 700 } },
-                    `🧱 物理驻墙 ${activeWalls.length} 堵`),
+                    `🧱 物理驻墙 ${activeWalls.length} 条`),
                   h('span', { style: { color: 'var(--dnb-text-3)' } }, '·'),
                   h('span', { style: { color: forbiddenList.length > 0 ? '#34d399' : 'var(--dnb-text-3)', fontWeight: 700 } },
                     `🚫 禁止红线 ${forbiddenList.length} 条`),
@@ -782,7 +782,7 @@ export function InterventionConfirmModal({ view, board }) {
               ? h('button', {
                   type: 'button',
                   className: 'dnb-mini-btn',
-                  title: allDefenseCollapsed ? '一键拉开物理驻墙与禁止红线详情' : '一键收起物理驻墙与禁止红线详情',
+                  title: allDefenseCollapsed ? '展开查看物理驻墙和红线详情' : '收起物理驻墙和红线详情',
                   onClick: toggleAllDefense,
                 }, allDefenseCollapsed ? '↕ 一键拉开' : '↕ 一键收起')
               : null,
@@ -820,7 +820,7 @@ export function InterventionConfirmModal({ view, board }) {
               onClick: () => setWallsSecCollapsed(v => !v),
             },
             h('span', { style: { fontSize: 11, fontWeight: 700, color: '#f87171' } },
-              `🧱 物理驻墙（事前硬拦截 · 已生效 ${activeWalls.length} 堵${pausedWallsCount > 0 ? ` · ${pausedWallsCount} 暂挂` : ''}）`),
+              `🧱 物理驻墙（踩线直接拦住 · 已生效 ${activeWalls.length} 条${pausedWallsCount > 0 ? ` · ${pausedWallsCount} 条暂停` : ''}）`),
             h(Icon, {
               name: 'chevron',
               size: 12,
@@ -838,7 +838,7 @@ export function InterventionConfirmModal({ view, board }) {
                 activeWalls.length > 0
                   ? [
                       ...activeWalls.slice(0, 4).map(w => {
-                        const scopeTag = w.scope === 'workspace' ? '📁本工程' : '🌐全局'
+                        const scopeTag = w.scope === 'workspace' ? '📁当前项目' : '🌐全局'
                         const typeTag = MODAL_WALL_TYPE_TAG[w.ruleType] || w.ruleType
                         const patStr = Array.isArray(w.patterns) ? w.patterns.join(', ') : ''
                         const previewPat = patStr.length > 52 ? patStr.slice(0, 52) + '…' : patStr
@@ -854,11 +854,11 @@ export function InterventionConfirmModal({ view, board }) {
                       }),
                       activeWalls.length > 4
                         ? h('div', { key: 'more-walls', style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
-                            `…另有 ${activeWalls.length - 4} 堵物理驻墙共同生效中`)
+                            `…还有 ${activeWalls.length - 4} 条物理驻墙正在生效`)
                         : null,
                     ]
                   : h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
-                      '暂未启用物理驻墙（可点右上「管理边界」手搓或手动驻防）'),
+                      '还没设物理驻墙（可点右上角「管理边界」添加）'),
               )
             : null,
         ),
@@ -888,7 +888,7 @@ export function InterventionConfirmModal({ view, board }) {
               onClick: () => setRedlinesSecCollapsed(v => !v),
             },
             h('span', { style: { fontSize: 11, fontWeight: 700, color: forbiddenList.length > 0 ? '#34d399' : 'var(--dnb-text-2)' } },
-              `🚫 禁止红线（全局与本局边界 · 已生效 ${forbiddenList.length} 条）`),
+              `🚫 禁止红线（全局和当前规则 · 共 ${forbiddenList.length} 条）`),
             h(Icon, {
               name: 'chevron',
               size: 12,
@@ -913,10 +913,10 @@ export function InterventionConfirmModal({ view, board }) {
                       ),
                       forbiddenList.length > 4
                         ? h('div', { key: 'more-redlines', style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
-                            `…另有 ${forbiddenList.length - 4} 条禁止红线共同生效中`)
+                            `…还有 ${forbiddenList.length - 4} 条禁止红线正在生效`)
                         : null,
                     ]
-                  : h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, '暂未设定禁止红线'),
+                  : h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, '还没设禁止红线'),
               )
             : null,
         ),
@@ -925,24 +925,24 @@ export function InterventionConfirmModal({ view, board }) {
       h(
         'div',
         { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.55 } },
-        h('div', { style: { fontWeight: 600, color: 'var(--dnb-text)', marginBottom: 3 } }, '开启后的行为与实操风险：'),
+        h('div', { style: { fontWeight: 600, color: 'var(--dnb-text)', marginBottom: 3 } }, '开启后会发生什么（请注意风险）：'),
         h('div', { style: { color: '#60a5fa', marginBottom: 4, fontWeight: 600 } },
-          `• 当前权限档位联动表现：${INTERVENTION_TIER_DESC[permMode] || INTERVENTION_TIER_DESC.advisor}`),
-        h('div', null, '• Token 额外消耗：主对话每轮停顿都将唤醒参谋长核验并可能继续发指令。'),
-        h('div', null, '• 对话节奏接管：参谋长会主动插话纠偏与派发下步，点击红色「⏹ 急停」可随时中断。'),
-        h('div', null, `• 防死循环熔断：达到 ${normalizeMaxTurnsVal(tm.maxInterventionTurns) === 0 ? '♾️ 无限轮次' : (normalizeMaxTurnsVal(tm.maxInterventionTurns) + ' 轮上限')} 或连续无实际进展将触发熔断保护。`),
+          `• 当前权限：${INTERVENTION_TIER_DESC[permMode] || INTERVENTION_TIER_DESC.advisor}`),
+        h('div', null, '• 会多花 Token：主对话每次停下来，参谋长都会检查一遍，还可能继续发消息。'),
+        h('div', null, '• 会主动插话：参谋长会自己插话或安排下一步；点红色「⏹ 急停」能随时停下。'),
+        h('div', null, `• 卡住会自动停：到 ${normalizeMaxTurnsVal(tm.maxInterventionTurns) === 0 ? '♾️ 不限轮数' : (normalizeMaxTurnsVal(tm.maxInterventionTurns) + ' 轮')} 或连续没进展时，会自动停下来防止死循环。`),
       ),
       // Dual Mandatory Disclaimers
       h(
         'div',
         { className: 'dnb-disclaimer-box' },
         h('div', { style: { marginBottom: 4 } },
-          h('strong', null, '免责声明 1（模型依赖）：'),
-          '参谋长的一切自动审查、强介入驱动、压缩前抢救与红线拦截能力均高度依赖您为参谋长配置的底层大模型能力与上下文质量，不同模型在规划严谨度与遵循指令上的表现存在客观差异。',
+          h('strong', null, '说明 1（效果看模型）：'),
+          '参谋长检查准不准、能不能守住红线，很依赖你选的模型能力。不同模型理解规则的稳定度不一样，效果也会有差别。',
         ),
         h('div', null,
-          h('strong', null, '免责声明 2（规则冲突）：'),
-          '若主会话或当前项目中挂载了过多的系统提示词（System Prompt）、Rules 或硬性规则，可能与本插件的自主干预逻辑产生指令冲突，进而导致介入循环异常、提前熔断或执行偏离预期。',
+          h('strong', null, '说明 2（规则冲突）：'),
+          '如果主对话或项目里设了太多系统规则，可能会和这里的自动提示打架，导致提前停机或跑偏。',
         ),
       ),
       // Explicit Checkbox Agreement
@@ -955,7 +955,7 @@ export function InterventionConfirmModal({ view, board }) {
           style: { marginTop: 2 },
           onChange: e => patch({ interventionAgreed: Boolean(e.target.checked) }),
         }),
-        '我已核对当前目标、物理驻墙与禁止红线，理解底层模型与宿主提示词规则冲突可能带来偏离，并确认启用主动强介入。',
+        '我已核对好目标和安全规则，了解模型和规则可能带来的影响，确认开启强介入。',
       ),
       h(
         'div',
@@ -981,15 +981,15 @@ export function InterventionConfirmModal({ view, board }) {
           disabled: confirmBusy,
           onClick: async () => {
             if (!trimmedDraft) {
-              triggerObjRedFlash('⚠ 未明确核心总目标：请先填写总目标并点击「锁定目标」，方可开启强介入！')
+              triggerObjRedFlash('⚠ 请先写好总目标，并点「锁定目标」，再开启强介入。')
               return
             }
             if (!objLocked) {
-              triggerObjRedFlash('⚠ 请先点选总目标框右上角的「🔓 锁定目标」按钮，锁定明确目标后才能开启强介入！')
+              triggerObjRedFlash('⚠ 请先点右上角的「🔓 锁定目标」，锁定后再开启强介入。')
               return
             }
             if (!view.interventionAgreed) {
-              patch({ notice: '请先勾选下方风险确认框' })
+              patch({ notice: '请先勾选下面的确认框' })
               return
             }
             setConfirmBusy(true)
@@ -1008,7 +1008,7 @@ export function InterventionConfirmModal({ view, board }) {
               setConfirmBusy(false)
             }
           },
-        }, confirmBusy ? '开启并立即推进中…' : '确认锁定并开启强介入'),
+        }, confirmBusy ? '正在开启…' : '确认锁定并开启'),
       ),
     ),
   )
@@ -1032,7 +1032,7 @@ export function UnlimitedTurnsConfirmModal({ view }) {
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '♾️ 开启无限主动督导轮次 — 作者风险确认'),
+        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '♾️ 开启不限轮数自动推进 — 风险确认'),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -1044,12 +1044,12 @@ export function UnlimitedTurnsConfirmModal({ view }) {
         'div',
         { className: 'dnb-disclaimer-box' },
         h('div', { style: { marginBottom: 4 } },
-          h('strong', null, '持续推跑风险：'),
-          '进入 ♾️ 无限督导模式后，只要参谋长评估主会话仍未完成当前任务，就会持续发送推进/纠偏指令而不再受固定轮数限制。',
+          h('strong', null, '会一直往下推：'),
+          '开启后，只要参谋长觉得任务还没做完，就会一直发指令让它继续跑，不再限制轮数。',
         ),
         h('div', null,
-          h('strong', null, '拉锯与费用提示：'),
-          '参谋长与主对话模型在复杂疑难处可能持续来回探讨或拉锯很久，并显著增加 Token 消耗（仅连续 8 轮无实质变化时才触发兜底防卡死熔断，且您可随时点「⏹ 急停」或把参谋长切为「⏹ 停止」）。',
+          h('strong', null, '费钱且可能反复拉锯：'),
+          '遇到难题时，两边模型可能来回讨论很久，花掉大量 Token。只有连续 8 轮没新进展才会自动停，你随时可以点「⏹ 急停」或把模式切回「⏸ 关停」。',
         ),
       ),
       h(
@@ -1060,7 +1060,7 @@ export function UnlimitedTurnsConfirmModal({ view }) {
           className: 'dnb-pill',
           style: { height: 32, padding: '0 14px', fontSize: 12.5 },
           onClick: () => patch({ unlimitedTurnsModalOpen: false }),
-        }, '保留有限轮次'),
+        }, '还是限制轮数'),
         h('button', {
           type: 'button',
           className: 'dnb-primary-btn',
@@ -1072,7 +1072,7 @@ export function UnlimitedTurnsConfirmModal({ view }) {
             })
             if (ok) patch({ unlimitedTurnsModalOpen: false })
           },
-        }, '确认启用 ♾️ 无限督导'),
+        }, '确认不限轮数'),
       ),
     ),
   )
@@ -1095,7 +1095,7 @@ export function AutoPilotConfirmModal({ view }) {
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
         h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#34d399' } },
-          bi('🤖 开启托管模式 — 梦境漫游、硬预算与自动休眠确认', '🤖 Enable Managed Mode — Dream Roam, Budget Cap & Auto-Sleep')),
+          bi('🤖 开启托管模式：确认后台整理与费用上限', '🤖 Enable Managed Mode: Cleanup & Budget Limits')),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -1107,10 +1107,10 @@ export function AutoPilotConfirmModal({ view }) {
         'div',
         { className: 'dnb-disclaimer-box' },
         h('div', { style: { marginBottom: 4 } },
-          h('strong', null, bi('1. 持续后台监工与会话隔离：', '1. Continuous Session Supervision: ')),
+          h('strong', null, bi('1. 后台盯着进度（不串台）：', '1. Watch progress per chat: ')),
           bi(
-            '托管模式下，参谋长会按当前权限等级（L0–L3）持续核查目标与红线、协同纠偏及触发断流续跑（绝不触碰全局定住红线，绝不读写冷藏档案柜）。',
-            'Supervises objectives, boundaries, steering & stream rescue within your active permission tier (L0–L3), isolated per session.',
+            '参谋长会按你的权限等级（L0–L3）盯着目标和红线，出错或断线时帮忙续上。它不会改全局固定红线，也不会翻看长期冷库资料。',
+            'Watches goals and rules under your permission level (L0–L3) and resumes dropped chats. Never edits global pinned rules or cold archives.',
           ),
         ),
         h('div', { style: { marginBottom: 4 } },
@@ -1121,10 +1121,10 @@ export function AutoPilotConfirmModal({ view }) {
           ),
         ),
         h('div', null,
-          h('strong', null, bi('3. 五条件自动休眠 + 硬预算熔断守护：', '3. Auto-Sleep & Hard Budget Breaker: ')),
+          h('strong', null, bi('3. 闲置自动停机与费用上限：', '3. Auto-pause & spending cap: ')),
           bi(
-            '连续闲置达 15 分钟（或核心目标收口且待办清零）自动休眠回「⏸ 关停」；若后台达到硬预算上限也会自动熔断停机省费用。',
-            'Stands down automatically after 15m idle with 0 open items, OR immediately if the hard budget limit is hit.',
+            '闲置满 15 分钟（或目标完成且没待办）会自动切回「⏸ 关停」。达到费用上限时也会立刻停下，帮你省钱。',
+            'Switches back to ⏸ Off after 15m idle with no open tasks, or right away if the budget cap is reached.',
           ),
         ),
       ),
@@ -1150,7 +1150,7 @@ export function AutoPilotConfirmModal({ view }) {
             })
             if (ok) patch({ autoPilotConfirmOpen: false })
           },
-        }, bi('🤖 确认开启本对话托管模式', '🤖 Confirm Managed Mode')),
+        }, bi('🤖 确认开启托管', '🤖 Confirm Managed Mode')),
       ),
     ),
   )
@@ -1175,7 +1175,7 @@ export function AwayPresetConfirmModal({ view }) {
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
         h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } },
-          bi('🚀 一键切换「离桌托管」场景预设', '🚀 Enable "Away Managed" Scenario Preset')),
+          bi('🚀 开启「离桌托管」预设', '🚀 Enable "Away Mode" Preset')),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -1188,14 +1188,14 @@ export function AwayPresetConfirmModal({ view }) {
         'div',
         { className: 'dnb-risk-box' },
         h('div', { style: { fontSize: 12.5, fontWeight: 700, color: '#f59e0b' } },
-          bi('⚠️ 将联动激活以下高自主配置（仍受物理驻墙与硬红线约束）：', '⚠️ This preset configures high-autonomy safeguards:')),
+          bi('⚠️ 开启后会同时打开以下设置（仍受物理驻墙和红线限制）：', '⚠️ Turns on these settings (still bound by guard walls and rules):')),
         h(
           'ul',
           { style: { margin: '0 0 0 18px', padding: 0, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--dnb-text)' } },
-          h('li', null, bi('权限升至 L3 · 参谋长模式（自动协调主/子代理与续跑）', 'Permission tier: L3 · Chief (autonomous steering & coordination)')),
-          h('li', null, bi('运行模式切至 🤖 托管（后台督导 + 🌙 梦境漫游 + 15分钟自动休眠）', 'Run mode: 🤖 Managed (patrol + Dream Roam + 15m auto-sleep)')),
-          h('li', null, bi('开启 80% 上下文自动压缩 + 🛡️ 红线哨兵监听', 'Auto-compact at 80% + 🛡️ Redline Sentinel alerts')),
-          h('li', null, bi('启用单次托管硬预算熔断（30 次调用 / 300K Tokens 上限）与桌面通知', 'Hard budget circuit breaker (30 calls / 300K tokens) + desktop alerts')),
+          h('li', null, bi('权限升到 L3 · 参谋长模式（可自动调度对话和子代理、断线续跑）', 'Permission: L3 · Chief (auto-guides chats, subagents, and resumes)')),
+          h('li', null, bi('工作方式切到 🤖 托管（后台盯进度，用梦境漫游整理档案，闲置 15 分钟自动停）', 'Run mode: 🤖 Managed (watches progress, runs Dream Roam cleanup, auto-pauses after 15m idle)')),
+          h('li', null, bi('对话满 80% 自动压缩，并开启 🛡 红线哨兵提醒越界风险', 'Auto-compacts at 80% context and turns on 🛡 Sentinel alerts')),
+          h('li', null, bi('设置费用上限（30 次调用或 300K Tokens 自动停），关键节点发桌面通知', 'Stops at budget limit (30 calls or 300K tokens) and sends desktop alerts')),
         ),
       ),
       h(
@@ -1209,8 +1209,8 @@ export function AwayPresetConfirmModal({ view }) {
           onChange: e => patch({ awayPresetAgreed: Boolean(e.target.checked) }),
         }),
         h('span', null, bi(
-          '我已阅读并知悉 L3 高权限及自动托管风险，确认开启「🚀 离桌托管」预设。',
-          'I understand the L3 autonomy risks and confirm applying the Away Managed preset.',
+          '我已了解 L3 高权限和自动托管的风险，确认开启「离桌托管」。',
+          'I understand the L3 and auto-managed risks, and confirm enabling Away Mode.',
         )),
       ),
       h(
@@ -1247,7 +1247,7 @@ export function AwayPresetConfirmModal({ view }) {
               patch({ chiefRiskBusy: false })
             }
           },
-        }, busy ? bi('校验激活中…', 'Activating…') : bi('确认并开启离桌托管', 'Confirm & Enable Away Mode')),
+        }, busy ? bi('正在开启…', 'Enabling…') : bi('确认开启离桌托管', 'Enable Away Mode')),
       ),
     ),
   )
@@ -1275,7 +1275,7 @@ export function ArchiveRelayModal({ view }) {
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
         h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } },
-          `📨 让参谋长带要求递话（已选 ${items.length} 条档案）`),
+          `📨 带上资料发给对话（已选 ${items.length} 份）`),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -1302,7 +1302,7 @@ export function ArchiveRelayModal({ view }) {
       h(
         'div',
         { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
-        h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } }, '递达对象：'),
+        h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } }, '发给谁：'),
         h('select', {
           value: m.target || 'lead',
           disabled: busy,
@@ -1338,8 +1338,8 @@ export function ArchiveRelayModal({ view }) {
           },
           onChange: e => patch({ archiveRelayModal: { ...m, mode: e.target.value } }),
         },
-          h('option', { value: 'followup' }, '排队递话'),
-          h('option', { value: 'steer' }, '运行中插话'),
+          h('option', { value: 'followup' }, '排队发送'),
+          h('option', { value: 'steer' }, '立刻插话'),
         ),
       ),
       h('textarea', {
@@ -1347,7 +1347,7 @@ export function ArchiveRelayModal({ view }) {
         rows: 3,
         disabled: busy,
         style: { fontSize: 12, minHeight: 74, resize: 'vertical' },
-        placeholder: '告诉参谋长这批档案要带上什么要求再递给主对话（如：请严格按档案里的接口签名与边界重构，勿修改已有测试契约）…',
+        placeholder: '写一句附带要求，参谋长会连同资料一起发过去（比如：改代码时别动现有测试）…',
         value: m.instruction || '',
         onChange: e => patch({ archiveRelayModal: { ...m, instruction: e.target.value } }),
       }),
@@ -1367,7 +1367,7 @@ export function ArchiveRelayModal({ view }) {
           style: { height: 32, padding: '0 15px', fontSize: 12.5, fontWeight: 700 },
           disabled: busy || items.length === 0,
           onClick: () => void relayArchivesWithChiefApi(m),
-        }, busy ? '正在整理并递话…' : `📨 递给 @${m.target === 'lead' || !m.target ? '主对话' : shortAgentName(m.target, true)}`),
+        }, busy ? '正在发送…' : `📨 发给 @${m.target === 'lead' || !m.target ? '主对话' : shortAgentName(m.target, true)}`),
       ),
     ),
   )
@@ -1378,8 +1378,8 @@ export function DistillToGlobalModal({ view }) {
   if (!m) return null
   const busy = Boolean(view.distillBusy)
   const countLabel = Array.isArray(m.ids) && m.ids.length > 0
-    ? `已勾选的 ${m.ids.length} 卷本局档案`
-    : '本会话档案柜中全部可复用经验'
+    ? `选中的 ${m.ids.length} 份档案`
+    : '当前对话里值得长期留存的经验'
   return h(
     'div',
     {
@@ -1394,7 +1394,7 @@ export function DistillToGlobalModal({ view }) {
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '✦ 让参谋长总结提炼入全局档案库'),
+        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '✦ 把经验存到全局档案库'),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -1406,14 +1406,14 @@ export function DistillToGlobalModal({ view }) {
       h(
         'div',
         { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5 } },
-        `参谋长将自动审查「${countLabel}」，剔除纯一次性过程碎屑，提炼跨对话可复用的工程坐标、规范与排障结论存入「🌐 全局档案柜」（默认保留原会话卷宗，遵守先升全局再沉淀的梯度）。`,
+        `参谋长会从「${countLabel}」里挑出以后还能用的经验，存到「🌐 全局档案柜」。一次性的过程记录会自动过滤，原档案默认保留。`,
       ),
       h('textarea', {
         className: 'dnb-textarea',
         rows: 2,
         disabled: busy,
         style: { fontSize: 12, minHeight: 56, resize: 'vertical' },
-        placeholder: '可选补充提炼侧重（如：重点摘除可跨项目复用的构建命令与架构踩坑结论）…',
+        placeholder: '可选：告诉参谋长重点留哪些内容（比如：打包命令或踩坑记录）…',
         value: m.instruction || '',
         onChange: e => patch({ distillGlobalModal: { ...m, instruction: e.target.value } }),
       }),
@@ -1427,7 +1427,7 @@ export function DistillToGlobalModal({ view }) {
           style: { marginTop: 2 },
           onChange: e => patch({ distillGlobalModal: { ...m, clearSource: Boolean(e.target.checked) } }),
         }),
-        '提炼成功后同步移除已提炼来源的本局原卷宗（默认不勾选，保留本局原档）',
+        '保存成功后，顺便删掉当前对话里的原档案（默认保留）',
       ),
       h(
         'div',
@@ -1445,7 +1445,7 @@ export function DistillToGlobalModal({ view }) {
           style: { height: 32, padding: '0 15px', fontSize: 12.5, fontWeight: 700 },
           disabled: busy,
           onClick: () => void distillToGlobalApi(m),
-        }, busy ? '参谋长正在提炼…' : '✦ 开始提炼入全局'),
+        }, busy ? '正在整理保存…' : '✦ 存到全局档案'),
       ),
     ),
   )
@@ -1470,7 +1470,7 @@ export function ChiefAdviceModal({ view }) {
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '💡 参谋长主动建议'),
+        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '💡 参谋长给你的建议'),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -1482,7 +1482,7 @@ export function ChiefAdviceModal({ view }) {
       h(
         'div',
         { style: { fontSize: 13, fontWeight: 600, color: 'var(--dnb-text)', lineHeight: 1.5 } },
-        m.title || '参谋长提出了一条阶段调整建议',
+        m.title || '参谋长有一条新建议',
       ),
       m.reason
         ? h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5 } }, m.reason)
@@ -1514,7 +1514,7 @@ export function ChiefAdviceModal({ view }) {
           style: { height: 32, padding: '0 12px', fontSize: 12 },
           disabled: busy,
           onClick: () => patch({ chiefAdviceModal: null }),
-        }, '暂不处理'),
+        }, '稍后再看'),
         !m.isSynthetic && m.id
           ? h('button', {
               type: 'button',
@@ -1525,7 +1525,7 @@ export function ChiefAdviceModal({ view }) {
                 await decideSuggestion(m, 'dismiss')
                 patch({ chiefAdviceModal: null })
               },
-            }, '忽略驳回')
+            }, '忽略这条')
           : null,
         draft
           ? h('button', {
@@ -1538,7 +1538,7 @@ export function ChiefAdviceModal({ view }) {
                 patch({ chiefAdviceModal: null })
                 focusSecInput()
               },
-            }, '填入许愿框微调')
+            }, '放到输入框改改')
           : null,
         h('button', {
           type: 'button',
@@ -1554,7 +1554,7 @@ export function ChiefAdviceModal({ view }) {
               patch({ chiefAdviceModal: null })
             }
           },
-        }, busy ? '递交中…' : '📨 采纳并递交主对话'),
+        }, busy ? '正在发送…' : '📨 采纳并告诉主对话'),
       ),
     ),
   )
@@ -1601,7 +1601,7 @@ export function HazardHaltModal({ view }) {
         h(
           'span',
           { style: { fontSize: 13.5, fontWeight: 700, color: '#ff6961' } },
-          isBoundHit ? '🚫 撞边界熔断 · 主动强介入已紧急停机' : '🚨 重大不可逆风险拦截 · 主动强介入已紧急停机',
+          isBoundHit ? '🚫 踩到红线，强介入已自动停下' : '🚨 检测到高风险，强介入已自动停下',
         ),
         h('button', {
           type: 'button',
@@ -1625,7 +1625,7 @@ export function HazardHaltModal({ view }) {
               fontWeight: 700,
             },
           },
-          isBoundHit ? '必然撞边界拦阻' : '不可逆风险煞车',
+          isBoundHit ? '即将触犯边界' : '可能有不可逆风险',
         ),
         m.title
           ? h('span', { style: { fontSize: 12.5, fontWeight: 700, color: 'var(--dnb-text)' } }, m.title)
@@ -1646,20 +1646,20 @@ export function HazardHaltModal({ view }) {
             wordBreak: 'break-word',
           },
         },
-        m.reason || '继续推进可能造成不可逆损失或触犯工作边界，参谋长已立即停下后续推送。',
+        m.reason || '继续操作可能会改坏东西或触犯红线，参谋长已经停了下来。',
       ),
       m.objective
         ? h(
             'div',
             { style: { fontSize: 11, color: 'var(--dnb-text-3)', lineHeight: 1.4 } },
-            '停机前锁定核心目标：',
+            '暂停前的目标：',
             m.objective,
           )
         : null,
       h(
         'div',
         { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.45 } },
-        '已为您自动关闭「主动强介入」并取消自动续跑，彻底防止继续推进造成损失；请先人工核实或调整方案后再决定是否重启。',
+        '已经帮你关掉「⚡ 强介入」和自动续跑，避免继续操作出错。请先检查一下情况，确认没问题后再决定要不要重启。',
       ),
       h(
         'div',
@@ -1670,14 +1670,14 @@ export function HazardHaltModal({ view }) {
           style: { height: 32, padding: '0 12px', fontSize: 12 },
           disabled: ackBusy,
           onClick: () => void dismissAndAck('boundaries'),
-        }, '查看边界红线'),
+        }, '查看边界规则'),
         h('button', {
           type: 'button',
           className: 'dnb-primary-btn',
           style: { height: 32, padding: '0 16px', fontSize: 12.5, fontWeight: 700, background: '#ff453a', color: '#fff' },
           disabled: ackBusy,
           onClick: () => void dismissAndAck(''),
-        }, ackBusy ? '确认中…' : '我知道了（已交还人工控制）'),
+        }, ackBusy ? '确认中…' : '我知道了'),
       ),
     ),
   )
@@ -1700,7 +1700,7 @@ export function PrecipitateConfirmModal({ view }) {
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '⏬ 沉淀可复用工程经验至冷库'),
+        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-accent)' } }, '⏬ 把常用经验存到长期冷库'),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -1712,9 +1712,9 @@ export function PrecipitateConfirmModal({ view }) {
       h(
         'div',
         { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5 } },
-        `将从「${m.label || '当前档案'}」中提炼高价值的通用踩坑、架构约定与验收模式，封入同项目全局冷库。冷库条目默认全会话 `,
-        h('strong', { style: { color: 'var(--dnb-text)' } }, '0 Token 隔离'),
-        '，仅在您需要时点击「翻出」才会临时注入当前对话。',
+        `会把「${m.label || '当前档案'}」里值得复用的经验提炼出来，存进项目长期冷库。冷库里的内容平时 `,
+        h('strong', { style: { color: 'var(--dnb-text)' } }, '占 0 Token'),
+        '，只有你点「翻出」时才会发给当前对话。',
       ),
       h(
         'label',
@@ -1726,7 +1726,7 @@ export function PrecipitateConfirmModal({ view }) {
           style: { marginTop: 2 },
           onChange: e => patch({ precipitateModal: { ...m, clearSource: Boolean(e.target.checked) } }),
         }),
-        '沉淀成功后同步清空已沉淀的原工作档案条目（保留冷库精炼经验）',
+        '存进冷库后，顺便删掉原来的零散记录',
       ),
       h(
         'div',
@@ -1751,7 +1751,7 @@ export function PrecipitateConfirmModal({ view }) {
             ...(Array.isArray(m.ids) && m.ids.length > 0 ? { ids: m.ids } : {}),
             clearSource: Boolean(m.clearSource),
           }),
-        }, view.archivePrecipitating ? '正在提炼沉淀…' : '开始提炼沉淀'),
+        }, view.archivePrecipitating ? '正在整理保存…' : '开始保存'),
       ),
     ),
   )
@@ -1774,7 +1774,7 @@ export function PeerLinkConfirmModal({ view }) {
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 接入互通协同网络 — 上下文防污染确认'),
+        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 确认连接另一个对话窗口'),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -1796,17 +1796,17 @@ export function PeerLinkConfirmModal({ view }) {
             gap: 4,
           },
         },
-        h('div', null, h('strong', null, '拟接入窗口：'), m.peerTitle || shortSession(m.peerId)),
+        h('div', null, h('strong', null, '要连接的窗口：'), m.peerTitle || shortSession(m.peerId)),
         m.peerObjective
-          ? h('div', { style: { color: 'var(--dnb-text-2)' } }, h('strong', null, '对方当前目标：'), m.peerObjective)
+          ? h('div', { style: { color: 'var(--dnb-text-2)' } }, h('strong', null, '对方的目标：'), m.peerObjective)
           : null,
       ),
       h(
         'div',
         { className: 'dnb-disclaimer-box' },
-        '一旦接入同一协同网络，两个独立会话将自动共享实时进度、协同信箱与参谋态势。\n',
-        h('strong', null, '如果这两个对话处理的并非同一个或强关联的任务，强制联动会同时污染两个对话的上下文与参谋长摘要！'),
-        '\n请确认二者任务相关后再接入（后续若随时断开，系统会自动净化并隔离协同摘要与残余记忆）。',
+        '连上之后，两个窗口会共享进度和消息。\n',
+        h('strong', null, '如果它们做的不是同一件事，连在一起会把两边的资料和摘要弄混。'),
+        '\n请确认这两个对话有关联再连接。以后随时断开，资料也会立刻分开。',
       ),
       h(
         'div',
@@ -1816,7 +1816,7 @@ export function PeerLinkConfirmModal({ view }) {
           className: 'dnb-pill',
           style: { height: 28, padding: '0 12px', fontSize: 12 },
           onClick: () => patch({ peerLinkConfirmModal: null }),
-        }, '取消（不联动）'),
+        }, '先不连接'),
         h('button', {
           type: 'button',
           className: 'dnb-primary-btn',
@@ -1826,7 +1826,7 @@ export function PeerLinkConfirmModal({ view }) {
             patch({ peerLinkConfirmModal: null })
             await togglePeerSessionLink(pid, true)
           },
-        }, '确认任务相关并接入网络'),
+        }, '确认相关并连接'),
       ),
     ),
   )
@@ -1849,7 +1849,7 @@ export function HandoffWarnModal({ view }) {
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 交接前提醒：交接单尚未对齐最新状态'),
+        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 交接单还没更新到最新进度'),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -1861,7 +1861,7 @@ export function HandoffWarnModal({ view }) {
       h(
         'div',
         { className: 'dnb-disclaimer-box' },
-        m.reason || '当前交接单若未写好或未同步最新进展，强行交接将打乱下一窗口的上下文！建议先让参谋长提炼并更新交接单后再投递。',
+        m.reason || '交接单是给新对话看的前情提要。现在还没写最新进展，直接交接会让新对话接不上，建议先更新一下再交接。',
       ),
       h(
         'div',
@@ -1874,7 +1874,7 @@ export function HandoffWarnModal({ view }) {
           onClick: () => {
             patch({ handoffWarnModal: null, handoffEditing: true, handoffDraft: view.handoffText || '' })
           },
-        }, '去手动修改'),
+        }, '自己去改'),
         h('button', {
           type: 'button',
           className: 'dnb-pill',
@@ -1884,7 +1884,7 @@ export function HandoffWarnModal({ view }) {
             patch({ handoffWarnModal: null })
             void transfer(m.target, m.opts)
           },
-        }, '仍直接交接'),
+        }, '直接交接'),
         h('button', {
           type: 'button',
           className: 'dnb-primary-btn',
@@ -1895,7 +1895,7 @@ export function HandoffWarnModal({ view }) {
             patch({ handoffWarnModal: null })
             await transfer(m.target, m.opts)
           },
-        }, view.secRegenerating ? '参谋长更新交接单中…' : '✦ 让参谋长更新交接单并交接'),
+        }, view.secRegenerating ? '正在更新交接单…' : '✦ 更新交接单并交接'),
       ),
     ),
   )
@@ -1920,7 +1920,7 @@ export function ChiefRiskConfirmModal({ view }) {
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
         h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } },
-          bi('L3 · 参谋长模式（进入前确认风险）', 'L3 · Chief Mode (Confirm Risks First)')),
+          bi('L3 · 参谋长模式：确认风险', 'L3 · Chief Mode: Confirm Risks')),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -1933,18 +1933,18 @@ export function ChiefRiskConfirmModal({ view }) {
         'div',
         { className: 'dnb-risk-box' },
         h('div', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 6 } },
-          bi('⚠️ 高权限模式风险告知', '⚠️ High-Permission Risk Disclosure')),
-        h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } }, bi('启用后，Agent 可能自主：', 'Once enabled, the agent may autonomously:')),
+          bi('⚠️ 开启高权限前请确认', '⚠️ Before turning on high permissions')),
+        h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } }, bi('开启后，AI 可能会自己做这些事：', 'Once enabled, the AI can do these on its own:')),
         h(
           'ul',
           { style: { margin: '0 0 0 18px', padding: 0, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--dnb-text)' } },
-          h('li', null, bi('修改工作区文件', 'Modify workspace files')),
-          h('li', null, bi('执行系统命令', 'Execute system commands')),
-          h('li', null, bi('调整主代理及子代理工作流', 'Steer lead & subagent workflows')),
-          h('li', null, bi('执行可能造成不可逆影响的操作', 'Perform potentially irreversible operations')),
+          h('li', null, bi('修改你项目里的文件', 'Edit files in your project')),
+          h('li', null, bi('运行终端命令', 'Run system commands')),
+          h('li', null, bi('调度主对话和子代理的工作', 'Guide main chat and subagents')),
+          h('li', null, bi('做一些删改后难以撤回的操作', 'Make changes that are hard to undo')),
         ),
         h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text-2)' } },
-          bi('即使有安全卫兵，仍然不能保证完全消除风险。', 'Even with Safety Guardrails, risk cannot be completely eliminated.')),
+          bi('就算开了安全规则保护，也不能保证不出意外。', 'Even with safety rules on, some risk remains.')),
       ),
       h(
         'label',
@@ -1992,10 +1992,10 @@ export function ChiefRiskConfirmModal({ view }) {
               patch({ chiefRiskBusy: false })
             }
           },
-        }, busy ? bi('DSH Chief 校验启用中…', 'Verifying & Enabling…') : bi('确认并启用', 'Confirm & Enable')),
+        }, busy ? bi('正在开启…', 'Enabling…') : bi('确认开启', 'Confirm')),
       ),
       h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', lineHeight: 1.4 } },
-        '真正启用必须由 DSH Chief 后端执行风险授权校验，切换回低权限或新会话后将自动重置该高权限授权。'),
+        '切换回低权限或开新对话时，高权限会自动关闭，需要重新确认。'),
     ),
   )
 }
@@ -2039,7 +2039,7 @@ export function OperationApprovalModal({ view }) {
           type: 'button',
           className: 'dnb-icon-btn',
           style: { width: 22, height: 22 },
-          title: '稍后处理（保留底部授权提醒横幅）',
+          title: '先不处理（提示会留在底部）',
           disabled: busy,
           onClick: dismissCurrent,
         }, h(Icon, { name: 'x', size: 13 })),
@@ -2048,30 +2048,30 @@ export function OperationApprovalModal({ view }) {
         'div',
         { className: 'dnb-op-box' },
         h('div', { style: { fontSize: 13, fontWeight: 700, color: '#d97706', display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
-          '🛡️ 操作授权请求',
+          '🛡️ 请你确认这项操作',
           active.kind === 'archive_op'
-            ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#fbbf24' } }, '📌 档案馆主会话注入')
+            ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#fbbf24' } }, '📌 向主对话发资料')
             : (active.kind === 'model_effort'
-                ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#a5b4fc' } }, '🧠 思考强度调挡')
+                ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#a5b4fc' } }, '🧠 调整思考深度')
                 : (active.kind === 'auto_continue'
-                    ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#38bdf8' } }, '⚡ 断线自动续跑')
+                    ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#38bdf8' } }, '⚡ 断线后继续跑')
                     : null)),
         ),
         h('div', { className: 'dnb-op-kv' },
           h('span', { className: 'dnb-op-k' }, '操作：'),
-          h('span', null, active.operationLabel || '受控工作区或工作流操作'),
+          h('span', null, active.operationLabel || '需要你批准的操作'),
         ),
         h('div', { className: 'dnb-op-kv' },
           h('span', { className: 'dnb-op-k' }, '目标：'),
-          h('span', { className: 'dnb-op-code' }, active.targetLabel || '当前工作区'),
+          h('span', { className: 'dnb-op-code' }, active.targetLabel || '当前项目'),
         ),
         h('div', { className: 'dnb-op-kv' },
           h('span', { className: 'dnb-op-k' }, '原因：'),
-          h('span', null, active.reason || '完成当前参谋推进步骤'),
+          h('span', null, active.reason || '为了推进当前任务'),
         ),
         h('div', { className: 'dnb-op-kv' },
           h('span', { className: 'dnb-op-k' }, '影响：'),
-          h('span', null, active.impact || '仅在允许本次后执行一次该受控操作'),
+          h('span', null, active.impact || '只会执行这一次，之后如需继续会再问你'),
         ),
         active.preview
           ? h('pre', {
@@ -2151,7 +2151,7 @@ export function ElevationRequestModal({ view }) {
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#60a5fa' } }, '⬆️ 模型申请提升权限'),
+        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#60a5fa' } }, '⬆️ 参谋长申请更高权限'),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -2164,20 +2164,20 @@ export function ElevationRequestModal({ view }) {
         'div',
         { className: 'dnb-op-box' },
         h('div', { className: 'dnb-op-kv' },
-          h('span', { className: 'dnb-op-k' }, '当前档位：'),
+          h('span', { className: 'dnb-op-k' }, '权限变化：'),
           h('span', null, `${CHIEF_PERMISSION_LABELS[req.fromMode] || req.fromMode} → 申请 ${CHIEF_PERMISSION_LABELS[req.targetMode] || req.targetMode}`),
         ),
         h('div', { className: 'dnb-op-kv' },
-          h('span', { className: 'dnb-op-k' }, '发起方：'),
+          h('span', { className: 'dnb-op-k' }, '谁发起的：'),
           h('span', { className: 'dnb-op-code' }, req.by || 'chief'),
         ),
         h('div', { className: 'dnb-op-kv' },
-          h('span', { className: 'dnb-op-k' }, '申请原因：'),
-          h('span', null, req.reason || '当前任务需要更高操作权限'),
+          h('span', { className: 'dnb-op-k' }, '原因：'),
+          h('span', null, req.reason || '当前任务需要更多权限才能继续'),
         ),
         req.requestedActionSummary
           ? h('div', { className: 'dnb-op-kv' },
-              h('span', { className: 'dnb-op-k' }, '拟执行：'),
+              h('span', { className: 'dnb-op-k' }, '准备做什么：'),
               h('span', null, req.requestedActionSummary),
             )
           : null,
@@ -2197,7 +2197,7 @@ export function ElevationRequestModal({ view }) {
             'data-tone': selected ? (modeKey === 'chief' ? 'amber' : 'accent') : undefined,
             disabled: busy,
             onClick: () => patch({ elevationChosenMode: modeKey, elevationAgreed: false }),
-          }, modeKey === 'strategist' ? '🛡️ 稳妥方案：仅提权至 L2 参谋模式（逐项授权）' : (CHIEF_PERMISSION_LABELS[modeKey] || modeKey))
+          }, modeKey === 'strategist' ? '🛡️ 更稳妥：只开到 L2 · 参谋模式（每步问你）' : (CHIEF_PERMISSION_LABELS[modeKey] || modeKey))
         }),
       ),
       needsRiskCheck
@@ -2207,9 +2207,9 @@ export function ElevationRequestModal({ view }) {
             h(
               'div',
               { className: 'dnb-risk-box' },
-              h('div', { style: { fontSize: 13, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 高权限模式风险告知（提权至 L3）'),
+              h('div', { style: { fontSize: 13, fontWeight: 700, color: '#f59e0b' } }, '⚠️ 升级到 L3 高权限的风险'),
               h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } },
-                '批准进入 L3 · 参谋长模式后，Agent 将可自主修改工作区文件、执行系统命令、切换/协调主与子代理工作流。即使有安全卫兵，仍然不能保证完全消除风险。'),
+                '进入 L3 · 参谋长模式后，AI 可以直接改项目文件、跑命令，也能调度其他助手。就算有安全规则保护，也不能保证不出意外。'),
             ),
             h(
               'label',
@@ -2234,7 +2234,7 @@ export function ElevationRequestModal({ view }) {
           style: { height: 32, padding: '0 14px', fontSize: 12.5 },
           disabled: busy,
           onClick: () => void decideElevation(req.id, 'reject'),
-        }, '拒绝提权'),
+        }, '不批准'),
         h('button', {
           type: 'button',
           className: 'dnb-primary-btn',
@@ -2248,7 +2248,7 @@ export function ElevationRequestModal({ view }) {
           },
           disabled: busy || (needsRiskCheck && !agreed),
           onClick: () => void decideElevation(req.id, 'approve', chosenMode, needsRiskCheck ? agreed : false),
-        }, busy ? '校验提交中…' : `批准进入 ${CHIEF_PERMISSION_LABELS[chosenMode] || chosenMode}`),
+        }, busy ? '正在开启…' : `同意进入 ${CHIEF_PERMISSION_LABELS[chosenMode] || chosenMode}`),
       ),
     ),
   )
@@ -2273,7 +2273,7 @@ export function AuditLogModal({ view }) {
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
         h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-text)' } },
-          bi('📜 6 级安全架构与审计日志', '📜 6-Layer Security Architecture & Audit Log')),
+          bi('📜 安全检查流程与操作记录', '📜 Security Flow & Action Log')),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -2285,12 +2285,12 @@ export function AuditLogModal({ view }) {
         'div',
         { className: 'dnb-pipe-bar' },
         [
-          bi('用户模式', 'Tier'),
-          bi('操作请求', 'Request'),
-          bi('安全卫兵硬性规则', 'Hard Guard'),
-          bi('权限判定', 'Gate'),
-          bi('执行器', 'Executor'),
-          bi('审计日志', 'Audit'),
+          bi('权限等级', 'Level'),
+          bi('申请操作', 'Request'),
+          bi('硬性红线检查', 'Guard Rules'),
+          bi('权限检查', 'Permission'),
+          bi('实际执行', 'Run'),
+          bi('记录留存', 'Log'),
         ].map((step, idx, arr) =>
           h(
             React.Fragment,
@@ -2302,7 +2302,7 @@ export function AuditLogModal({ view }) {
       ),
       logs.length === 0
         ? h('div', { style: { padding: '18px 8px', textAlign: 'center', fontSize: 12, color: 'var(--dnb-text-3)' } },
-            bi('当前会话暂无审计记录；权限切换、安全卫兵拦截、逐项授权与执行操作都将实时落盘于此。', 'No audit entries yet; tier switches, guard blocks, approvals and executions are logged here.'))
+            bi('目前还没有操作记录。以后切换权限、拦截违规操作或你点同意时，都会记在这里。', 'No records yet. Permission changes, blocked actions, and your approvals will appear here.'))
         : h(
             'div',
             { style: { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflowY: 'auto' } },

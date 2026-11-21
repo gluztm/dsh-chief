@@ -1,25 +1,25 @@
 name: 🐛 Bug 反馈 (Bug Report)
-description: 报告 DSH 参谋长 (dsh-chief) 在运行、渲染或模型调用中的异常问题
+description: 反馈 DSH 参谋长在使用、显示或调用模型时遇到的问题
 title: "[Bug]: "
 labels: ["bug"]
 body:
   - type: markdown
     attributes:
       value: |
-        感谢反馈！请尽量提供复现步骤与环境版本（请勿粘贴任何真实 API Key 或私密路径）。
+        感谢反馈！请尽量写清楚怎么触发的问题和环境版本（不要粘贴真实 API Key 或私密路径）。
   - type: input
     id: versions
     attributes:
       label: 环境版本 (Environment)
       description: 操作系统、DSH 版本与 dsh-chief 版本
-      placeholder: "Windows 11 / DSH 0.2.x / dsh-chief 1.0.0"
+      placeholder: "Windows 11 / DSH 0.2.2-rc.5 / dsh-chief 1.6.0"
     validations:
       required: true
   - type: textarea
     id: steps
     attributes:
       label: 复现步骤 (Steps to Reproduce)
-      description: 如何触发该问题？涉及哪个页签（参谋 / 任务 / 协同 / 规划 / 档案 / 边界）？
+      description: 怎么一步步触发的？出在哪个页签（参谋 / 任务 / 协同 / 档案 / 边界 / 设置）？
     validations:
       required: true
   - type: textarea

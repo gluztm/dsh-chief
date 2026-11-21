@@ -168,7 +168,7 @@ export async function call(path, init) {
   try {
     value = text ? JSON.parse(text) : null
   } catch {
-    throw new Error('接口返回异常：' + text.slice(0, 80))
+    throw new Error('服务返回的数据格式不对：' + text.slice(0, 80))
   }
   if (value && value.board) patch({ board: value.board })
   if (value && Array.isArray(value.subagents)) patch({ subagents: value.subagents })
@@ -266,15 +266,15 @@ export async function loadChiefView(regenerate = false, opts = {}) {
     if (value && value.ok) applySecView(value)
     if (value && value.handoffSyncResult) {
       if (value.handoffSyncResult.synced) {
-        patch({ notice: '✦ 摘要已提炼并同步更新至交接单' })
+        patch({ notice: '✦ 摘要已更新，并同步到了交接单' })
         void loadHandoff()
       } else if (value.handoffSyncResult.skipped === 'pinned-by-human') {
-        patch({ notice: regenerate ? '摘要已提炼（交接单已被人类定住，保持未覆写）' : '交接单已被人类定住，跳过同步' })
+        patch({ notice: regenerate ? '摘要已更新（交接单已定住防改，没有覆盖）' : '交接单已定住防改，跳过同步' })
       } else if (regenerate) {
-        patch({ notice: '摘要已重新提炼' })
+        patch({ notice: '摘要已更新' })
       }
     } else if (regenerate) {
-      patch({ notice: '摘要已重新提炼' })
+      patch({ notice: '摘要已更新' })
     }
     return value
   } catch (error) {
@@ -345,7 +345,7 @@ export async function updateSecConfig(nextCfg) {
       return null
     }
     if (!value || value.ok === false) {
-      patch({ error: (value && value.error) || '更新参谋长配置失败' })
+      patch({ error: (value && value.error) || '保存设置失败' })
       return null
     }
     const resolvedLocks = (value.config && value.config.lockedModelEfforts && typeof value.config.lockedModelEfforts === 'object')
@@ -389,7 +389,7 @@ export async function updateSecConfig(nextCfg) {
     if (nextCfg.ackHazardAlertId) {
       // Quietly acknowledged; no intrusive toast needed
     } else if (nextCfg.emergencyStopIntervention) {
-      patch({ notice: '⏹ 已紧急关停「主动强介入」，自动驱动与巡检续跑已停机' })
+      patch({ notice: '⏹ 已急停：强介入和自动续跑都已停下' })
     } else if (typeof nextCfg.permissionMode === 'string') {
       const savedPerm = (value.config && value.config.permissionMode)
         || (value.view && value.view.config && value.view.config.permissionMode)
@@ -398,97 +398,97 @@ export async function updateSecConfig(nextCfg) {
         patch({
           staleBackendDetected: true,
           staleBackendDismissed: false,
-          error: '参谋长权限未在后端生效（宿主仍在运行旧版内存模块），请重启一次 DeepSeek Harness 客户端。',
+          error: '权限设置没生效，后台还在跑旧版本。请重启一下 DeepSeek Harness 客户端。',
         })
         return null
       }
       const permMap = {
-        advisor: '已切换为 L0 · 顾问模式（只读观察/分析/建议，不改工作区与工作流）',
-        assistant: '已切换为 L1 · 助手模式（仅可维护参谋记忆、档案与看板配置）',
-        strategist: '已切换为 L2 · 参谋模式（修改工作区或主/子工作流前将弹窗逐项授权）',
-        chief: '已通过风险确认并进入 L3 · 参谋长模式（高自主执行，受安全卫兵与审计日志约束）',
+        advisor: '已切到 L0 · 顾问模式：只看不改，只在需要时提建议',
+        assistant: '已切到 L1 · 助手模式：可整理记忆和档案，不改你的项目文件',
+        strategist: '已切到 L2 · 参谋模式：改文件或发消息前都会先弹窗问你',
+        chief: '已开启 L3 · 参谋长模式：可自主调度和改文件，仍受安全规则限制',
       }
-      patch({ notice: permMap[nextCfg.permissionMode] || '已更新参谋长执行权限' })
+      patch({ notice: permMap[nextCfg.permissionMode] || '已更新权限设置' })
     } else if (nextCfg.tacticalModes && typeof nextCfg.tacticalModes === 'object') {
       if (value.compactLowWarning) {
         patch({ notice: '⚠️ ' + value.compactLowWarning })
       } else if (normalizeMaxTurnsVal(nextCfg.tacticalModes.maxInterventionTurns) === 0 && Object.prototype.hasOwnProperty.call(nextCfg.tacticalModes, 'maxInterventionTurns') && !nextCfg.confirmedInterventionRisk) {
-        patch({ notice: '♾️ 已启用无限督导轮次（只要参谋长判定未完成就会继续 push）' })
+        patch({ notice: '♾️ 已开启不限轮数：只要任务没完，参谋长就会一直催着继续' })
       } else if (typeof nextCfg.tacticalModes.intervention === 'boolean' && nextCfg.confirmedInterventionRisk) {
         const ko = value.immediateKickoff
         patch({
           notice: nextCfg.tacticalModes.intervention
             ? (ko && ko.triggered
-                ? '⚡ 已开启「主动强介入」并锁定总目标，正在立即唤醒推进'
+                ? '⚡ 已开启强介入并锁好目标，马上开始推进'
                 : (ko && ko.queuedApproval
-                    ? '⚡ 已开启「主动强介入」，请授权首轮推进弹窗'
-                    : '⚡ 已开启「主动强介入」并锁定核心总目标'))
-            : '已关闭「主动强介入」模式',
+                    ? '⚡ 已开启强介入，请在弹窗里同意第一步操作'
+                    : '⚡ 已开启强介入并锁好目标'))
+            : '已关闭强介入',
         })
       } else if (typeof nextCfg.tacticalModes.intervention === 'boolean' && Object.keys(nextCfg.tacticalModes).length === 1) {
-        patch({ notice: nextCfg.tacticalModes.intervention ? '⚡ 已开启「主动强介入」模式' : '已关闭「主动强介入」模式' })
+        patch({ notice: nextCfg.tacticalModes.intervention ? '⚡ 已开启强介入' : '已关闭强介入' })
       } else {
-        patch({ notice: '✦ 已更新参谋长战术驾驶舱开关' })
+        patch({ notice: '✦ 已更新自动控制开关' })
       }
     } else if (typeof nextCfg.runMode === 'string') {
       const rmMap = {
-        off: '⏸ 已切至「关停模式」：后台 0 LLM 消耗、0 巡检、0 梦境漫游（仅显式发话/按钮生效）',
-        patrol: '🛡 已切至「巡检模式」：常规回合 0 Token，阻墙拦截/高危报错/断流时精准唤醒（支持 Auto continue）',
-        managed: '🤖 已开启「托管模式」：持续监工督导 + 🌙 梦境漫游轻拢卷宗织钩子 + 15 分钟闲置自动休眠',
+        off: '⏸ 已切到关停：后台不花额度，也不自动检查，只在你提问或点按钮时工作',
+        patrol: '🛡 已切到巡检：平时不花额度，只在报错、断线或触发物理驻墙时介入',
+        managed: '🤖 已切到托管：后台盯着进度、用梦境漫游整理档案，闲置 15 分钟自动停下',
       }
-      patch({ notice: rmMap[nextCfg.runMode] || '已更新参谋长运行模式' })
+      patch({ notice: rmMap[nextCfg.runMode] || '已更新运行方式' })
     } else if (typeof nextCfg.thinkingEffort === 'string') {
-      patch({ notice: `🧠 已切换参谋长思考强度为「${nextCfg.thinkingEffort === 'auto' ? '自适应换挡' : nextCfg.thinkingEffort}」` })
+      patch({ notice: `🧠 思考深度已切到「${nextCfg.thinkingEffort === 'auto' ? '自动' : nextCfg.thinkingEffort}」` })
     } else if (typeof nextCfg.teamEffortMode === 'string') {
       patch({
         notice: nextCfg.teamEffortMode === 'manual'
-          ? '✋ 团队思考强度已设为「手动」：参谋长不再自动调节主/子代理思考强度'
-          : '🪄 团队思考强度已设为「自动」：参谋长将按当前权限范围自动调节',
+          ? '✋ 团队思考深度已设为手动，参谋长不会自动调整'
+          : '🪄 团队思考深度已设为自动，参谋长会按任务情况调整',
       })
     } else if (nextCfg.directSetAgentEffort && typeof nextCfg.directSetAgentEffort === 'object') {
       const t = nextCfg.directSetAgentEffort.target || 'lead'
       const e = nextCfg.directSetAgentEffort.reasoningEffort || nextCfg.directSetAgentEffort.effort || 'medium'
-      patch({ notice: `🧠 已调整 @${t} 模型思考强度为 ${e}` })
+      patch({ notice: `🧠 已把 @${t} 的思考深度调成 ${e}` })
     } else if (nextCfg.toggleLockAgentEffort && typeof nextCfg.toggleLockAgentEffort === 'object') {
       const t = nextCfg.toggleLockAgentEffort.target || 'lead'
       const l = Boolean(nextCfg.toggleLockAgentEffort.locked)
-      patch({ notice: l ? `🔒 已锁定 @${t} 思考挡位，参谋 L2/L3 无法自动覆写` : `🔓 已解除 @${t} 思考挡位锁定` })
+      patch({ notice: l ? `🔒 已锁定 @${t} 的思考深度，参谋长不能自动改` : `🔓 已解锁 @${t} 的思考深度` })
     } else if (nextCfg.preset) {
       const presetMap = {
-        observer: bi('👁 已切换至「只读旁观」预设：L0 · ⏸ 关停 · 低思考强度', '👁 Switched to Observer preset: L0 · Off · Low effort'),
-        collab: bi('🤝 已切换至「日常协作」预设：L2 · 🛡 巡检 · 逐项审批 · 红线哨兵', '🤝 Switched to Co-Pilot preset: L2 · Patrol · Approvals · Sentinel'),
-        away: bi('🚀 已切换至「离桌托管」预设：L3 · 🤖 托管 · 80%自动压缩 · 30次/300K硬预算', '🚀 Switched to Away Managed preset: L3 · Managed · 80% Compact · Budget Cap'),
+        observer: bi('👁 已切到「只读旁观」：L0 · ⏸ 关停 · 低思考深度', '👁 Switched to Observer: L0 · Off · Low thinking'),
+        collab: bi('🤝 已切到「日常协作」：L2 · 🛡 巡检 · 每步问你 · 🛡 红线哨兵', '🤝 Switched to Co-Pilot: L2 · Patrol · Ask first · 🛡 Sentinel'),
+        away: bi('🚀 已切到「离桌托管」：L3 · 🤖 托管 · 80%自动压缩 · 30次/300K上限', '🚀 Switched to Away Mode: L3 · Managed · 80% compact · 30 calls/300K cap'),
       }
-      patch({ notice: presetMap[nextCfg.preset] || bi('✦ 已应用场景预设', '✦ Scenario preset applied') })
+      patch({ notice: presetMap[nextCfg.preset] || bi('✦ 已套用预设模式', '✦ Preset applied') })
     } else if (typeof nextCfg.uiLang === 'string') {
-      const langNames = { auto: bi('自动跟随宿主', 'Auto'), zh: '简体中文', en: 'English' }
-      patch({ notice: bi('🌐 界面语言已切换为：', '🌐 Interface language: ') + (langNames[nextCfg.uiLang] || nextCfg.uiLang) })
+      const langNames = { auto: bi('自动', 'Auto'), zh: '简体中文', en: 'English' }
+      patch({ notice: bi('🌐 语言已切到：', '🌐 Language: ') + (langNames[nextCfg.uiLang] || nextCfg.uiLang) })
     } else if (nextCfg.resetManagedBudget) {
-      patch({ notice: bi('↺ 已重置本轮托管硬预算计数器', '↺ Managed budget counter reset') })
+      patch({ notice: bi('↺ 已清零本轮托管额度计数', '↺ Managed usage counter reset') })
     } else if (typeof nextCfg.notifyEnabled === 'boolean') {
-      patch({ notice: nextCfg.notifyEnabled ? bi('🔔 已开启关键节点系统通知提醒', '🔔 Desktop milestone alerts enabled') : bi('🔕 已关闭关键节点系统通知提醒', '🔕 Desktop milestone alerts disabled') })
+      patch({ notice: nextCfg.notifyEnabled ? bi('🔔 已开启桌面通知提醒', '🔔 Desktop alerts on') : bi('🔕 已关闭桌面通知提醒', '🔕 Desktop alerts off') })
     } else if (typeof nextCfg.notifySound === 'boolean') {
-      patch({ notice: nextCfg.notifySound ? bi('🔊 已开启轻柔提示音', '🔊 Gentle alert chime enabled') : bi('🔇 已静音提示音', '🔇 Alert chime muted') })
+      patch({ notice: nextCfg.notifySound ? bi('🔊 已开启提示音', '🔊 Sound on') : bi('🔇 已关闭提示音', '🔇 Sound off') })
     } else if (nextCfg.managedBudgetMaxCalls !== undefined || nextCfg.managedBudgetMaxTokens !== undefined) {
-      patch({ notice: bi('💰 已更新托管硬预算熔断上限', '💰 Managed hard budget limits updated') })
+      patch({ notice: bi('💰 已更新托管费用上限', '💰 Spending limits updated') })
     } else if (typeof nextCfg.paceMode === 'string') {
       const paceNotice = nextCfg.paceMode === 'stopped'
-        ? '⏹ 已停止参谋长：后台强介入、空转监控与断线续跑全部暂停（可随时切回恢复）'
+        ? '⏹ 已停止参谋长：自动推进和后台检查都已暂停'
         : nextCfg.paceMode === 'auto'
-          ? '⚡ 已开启本会话全自动托管（仅管当前对话，完工且摘要收尾后自动停机防空转）'
+          ? '⚡ 已开启本对话托管：只管当前窗口，做完后会自动停下'
           : nextCfg.paceMode === 'smart'
-            ? '已切为「关键巡检」：仅在撞墙或关键节点节流巡检，摘要按需手动提炼'
-            : '已切为「按需手动」：后台零自动总结，仅在你点提炼或发话时调用模型'
+            ? '已切到巡检：平时不运行，遇到卡点或报错才介入'
+            : '已切到手动：后台不自动运行，只在你主动点按钮或发消息时工作'
       patch({ notice: paceNotice })
     } else if (typeof nextCfg.autoPilot === 'boolean') {
-      patch({ notice: nextCfg.autoPilot ? '⚡ 已开启本会话全自动协同托管' : '已切换为按需手动模式' })
+      patch({ notice: nextCfg.autoPilot ? '⚡ 已开启当前对话托管' : '已切到手动模式' })
     } else if (typeof nextCfg.modelRef === 'string') {
       const cat = (value && value.view && value.view.models) || store.secModelsCatalog
       const followHint = (cat && (cat.followLabel || fullModelWithChannel(cat.followRef || cat.defaultRef, cat))) || ''
       patch({
         notice: nextCfg.modelRef
-          ? '参谋长专职模型：' + fullModelWithChannel(nextCfg.modelRef, cat)
-          : '已恢复跟随主对话模型' + (followHint ? '（' + followHint + '）' : ''),
+          ? '参谋长当前模型：' + fullModelWithChannel(nextCfg.modelRef, cat)
+          : '已切回跟随主对话模型' + (followHint ? '（' + followHint + '）' : ''),
       })
     }
     return value
@@ -547,9 +547,9 @@ export async function decideApproval(approvalId, decision) {
       openApprovalModalId: '',
       notice: decision === 'approve'
         ? (value && value.resumed
-            ? '✓ 已授权执行并自动续跑完成原任务'
-            : ((value && value.executed) ? '✓ 已授权并执行本次操作' : '✓ 已批准操作'))
-        : '已拒绝本次受控操作申请',
+            ? '✓ 已批准并继续完成了原任务'
+            : ((value && value.executed) ? '✓ 已批准并执行这次操作' : '✓ 已批准操作'))
+        : '已拒绝这次操作',
     })
     return value
   } catch (error) {
@@ -579,15 +579,15 @@ export async function decideElevation(elevationId, decision, targetMode, confirm
       elevationChosenMode: '',
       notice: decision === 'approve'
         ? (value && value.resumed
-            ? ('已批准提权至 ' + (CHIEF_PERMISSION_LABELS[value.permissionMode || targetMode] || targetMode) + ' 并自动续跑')
-            : ('已批准提权至 ' + (CHIEF_PERMISSION_LABELS[value.permissionMode || targetMode] || targetMode)))
-        : '已拒绝模型的权限提升申请',
+            ? ('已批准升到 ' + (CHIEF_PERMISSION_LABELS[value.permissionMode || targetMode] || targetMode) + ' 并继续运行')
+            : ('已批准升到 ' + (CHIEF_PERMISSION_LABELS[value.permissionMode || targetMode] || targetMode)))
+        : '已拒绝提升权限',
     })
     return value
   } catch (error) {
     const payload = error && error.payload
     if (payload && payload.requireChiefRiskConfirm) {
-      patch({ elevationBusy: false, error: '进入 L3 参谋长模式必须勾选风险知悉确认' })
+      patch({ elevationBusy: false, error: '进入 L3 · 参谋长模式前，请先勾选风险确认框' })
       return null
     }
     patch({ elevationBusy: false, error: String((error && error.message) || error) })
@@ -604,8 +604,8 @@ export async function togglePeerSessionLink(peerId, linked) {
     })
     patch({
       notice: linked
-        ? '已接入跨对话协同网络（进度与信箱实时同步）'
-        : '已脱离协同网络：参谋摘要与协同上下文已隔离净化',
+        ? '已连上该对话，两边会同步进度和消息'
+        : '已断开连接，两边的摘要和记录已分开',
     })
     return value
   } catch (error) {
@@ -756,24 +756,24 @@ export async function decideSuggestion(sug, decision, editedText = '', boundFiel
         const isPinned = Boolean(applied.pinned)
         const replacedN = Number(applied.replacedCount || (Array.isArray(sug.replaces) ? sug.replaces.length : 0))
         if (replacedN > 0) {
-          patch({ notice: `${isPinned ? '📌 ' : ''}已将 ${replacedN} 条零散规则浓缩合并进【${label}】${isPinned ? '（全局共享）' : '（仅本任务）'}` })
+          patch({ notice: `${isPinned ? '📌 ' : ''}已把 ${replacedN} 条规则合并进【${label}】${isPinned ? '（所有任务通用）' : '（只限这次）'}` })
         } else {
-          patch({ notice: `${isPinned ? '📌 已批准并定住全局' : '已批准注入本任务'}【${label}】` })
+          patch({ notice: `${isPinned ? '📌 已添加到全局' : '已添加到本对话'}【${label}】` })
         }
       } else if (sug.kind === 'guard_wall') {
         const applied = value && value.wallApplied
-        patch({ notice: '🧱 已落锁物理驻墙：' + ((applied && applied.title) || sug.title || '') })
+        patch({ notice: '🧱 已启用物理驻墙：' + ((applied && applied.title) || sug.title || '') })
       } else if (sug.kind === 'wall_removal') {
         const removed = value && value.wallRemoved
         patch({
           notice: removed && removed.action === 'remove'
-            ? `🧱 已批准拆除物理驻墙：${removed.title || sug.title || ''}`
-            : `⏸ 已批准暂挂物理驻墙：${(removed && removed.title) || sug.title || ''}`,
+            ? `🧱 已删除物理驻墙：${removed.title || sug.title || ''}`
+            : `⏸ 已暂停物理驻墙：${(removed && removed.title) || sug.title || ''}`,
         })
       } else if (sug.kind === 'advice') {
-        patch({ notice: '💡 已采纳参谋长建议并递交 → @' + (sug.targetLabel || sug.target || '主对话') })
+        patch({ notice: '💡 已采纳建议并发送 → @' + (sug.targetLabel || sug.target || '主对话') })
       } else {
-        patch({ notice: '已递话 → @' + (sug.targetLabel || sug.target) })
+        patch({ notice: '已发送 → @' + (sug.targetLabel || sug.target) })
       }
       void refresh()
     }
@@ -812,9 +812,9 @@ export async function executePendingSuggestions(opts = {}) {
       const execCount = Number(value && value.executedCount) || 0
       const blockedCount = Number(value && value.blockedCount) || 0
       const skippedGoals = Number(value && value.skippedGoalCount) || 0
-      const parts = [`✓ 已执行 ${execCount} 项参谋建议`]
-      if (blockedCount > 0) parts.push(`拦截 ${blockedCount} 项越界建议`)
-      if (skippedGoals > 0) parts.push(`保留 ${skippedGoals} 项结项请示单独拍板`)
+      const parts = [`✓ 已执行 ${execCount} 条建议`]
+      if (blockedCount > 0) parts.push(`拦住 ${blockedCount} 条越界建议`)
+      if (skippedGoals > 0) parts.push(`还有 ${skippedGoals} 条完成确认需要你单独点`)
       patch({ notice: parts.join(' · ') })
       void refresh()
       return value
@@ -854,7 +854,7 @@ export async function requestConsolidateBounds(field = '', items = []) {
   if (store.secBusy || store.boundConsolidating) return null
   const tag = field || 'all'
   return await withChiefWorkFx(
-    { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在浓缩边界中...' },
+    { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '正在合并边界规则…' },
     async () => {
       patch({ boundConsolidating: tag, secBusy: true, error: '' })
       try {
@@ -878,7 +878,7 @@ export async function requestConsolidateBounds(field = '', items = []) {
           }
           patch({
             boundSelected: nextSel,
-            notice: '🏛 参谋长已将零散边界浓缩为 1 条，请在上方请示卡拍板',
+            notice: '🏛 边界规则已合并成 1 条，请在上方建议卡片里确认',
           })
         }
         return value
@@ -898,7 +898,7 @@ export function prefillSuggestion(sug) {
     secTarget: sug.target || 'lead',
     secMode: sug.mode || 'steer',
     secInput: sug.draftText || '',
-    notice: '已填入底部许愿框，可微调后发送',
+    notice: '已填到下面输入框，改好就能发',
   })
   if (sug.id && !sug.isSynthetic) void decideSuggestion(sug, 'dismiss')
 }
@@ -910,8 +910,8 @@ export async function mutateFact(payload) {
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({ session: store.sessionId, ...payload }),
     })
-    if (payload.op === 'add') patch({ notice: '已记入持久条目' })
-    else if (payload.op === 'remove') patch({ notice: '已移除条目' })
+    if (payload.op === 'add') patch({ notice: '已保存这条记录' })
+    else if (payload.op === 'remove') patch({ notice: '已删除这条记录' })
     return value
   } catch (error) {
     patch({ error: String((error && error.message) || error) })
@@ -927,7 +927,7 @@ export async function ingestSecImageFiles(fileList) {
     return /\.(png|jpe?g|webp|gif)$/i.test(String(f.name || ''))
   })
   if (!incoming.length) {
-    patch({ notice: '仅支持 PNG / JPEG / WebP / GIF 格式图片' })
+    patch({ notice: '只支持 PNG、JPG、WebP、GIF 图片' })
     return
   }
   const existing = Array.isArray(store.secImages) ? store.secImages : []
@@ -938,7 +938,7 @@ export async function ingestSecImageFiles(fileList) {
   }
   const picked = incoming.slice(0, slots)
   if (incoming.length > slots) {
-    patch({ notice: `单次最多 ${SEC_MAX_IMAGES} 张，已截取前 ${slots} 张` })
+    patch({ notice: `一次最多传 ${SEC_MAX_IMAGES} 张，已选前 ${slots} 张` })
   }
   const encoded = []
   for (const file of picked) {
@@ -956,45 +956,45 @@ export async function ingestSecImageFiles(fileList) {
 
 function classifyChiefWorkFx(text, quickTag = '') {
   if (quickTag === 'consult_chief') {
-    return { tone: 'neon', tab: 'chief', label: '💡 参谋长正在研判局势与拟定建议...' }
+    return { tone: 'neon', tab: 'chief', label: '💡 参谋长正在看情况、想建议…' }
   }
   if (quickTag === 'dream_roam') {
-    return { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游 · 轻拢卷宗与织就钩子中...' }
+    return { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游，帮你整理档案…' }
   }
   if (quickTag === 'craft_wall') {
-    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在手搓驻墙中...' }
+    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在写物理驻墙规则…' }
   }
   if (quickTag === 'extract_bounds') {
-    return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在提炼边界中...' }
+    return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在整理边界规则…' }
   }
   const clean = String(text || '').trim()
   const hits = []
   if (/梦境漫游|dream.?roam/i.test(clean)) {
-    hits.push({ tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游 · 轻拢卷宗与织就钩子中...' })
+    hits.push({ tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游，帮你整理档案…' })
   }
   if (/思考强度|思考挡位|推理强度|调挡|reasoningEffort|effortOps/i.test(clean)) {
-    hits.push({ tone: 'neon', tab: store.tab || 'chief', label: '🧠 参谋长正在调配模型思考强度中...' })
+    hits.push({ tone: 'neon', tab: store.tab || 'chief', label: '🧠 参谋长正在调整思考深度…' })
   }
   if (/置顶桌面|认知桌面|递送.*档案|拉阅.*钩子|archiveOps/i.test(clean)) {
-    hits.push({ tone: 'archive', tab: 'archive', label: '📌 参谋长正在调配认知桌面与卷宗钩子中...' })
+    hits.push({ tone: 'archive', tab: 'archive', label: '📌 参谋长正在整理认知桌面资料…' })
   }
   if (/手搓|驻墙|筑墙|物理墙|guard_?wall|wallProposals/i.test(clean)) {
-    hits.push({ tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在手搓驻墙中...' })
+    hits.push({ tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在写物理驻墙规则…' })
   }
   if (/提炼.{0,4}边界|工作边界|红线|必做项|注意事项|boundProposals/i.test(clean)) {
-    hits.push({ tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在调配红线边界中...' })
+    hits.push({ tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在整理红线规则…' })
   }
   if (/整理档案|档案柜|卷宗|归档|收纳入柜|桌面档案|抽屉|archive/i.test(clean)) {
-    hits.push({ tone: 'archive', tab: 'archive', label: '参谋长正在整理档案中...' })
+    hits.push({ tone: 'archive', tab: 'archive', label: '参谋长正在整理档案…' })
   }
   if (/任务看板|拆解任务|金字塔|子任务|graph\.plan/i.test(clean)) {
-    hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在编排任务看板中...' })
+    hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在整理任务列表…' })
   }
   if (/执行计划|规划步骤|交接单|handoff/i.test(clean)) {
-    hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在推演执行计划中...' })
+    hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在拟定执行计划…' })
   }
   if (/协同网络|跨窗|关联会话|子代理|广播/i.test(clean)) {
-    hits.push({ tone: 'peers', tab: 'peers', label: '参谋长正在协调团队网络中...' })
+    hits.push({ tone: 'peers', tab: 'peers', label: '参谋长正在协调各窗口对话…' })
   }
   if (hits.length === 1) return hits[0]
   if (hits.length >= 2) {
@@ -1003,43 +1003,43 @@ function classifyChiefWorkFx(text, quickTag = '') {
       tone: 'neon',
       tab: allBoundaries ? 'boundaries' : (store.tab || 'chief'),
       ...(allBoundaries ? { boundSubTab: 'rules' } : {}),
-      label: allBoundaries ? '参谋长正在手搓驻墙与边界中...' : '参谋长正在统筹操作参谋系统中...',
+      label: allBoundaries ? '参谋长正在整理规则和物理驻墙…' : '参谋长正在批量处理中…',
     }
   }
   return {
     tone: 'neon',
     tab: store.tab || 'chief',
-    label: '参谋长正在推演研判中...',
+    label: '参谋长正在思考…',
   }
 }
 
 function resolveChiefSuggestionWorkFx(suggestions = []) {
   const list = Array.isArray(suggestions) ? suggestions.filter(Boolean) : []
   if (!list.length) {
-    return { tone: 'neon', tab: store.tab || 'chief', label: '参谋长正在统一落地参谋建议中...' }
+    return { tone: 'neon', tab: store.tab || 'chief', label: '参谋长正在执行你选的建议…' }
   }
   const kinds = new Set(list.map(s => String(s.kind || '').trim()))
   if (kinds.size === 1 && kinds.has('guard_wall')) {
-    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在落锁物理驻墙中...' }
+    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在启用物理驻墙…' }
   }
   if (kinds.size === 1 && kinds.has('wall_removal')) {
-    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '⚠️ 正在按人工批准调整物理驻墙...' }
+    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '⚠️ 正在按你的确认调整物理驻墙…' }
   }
   if (kinds.size === 1 && kinds.has('bound')) {
-    return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在注入红线边界中...' }
+    return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在添加边界规则…' }
   }
   if (kinds.size === 1 && kinds.has('archive_op')) {
-    return { tone: 'archive', tab: 'archive', label: '📌 参谋长正在调配认知桌面与卷宗钩子中...' }
+    return { tone: 'archive', tab: 'archive', label: '📌 参谋长正在整理认知桌面资料…' }
   }
   if (kinds.size === 1 && kinds.has('model_effort')) {
-    return { tone: 'neon', tab: 'chief', label: '🧠 参谋长正在调配模型思考强度中...' }
+    return { tone: 'neon', tab: 'chief', label: '🧠 参谋长正在调整思考深度…' }
   }
   const allBoundsPage = [...kinds].every(k => k === 'guard_wall' || k === 'bound')
   return {
     tone: 'neon',
     tab: allBoundsPage ? 'boundaries' : (store.tab || 'chief'),
     ...(allBoundsPage ? { boundSubTab: 'rules' } : {}),
-    label: allBoundsPage ? '参谋长正在同步落锁驻墙与边界中...' : '🏁 参谋长正在一站式推进建议清单中...',
+    label: allBoundsPage ? '参谋长正在保存规则和物理驻墙…' : '🏁 参谋长正在依次执行建议…',
   }
 }
 
@@ -1056,7 +1056,7 @@ async function withChiefWorkFx(fxSpec = {}, fn) {
       token,
       tone: spec.tone || 'neon',
       tab: targetTab,
-      label: spec.label || '参谋长正在工作中...',
+      label: spec.label || '参谋长正在处理…',
     },
   })
   if (targetTab === 'archive' && !store.archiveLoaded) {
@@ -1128,13 +1128,13 @@ export async function submitChiefBar(overrideText = '', quickTag = '') {
           if (m && m.text) pushAction((m.op === 'remove' ? '移除：' : '记入：') + clampTitle(m.text, 14))
         }
         for (const wp of (value.wallProposals || [])) {
-          if (wp && wp.title) pushAction('呈批驻墙：' + clampTitle(wp.title, 14))
+          if (wp && wp.title) pushAction('新物理驻墙：' + clampTitle(wp.title, 14))
         }
         for (const wr of (value.wallRemovalProposals || [])) {
-          if (wr && wr.title) pushAction('⚠️ 请示拆墙：' + clampTitle(wr.title, 14))
+          if (wr && wr.title) pushAction('⚠️ 申请关墙：' + clampTitle(wr.title, 14))
         }
         for (const bp of (value.boundProposals || [])) {
-          if (bp && bp.draftText) pushAction('呈批边界：' + clampTitle(bp.draftText, 12))
+          if (bp && bp.draftText) pushAction('建议改边界：' + clampTitle(bp.draftText, 12))
         }
         if (value.view) applySecView(value.view)
         const createdSugCount = (Array.isArray(value.wallProposals) ? value.wallProposals.length : 0)
@@ -1156,8 +1156,8 @@ export async function submitChiefBar(overrideText = '', quickTag = '') {
           ...(createdSugCount > 0
             ? {
                 notice: hasWallRemovalOnly
-                  ? `⚠️ 参谋请示人工审批拆墙（${value.wallRemovalProposals.length} 项），请在建议栏拍板批准或忽略`
-                  : `✨ 已生成 ${createdSugCount} 项待确认提案，请点面板顶部「▶ 执行建议」一键落锁生效`,
+                  ? `⚠️ 参谋长申请关闭 ${value.wallRemovalProposals.length} 条物理驻墙，请在上方建议卡片里决定`
+                  : `✨ 已生成 ${createdSugCount} 条待确认建议，点顶部「▶ 执行建议」就能生效`,
               }
             : {}),
         })
@@ -1504,8 +1504,8 @@ export async function requestOrganizeArchives(opts = {}) {
   const isDream = Boolean(opts.dream || opts.reasonKind === 'dream_roam')
   return await withChiefWorkFx(
     isDream
-      ? { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游 · 轻拢卷宗与织就钩子中...' }
-      : { tone: 'archive', tab: 'archive', label: '参谋长正在整理档案中...' },
+      ? { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游，帮你整理档案…' }
+      : { tone: 'archive', tab: 'archive', label: '参谋长正在整理档案…' },
     async () => {
       patch({ archiveOrganizing: true, error: '' })
       try {
@@ -1533,8 +1533,8 @@ export async function requestOrganizeArchives(opts = {}) {
             archiveOrganizeOpen: false,
             archiveOrganizePrompt: '',
             notice: value.updatedCount > 0
-              ? `✦ 参谋长已按层次整理收纳 ${value.updatedCount} 份工程卷宗（原文 100% 无损保留）`
-              : '✦ 当前卷宗已分门别类，无需重复拆整',
+              ? `✦ 已帮你把 ${value.updatedCount} 份档案分类整理好，原文完整保留`
+              : '✦ 这些档案已经分类好了，不用重整',
           })
           void loadArchives(true, '', vaultScope)
           for (const k of openIds) {
@@ -1555,7 +1555,7 @@ export async function requestOrganizeArchives(opts = {}) {
 export async function harvestArchivesApi(focusHint = '', opts = {}) {
   if (store.archiveHarvesting) return null
   return await withChiefWorkFx(
-    { tone: 'archive', tab: 'archive', label: '参谋长正在抢救归档中...' },
+    { tone: 'archive', tab: 'archive', label: '正在从对话里提取关键记录…' },
     async () => {
       patch({ archiveHarvesting: true, error: '' })
       try {
@@ -1573,8 +1573,8 @@ export async function harvestArchivesApi(focusHint = '', opts = {}) {
         if (value && value.ok) {
           patch({
             notice: value.count > 0
-              ? `📥 已抢救 ${value.count} 份本轮对话工程细节入柜（防压缩失忆）`
-              : '📥 当前对话暂无新增重要工程细节',
+              ? `📥 已保存 ${value.count} 份重要记录，避免长对话压缩后忘掉`
+              : '📥 这轮对话没有新的重要细节要保存',
           })
           void loadArchives(true)
         }
@@ -1592,7 +1592,7 @@ export async function harvestArchivesApi(focusHint = '', opts = {}) {
 export async function precipitateArchivesApi(opts = {}) {
   if (store.archivePrecipitating) return null
   return await withChiefWorkFx(
-    { tone: 'archive', tab: 'archive', label: '参谋长正在沉淀经验入库中...' },
+    { tone: 'archive', tab: 'archive', label: '正在把经验存进长期冷库…' },
     async () => {
       patch({ archivePrecipitating: true, error: '' })
       try {
@@ -1614,8 +1614,8 @@ export async function precipitateArchivesApi(opts = {}) {
           patch({
             precipitateModal: null,
             notice: value.count > 0
-              ? `⏬ 已提炼 ${value.count} 条可复用经验封入冷库（默认 0 Token 隔离）`
-              : '⏬ 当前卷宗暂无更多可沉淀经验',
+              ? `⏬ 已把 ${value.count} 条常用经验存进冷库（平时占 0 Token）`
+              : '⏬ 暂时没有可以存进冷库的经验',
           })
           void loadArchives(true, '', vaultScope)
         }
@@ -1667,7 +1667,7 @@ export async function relayArchivesWithChiefApi(modalState) {
   const items = Array.isArray(modalState && modalState.items) ? modalState.items : []
   if (!items.length) return null
   return await withChiefWorkFx(
-    { tone: 'archive', tab: 'archive', label: '参谋长正在整合递交档案中...' },
+    { tone: 'archive', tab: 'archive', label: '正在整理档案并准备发送…' },
     async () => {
       patch({ relayArchivesBusy: true, error: '' })
       try {
@@ -1692,7 +1692,7 @@ export async function relayArchivesWithChiefApi(modalState) {
           patch({
             archiveRelayModal: null,
             selectedArchiveMap: {},
-            notice: `📨 参谋长已带要求整合 ${items.length} 条档案并递交给 @${modalState.target === 'lead' || !modalState.target ? '主对话' : shortAgentName(modalState.target, true)}`,
+            notice: `📨 已把 ${items.length} 份档案和你的要求一起发给 @${modalState.target === 'lead' || !modalState.target ? '主对话' : shortAgentName(modalState.target, true)}`,
           })
           void refresh()
         }
@@ -1710,7 +1710,7 @@ export async function relayArchivesWithChiefApi(modalState) {
 export async function distillToGlobalApi(modalState) {
   if (store.distillBusy) return null
   return await withChiefWorkFx(
-    { tone: 'archive', tab: 'archive', label: '参谋长正在提炼全局档案中...' },
+    { tone: 'archive', tab: 'archive', label: '正在整理要存入全局档案的经验…' },
     async () => {
       patch({ distillBusy: true, error: '' })
       try {
@@ -1734,8 +1734,8 @@ export async function distillToGlobalApi(modalState) {
             selectedArchiveMap: {},
             globalVaultLoaded: false,
             notice: value.createdCount > 0
-              ? `✦ 已从本局提炼 ${value.createdCount} 份可复用工程档案存入「🌐 全局档案柜」`
-              : '✦ 当前本局暂无更多待提炼的新增可复用经验',
+              ? `✦ 已提取 ${value.createdCount} 份通用经验，存进「🌐 全局档案柜」`
+              : '✦ 这轮对话暂时没有新的通用经验',
           }
           if (value.globalArchives && Array.isArray(value.globalArchives.items)) {
             nextPatch.globalVaultItems = value.globalArchives.items
@@ -1761,18 +1761,18 @@ export async function distillToGlobalApi(modalState) {
 
 export async function approveGoalApi() {
   const value = await act({ action: 'goal.approve' })
-  if (value && value.ok) patch({ notice: '✅ 已批准目标结项并切换回标准计划模式' })
+  if (value && value.ok) patch({ notice: '✅ 已确认目标完成，切回普通计划模式' })
   return value
 }
 
 export async function rejectGoalApi(reason) {
   const text = String(reason || '').trim()
   if (!text) {
-    patch({ error: '请简短说明驳回原因与补充要求' })
+    patch({ error: '请简单写一下没通过的原因，或要补什么' })
     return null
   }
   const value = await act({ action: 'goal.reject', reason: text })
-  if (value && value.ok) patch({ notice: '↩ 已驳回结项，目标督导将继续推进' })
+  if (value && value.ok) patch({ notice: '↩ 已退回重做，参谋长会继续盯着推进' })
   return value
 }
 
@@ -1826,7 +1826,7 @@ export async function searchColdArchives(queryText) {
       const localHits = searchBoard(q).filter(hItem => hItem.tab !== 'archive')
       patch({
         askHits: [...archHits, ...localHits],
-        notice: archHits.length ? `已在封存档案柜检出 ${archHits.length} 卷匹配记录` : '封存档案柜中未检出匹配卷宗',
+        notice: archHits.length ? `在档案库里找到 ${archHits.length} 份相关记录` : '档案库里没找到相关内容',
       })
     }
   } catch (error) {
@@ -1880,7 +1880,7 @@ export async function act(action) {
       patch({
         staleBackendDetected: true,
         staleBackendDismissed: false,
-        error: '检测到客户端内存仍驻留旧版参谋部后端（尚未加载新动作），请完整关闭并重新打开 DeepSeek Harness 客户端即可生效。',
+        error: '后台还在跑旧版本，新功能还没加载进来。请完全关闭再重新打开 DeepSeek Harness 客户端。',
       })
     } else {
       patch({ error: msg })
@@ -1948,7 +1948,7 @@ export async function saveHandoffCustom(text, pinAfter = false) {
     if (pinAfter) {
       await act({ action: 'handoff.pin', pinned: true, by: 'user' })
     }
-    patch({ handoffEditing: false, notice: pinAfter ? '✏️ 已保存交接单并定住防改' : '✏️ 已保存手动交接单' })
+    patch({ handoffEditing: false, notice: pinAfter ? '✏️ 已保存交接单，并设好定住防改' : '✏️ 已保存你改的交接单' })
     await loadHandoff()
   }
   return res
@@ -1972,7 +1972,7 @@ export async function toggleHandoffPin(nextPinned, snapshotOverride = '') {
     by: 'user',
   })
   if (res && res.ok) {
-    patch({ notice: nextPinned ? '📌 已定住交接单（已固化当前快照，参谋长不可自动覆写）' : '🔓 已解除交接单定住锁定' })
+    patch({ notice: nextPinned ? '📌 已定住防改：参谋长不会再自动覆盖这份交接单' : '🔓 已解除锁定，交接单可以重新自动更新了' })
     await loadHandoff()
   }
   return res
@@ -1981,7 +1981,7 @@ export async function toggleHandoffPin(nextPinned, snapshotOverride = '') {
 export async function resetHandoffAuto() {
   const res = await act({ action: 'handoff.reset', by: 'user' })
   if (res && res.ok) {
-    patch({ handoffEditing: false, notice: '↺ 已恢复为系统实时自动生成交接单' })
+    patch({ handoffEditing: false, notice: '↺ 已改回由系统自动更新交接单' })
     await loadHandoff()
   }
   return res
@@ -1989,12 +1989,12 @@ export async function resetHandoffAuto() {
 
 export async function toggleSyncHandoffOnDigest(enabled) {
   if (store.board && store.board.handoff && store.board.handoff.pinned) {
-    patch({ notice: '🔒 交接单已被人类定住，需先解除定住才能开启自动同步' })
+    patch({ notice: '🔒 交接单已定住防改，先解锁才能开启自动同步' })
     return null
   }
   const res = await act({ action: 'handoff.setSyncOnDigest', enabled: Boolean(enabled), by: 'user' })
   if (res && res.ok) {
-    patch({ notice: enabled ? '✦ 提炼摘要后将自动同步至交接单' : '已关闭摘要同步交接单（仅手工更新）' })
+    patch({ notice: enabled ? '✦ 以后提炼摘要时会自动更新交接单' : '已关闭自动同步，之后只按你的修改为准' })
     await loadHandoff()
   }
   return res
@@ -2007,8 +2007,8 @@ export async function requestTransferWithGuard(target, opts = {}) {
   const staleOrIncomplete = !pinned && Boolean(hMeta.isIncomplete || hMeta.isStale || hMeta.hasNarrativeUpdate)
   if (staleOrIncomplete) {
     const reason = hMeta.isIncomplete
-      ? '当前交接单内容尚不完整（缺少目标、步骤或最新参谋摘要），直接交接会打乱新对话的上下文衔接。'
-      : '参谋长已更新最新态势摘要，但当前交接单尚未同步更新；直接交接可能让新窗口读到过期进度，建议先等参谋长刷新交接单。'
+      ? '交接单还缺目标、步骤或最新摘要，直接交接会让新对话接不上。'
+      : '摘要已经更新了，但交接单还没同步。直接交接会让新窗口看到旧进度，建议先更新一下。'
     patch({
       handoffWarnModal: {
         target,
@@ -2023,7 +2023,7 @@ export async function requestTransferWithGuard(target, opts = {}) {
 }
 
 export async function transfer(target, opts = {}) {
-  patch({ transferNote: '投递中…', error: '' })
+  patch({ transferNote: '正在交接…', error: '' })
   try {
     const value = await call('transfer', {
       method: 'POST',
@@ -2041,7 +2041,7 @@ export async function transfer(target, opts = {}) {
     })
     const created = value && value.mode === 'created' && value.sessionId ? String(value.sessionId) : ''
     let note = '已放入待领取队列（含参谋预部署）'
-    if (value && value.mode === 'injected') note = '已投递至目标会话并部署参谋'
+    if (value && value.mode === 'injected') note = '已交接到目标对话，并开启了参谋'
     if (created) {
       patch({ transferred: true })
       setTimeout(() => patch({ transferred: false }), 2000)
@@ -2113,7 +2113,7 @@ export async function addMemory() {
   const title = store.memTitle.trim()
   const section = store.memSection
   if (!text) return
-  patch({ memText: '', memTitle: '', memComposerOpen: false, notice: '已记入记忆' })
+  patch({ memText: '', memTitle: '', memComposerOpen: false, notice: '已记下来' })
   await act({ action: 'memory.add', text, title, section })
   void loadMemory()
 }
@@ -2193,7 +2193,7 @@ export function sendToComposer(text) {
     if (submit) {
       try {
         submit()
-        return '已发送至对话'
+        return '已发到对话'
       } catch {}
     }
     return '已填入输入框'
@@ -2206,7 +2206,7 @@ export async function askLeadModel(promptText, subject = '步骤咨询') {
   if (!clean) return
   const sent = sendToComposer(clean)
   if (sent) {
-    patch({ notice: sent + ' · 等待模型解答' })
+    patch({ notice: sent + '，等主对话回复' })
     return
   }
   try {
@@ -2222,9 +2222,9 @@ export async function askLeadModel(promptText, subject = '步骤咨询') {
         mode: 'followup',
       }),
     })
-    patch({ notice: '已发送给主对话模型解答' })
+    patch({ notice: '已发给主对话' })
   } catch (error) {
-    copyText(clean, '问题已复制，可粘贴到对话框提问')
+    copyText(clean, '已复制，去对话框粘贴就能提问')
   }
 }
 
@@ -2248,7 +2248,7 @@ export async function addBoundRule(field, item, pinned = false) {
   if (!res || store.error) return
   patch({
     boundDraft: { ...store.boundDraft, [field]: '' },
-    notice: pinned ? '📌 已添加并定住为全局共享边界' : '已添加至当前任务边界（点击前方的图钉可定住全局）',
+    notice: pinned ? '📌 已添加为所有任务通用的边界' : '已添加到当前对话边界（点前面图钉可设为通用）',
   })
 }
 
@@ -2257,8 +2257,8 @@ export async function toggleBoundPin(field, item, nextPinned) {
   if (!res || store.error) return
   patch({
     notice: nextPinned
-      ? '📌 已盖上小图钉 · 定住为跨任务全局共享边界'
-      : '已取下小图钉 · 改为仅当前任务生效',
+      ? '📌 已固定为所有任务通用的边界'
+      : '已取消通用固定，只在当前对话生效',
   })
 }
 
@@ -2275,7 +2275,7 @@ export async function editBoundRule(field, oldItem, nextItem) {
   const trimmed = String(nextItem || '').trim()
   if (!trimmed || trimmed === oldItem) return
   const res = await act({ action: 'bounds.edit', field, oldItem, item: trimmed })
-  if (res && !store.error) patch({ notice: '已更新边界条文' })
+  if (res && !store.error) patch({ notice: '已更新边界规则' })
 }
 
 export function toggleBoundSelect(field, item) {
@@ -2292,7 +2292,7 @@ export async function saveGuardWallApi({ title, ruleType = 'forbid_cmd', pattern
     ? patterns
     : (cleanPattern ? cleanPattern.split(/[\r\n,;，；]+/).map(s => s.trim()).filter(Boolean) : [])
   if (!cleanTitle || !patList.length) {
-    patch({ error: '物理驻墙需要填写规则名称与至少 1 条匹配规则' })
+    patch({ error: '请给物理驻墙起个名字，并至少写 1 条拦截条件' })
     return null
   }
   const res = await act({
@@ -2312,7 +2312,7 @@ export async function saveGuardWallApi({ title, ruleType = 'forbid_cmd', pattern
       wallFormOpen: false,
       wallDraftTitle: '',
       wallDraftPattern: '',
-      notice: `🧱 已落锁物理驻墙「${cleanTitle}」（${scope === 'workspace' ? '仅本工程' : '🌐 全局随身'}）`,
+      notice: `🧱 已启用物理驻墙「${cleanTitle}」（${scope === 'workspace' ? '只管当前项目' : '🌐 所有项目通用'}）`,
     })
   }
   return res
@@ -2322,8 +2322,8 @@ export async function setGuardWallScopeApi(wallId, scope) {
   if (!wallId || !scope) return null
   const res = await act({ action: 'wall.setScope', wallId, scope })
   if (res && res.ok) {
-    const labelMap = { global: '🌐 全局随身', workspace: '📁 仅本工程', paused: '⏸ 暂挂停用' }
-    patch({ notice: `🧱 已切换物理墙作用域 → ${labelMap[scope] || scope}` })
+    const labelMap = { global: '🌐 所有项目通用', workspace: '📁 只管当前项目', paused: '⏸ 暂停使用' }
+    patch({ notice: `🧱 物理驻墙范围已改为：${labelMap[scope] || scope}` })
   }
   return res
 }
@@ -2336,7 +2336,7 @@ export async function removeGuardWallApi(wallId) {
     patch({
       wallSelectedIds: curSel.filter(id => id !== wallId),
       wallMergeError: '',
-      notice: '🧱 已拆除该条物理驻墙',
+      notice: '🧱 已删除这条物理驻墙',
     })
   }
   return res
@@ -2355,21 +2355,21 @@ export async function mergeGuardWallsApi({ wallIds = [], autoGroup = false } = {
   if (!autoGroup) {
     const cleanIds = [...new Set((Array.isArray(wallIds) ? wallIds : []).filter(id => walls.some(w => w && w.id === id)))]
     if (cleanIds.length < 2) {
-      const msg = '请至少勾选 2 条相同类型的物理驻墙后再合并'
+      const msg = '请至少选 2 条同类型的物理驻墙再合并'
       patch({ wallMergeError: msg, error: msg })
       return { ok: false, code: 'MERGE_MIN_TWO', error: msg }
     }
     const picked = walls.filter(w => cleanIds.includes(w.id))
     const ruleTypes = new Set(picked.map(w => w.ruleType))
     if (ruleTypes.size > 1) {
-      const msg = '⛔ 禁止跨类型合并物理驻墙：仅允许相同拦截类型的物理驻墙合并（如「禁碰路径」只能与「禁碰路径」合并），请取消异类勾选！'
+      const msg = '⛔ 不同类型的物理驻墙不能混在一起合并，比如「禁碰路径」只能和「禁碰路径」合。请取消选错的那条。'
       patch({ wallMergeError: msg, error: msg })
       return { ok: false, code: 'CROSS_TYPE_MERGE_FORBIDDEN', error: msg }
     }
   }
   patch({ wallMergeError: '', error: '' })
   return await withChiefWorkFx(
-    { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在合并同类驻墙中...', minMs: 520 },
+    { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '正在合并同类物理驻墙…', minMs: 520 },
     async () => {
       const res = await act({
         action: 'wall.merge',
@@ -2377,14 +2377,14 @@ export async function mergeGuardWallsApi({ wallIds = [], autoGroup = false } = {
         autoGroup: Boolean(autoGroup),
       })
       if (!res || !res.ok) {
-        const msg = (res && res.error) || store.error || '合并物理驻墙失败'
+        const msg = (res && res.error) || store.error || '合并失败'
         patch({ wallMergeError: msg, error: msg })
         return res || { ok: false, error: msg }
       }
       patch({
         wallSelectedIds: [],
         wallMergeError: '',
-        notice: `🧱 已将 ${res.mergedCount || 2} 条同类物理驻墙合并为 ${res.createdCount || 1} 条`,
+        notice: `🧱 已把 ${res.mergedCount || 2} 条同类物理驻墙合并成 ${res.createdCount || 1} 条`,
       })
       return res
     },

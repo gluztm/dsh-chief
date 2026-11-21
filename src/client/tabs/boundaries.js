@@ -26,11 +26,11 @@ import {
 import { Icon, AccCard } from '../components/common.js'
 
 const WALL_TYPE_META = {
-  forbid_cmd: { label: '🚫 禁跑命令', placeholder: '输入命令关键字或正则（如 npm publish、git push --force）…' },
-  forbid_path: { label: '🚧 禁碰路径', placeholder: '输入禁止读写目录或文件（如 .github/workflows、DSHGuard）…' },
-  restrict_write: { label: '🔐 仅限某目录可写', placeholder: '输入唯一允许写入的白名单目录绝对/相对路径…' },
-  require_approval_cmd: { label: '🛡️ 高危命令先请示', placeholder: '输入需强制拦停审批的命令特征（如 prisma migrate）…' },
-  deny_tool: { label: '⛔ 禁用工具', placeholder: '输入禁用的工具名（如 run_command、write_file）…' },
+  forbid_cmd: { label: '🚫 禁跑命令', placeholder: '输入禁跑的命令关键词（如 npm publish、git push --force）…' },
+  forbid_path: { label: '🚧 禁碰路径', placeholder: '输入禁止读写的文件夹或文件（如 .github/workflows、DSHGuard）…' },
+  restrict_write: { label: '🔐 仅限某目录可写', placeholder: '输入唯一允许写入的文件夹路径…' },
+  require_approval_cmd: { label: '🛡️ 高危命令先请示', placeholder: '输入运行前要先问你的命令（如 prisma migrate）…' },
+  deny_tool: { label: '⛔ 禁用工具', placeholder: '输入要禁用的工具名（如 run_command、write_file）…' },
 }
 
 function GuardWallsCard({ view }) {
@@ -78,10 +78,10 @@ function GuardWallsCard({ view }) {
       onToggle: () => patch({ wallCollapsed: !collapsed }),
       className: 'dnb-wall-box',
       icon: h(Icon, { name: 'shieldSentinel', size: 13.5, style: { color: activeCount > 0 ? '#ef4444' : '#f87171', flexShrink: 0 } }),
-      title: bi('物理驻墙 · 事前硬拦截', 'Guard Wall · Pre-Tool Hard Block'),
+      title: bi('物理驻墙 · 执行前拦截', 'Guard Wall · Pre-Tool Block'),
       preview: walls.length
         ? `${activeCount} ${bi('生效', 'active')} · ${walls.slice(0, 2).map(w => w.title).join(bi('、', ', '))}`
-        : bi('全会话工具前拦截物理哨兵就绪', 'Session-wide pre-tool physical sentinel ready'),
+        : bi('物理驻墙：在模型运行工具前直接拦下危险操作', 'Blocks risky tool calls before they run'),
       bodyStyle: { padding: 0 },
       badges: h(
         'span',
@@ -102,7 +102,7 @@ function GuardWallsCard({ view }) {
             const nextOpen = !formOpen
             patch({ wallFormOpen: nextOpen, ...(nextOpen ? { wallCollapsed: false } : {}) })
           },
-        }, formOpen ? '收起表单' : '+ 驻墙'),
+        }, formOpen ? '收起' : '+ 加规则'),
         h(
           'div',
           { className: 'dnb-more-wrap' },
@@ -111,7 +111,7 @@ function GuardWallsCard({ view }) {
             className: 'dnb-pill',
             style: { height: 22, padding: '0 7px', fontSize: 10.5 },
             'data-active': wallMenuOpen ? '1' : '0',
-            title: '更多筑墙与合并操作',
+            title: '更多规则与合并操作',
             onClick: e => {
               e.stopPropagation()
               setWallMenuOpen(v => !v)
@@ -125,7 +125,7 @@ function GuardWallsCard({ view }) {
                   type: 'button',
                   className: 'dnb-more-item',
                   disabled: view.secBusy,
-                  title: '让参谋长按你的大白话帮你手搓物理驻墙规则并发起一键落锁确认',
+                  title: '让参谋长按项目情况帮你写规则，确认后生效',
                   onClick: () => {
                     setWallMenuOpen(false)
                     void submitChiefBar(
@@ -133,13 +133,13 @@ function GuardWallsCard({ view }) {
                       'craft_wall',
                     )
                   },
-                }, h('span', null, view.secBusy && view.chiefQuickAction === 'craft_wall' ? '⏳ 正在手搓筑墙…' : '✨ 参谋手搓筑墙')),
+                }, h('span', null, view.secBusy && view.chiefQuickAction === 'craft_wall' ? '⏳ 生成规则中…' : '✨ 让参谋长写规则')),
                 selectedIds.length >= 2
                   ? h('button', {
                       type: 'button',
                       className: 'dnb-more-item',
                       'data-danger': '1',
-                      title: '合并已勾选的同类型物理驻墙（若误选了不同拦截类型会弹出错误提醒阻止合并）',
+                      title: '把勾选的同类型规则合为一条',
                       onClick: () => {
                         setWallMenuOpen(false)
                         void mergeGuardWallsApi({ wallIds: selectedIds })
@@ -149,7 +149,7 @@ function GuardWallsCard({ view }) {
                       ? h('button', {
                           type: 'button',
                           className: 'dnb-more-item',
-                          title: '仅按相同拦截类型自动合并多堵同类物理驻墙（禁碰路径只和禁碰路径合并，绝不跨类混并）',
+                          title: '按类型自动合并重复规则，不同类型不混并',
                           onClick: () => {
                             setWallMenuOpen(false)
                             void mergeGuardWallsApi({ autoGroup: true })
@@ -192,7 +192,7 @@ function GuardWallsCard({ view }) {
             h('input', {
               className: 'dnb-input',
               style: { flex: '1 1 140px', height: 28, fontSize: 11.5 },
-              placeholder: '物理墙名称（如：锁死生产发布 / 保护核心配置）',
+              placeholder: '给规则起个名（如：禁止发布到生产 / 保护配置）',
               value: draftTitle,
               onChange: e => patch({ wallDraftTitle: e.target.value }),
             }),
@@ -211,7 +211,7 @@ function GuardWallsCard({ view }) {
           h('input', {
             className: 'dnb-input',
             style: { height: 28, fontSize: 11.5 },
-            placeholder: (WALL_TYPE_META[draftField] && WALL_TYPE_META[draftField].placeholder) || '输入匹配规则（多项可用逗号分隔）',
+            placeholder: (WALL_TYPE_META[draftField] && WALL_TYPE_META[draftField].placeholder) || '输入拦截内容，多个用逗号隔开',
             value: draftPattern,
             onChange: e => patch({ wallDraftPattern: e.target.value }),
             onKeyDown: e => { if (e.key === 'Enter') submitNewWall() },
@@ -241,7 +241,7 @@ function GuardWallsCard({ view }) {
               style: { height: 26, padding: '0 10px', fontSize: 11 },
               disabled: !draftTitle.trim() || !draftPattern.trim() || view.busy,
               onClick: submitNewWall,
-            }, '🧱 立即驻防落锁'),
+            }, '🧱 保存并启用'),
           ),
         )
       : null,
@@ -262,7 +262,7 @@ function GuardWallsCard({ view }) {
                 h('span', { style: { fontSize: 12, fontWeight: 600, color: w.activeNow ? 'var(--dnb-text)' : 'var(--dnb-text-2)' } }, w.title),
                 h('span', { className: 'dnb-tag', style: { fontSize: 10 } }, typeMeta.label),
                 w.source === 'chief_crafted'
-                  ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: 'var(--dnb-accent)' } }, '参谋手搓')
+                  ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: 'var(--dnb-accent)' } }, '参谋生成')
                   : null,
               ),
               h(
@@ -273,7 +273,7 @@ function GuardWallsCard({ view }) {
                       type: 'button',
                       className: 'dnb-bound-check',
                       'data-checked': isChecked ? '1' : '0',
-                      title: isChecked ? '已勾选，可点击「合并所选」与同类型物理墙合并' : '勾选以合并多条同类型物理驻墙（禁跨类型合并）',
+                      title: isChecked ? '已勾选，点右上角合并同类规则' : '勾选几条同类规则，可合并成一条',
                       onClick: () => toggleGuardWallSelect(w.id),
                     }, h(Icon, { name: 'check', size: 10.5 }))
                   : null,
@@ -281,7 +281,7 @@ function GuardWallsCard({ view }) {
                   type: 'button',
                   className: 'dnb-icon-btn',
                   style: { width: 20, height: 20, flexShrink: 0, color: 'var(--dnb-text-3)' },
-                  title: '人工拆除该物理墙（AI 模型无权调用拆除）',
+                  title: '删除这条规则（AI 无法自己删）',
                   onClick: () => void removeGuardWallApi(w.id),
                 }, h(Icon, { name: 'x', size: 11 })),
               ),
@@ -318,7 +318,7 @@ function GuardWallsCard({ view }) {
       : h(
           'div',
           { style: { padding: '10px 12px', fontSize: 11, color: 'var(--dnb-text-3)' } },
-          '尚未手动筑墙。全会话工具前拦截物理哨兵已就绪，点击右上角「+ 驻墙」或让参谋长手搓一条即可全对话随身生效。',
+          '还没有自定义拦截规则。点右上角「+ 加规则」自己加一条，或让参谋长帮你写一条。',
         ),
   )
 }
@@ -374,13 +374,13 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
       onToggle: toggleColCollapsed,
       accentColor: dot,
       title: uiLabel,
-      headTitle: isColCollapsed ? bi(`点击拉开【${uiLabel}】`, `Expand ${uiLabel}`) : bi(`点击收起【${uiLabel}】`, `Collapse ${uiLabel}`),
+      headTitle: isColCollapsed ? bi(`展开「${uiLabel}」`, `Expand ${uiLabel}`) : bi(`收起「${uiLabel}」`, `Collapse ${uiLabel}`),
       icon: h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: dot, flexShrink: 0 } }),
       count: list.length ? String(list.length) : '',
       badges: pinnedCountInCol > 0
         ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, `📌${pinnedCountInCol}`)
         : null,
-      preview: list.length ? list.slice(0, 2).join('；') : '尚未添加规则',
+      preview: list.length ? list.slice(0, 2).join('；') : '还没有规则',
       bodyStyle: { padding: 0 },
       actions: list.length >= 2
         ? h('button', {
@@ -396,14 +396,14 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
             },
             disabled: Boolean(store.secBusy),
             title: selected.length >= 2
-              ? `请参谋长将勾选的 ${selected.length} 条零散规则总结成一条`
-              : `请参谋长将【${label}】下的 ${list.length} 条零散规则浓缩总结成一条`,
+              ? `把勾选的 ${selected.length} 条规则合并成一条`
+              : `把「${label}」下的 ${list.length} 条规则精简成一条`,
             onClick: () => void requestConsolidateBounds(field, selected.length >= 2 ? selected : []),
           },
           h(Icon, { name: 'sparkles', size: 10.5 }),
           isConsolidatingCol
-            ? '浓缩中…'
-            : (selected.length >= 2 ? `${selected.length} 条合一` : '总结成一条'))
+            ? '整理中…'
+            : (selected.length >= 2 ? `合并 ${selected.length} 条` : '合并为一条'))
         : null,
     },
     list.map((item, idx) => {
@@ -427,8 +427,8 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
           className: 'dnb-pin-stamp',
           'data-pinned': isPinned ? '1' : '0',
           title: isPinned
-            ? '📌 已定住（全局跨任务共享）· 点击取下图钉改为仅本任务有效'
-            : '仅当前任务生效 · 点击盖上小图钉定住为全局共享',
+            ? '已固定到全局，点一下改回仅本次有效'
+            : '仅本次有效，点一下固定到全局',
           onClick: () => void toggleBoundPin(field, item, !isPinned),
         }, h(Icon, { name: 'pinStamp', size: 13 })),
 
@@ -475,7 +475,7 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
             ? h('button', {
                 className: 'dnb-bound-check',
                 'data-checked': isChecked ? '1' : '0',
-                title: isChecked ? '已选入待合并零散边界' : '勾选以挑出多条零散边界合并成一条',
+                title: isChecked ? '已勾选，可合并成一条' : '勾选多条规则后合并成一条',
                 onClick: () => toggleBoundSelect(field, item),
               }, h(Icon, { name: 'check', size: 10.5 }))
             : null,
@@ -483,7 +483,7 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
             ? h('button', {
                 className: 'dnb-icon-btn dnb-row-actions',
                 style: { width: 22, height: 22 },
-                title: '编辑条文',
+                title: '编辑',
                 onClick: () => {
                   setEditingItem(item)
                   setEditingVal(item)
@@ -493,7 +493,7 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
           h('button', {
             className: 'dnb-icon-btn dnb-row-actions',
             style: { width: 22, height: 22, color: '#ff453a' },
-            title: '删除此条边界',
+            title: '删除这条规则',
             onClick: () => void removeBoundRule(field, item),
           }, h(Icon, { name: 'x', size: 12 })),
         ),
@@ -505,7 +505,7 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
       h('button', {
         className: 'dnb-pin-stamp',
         'data-pinned': pinDraft ? '1' : '0',
-        title: pinDraft ? '📌 新增时直接定住为全局共享（点击切换为仅本任务）' : '新增时仅本任务有效（点击小图钉切换为全局共享）',
+        title: pinDraft ? '新规则会固定到全局（点图钉切换）' : '新规则仅本次有效（点图钉固定）',
         onClick: () => patch({ boundPinDraft: { ...(store.boundPinDraft || {}), [field]: !pinDraft } }),
       }, h(Icon, { name: 'pinStamp', size: 12.5 })),
       h('input', {
@@ -513,7 +513,7 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
         style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1 },
         placeholder: full
           ? '已达上限'
-          : (pinDraft ? '添加全局共享规则（跨任务生效）…' : '添加当前任务规则（点左侧图钉可定住全局）…'),
+          : (pinDraft ? '输入全局规则（所有任务都生效）…' : '输入本任务规则（点左边图钉可固定到全局）…'),
         disabled: full,
         value: draft,
         onChange: e => patch({ boundDraft: { ...store.boundDraft, [field]: e.target.value } }),
@@ -524,7 +524,7 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
             className: 'dnb-pill dnb-pill-accent',
             style: { height: 24 },
             onClick: commit,
-          }, pinDraft ? '📌 定住添加' : '添加')
+          }, pinDraft ? '📌 固定添加' : '添加')
         : null,
     ),
   )
@@ -577,8 +577,8 @@ export function BoundariesTab({ store: view }) {
         {
           style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 },
           title: bi(
-            `当前已定住 ${totalPinnedCount} 条全局共享边界（点击每条规则前的小图钉即可跨任务固定）`,
-            `${totalPinnedCount} pinned global boundaries (click the pin icon on any rule to persist across tasks)`,
+            `已固定 ${totalPinnedCount} 条全局规则（点图钉切换）`,
+            `${totalPinnedCount} global rules pinned (click pin to toggle)`,
           ),
         },
         h('span', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } }, bi('红线边界', 'Redlines & Bounds')),
@@ -593,7 +593,7 @@ export function BoundariesTab({ store: view }) {
           className: 'dnb-pill',
           style: { height: 25, padding: '0 9px', fontSize: 11 },
           disabled: view.secBusy,
-          title: '让 DSH 参谋长结合当前撞墙记录与会话纪律提炼新边界，并发起请示供你拍板',
+          title: '让参谋长根据本次踩坑整理出新规则',
           onClick: () => {
             void submitChiefBar(
               '请结合当前会话的踩坑撞墙记录、工具权限约束与工作约定，简明分点总结工作边界，并务必完整填入 JSON 的 boundProposals 数组向我发起边界注入请示（若提到具体条文请每条都放进 boundProposals）。',
@@ -609,7 +609,7 @@ export function BoundariesTab({ store: view }) {
             className: 'dnb-pill',
             style: { height: 25, padding: '0 7px', fontSize: 11 },
             'data-active': view.boundMoreMenuOpen ? '1' : '0',
-            title: '更多边界维护选项',
+            title: '更多规则操作',
             onClick: () => patch({ boundMoreMenuOpen: !view.boundMoreMenuOpen }),
           }, '⋯'),
           view.boundMoreMenuOpen
@@ -623,18 +623,18 @@ export function BoundariesTab({ store: view }) {
                     patch({ boundMoreMenuOpen: false })
                     toggleAllBoundSections()
                   },
-                }, h('span', null, allSectionsCollapsed ? '↕ 展开全部分组' : '↕ 收起全部分组')),
+                }, h('span', null, allSectionsCollapsed ? '↕ 全部展开' : '↕ 全部收起')),
                 hasConsolidatableCol
                   ? h('button', {
                       type: 'button',
                       className: 'dnb-more-item',
                       disabled: view.secBusy,
-                      title: '请 DSH 参谋长把当前零散、重复的多条重要边界浓缩合并成一条高密度总则',
+                      title: '让参谋长把零散、重复的规则合并精简',
                       onClick: () => {
                         patch({ boundMoreMenuOpen: false })
                         void requestConsolidateBounds('', [])
                       },
-                    }, h('span', null, view.boundConsolidating === 'all' ? '浓缩中…' : '✦ 零散总结成一条'))
+                    }, h('span', null, view.boundConsolidating === 'all' ? '整理中…' : '✦ 全部精简合并'))
                   : null,
               )
             : null,
@@ -658,7 +658,7 @@ export function BoundariesTab({ store: view }) {
       {
         open: showEnv,
         onToggle: () => setShowEnv(v => !v),
-        title: bi('运行环境信息', 'Runtime Environment'),
+        title: bi('运行环境', 'Runtime Info'),
         count: rows.length ? String(rows.length) : '',
         preview: info.workspaceRoot || info.sessionWorkingDirectory || info.workingDirectory || '',
         bodyStyle: { padding: 0 },
