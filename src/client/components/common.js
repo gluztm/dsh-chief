@@ -509,9 +509,11 @@ export function SubagentFleetBar({ board }) {
     hiddenCount = Math.max(0, children.length - visibleAgents.length)
   }
 
+  const FLEET_PALETTE = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#fb7185']
+
   return h(
     'div',
-    { className: 'dnb-group', style: { padding: isCollapsed ? '7px 10px' : '8px 10px', marginBottom: 10 } },
+    { className: 'dnb-group dnb-fleet-card', style: { padding: isCollapsed ? '7px 10px' : '8px 10px', marginBottom: 10 } },
     h(
       'div',
       { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: isCollapsed ? 0 : 6 } },
@@ -522,9 +524,9 @@ export function SubagentFleetBar({ board }) {
             display: 'flex',
             alignItems: 'center',
             gap: 6,
-            fontSize: 11.5,
+            fontSize: 12,
             fontWeight: 600,
-            color: 'var(--dnb-text-2)',
+            color: 'var(--dnb-text)',
             cursor: 'pointer',
             minWidth: 0,
           },
@@ -532,13 +534,14 @@ export function SubagentFleetBar({ board }) {
           title: isCollapsed ? '展开子代理列表' : '收起子代理列表',
         },
         runningCount > 0
-          ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#409cff' } })
+          ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#38bdf8' } })
           : h('span', {
               style: {
                 width: 7,
                 height: 7,
                 borderRadius: '50%',
-                background: 'var(--dnb-text-3)',
+                background: '#38bdf8',
+                boxShadow: '0 0 0 2px rgba(56, 189, 248, 0.22)',
                 flexShrink: 0,
               },
             }),
@@ -580,11 +583,12 @@ export function SubagentFleetBar({ board }) {
       ? h(
           'div',
           { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
-          visibleAgents.map(agent => {
+          visibleAgents.map((agent, idx) => {
             const isRunning = agent.status === 'running'
             const isSelected = store.filterAgent === agent.name || steerAgent === agent.name
             const pKey = hier.parentKeyOf.get(agent.name)
             const isTier2 = pKey && pKey !== 'lead'
+            const dotHex = FLEET_PALETTE[idx % FLEET_PALETTE.length]
             return h(
               'button',
               {
@@ -594,7 +598,9 @@ export function SubagentFleetBar({ board }) {
                 style: {
                   height: 25,
                   padding: '0 9px',
-                  borderColor: isRunning && !isSelected ? 'rgba(10, 132, 255, 0.38)' : undefined,
+                  borderColor: isSelected
+                    ? undefined
+                    : (isRunning ? 'rgba(56, 189, 248, 0.52)' : 'rgba(148, 163, 184, 0.28)'),
                 },
                 title: '@' + agent.name + (isTier2 ? '（上级：@' + pKey + '）' : '') + (agent.description ? ' — ' + agent.description : ''),
                 onClick: () => {
@@ -610,7 +616,7 @@ export function SubagentFleetBar({ board }) {
                       width: 6.5,
                       height: 6.5,
                       borderRadius: '50%',
-                      background: 'var(--dnb-text-3)',
+                      background: dotHex,
                     },
                   }),
               '@' + shortAgentName(agent.name),

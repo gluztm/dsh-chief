@@ -16,6 +16,40 @@ import {
   CHIEF_PERMISSION_META,
 } from './chief.js'
 import { normalizePermissionMode } from './chief-executor.js'
+import { computeBubbleState } from './chief-network.js'
+
+function summarizeBubbleSnapshot(secDeps, rootId, dir) {
+  try {
+    const rid = rootId || 'global'
+    const b = computeBubbleState(secDeps, rid, null, dir || null)
+    const clusterLen = Array.isArray(dir && dir.cluster) ? dir.cluster.length : 0
+    const linkedPeersCount = clusterLen > 0
+      ? Math.max(0, clusterLen - 1)
+      : (Array.isArray(dir && dir.targets) ? dir.targets.filter(t => t && t.kind === 'peer-session').length : 0)
+    return {
+      locked: Boolean(b && b.locked),
+      enrolledHarnesses: (Array.isArray(b && b.enrolledHarnesses) ? b.enrolledHarnesses : []).map(h => ({
+        provider: h.provider,
+        label: h.label || h.provider,
+        role: h.role || h.roleHint || '',
+        installed: h.installed !== false,
+        configured: Boolean(h.configured),
+        running: Boolean(h.running),
+      })),
+      availableHarnesses: (Array.isArray(b && b.availableHarnesses) ? b.availableHarnesses : [])
+        .filter(h => h && h.installed !== false)
+        .map(h => ({
+          provider: h.provider,
+          label: h.label || h.provider,
+          role: h.role || h.roleHint || '',
+          configured: Boolean(h.configured),
+        })),
+      linkedPeersCount,
+    }
+  } catch {
+    return { locked: false, enrolledHarnesses: [], availableHarnesses: [], linkedPeersCount: 0 }
+  }
+}
 import {
   STATUSES,
   PRIORITIES,
@@ -107,7 +141,7 @@ export function createModelTools(deps) {
           'Board operation (MUST be called whenever recording tasks/status/conclusions or relaying messages; plain text alone does NOT update the board or notify peers). '
           + 'Use "graph.plan" (or "task.batch") to plan a hierarchical/DAG task graph in one call (supports parentId, blockedBy, planStepId, targetPlanStepId, owner/subagent, intent, evidence). '
           + 'For multi-step workflows, define ordered steps via "plan.set" first and bind tasks/subagents with "planStepId" (and optional "targetPlanStepId") so the workflow topology displays step-by-step progress and subagent return arrows. '
-          + 'Use "task.dispatch" to spawn or message a subagent, "team.steer" to steer a subagent, and "mail.send" to relay messages across lead/subagents/sessions. '
+          + 'Use "task.dispatch" to spawn or message a subagent, "team.steer" to steer a subagent, and "mail.send" to relay messages or dispatch work across lead/subagents/linked sessions/enrolled Bubble harnesses (pass provider id as target). '
           + 'Use "inquiry.reply" (inquiryId, text) whenever you see a priority [INQUIRY #id] from DSH Chief — answer accurately and continue your current work immediately without stopping. '
           + 'Use "chief.request" (subject, text) to ask DSH Chief for cross-session coordination, permission elevation, to report exploration & planning results, or when blocked by an insurmountable guard wall that cannot be bypassed safely. '
           + 'Use "wall.list" (read-only) to inspect currently active persistent guard walls defending high-risk paths/commands. '
@@ -426,6 +460,8 @@ export function createModelTools(deps) {
             const roster = await refreshSubagentTree(runtime, session, board)
             const svc = runtime.get('agentTeams')
             const rawTeamTasks = (svc && typeof svc.listTasks === 'function' && callerAgent) ? (svc.listTasks(callerAgent) || []) : []
+            const secDeps = makeChiefDeps(runtime)
+            const dir = await listPeerDirectory(secDeps, session || rawSession).catch(() => null)
             return {
               ok: true,
               subagents: roster,
@@ -434,6 +470,7 @@ export function createModelTools(deps) {
                 owner: t.ownerName || '', blockedBy: t.blockedBy || [],
                 ready: t.ready, revision: t.revision,
               })),
+              bubble: summarizeBubbleSnapshot(secDeps, session || rawSession, dir),
               ...summary(board, roster),
             }
           } catch (err) {
@@ -548,6 +585,7 @@ export function createModelTools(deps) {
             ok: true,
             inbox,
             peers: dir.targets,
+            bubble: summarizeBubbleSnapshot(secDeps, session || rawSession, dir),
             ...summary(board, roster),
           }
         }

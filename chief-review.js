@@ -6,7 +6,7 @@
 
 import crypto from 'node:crypto'
 import { loadArchiveStore } from './archives.js'
-import { normalizePermissionMode, permissionRank } from './chief-executor.js'
+import { normalizePermissionMode, permissionRank, buildCapabilityScope } from './chief-executor.js'
 import { detectPrematurePromiseText } from './idle-guard.js'
 import {
   CHAT_CAP,
@@ -16,6 +16,7 @@ import {
   DEFAULT_MANAGED_IDLE_TIMEOUT_MS,
   SUMMARY_MAX_TOKENS,
   archiveTargetForRoot,
+  collectChiefVisibleArchives,
   nextId,
   clamp,
   cleanMultiline,
@@ -48,7 +49,7 @@ import {
   executeHarvestAndCompact,
   maybeRunPreCompaction,
 } from './chief-compaction.js'
-import { applyFactChanges, applyBoardOps } from './chief-commands.js'
+import { applyFactChanges, applyBoardOps, executeChiefArchiveInjectionOp } from './chief-commands.js'
 import { executeBatchSuggestions } from './chief-approvals.js'
 
 const TURN_REVIEW_SYSTEM = [
@@ -74,6 +75,7 @@ const TURN_REVIEW_SYSTEM = [
   '   - `"kind": "advice"`：当主模型陷入明显可替代方案、环境坑点或需提醒用户拍板的关键决策时提出一句话建议，可带 `"popup": true|false`（仅关键分叉/阻塞决策设 `true`）。',
   '8. `shouldCompactNow` & `compactReason`：仅当 `SMART_COMPACT_CO_MANAGED`（✦ 智选）启用时评估！此时硬性上下文阈值已退让为辅助，由你与主会话共同把控压缩时机：只要一个完整阶段目标刚刚收口、工作流切换阶段、出现大量重复试错/工具噪音日志、或上下文估算已达 ≥30% 且适合归档脱水时，果断设 `shouldCompactNow: true` 并填写一句话 `compactReason`；仅在刚起步或上下文极轻时保持 `false`。',
   '9. `AUTO_PILOT_SESSION_ONLY`（全自动托管安全边界）：当激活标志包含 `AUTO_PILOT_SESSION_ONLY` 时，所有自动决策仅限本对话会话内部！严禁将本会话规律生成 `"pinGlobal": true` 的全局定住边界，严禁跨出本对话去篡改全局档案柜或无关独立窗口；发现跨窗口传递信息时可留待人工审批。',
+  '10. `desktopArchivePin`（按需取档上认知桌面）：仅当 prompt 列出的「可用但尚未摆上认知桌面的可见档案」中存在当前任务/卡点/排障**正高度直接需要**的一份时，设 `"desktopArchivePin": { "vaultScope": "session|global", "id": "候选id", "title": "候选标题", "reason": "为何需要摆上一线桌面（30字内）" }`；不需要时**必须为 `null`**。严禁编造列表外的 ID 或触碰冷藏库；`AUTO_PILOT_SESSION_ONLY` 时严禁选 `global`。',
   '',
   '输出格式（严格 JSON）：',
   '{',
@@ -90,9 +92,68 @@ const TURN_REVIEW_SYSTEM = [
   '  "interventionText": "",',
   '  "shouldCompactNow": false,',
   '  "compactReason": "",',
-  '  "suggestions": []',
+  '  "suggestions": [],',
+  '  "desktopArchivePin": null',
   '}',
 ].join('\n')
+
+function buildArchiveCandidates(deps, rootId, stateSnapshot, { autoPilot = false } = {}) {
+  if (!rootId || rootId === 'global') return []
+  try {
+    const vis = collectChiefVisibleArchives(deps, rootId, stateSnapshot)
+    const out = []
+    const seen = new Set()
+    const pushItem = (vaultScope, it) => {
+      if (!it || !it.id || it.takenOut) return
+      if (vaultScope !== 'session' && vaultScope !== 'global') return
+      const key = `${vaultScope}:${it.id}`
+      if (seen.has(key)) return
+      seen.add(key)
+      out.push({
+        vaultScope,
+        id: String(it.id),
+        title: String(it.title || it.id),
+        folder: String(it.folder || ''),
+        summary: String(it.summary || ''),
+        hasHook: Boolean(it.hasHook),
+        hookCue: String(it.hookCue || ''),
+        points: Array.isArray(it.points) ? it.points : [],
+      })
+    }
+    const sess = Array.isArray(vis && vis.sessionItems) ? vis.sessionItems : []
+    for (const it of sess.filter(x => x && !x.takenOut).slice(0, 5)) pushItem('session', it)
+    if (!autoPilot) {
+      const glob = Array.isArray(vis && vis.globalHookIndex) ? vis.globalHookIndex : []
+      for (const it of glob.filter(x => x && !x.takenOut).slice(0, 3)) pushItem('global', it)
+    }
+    return out.slice(0, 8)
+  } catch {
+    return []
+  }
+}
+
+function validateDesktopArchivePin(rawPin, candidates, { autoPilot = false, hazardStopped = false } = {}) {
+  if (hazardStopped || !rawPin || typeof rawPin !== 'object' || !Array.isArray(candidates) || !candidates.length) return null
+  const rawScope = String(rawPin.vaultScope || '').trim()
+  if (rawScope === 'precipitated') return null
+  if (autoPilot && rawScope && rawScope !== 'session') return null
+  const rawId = String(rawPin.id || '').trim()
+  const rawTitle = String(rawPin.title || '').trim()
+  if (!rawId && !rawTitle) return null
+  const matched = candidates.find(c =>
+    (!rawScope || c.vaultScope === rawScope)
+    && ((rawId && c.id === rawId) || (!rawId && rawTitle && c.title === rawTitle)),
+  )
+  if (!matched) return null
+  if (autoPilot && matched.vaultScope !== 'session') return null
+  const reason = clamp(String(rawPin.reason || '').trim() || '当前推进正高度命中该历史工程档案', 140)
+  return {
+    vaultScope: matched.vaultScope,
+    id: matched.id,
+    title: matched.title,
+    reason,
+  }
+}
 
 /** High-precision backup safety net if the turn-review model missed `hazardStop.triggered` despite unmistakable irreversible hazard or boundary collision cues. */
 function detectEmergencyHazardFallback({ parsed, digestText = '', bounds = {}, isInterventionActive = false }) {
@@ -472,6 +533,9 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     ? `智选共管状态（硬阈值已停用）：消息数≈${digest.msgCount}${liveUsage && liveUsage.totalTokens ? `，当前估算上下文 ${liveUsage.totalTokens}/${liveUsage.contextWindow} (${Math.round((liveUsage.totalTokens / liveUsage.contextWindow) * 100)}%)` : ''}`
     : ''
 
+  const isAutoPilotBefore = Boolean(runMode === 'managed' && !effCfgBefore.stopped)
+  const archiveCandidates = buildArchiveCandidates(deps, rootId, loadChiefState(), { autoPilot: isAutoPilotBefore })
+
   const prompt = [
     `当前激活监督模式：${activeFlags.join(' | ') || runMode}`,
     ...(smartUsageHint ? [smartUsageHint] : []),
@@ -489,6 +553,11 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     '',
     '已有持久记忆条目：',
     ...(numberedFacts.length ? numberedFacts.map((f, i) => `[${i + 1}] (${f.category}) ${f.text}`) : ['（暂无）']),
+    ...(archiveCandidates.length ? [
+      '',
+      '可用但尚未摆上认知桌面的可见档案（仅在当前推进高度直接需要时用 desktopArchivePin 调取 1 份，严禁为充数硬拉；冷藏库完全不可见）：',
+      ...archiveCandidates.map(c => `- [${c.vaultScope} | id=${c.id}] 《${clamp(c.title, 44)}》${c.folder ? `(${clamp(c.folder, 20)})` : ''} ${clamp(c.hookCue || c.summary || (c.points && c.points[0] && c.points[0].title) || '', 90)}`),
+    ] : []),
     '',
     '本轮最新对话片段：',
     digest.text,
@@ -625,6 +694,14 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   const autoBoundUpdates = []
   let shouldAutoOrganizeSession = false
 
+  const validatedArchivePin = validateDesktopArchivePin(parsed.desktopArchivePin, archiveCandidates, {
+    autoPilot,
+    hazardStopped: Boolean(hazardInfo && hazardInfo.triggered),
+  })
+  let desktopArchiveSuggestionQueued = false
+  let desktopArchiveApprovalQueued = false
+  let desktopArchivePinned = null
+
   const hasRunningChild = realPeers.some(p => p.kind === 'subagent' && p.status === 'running')
   const prematureCue = !(identity && identity.isChild)
     ? detectPrematurePromiseText(digest.lastAssistantText || '')
@@ -739,6 +816,42 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
         if (!lastOrgAt || Date.now() - lastOrgAt > 60_000) {
           shouldAutoOrganizeSession = true
         }
+      }
+    }
+
+    if (validatedArchivePin && (permNow === 'advisor' || permNow === 'assistant')) {
+      const archSug = normalizeSuggestion({
+        kind: 'archive_op',
+        fromAgent: '🗂️ 档案调度参谋',
+        title: `📌 建议将《${clamp(validatedArchivePin.title, 28)}》摆上认知桌面`,
+        reason: validatedArchivePin.reason,
+        target: 'desktop',
+        targetLabel: clamp(validatedArchivePin.title, 28),
+        mode: 'silent',
+        draftText: `摆上桌面 《${validatedArchivePin.title}》`,
+        archiveSpec: {
+          op: 'pin_to_desktop',
+          vaultScope: validatedArchivePin.vaultScope,
+          id: validatedArchivePin.id,
+          title: validatedArchivePin.title,
+          instruction: validatedArchivePin.reason,
+        },
+      })
+      const dupArch = archSug && ws.suggestions.some(
+        existing => existing.status === 'pending'
+          && existing.kind === 'archive_op'
+          && existing.archiveSpec
+          && existing.archiveSpec.id === validatedArchivePin.id
+          && (existing.archiveSpec.vaultScope || 'session') === validatedArchivePin.vaultScope,
+      )
+      if (archSug && !dupArch) {
+        const pending = ws.suggestions.filter(item => item.status === 'pending')
+        if (pending.length >= 5) {
+          const victim = pending.find(item => item.kind !== 'bound' && item.kind !== 'goal_approval' && item.kind !== 'advice') || pending[0]
+          victim.status = 'dismissed'
+        }
+        ws.suggestions.push(archSug)
+        desktopArchiveSuggestionQueued = true
       }
     }
 
@@ -1221,6 +1334,80 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     })
   }
 
+  if (validatedArchivePin && !hazardStopped) {
+    if (permNow === 'chief' && hasAckNow) {
+      try {
+        const archRes = await executeChiefArchiveInjectionOp(deps, rootId, {
+          op: 'pin_to_desktop',
+          vaultScope: validatedArchivePin.vaultScope,
+          id: validatedArchivePin.id,
+          title: validatedArchivePin.title,
+          instruction: validatedArchivePin.reason,
+        }, { by: 'chief', input: validatedArchivePin.reason })
+        if (archRes && archRes.ok) {
+          desktopArchivePinned = {
+            ok: true,
+            id: archRes.id,
+            vaultScope: archRes.scope || validatedArchivePin.vaultScope,
+            title: validatedArchivePin.title,
+            actionText: archRes.actionText || '',
+            evicted: Array.isArray(archRes.evicted) ? archRes.evicted : [],
+          }
+          if (typeof deps.appendBoardLog === 'function') {
+            deps.appendBoardLog(rootId, `📌 参谋长主动取档上桌：《${clamp(validatedArchivePin.title, 36)}》`, 'DSH 参谋长')
+          }
+          mutateChiefState((s) => {
+            const ws = ensureWorkspace(s, rootId)
+            pushAuditToWs(ws, {
+              mode: permNow,
+              stage: 'review',
+              rule: 'desktop_archive_pin',
+              decision: 'executed',
+              operation: '推档案上认知桌面',
+              target: clamp(validatedArchivePin.title, 60),
+              reason: validatedArchivePin.reason,
+              outcome: 'ok',
+              by: 'chief',
+            })
+            ws.chat.push({
+              id: nextId('chat'),
+              role: 'chief',
+              kind: 'receipt',
+              ...(res.thinkingEffort ? { thinkingEffort: res.thinkingEffort } : {}),
+              ...(res.thinkingEffortMode ? { thinkingEffortMode: res.thinkingEffortMode } : {}),
+              text: `- 【📌 参谋长主动取档上桌】已将《${clamp(validatedArchivePin.title, 48)}》(${validatedArchivePin.vaultScope === 'global' ? '全局档案柜' : '本会话档案柜'}) 推入主对话桌面（${validatedArchivePin.reason}）。`,
+              actions: [`📌 推档上桌 《${clamp(validatedArchivePin.title, 18)}》`],
+              at: Date.now(),
+            })
+            if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+          })
+        }
+      } catch {}
+    } else if (permNow === 'strategist') {
+      const refTitle = validatedArchivePin.title || validatedArchivePin.id
+      queueChiefApproval(rootId, {
+        category: 'archive_op',
+        operationLabel: '推档案上认知桌面',
+        targetLabel: refTitle,
+        reason: validatedArchivePin.reason,
+        impact: '允许后将该档案置顶到当前会话认知桌面，下一轮自动注入主对话视图',
+        preview: `[${validatedArchivePin.vaultScope}] 《${refTitle}》 (id=${validatedArchivePin.id})`,
+        dedupeKey: `archpin:${rootId}:${validatedArchivePin.vaultScope}:${validatedArchivePin.id}`,
+        kind: 'archive_op',
+        capabilityScope: buildCapabilityScope({ kind: 'archive_op', tool: 'archive_op', target: refTitle }),
+        payload: {
+          op: 'pin_to_desktop',
+          vaultScope: validatedArchivePin.vaultScope,
+          id: validatedArchivePin.id,
+          title: validatedArchivePin.title,
+          instruction: validatedArchivePin.reason,
+        },
+        by: 'chief',
+      })
+      desktopArchiveApprovalQueued = true
+    }
+  }
+
   let autoPilotStopRes = null
   if (autoPilot && !interventionMessage && autoRelays.length === 0 && !circuitTripped) {
     autoPilotStopRes = await checkAndStopIdleAutoPilot(deps, rootId, {
@@ -1250,6 +1437,9 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     ...(res.thinkingEffortMode ? { thinkingEffortMode: res.thinkingEffortMode } : {}),
     ...(dreamRoamRes ? { dreamRoam: dreamRoamRes } : {}),
     ...(oneStopReport ? { oneStopReport } : {}),
+    ...(desktopArchivePinned ? { desktopArchivePinned } : {}),
+    ...(desktopArchiveApprovalQueued ? { desktopArchiveApprovalQueued } : {}),
+    ...(desktopArchiveSuggestionQueued ? { desktopArchiveSuggestionQueued } : {}),
     ...(autoPilotStopRes ? { autoPilotStopped: Boolean(autoPilotStopRes.stopped) } : {}),
   }
   } finally {

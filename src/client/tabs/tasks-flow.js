@@ -1001,10 +1001,10 @@ export function TaskFlowPipelineView({
                     flowStatusLabel(stage.status),
                   ),
                   branchCount > 0
-                    ? h('span', { className: 'dnb-flow-count-chip' }, bi(`${branchCount} 子代理`, `${branchCount} agents`))
+                    ? h('span', { className: 'dnb-flow-count-chip', 'data-kind': 'agents' }, bi(`${branchCount} 子代理`, `${branchCount} agents`))
                     : null,
                   taskSummaryLabel
-                    ? h('span', { className: 'dnb-flow-count-chip' }, taskSummaryLabel)
+                    ? h('span', { className: 'dnb-flow-count-chip', 'data-kind': 'tasks' }, taskSummaryLabel)
                     : null,
                 ),
                 h('div', { className: 'dnb-flow-stage-title', title: stage.title }, stage.title),

@@ -17,6 +17,7 @@ import {
   deliverCrossMessage,
 } from './chief.js'
 import { resolveAlignedModelEffort } from './chief-state.js'
+import { computeBubbleState } from './chief-network.js'
 import {
   API,
   newId,
@@ -840,16 +841,68 @@ export function createSubagentRuntime(deps) {
   }
 
   function linkedPeersForSession(runtime, rootId) {
-    if (!rootId) return { linkedPeersCount: 0, linkedPeersProgress: [] }
+    const emptyBubble = {
+      locked: false,
+      enrolledHarnesses: [],
+      availableHarnesses: [],
+      standbySessionsCount: 0,
+    }
+    if (!rootId) return { linkedPeersCount: 0, linkedPeersProgress: [], bubbleSquad: emptyBubble }
+    const rt = runtime || deps.hostState.activeRuntime
     const state = loadChiefState()
     const cluster = getLinkedCluster(state, rootId)
-    if (!Array.isArray(cluster) || cluster.length <= 1) {
-      return { linkedPeersCount: 0, linkedPeersProgress: [] }
+    let bubbleState = null
+    try {
+      bubbleState = computeBubbleState({ runtime: rt, hostState: deps.hostState }, rootId, state)
+    } catch {}
+    const enrolledHarnesses = (Array.isArray(bubbleState && bubbleState.enrolledHarnesses) ? bubbleState.enrolledHarnesses : [])
+      .filter(h => h && (h.installed !== false || h.running))
+      .map(h => ({
+        provider: String(h.provider || ''),
+        label: String(h.label || h.provider || ''),
+        role: String(h.role || h.roleHint || ''),
+        running: Boolean(h.running),
+        configured: Boolean(h.configured),
+      }))
+    const availableHarnesses = (Array.isArray(bubbleState && bubbleState.availableHarnesses) ? bubbleState.availableHarnesses : [])
+      .filter(h => h && h.installed !== false)
+      .map(h => ({
+        provider: String(h.provider || ''),
+        label: String(h.label || h.provider || ''),
+        role: String(h.role || h.roleHint || ''),
+        configured: Boolean(h.configured),
+      }))
+    const linkedSet = new Set(Array.isArray(cluster) ? cluster.map(id => String(id)) : [])
+    linkedSet.add(String(rootId))
+    let standbySessionsCount = 0
+    try {
+      const agentsSvc = rt && typeof rt.get === 'function' ? rt.get('agents') : null
+      const rawAgents = agentsSvc && typeof agentsSvc.list === 'function' ? agentsSvc.list() : []
+      const standbyRoots = new Set()
+      for (const ag of Array.isArray(rawAgents) ? rawAgents : []) {
+        if (!ag || !ag.id || ag.parentId) continue
+        const kind = String(ag.kind || ag.agentKind || '').toLowerCase()
+        if (kind === 'subagent') continue
+        const agRoot = resolveRootSessionId(ag.id, ag)
+        if (!agRoot || agRoot !== String(ag.id)) continue
+        if (!linkedSet.has(agRoot)) standbyRoots.add(agRoot)
+      }
+      standbySessionsCount = standbyRoots.size
+    } catch {}
+    const bubbleSquad = {
+      locked: Boolean(bubbleState && bubbleState.locked),
+      enrolledHarnesses,
+      availableHarnesses,
+      standbySessionsCount,
     }
-    const linkedPeersProgress = collectClusterPeerProgress(makeChiefDeps(runtime), cluster, rootId)
+    if (!Array.isArray(cluster) || cluster.length <= 1) {
+      return { linkedPeersCount: 0, linkedPeersProgress: [], bubbleSquad }
+    }
+    const linkedPeersProgress = collectClusterPeerProgress(makeChiefDeps(rt), cluster, rootId)
     return {
       linkedPeersCount: Math.max(0, cluster.length - 1),
       linkedPeersProgress,
+      bubbleSquad,
     }
   }
 

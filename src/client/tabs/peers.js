@@ -928,7 +928,6 @@ export function PeersTab({ view }) {
                       ? h(
                           'div',
                           { className: 'dnb-liquid-satellites' },
-                          h('span', { className: 'dnb-liquid-sat-prefix' }, `↳ ${bi('次', 'Sub')}`),
                           primaryBranch.children.map((sub) => {
                             const sPeer = sub.raw || {}
                             const sRun = sPeer.status === 'running'
@@ -943,8 +942,8 @@ export function PeersTab({ view }) {
                                 title: `${subName}${sPeer.taskTitle ? ' — ' + sPeer.taskTitle : ''}`,
                               },
                               sRun
-                                ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '7px', color: '#38bdf8' } })
-                                : h('span', { className: 'dnb-squad-dot', style: { background: 'rgba(56, 189, 248, 0.78)', width: 5.5, height: 5.5 } }),
+                                ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '6px', color: '#38bdf8' } })
+                                : h('span', { className: 'dnb-squad-dot', style: { background: 'rgba(56, 189, 248, 0.78)', width: 4.5, height: 4.5 } }),
                               h('span', { className: 'dnb-liquid-sat-name' }, subName),
                               h(
                                 'span',
@@ -1115,7 +1114,6 @@ export function PeersTab({ view }) {
                         ? h(
                             'div',
                             { className: 'dnb-liquid-satellites', 'data-compact': '1' },
-                            h('span', { className: 'dnb-liquid-sat-prefix' }, `↳ ${bi('次', 'Sub')}`),
                             branch.children.map((sub) => {
                               const sPeer = sub.raw || {}
                               const sRun = sPeer.status === 'running'
@@ -1129,7 +1127,7 @@ export function PeersTab({ view }) {
                                   'data-running': sRun ? '1' : '0',
                                   title: `${subName}${sPeer.taskTitle ? ' — ' + sPeer.taskTitle : ''}`,
                                 },
-                                h('span', { className: 'dnb-squad-dot', style: { background: branch.accent.dot, width: 5.5, height: 5.5 } }),
+                                h('span', { className: 'dnb-squad-dot', style: { background: branch.accent.dot, width: 4.5, height: 4.5 } }),
                                 h('span', { className: 'dnb-liquid-sat-name' }, subName),
                               )
                             }),

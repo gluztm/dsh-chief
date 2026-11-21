@@ -358,6 +358,7 @@ export function PlanTab({
       {
         open: !objCollapsed,
         onToggle: () => patch({ planObjCollapsed: !objCollapsed }),
+        className: 'dnb-obj-card',
         title: bi('核心目标', 'Core Objective'),
         headTitle: objCollapsed ? bi('展开并修改目标', 'Expand goal') : bi('收起目标卡片', 'Collapse goal'),
         showPullHint: false,
@@ -864,6 +865,7 @@ export function PlanTab({
         {
           open: !handoffCollapsed,
           onToggle: () => patch({ handoffSectionCollapsed: !handoffCollapsed }),
+          className: 'dnb-handoff-card',
           title: bi('🚀 换新窗口接着做', '🚀 Continue in New Window'),
           headTitle: handoffCollapsed ? bi('展开换窗口交接设置', 'Expand handoff options') : bi('收起交接设置', 'Collapse handoff options'),
           bodyStyle: { padding: 10, display: 'flex', flexDirection: 'column', gap: 8 },

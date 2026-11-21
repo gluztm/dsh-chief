@@ -190,8 +190,27 @@ function subagentHeaderLines(board, extras) {
       lines.push('🤖 子代理团队 (' + running.length + ' 运行中 / 共 ' + children.length + ' 个): ' + summary + (restCount > 0 ? ' · 另有 ' + restCount + ' 个空闲成员' : ''))
     }
   }
+  const squad = extras && extras.bubbleSquad ? extras.bubbleSquad : null
   if (extras && Number(extras.linkedPeersCount) > 0) {
-    lines.push('📡 跨窗口协同已开启: 已与 ' + extras.linkedPeersCount + ' 个外部主对话窗口互通，可用 chief_board({ action: "mail.send", target, text }) 跨对话递话。')
+    lines.push('📡 跨窗口协同已开启: 已与 ' + extras.linkedPeersCount + ' 个外部主对话窗口互通，可用 chief_board({ action: "mail.send", target, text }) 跨对话递话（target 见下方联动对话）。')
+  }
+  const enrolledHarnesses = squad && Array.isArray(squad.enrolledHarnesses) ? squad.enrolledHarnesses : []
+  if (enrolledHarnesses.length) {
+    const harnessDesc = enrolledHarnesses.map(h => {
+      const flag = h.running ? '运行中' : (h.configured ? '直连就绪' : '已安装待检')
+      return (h.label || h.provider) + '(target="' + h.provider + '", ' + flag + ')'
+    }).join(' · ')
+    lines.push('🧩 水泡外协 Harness (' + enrolledHarnesses.length + ' 编入' + (squad.locked ? ' · 🔒已锁编队' : '') + '): ' + harnessDesc + ' —— 可调 chief_board({ action: "mail.send", target, text }) 直接派单调用。')
+  }
+  const standbyCount = squad ? Number(squad.standbySessionsCount) || 0 : 0
+  const availHarnesses = squad && Array.isArray(squad.availableHarnesses) ? squad.availableHarnesses : []
+  if (standbyCount > 0 || availHarnesses.length > 0) {
+    const parts = []
+    if (standbyCount > 0) parts.push(standbyCount + ' 个未入泡独立主对话（内容已隔离，需用户手动入泡后方可见）')
+    if (availHarnesses.length > 0) {
+      parts.push(availHarnesses.length + ' 个已装待命 Harness(' + availHarnesses.slice(0, 4).map(h => h.provider).join('/') + ')')
+    }
+    lines.push('🪑 队外待命探测: 本机另有 ' + parts.join('、') + '；编队状态可调 team.list / mail.inbox 查询。')
   }
   return lines
 }
@@ -315,10 +334,11 @@ function linkedPeersLines(extras, limit = 4) {
   const lines = ['🌐 协同网络共享进度（当前联动 ' + peers.length + ' 个主对话 · 退出协同后自动清零）：']
   for (const p of shown) {
     const label = clamp(p.name || ownerName(p.rootId), 26)
+    const tgt = p.rootId ? ' target="' + clamp(String(p.rootId), 36) + '"' : ''
     const obj = p.objective ? '目标=' + clamp(p.objective, 52) : '暂无总目标'
     const counts = '任务 ' + (Number(p.doneCount) || 0) + '完/' + (Number(p.doingCount) || 0) + '做/' + (Number(p.blockedCount) || 0) + '阻'
     const cur = p.cursorStep ? ' · 断点=' + clamp(p.cursorStep, 36) : ''
-    lines.push('  · [' + label + '] ' + obj + ' | ' + counts + cur)
+    lines.push('  · [' + label + tgt + '] ' + obj + ' | ' + counts + cur)
   }
   if (peers.length > shown.length) {
     lines.push('  …另有 ' + (peers.length - shown.length) + ' 个联动对话')

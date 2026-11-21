@@ -438,6 +438,7 @@ export function createRuntimeHooks(deps) {
             subagents,
             linkedPeersCount: linked.linkedPeersCount,
             linkedPeersProgress: linked.linkedPeersProgress,
+            bubbleSquad: linked.bubbleSquad,
             takenOutArchives: archCtx.takenOutArchives,
             sessionHookedArchives: archCtx.sessionHookedArchives,
             desktopUsedTokens: archCtx.desktopUsedTokens,
