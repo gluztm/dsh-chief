@@ -1349,8 +1349,9 @@ export function HandoffTab({ view }) {
     void updateSecConfig({ managedBudgetMaxCalls: val })
   }
 
-  const placementPref = (view && view.placementPref) || { placement: 'both', showComposerEntry: true, hideInSubagent: true }
+  const placementPref = (view && view.placementPref) || { placement: 'both', showComposerEntry: true, hideInSubagent: true, subagentOpenMode: 'tab' }
   const placementMode = placementPref.placement || 'both'
+  const subOpenMode = placementPref.subagentOpenMode === 'split' ? 'split' : 'tab'
   const placementLabel = placementMode === 'topTab'
     ? bi('仅主页面', 'Main Tab Only')
     : (placementMode === 'sidebar' ? bi('仅右侧栏', 'Sidebar Only') : bi('右侧栏 + 主页面', 'Sidebar + Main Tab'))
@@ -1446,6 +1447,31 @@ export function HandoffTab({ view }) {
           checked: placementPref.hideInSubagent !== false,
           onChange: on => savePlacementPref({ hideInSubagent: on }),
         }),
+      ),
+      h(
+        'div',
+        { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '7px 2px', gap: 8 } },
+        h('span', { style: { fontSize: 12 } }, bi('子代理对话打开方式', 'Open subagent chat in')),
+        h(
+          'div',
+          { className: 'dnb-seg', style: { padding: 2, flexShrink: 0 } },
+          [
+            { key: 'tab', label: bi('现有栏加页签', 'Sidebar Tab') },
+            { key: 'split', label: bi('新开分屏', 'New Split Pane') },
+          ].map(opt =>
+            h('button', {
+              key: opt.key,
+              type: 'button',
+              className: 'dnb-seg-btn',
+              style: { padding: '3px 8px', fontSize: 11 },
+              'data-active': subOpenMode === opt.key ? '1' : '0',
+              onClick: () => {
+                savePlacementPref({ subagentOpenMode: opt.key })
+                patch({ notice: bi('已切换子代理打开方式：', 'Subagent open mode: ') + opt.label })
+              },
+            }, opt.label),
+          ),
+        ),
       ),
       h(
         'div',

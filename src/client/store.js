@@ -14,6 +14,7 @@ const DEFAULT_PLACEMENT_PREF = {
   placement: 'both',
   showComposerEntry: true,
   hideInSubagent: true,
+  subagentOpenMode: 'tab',
 }
 
 export function normalizePlacementPref(raw) {
@@ -21,10 +22,12 @@ export function normalizePlacementPref(raw) {
   const placement = ['both', 'topTab', 'sidebar'].includes(src.placement)
     ? src.placement
     : DEFAULT_PLACEMENT_PREF.placement
+  const subagentOpenMode = src.subagentOpenMode === 'split' ? 'split' : 'tab'
   return {
     placement,
     showComposerEntry: src.showComposerEntry !== false,
     hideInSubagent: src.hideInSubagent !== false,
+    subagentOpenMode,
   }
 }
 
@@ -482,8 +485,8 @@ function openTabInRightbar(kind) {
   }
 }
 
-/** Open a subagent's live chat stream in DSH's right sidebar split pane. */
-export function openSubagentChat(agent) {
+/** Open a subagent's live chat stream as a right-sidebar tab by default (or a split pane if preferred). */
+export function openSubagentChat(agent, opts = null) {
   if (!agent || !agent.id) return false
   const face = service('sidebarRight')
   if (!face || typeof face.openResource !== 'function') return false
@@ -492,16 +495,25 @@ export function openSubagentChat(agent) {
   const mode = agent.mode || 'continuable'
   const query = new URLSearchParams({ parent, mode })
   const url = 'dsh-resource://subagentchat/session/' + encodeURIComponent(agent.id) + '?' + query.toString()
+  const openMode = (opts && opts.openMode)
+    || (store.placementPref && store.placementPref.subagentOpenMode)
+    || 'tab'
+  const openOpts = openMode === 'split'
+    ? { revealIfOpened: true, preferNewPane: true }
+    : { revealIfOpened: true }
   try {
-    face.openResource(url, { revealIfOpened: true, preferNewPane: true })
+    face.openResource(url, openOpts)
     return true
   } catch {
-    try {
-      face.openResource(url, { revealIfOpened: true })
-      return true
-    } catch {
-      return false
+    if (openMode === 'split') {
+      try {
+        face.openResource(url, { revealIfOpened: true })
+        return true
+      } catch {
+        return false
+      }
     }
+    return false
   }
 }
 

@@ -1102,6 +1102,7 @@ export function PeersTab({ view }) {
                             const sPeer = sub.raw || {}
                             const sRun = sPeer.status === 'running'
                             const subName = sPeer.name || shortSession(sPeer.id)
+                            const subOpenSplit = Boolean(view && view.placementPref && view.placementPref.subagentOpenMode === 'split')
                             return h(
                               'div',
                               {
@@ -1122,11 +1123,13 @@ export function PeersTab({ view }) {
                                   ? h('button', {
                                       type: 'button',
                                       className: 'dnb-sat-btn',
-                                      title: bi('分屏查看该子代理对话流', 'Open subagent split view'),
+                                      title: subOpenSplit
+                                        ? bi('新开右侧分屏查看该子代理对话流', 'Open subagent in a new right split pane')
+                                        : bi('在右侧栏加页签查看该子代理对话流（可在设置改回新开分屏）', 'Open subagent tab in right sidebar (switchable in Settings)'),
                                       onClick: () => {
                                         if (!openSubagentChat(sPeer)) patch({ notice: bi('该子代理暂无独立面板视图', 'No dedicated pane view for this subagent') })
                                       },
-                                    }, h(Icon, { name: 'chat', size: 9 }), bi('分屏', 'Split'))
+                                    }, h(Icon, { name: 'chat', size: 9 }), subOpenSplit ? bi('分屏', 'Split') : bi('查看', 'View'))
                                   : null,
                                 sPeer.key
                                   ? h('button', {

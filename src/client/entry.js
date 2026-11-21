@@ -109,7 +109,7 @@ export function createClientPlugin() {
                   name: 'conversation.view',
                   id: SIDE_ID,
                   order: 1,
-                  label: () => bi(BRAND_NAME, 'DSH Chief'),
+                  label: () => bi('参谋长', 'Chief'),
                 },
                 ConversationChiefView,
               ),

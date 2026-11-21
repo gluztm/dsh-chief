@@ -487,6 +487,7 @@ window.__ModuleLoader__.load({
       placement: 'both',
       showComposerEntry: true,
       hideInSubagent: true,
+      subagentOpenMode: 'tab',
     }
 
     function normalizePlacementPref(raw) {
@@ -494,10 +495,12 @@ window.__ModuleLoader__.load({
       const placement = ['both', 'topTab', 'sidebar'].includes(src.placement)
         ? src.placement
         : DEFAULT_PLACEMENT_PREF.placement
+      const subagentOpenMode = src.subagentOpenMode === 'split' ? 'split' : 'tab'
       return {
         placement,
         showComposerEntry: src.showComposerEntry !== false,
         hideInSubagent: src.hideInSubagent !== false,
+        subagentOpenMode,
       }
     }
 
@@ -955,8 +958,8 @@ window.__ModuleLoader__.load({
       }
     }
 
-    /** Open a subagent's live chat stream in DSH's right sidebar split pane. */
-    function openSubagentChat(agent) {
+    /** Open a subagent's live chat stream as a right-sidebar tab by default (or a split pane if preferred). */
+    function openSubagentChat(agent, opts = null) {
       if (!agent || !agent.id) return false
       const face = service('sidebarRight')
       if (!face || typeof face.openResource !== 'function') return false
@@ -965,16 +968,25 @@ window.__ModuleLoader__.load({
       const mode = agent.mode || 'continuable'
       const query = new URLSearchParams({ parent, mode })
       const url = 'dsh-resource://subagentchat/session/' + encodeURIComponent(agent.id) + '?' + query.toString()
+      const openMode = (opts && opts.openMode)
+        || (store.placementPref && store.placementPref.subagentOpenMode)
+        || 'tab'
+      const openOpts = openMode === 'split'
+        ? { revealIfOpened: true, preferNewPane: true }
+        : { revealIfOpened: true }
       try {
-        face.openResource(url, { revealIfOpened: true, preferNewPane: true })
+        face.openResource(url, openOpts)
         return true
       } catch {
-        try {
-          face.openResource(url, { revealIfOpened: true })
-          return true
-        } catch {
-          return false
+        if (openMode === 'split') {
+          try {
+            face.openResource(url, { revealIfOpened: true })
+            return true
+          } catch {
+            return false
+          }
         }
+        return false
       }
     }
 
@@ -18281,8 +18293,9 @@ window.__ModuleLoader__.load({
         void updateSecConfig({ managedBudgetMaxCalls: val })
       }
 
-      const placementPref = (view && view.placementPref) || { placement: 'both', showComposerEntry: true, hideInSubagent: true }
+      const placementPref = (view && view.placementPref) || { placement: 'both', showComposerEntry: true, hideInSubagent: true, subagentOpenMode: 'tab' }
       const placementMode = placementPref.placement || 'both'
+      const subOpenMode = placementPref.subagentOpenMode === 'split' ? 'split' : 'tab'
       const placementLabel = placementMode === 'topTab'
         ? bi('仅主页面', 'Main Tab Only')
         : (placementMode === 'sidebar' ? bi('仅右侧栏', 'Sidebar Only') : bi('右侧栏 + 主页面', 'Sidebar + Main Tab'))
@@ -18378,6 +18391,31 @@ window.__ModuleLoader__.load({
               checked: placementPref.hideInSubagent !== false,
               onChange: on => savePlacementPref({ hideInSubagent: on }),
             }),
+          ),
+          h(
+            'div',
+            { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '7px 2px', gap: 8 } },
+            h('span', { style: { fontSize: 12 } }, bi('子代理对话打开方式', 'Open subagent chat in')),
+            h(
+              'div',
+              { className: 'dnb-seg', style: { padding: 2, flexShrink: 0 } },
+              [
+                { key: 'tab', label: bi('现有栏加页签', 'Sidebar Tab') },
+                { key: 'split', label: bi('新开分屏', 'New Split Pane') },
+              ].map(opt =>
+                h('button', {
+                  key: opt.key,
+                  type: 'button',
+                  className: 'dnb-seg-btn',
+                  style: { padding: '3px 8px', fontSize: 11 },
+                  'data-active': subOpenMode === opt.key ? '1' : '0',
+                  onClick: () => {
+                    savePlacementPref({ subagentOpenMode: opt.key })
+                    patch({ notice: bi('已切换子代理打开方式：', 'Subagent open mode: ') + opt.label })
+                  },
+                }, opt.label),
+              ),
+            ),
           ),
           h(
             'div',
@@ -27148,6 +27186,7 @@ window.__ModuleLoader__.load({
                                 const sPeer = sub.raw || {}
                                 const sRun = sPeer.status === 'running'
                                 const subName = sPeer.name || shortSession(sPeer.id)
+                                const subOpenSplit = Boolean(view && view.placementPref && view.placementPref.subagentOpenMode === 'split')
                                 return h(
                                   'div',
                                   {
@@ -27168,11 +27207,13 @@ window.__ModuleLoader__.load({
                                       ? h('button', {
                                           type: 'button',
                                           className: 'dnb-sat-btn',
-                                          title: bi('分屏查看该子代理对话流', 'Open subagent split view'),
+                                          title: subOpenSplit
+                                            ? bi('新开右侧分屏查看该子代理对话流', 'Open subagent in a new right split pane')
+                                            : bi('在右侧栏加页签查看该子代理对话流（可在设置改回新开分屏）', 'Open subagent tab in right sidebar (switchable in Settings)'),
                                           onClick: () => {
                                             if (!openSubagentChat(sPeer)) patch({ notice: bi('该子代理暂无独立面板视图', 'No dedicated pane view for this subagent') })
                                           },
-                                        }, h(Icon, { name: 'chat', size: 9 }), bi('分屏', 'Split'))
+                                        }, h(Icon, { name: 'chat', size: 9 }), subOpenSplit ? bi('分屏', 'Split') : bi('查看', 'View'))
                                       : null,
                                     sPeer.key
                                       ? h('button', {
@@ -28630,7 +28671,7 @@ window.__ModuleLoader__.load({
                       name: 'conversation.view',
                       id: SIDE_ID,
                       order: 1,
-                      label: () => bi(BRAND_NAME, 'DSH Chief'),
+                      label: () => bi('参谋长', 'Chief'),
                     },
                     ConversationChiefView,
                   ),
