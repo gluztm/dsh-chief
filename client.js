@@ -9159,17 +9159,23 @@ window.__ModuleLoader__.load({
         touch-action: none;
         user-select: none;
         background:
-          radial-gradient(circle at 35% 50%, rgba(56, 189, 248, 0.09), transparent 60%),
-          rgba(9, 14, 26, 0.68);
-        border: 1.5px solid rgba(56, 189, 248, 0.26);
-        box-shadow: inset 0 0 20px rgba(15, 23, 42, 0.55);
+          radial-gradient(ellipse 84% 44% at 44% 0%, rgba(56, 189, 248, 0.22), transparent 72%),
+          radial-gradient(circle at 26% 62%, rgba(20, 184, 166, 0.14), transparent 56%),
+          radial-gradient(circle at 78% 78%, rgba(56, 189, 248, 0.12), transparent 58%),
+          linear-gradient(175deg, #071e30 0%, #081929 52%, #05111d 100%);
+        border: 1.5px solid rgba(103, 232, 249, 0.34);
+        box-shadow:
+          inset 0 1px 0 rgba(186, 230, 253, 0.20),
+          inset 0 -10px 24px rgba(2, 132, 199, 0.14),
+          inset 0 0 26px rgba(6, 24, 42, 0.72);
         transition: border-color 0.2s ease;
       }
       .dnb-bubble-tank[data-locked="1"] {
-        border-color: rgba(245, 158, 11, 0.54);
+        border-color: rgba(245, 158, 11, 0.56);
         background:
-          radial-gradient(circle at 35% 50%, rgba(245, 158, 11, 0.08), transparent 60%),
-          rgba(15, 18, 28, 0.74);
+          radial-gradient(ellipse 80% 42% at 38% 0%, rgba(245, 158, 11, 0.16), transparent 72%),
+          radial-gradient(circle at 78% 72%, rgba(56, 189, 248, 0.10), transparent 56%),
+          linear-gradient(175deg, #131c2a 0%, #0b1624 55%, #07101a 100%);
       }
       .dnb-bubble-tank[data-shake="1"] {
         animation: dnb-bubble-shake 0.36s ease;
@@ -9234,9 +9240,12 @@ window.__ModuleLoader__.load({
         touch-action: none;
         will-change: transform;
         background:
-          radial-gradient(circle at 30% 26%, rgba(255, 255, 255, 0.28) 0%, var(--orb-bg, rgba(56, 189, 248, 0.20)) 58%, rgba(255, 255, 255, 0.12) 100%);
-        border: 1.5px solid var(--orb-border, rgba(125, 211, 252, 0.58));
-        box-shadow: inset 0 1px 4px rgba(255, 255, 255, 0.20), 0 4px 12px rgba(0, 0, 0, 0.26);
+          radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.08) 24%, var(--orb-bg, rgba(56, 189, 248, 0.22)) 60%, rgba(255, 255, 255, 0.16) 100%);
+        border: 1.5px solid var(--orb-border, rgba(125, 211, 252, 0.62));
+        box-shadow:
+          inset 0 2px 6px rgba(255, 255, 255, 0.26),
+          inset 0 -3px 8px rgba(6, 32, 52, 0.30),
+          0 5px 14px rgba(0, 0, 0, 0.26);
       }
       .dnb-orb:active {
         cursor: grabbing;
@@ -9244,19 +9253,39 @@ window.__ModuleLoader__.load({
       .dnb-orb::before {
         content: "";
         position: absolute;
-        top: 11%;
-        left: 19%;
-        width: 24%;
-        height: 12%;
+        top: 10%;
+        left: 18%;
+        width: 26%;
+        height: 13%;
         border-radius: 50%;
         corner-shape: round;
-        background: rgba(255, 255, 255, 0.34);
+        background: rgba(255, 255, 255, 0.40);
         transform: rotate(-32deg);
         pointer-events: none;
       }
       .dnb-orb[data-kind="harness"],
       .dnb-orb[data-kind="standby-harness"] {
         border-style: dashed;
+      }
+      .dnb-orb[data-logo="1"] {
+        padding: 4px 3px 3px;
+        gap: 2px;
+      }
+      .dnb-orb-logo {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        line-height: 0;
+        margin-top: 2px;
+        filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.35));
+      }
+      .dnb-orb-run-pin {
+        position: absolute;
+        top: 5px;
+        right: 6px;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
       }
       .dnb-orb[data-installed="0"] {
         opacity: 0.80;
@@ -9400,10 +9429,19 @@ window.__ModuleLoader__.load({
       html[data-ds-theme="light"] .dnb-bubble-tank,
       [data-ds-theme-source="light"] .dnb-bubble-tank {
         background:
-          radial-gradient(circle at 38% 48%, rgba(14, 165, 233, 0.11), transparent 62%),
-          linear-gradient(180deg, #f0f9ff 0%, #f8fafc 100%);
-        border-color: rgba(2, 132, 199, 0.36);
-        box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), inset 0 0 24px rgba(14, 165, 233, 0.08);
+          radial-gradient(ellipse 84% 44% at 44% 0%, rgba(255, 255, 255, 0.88), transparent 70%),
+          radial-gradient(circle at 26% 62%, rgba(20, 184, 166, 0.12), transparent 56%),
+          linear-gradient(175deg, #dcf4ff 0%, #eaf8ff 52%, #d4eefc 100%);
+        border-color: rgba(2, 132, 199, 0.40);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.92),
+          inset 0 -8px 20px rgba(14, 165, 233, 0.12),
+          inset 0 0 22px rgba(14, 165, 233, 0.08);
+      }
+      html[data-ds-theme-source="light"] .dnb-orb-logo,
+      html[data-ds-theme="light"] .dnb-orb-logo,
+      [data-ds-theme-source="light"] .dnb-orb-logo {
+        filter: none;
       }
       html[data-ds-theme-source="light"] .dnb-bubble-tank[data-locked="1"],
       html[data-ds-theme="light"] .dnb-bubble-tank[data-locked="1"],
@@ -24144,6 +24182,107 @@ window.__ModuleLoader__.load({
      */
 
 
+    function HarnessLogoIcon({ provider, size = 24, color = 'currentColor' }) {
+      const commonSvg = {
+        width: size,
+        height: size,
+        viewBox: '0 0 24 24',
+        fill: 'none',
+        'aria-hidden': 'true',
+        style: { display: 'block', flexShrink: 0, color },
+      }
+      if (provider === 'codex') {
+        return h(
+          'svg',
+          commonSvg,
+          Array.from({ length: 6 }, (_, i) =>
+            h('path', {
+              key: i,
+              d: 'M12 3.1 A 3.4 3.4 0 0 1 15.4 6.5 L 15.4 10.6 A 3.4 3.4 0 0 1 12 14',
+              transform: `rotate(${i * 60} 12 12)`,
+              stroke: 'currentColor',
+              strokeWidth: 1.65,
+              strokeLinecap: 'round',
+            }),
+          ),
+        )
+      }
+      if (provider === 'claude-code') {
+        return h(
+          'svg',
+          commonSvg,
+          Array.from({ length: 12 }, (_, i) => {
+            const ang = (i * Math.PI) / 6
+            const r1 = 3.1
+            const r2 = i % 2 === 0 ? 10.1 : 8.4
+            const x1 = 12 + Math.cos(ang) * r1
+            const y1 = 12 + Math.sin(ang) * r1
+            const x2 = 12 + Math.cos(ang) * r2
+            const y2 = 12 + Math.sin(ang) * r2
+            return h('line', {
+              key: i,
+              x1: x1.toFixed(2),
+              y1: y1.toFixed(2),
+              x2: x2.toFixed(2),
+              y2: y2.toFixed(2),
+              stroke: 'currentColor',
+              strokeWidth: i % 2 === 0 ? 1.9 : 1.55,
+              strokeLinecap: 'round',
+            })
+          }),
+          h('circle', { cx: 12, cy: 12, r: 1.65, fill: 'currentColor' }),
+        )
+      }
+      if (provider === 'acp') {
+        return h(
+          'svg',
+          commonSvg,
+          h('circle', {
+            cx: 12,
+            cy: 12,
+            r: 7.4,
+            stroke: 'currentColor',
+            strokeWidth: 1.35,
+            strokeDasharray: '10 4',
+            opacity: 0.72,
+          }),
+          h('path', {
+            d: 'M12 5.4 L17.6 15.5 L6.4 15.5 Z',
+            stroke: 'currentColor',
+            strokeWidth: 1.45,
+            strokeLinejoin: 'round',
+            opacity: 0.85,
+          }),
+          h('circle', { cx: 12, cy: 5.2, r: 2.2, fill: 'currentColor' }),
+          h('circle', { cx: 17.8, cy: 15.6, r: 2.2, fill: 'currentColor' }),
+          h('circle', { cx: 6.2, cy: 15.6, r: 2.2, fill: 'currentColor' }),
+        )
+      }
+      if (provider === 'dsh-sdk') {
+        return h(
+          'svg',
+          commonSvg,
+          h('path', {
+            d: 'M12 2.8 L19.8 7.3 L19.8 16.7 L12 21.2 L4.2 16.7 L4.2 7.3 Z',
+            stroke: 'currentColor',
+            strokeWidth: 1.45,
+            strokeLinejoin: 'round',
+            opacity: 0.82,
+          }),
+          h('path', {
+            d: 'M12 6.4 Q12.6 11.4 17.6 12 Q12.6 12.6 12 17.6 Q11.4 12.6 6.4 12 Q11.4 11.4 12 6.4 Z',
+            fill: 'currentColor',
+          }),
+        )
+      }
+      return h(
+        'svg',
+        commonSvg,
+        h('rect', { x: 5.5, y: 5.5, width: 13, height: 13, rx: 3.5, stroke: 'currentColor', strokeWidth: 1.6 }),
+        h('circle', { cx: 12, cy: 12, r: 2.4, fill: 'currentColor' }),
+      )
+    }
+
     function hashStrSeed(str) {
       let hVal = 2166136261
       const s = String(str || '')
@@ -24237,14 +24376,20 @@ window.__ModuleLoader__.load({
         const acc = hItem.accent || '#38bdf8'
         const roleText = hItem.role || hItem.roleHint || bi('外部独立执行进程', 'External Harness')
         const catItem = catalogByProvider.get(hItem.provider)
+        const isLocalCli = hItem.transport === 'local-cli'
+        const hBadge = hItem.running
+          ? bi('运行', 'Run')
+          : (hItem.installed ? (isLocalCli ? bi('直连', 'Local') : bi('就绪', 'Ready')) : bi('未装', 'Setup'))
         list.push({
           uid: 'harness:' + hItem.provider,
           zone: 'inside',
           kind: 'harness',
+          provider: hItem.provider,
+          isLogoOrb: true,
           label: hItem.label || hItem.provider,
           shortLabel: shortOrbLabel(hItem.label || hItem.provider, 'harness'),
-          badge: hItem.provider.length <= 7 ? hItem.provider : '外挂',
-          kindName: hItem.installed ? 'Harness' : bi('未安装后端', 'Not Installed'),
+          badge: hBadge,
+          kindName: hItem.installed ? (isLocalCli ? bi('Harness · 本机直连', 'Harness · Local') : 'Harness') : bi('未安装后端', 'Not Installed'),
           subText: `${hItem.provider} · ${roleText}`,
           r: 31,
           installed: Boolean(hItem.installed),
@@ -24296,12 +24441,14 @@ window.__ModuleLoader__.load({
           uid: 'standby-harness:' + hItem.provider,
           zone: 'outside',
           kind: 'standby-harness',
+          provider: hItem.provider,
+          isLogoOrb: true,
           label: hItem.label || hItem.provider,
           shortLabel: shortOrbLabel(hItem.label || hItem.provider, 'harness'),
-          badge: isLocalCli ? bi('本机就绪', 'Local') : bi('就绪', 'Ready'),
+          badge: isLocalCli ? bi('直连', 'Local') : bi('就绪', 'Ready'),
           kindName: isLocalCli ? bi('Harness · 本机直连', 'Harness · Local') : bi('Harness · 已安装', 'Harness · Ready'),
           subText: `${hItem.provider} · ${roleText}`,
-          r: 27,
+          r: 28,
           installed: true,
           transport: hItem.transport || '',
           installCmd: '',
@@ -24327,12 +24474,14 @@ window.__ModuleLoader__.load({
           uid: 'standby-harness:' + hItem.provider,
           zone: 'outside',
           kind: 'standby-harness',
+          provider: hItem.provider,
+          isLogoOrb: true,
           label: hItem.label || hItem.provider,
           shortLabel: shortOrbLabel(hItem.label || hItem.provider, 'harness'),
           badge: bi('未装', 'Setup'),
           kindName: bi('Harness · 待安装', 'Harness · Setup'),
           subText: `${hItem.provider} · ${roleText}`,
-          r: 26,
+          r: 28,
           installed: false,
           installCmd: harnessInstallCmdFor(hItem.provider, hItem.installCmd),
           running: false,
@@ -24572,62 +24721,135 @@ window.__ModuleLoader__.load({
       }
     }
 
-    function drawBubbleTankCanvas(ctx, dpr, geo, bodiesMap, orbs, { tNow, locked, isLight }) {
+    function drawBubbleTankCanvas(ctx, dpr, geo, bodiesMap, orbs, { tNow, locked, paused, isLight }) {
       if (!ctx) return
       ctx.save()
       ctx.scale(dpr, dpr)
       ctx.clearRect(0, 0, geo.W, geo.H)
 
+      const t = paused ? 1.2 : tNow
+
+      // Layer 1: Soft drifting underwater caustic light patches
+      const causticPalette = locked
+        ? (isLight ? ['rgba(251, 191, 36, 0.16)', 'rgba(56, 189, 248, 0.10)'] : ['rgba(245, 158, 11, 0.08)', 'rgba(56, 189, 248, 0.06)'])
+        : (isLight ? ['rgba(255, 255, 255, 0.36)', 'rgba(14, 165, 233, 0.10)'] : ['rgba(56, 189, 248, 0.09)', 'rgba(20, 184, 166, 0.07)'])
+      for (let i = 0; i < 4; i += 1) {
+        const px = geo.W * (0.18 + i * 0.22) + Math.sin(t * (0.34 + i * 0.07) + i * 1.9) * 26
+        const py = geo.H * (0.28 + (i % 2) * 0.38) + Math.cos(t * (0.28 + i * 0.06) + i * 1.3) * 18
+        const rw = geo.R * (0.48 + (i % 2) * 0.16)
+        const cg = ctx.createRadialGradient(px, py, 2, px, py, rw)
+        cg.addColorStop(0, causticPalette[i % 2])
+        cg.addColorStop(1, 'rgba(0, 0, 0, 0)')
+        ctx.fillStyle = cg
+        ctx.beginPath()
+        ctx.ellipse(px, py, rw, rw * 0.62, Math.sin(t * 0.2 + i) * 0.35, 0, Math.PI * 2)
+        ctx.fill()
+      }
+
+      // Layer 2: Gentle translucent water refraction wave arcs
+      for (let wIdx = 0; wIdx < 3; wIdx += 1) {
+        const baseY = geo.H * (0.24 + wIdx * 0.26)
+        ctx.beginPath()
+        for (let x = 0; x <= geo.W; x += 18) {
+          const y = baseY + Math.sin(x * 0.015 + t * (0.65 + wIdx * 0.18) + wIdx * 1.7) * 5.5
+          if (x === 0) ctx.moveTo(x, y)
+          else ctx.lineTo(x, y)
+        }
+        ctx.lineWidth = 1.1
+        ctx.strokeStyle = isLight ? 'rgba(2, 132, 199, 0.09)' : 'rgba(125, 211, 252, 0.07)'
+        ctx.stroke()
+      }
+
+      // Layer 3: Slow-rising hollow micro water bubbles with tiny specular glints
+      for (let i = 0; i < 10; i += 1) {
+        const xBase = ((i * 89 + 37) % Math.max(40, geo.W - 32)) + 16
+        const bx = xBase + Math.sin(t * (0.9 + (i % 3) * 0.2) + i) * 5
+        const spd = 8 + (i % 4) * 3.5
+        const by = geo.H - (((t * spd + i * 41) % (geo.H + 16)) - 8)
+        const br = 1.7 + (i % 3) * 0.85
+        ctx.beginPath()
+        ctx.arc(bx, by, br, 0, Math.PI * 2)
+        ctx.strokeStyle = isLight ? 'rgba(2, 132, 199, 0.24)' : 'rgba(186, 230, 253, 0.22)'
+        ctx.lineWidth = 0.9
+        ctx.stroke()
+        ctx.beginPath()
+        ctx.arc(bx - br * 0.35, by - br * 0.35, 0.65, 0, Math.PI * 2)
+        ctx.fillStyle = isLight ? 'rgba(255, 255, 255, 0.72)' : 'rgba(224, 242, 254, 0.50)'
+        ctx.fill()
+      }
+
       if (geo.hasOutside) {
         ctx.save()
         ctx.font = '600 10.5px "Microsoft YaHei UI", sans-serif'
-        ctx.fillStyle = isLight ? 'rgba(71, 85, 105, 0.58)' : 'rgba(148, 163, 184, 0.50)'
+        ctx.fillStyle = isLight ? 'rgba(71, 85, 105, 0.62)' : 'rgba(186, 230, 253, 0.56)'
         ctx.textAlign = 'right'
         ctx.fillText('外围待命域 · 拖入左泡协同', geo.W - 14, 21)
         ctx.restore()
       }
 
+      // Layer 4: Main aqueous soap-bubble dome / amber work-lock shell
       const grad = ctx.createRadialGradient(
-        geo.cx - geo.R * 0.28,
-        geo.cy - geo.R * 0.28,
-        geo.R * 0.08,
+        geo.cx - geo.R * 0.30,
+        geo.cy - geo.R * 0.32,
+        geo.R * 0.06,
         geo.cx,
         geo.cy,
         geo.R,
       )
       if (locked) {
-        grad.addColorStop(0, isLight ? 'rgba(251, 191, 36, 0.14)' : 'rgba(245, 158, 11, 0.12)')
-        grad.addColorStop(1, isLight ? 'rgba(217, 119, 6, 0.18)' : 'rgba(245, 158, 11, 0.22)')
+        grad.addColorStop(0, isLight ? 'rgba(254, 243, 199, 0.36)' : 'rgba(245, 158, 11, 0.14)')
+        grad.addColorStop(0.7, isLight ? 'rgba(251, 191, 36, 0.14)' : 'rgba(217, 119, 6, 0.08)')
+        grad.addColorStop(1, isLight ? 'rgba(217, 119, 6, 0.24)' : 'rgba(245, 158, 11, 0.26)')
       } else {
-        grad.addColorStop(0, isLight ? 'rgba(56, 189, 248, 0.11)' : 'rgba(56, 189, 248, 0.13)')
-        grad.addColorStop(1, isLight ? 'rgba(16, 185, 129, 0.14)' : 'rgba(56, 189, 248, 0.20)')
+        grad.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.42)' : 'rgba(186, 230, 253, 0.18)')
+        grad.addColorStop(0.68, isLight ? 'rgba(56, 189, 248, 0.09)' : 'rgba(14, 165, 233, 0.08)')
+        grad.addColorStop(1, isLight ? 'rgba(20, 184, 166, 0.22)' : 'rgba(45, 212, 191, 0.24)')
       }
 
       ctx.beginPath()
       ctx.arc(geo.cx, geo.cy, geo.R, 0, Math.PI * 2)
       ctx.fillStyle = grad
       ctx.fill()
-      ctx.lineWidth = locked ? 2.2 : 1.7
-      ctx.strokeStyle = locked
-        ? (isLight ? 'rgba(217, 119, 6, 0.72)' : 'rgba(251, 191, 36, 0.72)')
-        : (isLight ? 'rgba(2, 132, 199, 0.54)' : 'rgba(103, 232, 249, 0.52)')
-      ctx.stroke()
 
       if (locked) {
+        ctx.lineWidth = 2.3
+        ctx.strokeStyle = isLight ? 'rgba(217, 119, 6, 0.76)' : 'rgba(251, 191, 36, 0.76)'
+        ctx.stroke()
         ctx.save()
         ctx.setLineDash([7, 5])
         ctx.lineWidth = 1.2
-        ctx.strokeStyle = isLight ? 'rgba(217, 119, 6, 0.42)' : 'rgba(245, 158, 11, 0.44)'
+        ctx.strokeStyle = isLight ? 'rgba(217, 119, 6, 0.46)' : 'rgba(245, 158, 11, 0.48)'
         ctx.beginPath()
         ctx.arc(geo.cx, geo.cy, geo.R + 5, 0, Math.PI * 2)
         ctx.stroke()
         ctx.restore()
       } else {
+        const rimGrad = ctx.createLinearGradient(
+          geo.cx - geo.R,
+          geo.cy - geo.R,
+          geo.cx + geo.R,
+          geo.cy + geo.R,
+        )
+        rimGrad.addColorStop(0, isLight ? 'rgba(2, 132, 199, 0.65)' : 'rgba(103, 232, 249, 0.70)')
+        rimGrad.addColorStop(0.55, isLight ? 'rgba(13, 148, 136, 0.50)' : 'rgba(94, 234, 212, 0.56)')
+        rimGrad.addColorStop(1, isLight ? 'rgba(99, 102, 241, 0.44)' : 'rgba(165, 180, 252, 0.52)')
+        ctx.lineWidth = 1.9
+        ctx.strokeStyle = rimGrad
+        ctx.stroke()
+
+        // Dual aqueous specular highlight arcs
         ctx.save()
         ctx.beginPath()
-        ctx.arc(geo.cx, geo.cy, geo.R - 6, -Math.PI * 0.80, -Math.PI * 0.52)
-        ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.72)' : 'rgba(224, 242, 254, 0.36)'
-        ctx.lineWidth = 2.2
+        ctx.arc(geo.cx, geo.cy, geo.R - 6, -Math.PI * 0.82, -Math.PI * 0.52)
+        ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.88)' : 'rgba(224, 242, 254, 0.48)'
+        ctx.lineWidth = 2.4
+        ctx.lineCap = 'round'
+        ctx.stroke()
+
+        ctx.beginPath()
+        ctx.arc(geo.cx, geo.cy, geo.R - 7, Math.PI * 0.14, Math.PI * 0.30)
+        ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.56)' : 'rgba(165, 243, 252, 0.24)'
+        ctx.lineWidth = 1.6
         ctx.lineCap = 'round'
         ctx.stroke()
         ctx.restore()
@@ -24639,10 +24861,10 @@ window.__ModuleLoader__.load({
         if (!b) continue
         ctx.save()
         ctx.setLineDash([4, 4])
-        ctx.lineDashOffset = -(tNow * 24)
+        ctx.lineDashOffset = -(t * 24)
         ctx.lineWidth = 1.3
         ctx.strokeStyle = orb.accent.dot
-        ctx.globalAlpha = 0.52
+        ctx.globalAlpha = 0.54
         ctx.beginPath()
         ctx.moveTo(geo.cx, geo.cy)
         ctx.lineTo(b.x, b.y)
@@ -24902,6 +25124,7 @@ window.__ModuleLoader__.load({
             drawBubbleTankCanvas(ctx2d, dpr, geo, bodiesRef.current, sim.orbs, {
               tNow,
               locked: sim.locked,
+              paused: sim.paused,
               isLight,
             })
           }
@@ -25227,6 +25450,7 @@ window.__ModuleLoader__.load({
                     'data-uid': orb.uid,
                     'data-zone': orb.zone,
                     'data-kind': orb.kind,
+                    'data-logo': orb.isLogoOrb ? '1' : '0',
                     'data-installed': orb.installed ? '1' : '0',
                     'data-running': orb.running ? '1' : '0',
                     'data-selected': isSel ? '1' : '0',
@@ -25253,15 +25477,41 @@ window.__ModuleLoader__.load({
                     onPointerUp: e => handleOrbPointerEnd(e, orb),
                     onPointerCancel: e => handleOrbPointerEnd(e, orb),
                   },
-                  h(
-                    'div',
-                    { className: 'dnb-orb-top' },
-                    orb.running
-                      ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: orb.accent.dot } })
-                      : h('span', { className: 'dnb-orb-dot', style: { background: orb.accent.dot } }),
-                  ),
-                  h('div', { className: 'dnb-orb-label' }, orb.shortLabel),
-                  h('div', { className: 'dnb-orb-badge' }, showLockTag ? `🔒 ${orb.badge}` : orb.badge),
+                  orb.isLogoOrb
+                    ? h(
+                        React.Fragment,
+                        null,
+                        orb.running
+                          ? h(
+                              'span',
+                              { className: 'dnb-orb-run-pin' },
+                              h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: orb.accent.dot } }),
+                            )
+                          : null,
+                        h(
+                          'div',
+                          { className: 'dnb-orb-logo' },
+                          h(HarnessLogoIcon, {
+                            provider: orb.provider,
+                            size: orb.zone === 'inside' ? 26 : 23,
+                            color: orb.accent.text,
+                          }),
+                        ),
+                        h('div', { className: 'dnb-orb-badge' }, showLockTag ? `🔒 ${orb.badge}` : orb.badge),
+                      )
+                    : h(
+                        React.Fragment,
+                        null,
+                        h(
+                          'div',
+                          { className: 'dnb-orb-top' },
+                          orb.running
+                            ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: orb.accent.dot } })
+                            : h('span', { className: 'dnb-orb-dot', style: { background: orb.accent.dot } }),
+                        ),
+                        h('div', { className: 'dnb-orb-label' }, orb.shortLabel),
+                        h('div', { className: 'dnb-orb-badge' }, showLockTag ? `🔒 ${orb.badge}` : orb.badge),
+                      ),
                 )
               }),
             ),
@@ -25315,7 +25565,9 @@ window.__ModuleLoader__.load({
                     h(
                       'div',
                       { className: 'dnb-bubble-inspector-info' },
-                      h('span', { className: 'dnb-droplet-dot', style: { background: selectedOrb.accent.dot } }),
+                      selectedOrb.isLogoOrb
+                        ? h(HarnessLogoIcon, { provider: selectedOrb.provider, size: 15, color: selectedOrb.accent.text })
+                        : h('span', { className: 'dnb-droplet-dot', style: { background: selectedOrb.accent.dot } }),
                       h('span', { style: { fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' } }, selectedOrb.label),
                       h('span', { className: 'dnb-droplet-kind', style: { color: selectedOrb.accent.text, borderColor: selectedOrb.accent.border } }, selectedOrb.kindName),
                       h('span', { className: 'dnb-bubble-inspector-sub', title: selectedOrb.subText }, selectedOrb.subText),

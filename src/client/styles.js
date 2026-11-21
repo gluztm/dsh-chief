@@ -4740,17 +4740,23 @@ const CSS = `
     touch-action: none;
     user-select: none;
     background:
-      radial-gradient(circle at 35% 50%, rgba(56, 189, 248, 0.09), transparent 60%),
-      rgba(9, 14, 26, 0.68);
-    border: 1.5px solid rgba(56, 189, 248, 0.26);
-    box-shadow: inset 0 0 20px rgba(15, 23, 42, 0.55);
+      radial-gradient(ellipse 84% 44% at 44% 0%, rgba(56, 189, 248, 0.22), transparent 72%),
+      radial-gradient(circle at 26% 62%, rgba(20, 184, 166, 0.14), transparent 56%),
+      radial-gradient(circle at 78% 78%, rgba(56, 189, 248, 0.12), transparent 58%),
+      linear-gradient(175deg, #071e30 0%, #081929 52%, #05111d 100%);
+    border: 1.5px solid rgba(103, 232, 249, 0.34);
+    box-shadow:
+      inset 0 1px 0 rgba(186, 230, 253, 0.20),
+      inset 0 -10px 24px rgba(2, 132, 199, 0.14),
+      inset 0 0 26px rgba(6, 24, 42, 0.72);
     transition: border-color 0.2s ease;
   }
   .dnb-bubble-tank[data-locked="1"] {
-    border-color: rgba(245, 158, 11, 0.54);
+    border-color: rgba(245, 158, 11, 0.56);
     background:
-      radial-gradient(circle at 35% 50%, rgba(245, 158, 11, 0.08), transparent 60%),
-      rgba(15, 18, 28, 0.74);
+      radial-gradient(ellipse 80% 42% at 38% 0%, rgba(245, 158, 11, 0.16), transparent 72%),
+      radial-gradient(circle at 78% 72%, rgba(56, 189, 248, 0.10), transparent 56%),
+      linear-gradient(175deg, #131c2a 0%, #0b1624 55%, #07101a 100%);
   }
   .dnb-bubble-tank[data-shake="1"] {
     animation: dnb-bubble-shake 0.36s ease;
@@ -4815,9 +4821,12 @@ const CSS = `
     touch-action: none;
     will-change: transform;
     background:
-      radial-gradient(circle at 30% 26%, rgba(255, 255, 255, 0.28) 0%, var(--orb-bg, rgba(56, 189, 248, 0.20)) 58%, rgba(255, 255, 255, 0.12) 100%);
-    border: 1.5px solid var(--orb-border, rgba(125, 211, 252, 0.58));
-    box-shadow: inset 0 1px 4px rgba(255, 255, 255, 0.20), 0 4px 12px rgba(0, 0, 0, 0.26);
+      radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.08) 24%, var(--orb-bg, rgba(56, 189, 248, 0.22)) 60%, rgba(255, 255, 255, 0.16) 100%);
+    border: 1.5px solid var(--orb-border, rgba(125, 211, 252, 0.62));
+    box-shadow:
+      inset 0 2px 6px rgba(255, 255, 255, 0.26),
+      inset 0 -3px 8px rgba(6, 32, 52, 0.30),
+      0 5px 14px rgba(0, 0, 0, 0.26);
   }
   .dnb-orb:active {
     cursor: grabbing;
@@ -4825,19 +4834,39 @@ const CSS = `
   .dnb-orb::before {
     content: "";
     position: absolute;
-    top: 11%;
-    left: 19%;
-    width: 24%;
-    height: 12%;
+    top: 10%;
+    left: 18%;
+    width: 26%;
+    height: 13%;
     border-radius: 50%;
     corner-shape: round;
-    background: rgba(255, 255, 255, 0.34);
+    background: rgba(255, 255, 255, 0.40);
     transform: rotate(-32deg);
     pointer-events: none;
   }
   .dnb-orb[data-kind="harness"],
   .dnb-orb[data-kind="standby-harness"] {
     border-style: dashed;
+  }
+  .dnb-orb[data-logo="1"] {
+    padding: 4px 3px 3px;
+    gap: 2px;
+  }
+  .dnb-orb-logo {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 0;
+    margin-top: 2px;
+    filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.35));
+  }
+  .dnb-orb-run-pin {
+    position: absolute;
+    top: 5px;
+    right: 6px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
   }
   .dnb-orb[data-installed="0"] {
     opacity: 0.80;
@@ -4981,10 +5010,19 @@ const CSS = `
   html[data-ds-theme="light"] .dnb-bubble-tank,
   [data-ds-theme-source="light"] .dnb-bubble-tank {
     background:
-      radial-gradient(circle at 38% 48%, rgba(14, 165, 233, 0.11), transparent 62%),
-      linear-gradient(180deg, #f0f9ff 0%, #f8fafc 100%);
-    border-color: rgba(2, 132, 199, 0.36);
-    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), inset 0 0 24px rgba(14, 165, 233, 0.08);
+      radial-gradient(ellipse 84% 44% at 44% 0%, rgba(255, 255, 255, 0.88), transparent 70%),
+      radial-gradient(circle at 26% 62%, rgba(20, 184, 166, 0.12), transparent 56%),
+      linear-gradient(175deg, #dcf4ff 0%, #eaf8ff 52%, #d4eefc 100%);
+    border-color: rgba(2, 132, 199, 0.40);
+    box-shadow:
+      inset 0 1px 0 rgba(255, 255, 255, 0.92),
+      inset 0 -8px 20px rgba(14, 165, 233, 0.12),
+      inset 0 0 22px rgba(14, 165, 233, 0.08);
+  }
+  html[data-ds-theme-source="light"] .dnb-orb-logo,
+  html[data-ds-theme="light"] .dnb-orb-logo,
+  [data-ds-theme-source="light"] .dnb-orb-logo {
+    filter: none;
   }
   html[data-ds-theme-source="light"] .dnb-bubble-tank[data-locked="1"],
   html[data-ds-theme="light"] .dnb-bubble-tank[data-locked="1"],
