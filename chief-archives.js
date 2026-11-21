@@ -420,6 +420,7 @@ export async function harvestTurnDetailsToArchive(deps, {
   try {
     const llmRes = await callChiefLlm(deps, {
       sessionId: rootId,
+      reasonKind: 'archive_harvest',
       system: HARVEST_ARCHIVE_SYSTEM,
       prompt: `触发模式：${trigger === 'pre-compaction' ? '上下文压缩前自动高保真抢救' : '用户手动抢救当前工作细节入柜'}\n\n${cleanMultiline(bodySource, 5200)}`,
       maxTokens: SUMMARY_MAX_TOKENS,

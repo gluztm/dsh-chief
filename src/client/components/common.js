@@ -6,6 +6,7 @@
 
 import { React, h } from '../react-runtime.js'
 import { STATUSES, STATUS_LABEL, STATUS_BADGE, SIX_GOAL_ROWS_META, THINKING_EFFORT_OPTIONS } from '../constants.js'
+import { bi, statusBadge, effortMeta } from '../i18n.js'
 import { store, patch, focusObjectiveInPyramid, openSubagentChat } from '../store.js'
 import {
   clampTitle,
@@ -173,6 +174,11 @@ export function Icon({ name, size = 14, style }) {
         h('circle', { cx: 17, cy: 7.5, r: 1.8 }),
         h('path', { d: 'M7 11.5h6.2a2 2 0 0 0 2-2V9.3' }),
       )
+    case 'settings':
+      return h('svg', props,
+        h('circle', { cx: 12, cy: 12, r: 3 }),
+        h('path', { d: 'M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z' }),
+      )
     default:
       return null
   }
@@ -262,7 +268,7 @@ export function SearchDrawer({ view }) {
       h('input', {
         className: 'dnb-input',
         style: { borderRadius: 99, paddingLeft: 12, height: 30 },
-        placeholder: '搜索记忆、任务、协同信箱…',
+        placeholder: bi('搜索记忆、任务、协同信箱…', 'Search facts, tasks, mailbox…'),
         autoFocus: true,
         value: view.askText || '',
         onChange: e => {
@@ -280,16 +286,16 @@ export function SearchDrawer({ view }) {
             style: { height: 30 },
             disabled: view.archiveSearchBusy,
             onClick: () => void searchColdArchives(view.askText),
-            title: '按需穿透搜索封存懒加载的长期工程档案柜',
-          }, h(Icon, { name: 'archive', size: 12 }), view.archiveSearchBusy ? '检索中…' : '搜档案柜')
+            title: bi('按需穿透搜索封存懒加载的长期工程档案柜', 'Search cold engineering archive vaults on demand'),
+          }, h(Icon, { name: 'archive', size: 12 }), view.archiveSearchBusy ? bi('检索中…', 'Searching…') : bi('搜档案柜', 'Vaults'))
         : null,
       (view.askText || '').trim()
         ? h('button', {
             className: 'dnb-pill dnb-pill-accent',
             style: { height: 30 },
             onClick: askModel,
-            title: '直接交给 DSH 参谋长回答或拆话',
-          }, h(Icon, { name: 'sparkles', size: 12 }), '问参谋长')
+            title: bi('直接交给 DSH 参谋长回答或拆话', 'Ask DSH Chief directly'),
+          }, h(Icon, { name: 'sparkles', size: 12 }), bi('问参谋长', 'Ask Chief'))
         : null,
     ),
     Array.isArray(view.askHits)
@@ -327,7 +333,7 @@ export function SearchDrawer({ view }) {
                   ),
                 ),
               )
-            : h('div', { style: { padding: '10px 12px', fontSize: 11.5, color: 'var(--dnb-text-3)', textAlign: 'center' } }, '无匹配结果'),
+            : h('div', { style: { padding: '10px 12px', fontSize: 11.5, color: 'var(--dnb-text-3)', textAlign: 'center' } }, bi('无匹配结果', 'No matches found')),
         )
       : null,
   )
@@ -343,7 +349,7 @@ export function StatusBadge({ status, style }) {
     st === 'doing'
       ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9.5px', color: '#409cff' } })
       : null,
-    STATUS_BADGE[st] || STATUS_LABEL[st],
+    statusBadge(st) || STATUS_BADGE[st] || STATUS_LABEL[st],
   )
 }
 
@@ -1251,10 +1257,95 @@ export function EffortFanGauge({ value = 'auto', onChange, compact = false }) {
         h('span', { className: 'dnb-fan-hub-main' },
           dragging && previewStep
             ? previewStep.label
-            : (isAuto ? '🪄 自动' : (committedStep ? committedStep.label : '自动'))),
+            : (isAuto ? bi('🪄 自动', '🪄 Auto') : (committedStep ? committedStep.label : bi('自动', 'Auto')))),
         h('span', { className: 'dnb-fan-hub-sub' },
-          isAuto && !dragging ? '智能调节' : '点此自动'),
+          isAuto && !dragging ? bi('智能调节', 'Adaptive') : bi('点此自动', 'Set Auto')),
       ),
     ),
+  )
+}
+
+/* ------------------------------------------- Shared Collapsible Accordion Card */
+
+/**
+ * Unified collapsible accordion card shared across Chief, Tasks, Peers, Archives, and Boundaries tabs.
+ * Left chevron points right (0deg) when collapsed and down (90deg) when open.
+ */
+export function AccCard({
+  open = true,
+  onToggle = null,
+  title,
+  icon = null,
+  accentColor = '',
+  preview = '',
+  count = '',
+  badges = null,
+  headerExtra = null,
+  actions = null,
+  showPullHint = true,
+  pullHintOpen = null,
+  pullHintClosed = null,
+  className = '',
+  style = undefined,
+  bodyStyle = undefined,
+  headTitle = '',
+  cardRef = null,
+  children,
+}) {
+  const openHintText = pullHintOpen !== null ? pullHintOpen : bi('收起 ▴', 'Collapse ▴')
+  const closedHintText = pullHintClosed !== null ? pullHintClosed : bi('拉起 ▾', 'Expand ▾')
+  const canToggle = typeof onToggle === 'function'
+  const cardCls = ['dnb-acc-card', className].filter(Boolean).join(' ')
+  const mergedStyle = accentColor
+    ? { ...(style || {}), borderLeft: `3px solid ${accentColor}` }
+    : style
+
+  return h(
+    'div',
+    {
+      ref: cardRef || undefined,
+      className: cardCls,
+      'data-open': open ? '1' : '0',
+      style: mergedStyle,
+    },
+    h(
+      'div',
+      {
+        className: 'dnb-acc-head',
+        style: canToggle ? undefined : { cursor: 'default' },
+        title: headTitle || (canToggle ? (open ? bi('点击收起', 'Click to collapse') : bi('点击拉起', 'Click to expand')) : undefined),
+        onClick: canToggle ? onToggle : undefined,
+      },
+      h(
+        'div',
+        { className: 'dnb-acc-title-wrap' },
+        canToggle
+          ? h(Icon, { name: 'chevron', size: 12.5, className: 'dnb-acc-chevron' })
+          : null,
+        icon || null,
+        title ? h('span', { className: 'dnb-acc-title' }, title) : null,
+        badges || null,
+        headerExtra || null,
+        count !== '' && count !== null && count !== undefined
+          ? h('span', { className: 'dnb-acc-count' }, String(count))
+          : null,
+        !open && preview
+          ? h('span', { className: 'dnb-acc-preview', title: typeof preview === 'string' ? preview : undefined }, preview)
+          : null,
+      ),
+      (actions || (canToggle && showPullHint))
+        ? h(
+            'div',
+            { className: 'dnb-acc-ops', onClick: e => e.stopPropagation() },
+            actions || null,
+            canToggle && showPullHint
+              ? h('span', { className: 'dnb-acc-pull-hint', onClick: onToggle }, open ? openHintText : closedHintText)
+              : null,
+          )
+        : null,
+    ),
+    open
+      ? h('div', { className: 'dnb-acc-body', style: bodyStyle }, children)
+      : null,
   )
 }

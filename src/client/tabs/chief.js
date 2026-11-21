@@ -15,6 +15,7 @@ import {
   SEC_MAX_IMAGES,
   THINKING_EFFORT_OPTIONS,
 } from '../constants.js'
+import { bi, getUiLangPref, factCatLabel, permLabel } from '../i18n.js'
 import { store, patch, runtimeRefs } from '../store.js'
 import {
   normalizeMaxTurnsVal,
@@ -32,10 +33,13 @@ import {
   submitChiefBar,
   refresh,
   toggleSyncHandoffOnDigest,
+  copyText,
 } from '../api.js'
+import { buildSessionReportMarkdown, downloadSessionReportMarkdown } from '../report.js'
 import {
   Icon,
   Switch,
+  AccCard,
   EffortFanGauge,
   renderStructuredHeading,
   parseNarrativeBlocks,
@@ -97,23 +101,27 @@ export function ChiefTab({ board, view }) {
   return h(
     'div',
     { className: 'dnb-view' },
-    // Sub-view Segmented Pills
+    // Sub-view Segmented Bar + Quick Actions
     h(
       'div',
-      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 10 } },
+      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 10, flexWrap: 'wrap' } },
       h(
         'div',
-        { style: { display: 'flex', gap: 5 } },
+        { className: 'dnb-seg', style: { padding: 2 } },
         h('button', {
-          className: 'dnb-pill',
+          type: 'button',
+          className: 'dnb-seg-btn',
+          style: { padding: '3px 10px', fontSize: 11.5 },
           'data-active': subTab === 'digest' ? '1' : '0',
           onClick: () => patch({ secSubTab: 'digest' }),
-        }, '摘要'),
+        }, bi('摘要', 'Digest')),
         h('button', {
-          className: 'dnb-pill',
+          type: 'button',
+          className: 'dnb-seg-btn',
+          style: { padding: '3px 10px', fontSize: 11.5 },
           'data-active': subTab !== 'digest' ? '1' : '0',
           onClick: () => patch({ secSubTab: 'facts' }),
-        }, '纪律与条目', facts.length ? h('span', { className: 'dnb-seg-dot' }, String(facts.length)) : null),
+        }, bi('纪律与条目', 'Disciplines & Facts'), facts.length ? h('span', { className: 'dnb-seg-dot' }, String(facts.length)) : null),
       ),
       subTab === 'digest'
         ? (() => {
@@ -121,6 +129,30 @@ export function ChiefTab({ board, view }) {
             const hMeta = view.handoffMeta || {}
             const isHandoffPinned = Boolean(hState.pinned || hMeta.pinned)
             const syncOnDigest = Boolean(hState.syncOnDigest ?? hMeta.syncOnDigest)
+            const exportReport = (copyOnly = false) => {
+              const md = buildSessionReportMarkdown({
+                board,
+                secView: sec,
+                chiefMeta: view.chiefMeta,
+                subagents: view.subagents,
+                guardWalls: view.guardWalls,
+                sessionId: view.sessionId,
+              })
+              if (copyOnly) {
+                copyText(md, bi('📋 复盘战报 Markdown 已复制到剪贴板', '📋 Retrospective Markdown copied'))
+                return
+              }
+              const dl = downloadSessionReportMarkdown(md, view.sessionId)
+              if (dl && dl.ok) {
+                patch({ notice: bi('📄 已导出复盘战报：', '📄 Exported report: ') + dl.filename })
+              } else {
+                copyText(md, bi('📄 复盘战报 Markdown 已复制到剪贴板', '📋 Retrospective Markdown copied'))
+              }
+            }
+            const nextLangPref = () => {
+              const cur = view.uiLangPref || getUiLangPref()
+              return cur === 'auto' ? 'en' : (cur === 'en' ? 'zh' : 'auto')
+            }
             return h(
               'div',
               { style: { display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' } },
@@ -129,12 +161,12 @@ export function ChiefTab({ board, view }) {
                 className: 'dnb-pill',
                 style: { height: 25, padding: '0 9px', fontSize: 11, gap: 4 },
                 disabled: Boolean(view.secBusy),
-                title: '向参谋长咨询当前局势与可行建议（无建议或超出能力范围会直接说明，不强行凑执行）',
+                title: bi('向参谋长咨询当前局势与可行建议（无建议或超出能力范围会直接说明，不强行凑执行）', 'Consult Chief on current situation & next advice'),
                 onClick: () => void submitChiefBar(
                   '请结合当前任务进展、对话上下文、边界红线与团队状态，给我坦诚、接地气的参谋建议：当前有什么需要关注的卡点或更好的推进方向？若一切顺利暂无建议，或涉及非参谋与会话能处理的事项，直接实话告诉我即可，不要强行凑执行项。',
                   'consult_chief',
                 ),
-              }, h(Icon, { name: 'sparkles', size: 11 }), '咨询'),
+              }, h(Icon, { name: 'sparkles', size: 11 }), bi('咨询', 'Consult')),
               h('button', {
                 className: 'dnb-pill',
                 style: {
@@ -148,14 +180,14 @@ export function ChiefTab({ board, view }) {
                 },
                 disabled: view.secRegenerating || narrative.summarizing,
                 title: narrative.hasUnsummarizedChanges
-                  ? '上下文有新进展，点击让参谋长按需提炼最新摘要（平时后台不空转耗费 Token）'
-                  : '立即让参谋长提炼结构化摘要',
+                  ? bi('上下文有新进展，点击让参谋长按需提炼最新摘要（平时后台不空转耗费 Token）', 'New context changes detected; click to refresh digest on demand')
+                  : bi('立即让参谋长提炼结构化摘要', 'Refresh structured digest now'),
                 onClick: () => void loadChiefView(true, { syncHandoff: !isHandoffPinned && syncOnDigest }),
               },
                 (view.secRegenerating || narrative.summarizing)
                   ? h(Icon, { name: 'refresh', size: 11, style: { animation: 'dnb-spin 0.9s linear infinite' } })
                   : h(Icon, { name: 'sparkles', size: 11 }),
-                (view.secRegenerating || narrative.summarizing) ? '提炼中…' : '提炼摘要',
+                (view.secRegenerating || narrative.summarizing) ? bi('提炼中…', 'Distilling…') : bi('提炼摘要', 'Distill'),
                 (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
                   ? h('span', {
                       style: {
@@ -176,40 +208,68 @@ export function ChiefTab({ board, view }) {
                   className: 'dnb-pill',
                   style: { height: 25, padding: '0 7px', fontSize: 11 },
                   'data-active': view.chiefMoreMenuOpen ? '1' : '0',
-                  title: '更多交接与摘要选项',
+                  title: bi('战报导出、交接同步与语言切换', 'Report export, handoff sync & language'),
                   onClick: () => patch({ chiefMoreMenuOpen: !view.chiefMoreMenuOpen }),
                 }, '⋯'),
                 view.chiefMoreMenuOpen
                   ? h(
                       'div',
-                      { className: 'dnb-more-menu', style: { minWidth: 196 } },
+                      { className: 'dnb-more-menu', style: { minWidth: 212 } },
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-more-item',
+                        onClick: () => {
+                          patch({ chiefMoreMenuOpen: false })
+                          exportReport(false)
+                        },
+                      }, h('span', null, bi('📄 导出复盘战报 (.md)', '📄 Export Report (.md)'))),
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-more-item',
+                        onClick: () => {
+                          patch({ chiefMoreMenuOpen: false })
+                          exportReport(true)
+                        },
+                      }, h('span', null, bi('📋 复制复盘战报 Markdown', '📋 Copy Markdown Report'))),
+                      h('div', { className: 'dnb-more-sep' }),
                       h('button', {
                         type: 'button',
                         className: 'dnb-more-item',
                         'data-active': (!isHandoffPinned && syncOnDigest) ? '1' : '0',
                         disabled: isHandoffPinned,
                         title: isHandoffPinned
-                          ? '交接单已被人类定住锁定，参谋长不可覆盖；如需恢复同步请前往「规划」页解除定住'
-                          : '开启后，点击「提炼摘要」完成时会自动一键同步更新交接单',
+                          ? bi('交接单已被人类定住锁定，参谋长不可覆盖', 'Handoff pinned by human; locked against auto-overwrite')
+                          : bi('开启后，点击「提炼摘要」完成时会自动一键同步更新交接单', 'Auto-sync handoff packet after digest distillation'),
                         onClick: () => {
                           patch({ chiefMoreMenuOpen: false })
                           void toggleSyncHandoffOnDigest(!syncOnDigest)
                         },
                       },
-                        h('span', null, isHandoffPinned ? '🔒 交接已定住' : '提炼时自动同步交接单'),
-                        h('span', { style: { fontSize: 10.5, opacity: 0.78 } }, isHandoffPinned ? '锁定' : (syncOnDigest ? '开' : '关')),
+                        h('span', null, isHandoffPinned ? bi('🔒 交接已定住', '🔒 Handoff Pinned') : bi('提炼时自动同步交接单', 'Auto-sync handoff on distill')),
+                        h('span', { style: { fontSize: 10.5, opacity: 0.78 } }, isHandoffPinned ? bi('锁定', 'Locked') : (syncOnDigest ? bi('开', 'On') : bi('关', 'Off'))),
                       ),
-                      h('div', { className: 'dnb-more-sep' }),
                       h('button', {
                         type: 'button',
                         className: 'dnb-more-item',
                         disabled: isHandoffPinned || view.secRegenerating || narrative.summarizing,
-                        title: isHandoffPinned ? '交接单已被人类定住，无法一键同步覆盖' : '将当前参谋摘要与态势一键写入交接单',
+                        title: isHandoffPinned ? bi('交接单已被人类定住，无法一键同步覆盖', 'Handoff is pinned') : bi('将当前参谋摘要与态势一键写入交接单', 'Write current digest to handoff'),
                         onClick: () => {
                           patch({ chiefMoreMenuOpen: false })
                           void loadChiefView(false, { syncHandoff: true })
                         },
-                      }, h('span', null, isHandoffPinned ? '🔒 交接已定住' : '↪ 立即更新交接单')),
+                      }, h('span', null, isHandoffPinned ? bi('🔒 交接已定住', '🔒 Handoff Pinned') : bi('↪ 立即更新交接单', '↪ Sync Handoff Now'))),
+                      h('div', { className: 'dnb-more-sep' }),
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-more-item',
+                        onClick: () => {
+                          patch({ chiefMoreMenuOpen: false })
+                          void updateSecConfig({ uiLang: nextLangPref() })
+                        },
+                      },
+                        h('span', null, bi('🌐 切换界面语言', '🌐 Switch Language')),
+                        h('span', { style: { fontSize: 10.5, opacity: 0.78 } }, (view.uiLangPref || getUiLangPref()).toUpperCase()),
+                      ),
                     )
                   : null,
               ),
@@ -220,496 +280,483 @@ export function ChiefTab({ board, view }) {
 
     // Sub-view 1: Concise 6-Sentence Goal Brief or Standard Structured Digest
     subTab === 'digest'
-      ? h(
-          React.Fragment,
-          null,
-          h(
-            'div',
-            { className: 'dnb-prose-card' },
+      ? (() => {
+          const digestStatusText = (narrative.summarizing || view.secRegenerating)
+            ? bi('正在提炼最新上下文…', 'Distilling latest context…')
+            : narrative.isLiveZeroToken
+              ? bi('实时看板速览 · 零 Token', 'Live board overview · 0 tokens')
+              : ((narrative.at ? bi('更新于 ', 'Updated ') + relativeTimeLabel(narrative.at) : bi('已提炼', 'Distilled'))
+                  + (narrative.hasUnsummarizedChanges ? bi(' · 有新进展待提炼', ' · New updates') : ''))
+          const digestPreview = sixGoalRows && sixGoalRows[0]
+            ? clampTitle(sixGoalRows[0].body, 28)
+            : digestStatusText
+          const chiefLedger = sec.llmLedger || (view.chiefMeta && view.chiefMeta.llmLedgerSummary) || null
+          const ledgerTotalCalls = chiefLedger ? (Number(chiefLedger.totalCalls) || 0) : 0
+          const ledgerTotalTok = chiefLedger ? (Number(chiefLedger.totalTokens) || 0) : 0
+          const ledgerChipLabel = ledgerTotalTok >= 1000
+            ? `${ledgerTotalCalls}${bi('次', 'x')} · ${(ledgerTotalTok / 1000).toFixed(1).replace(/\.0$/, '')}K`
+            : `${ledgerTotalCalls}${bi('次', 'x')} · ${ledgerTotalTok}`
+          return h(
+            React.Fragment,
+            null,
             h(
-              'div',
-              { className: 'dnb-prose-meta' },
-              h(
-                'div',
-                { style: { display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0, flexWrap: 'wrap' } },
-                h('span', { style: { fontWeight: 600, fontSize: 13.5, color: 'var(--dnb-text)' } },
-                  useSixBriefCards ? '⚡ 极简目标战报' : '摘要'),
-                h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } },
-                  (narrative.summarizing || view.secRegenerating)
-                    ? '正在提炼最新上下文…'
-                    : narrative.isLiveZeroToken
-                      ? '实时看板速览 · 零 Token（按需点右上角提炼）'
-                      : ((narrative.at ? '更新于 ' + relativeTimeLabel(narrative.at) : '已提炼')
-                          + (narrative.hasUnsummarizedChanges ? ' · 有新进展待提炼' : ''))),
-              ),
-              narrative.byModel
-                ? h('span', {
-                    className: 'dnb-tag',
-                    style: { fontSize: 10, flexShrink: 0, opacity: 0.78 },
-                    title: narrative.byModel,
-                  }, shortModelName(narrative.byModel, view.secModelsCatalog || (sec && sec.models), true))
-                : null,
-            ),
-            useSixBriefCards
-              ? h(
-                  'div',
-                  { className: 'dnb-six-brief' },
-                  sixGoalRows.map(row =>
-                    h(
-                      'div',
-                      { key: row.key, className: 'dnb-six-row' },
-                      h(
-                        'span',
-                        {
-                          className: 'dnb-six-tag',
-                          style: { color: row.color, background: row.bg },
-                        },
-                        row.key,
-                      ),
-                      h('span', { style: { flex: 1, fontSize: 12.2, color: 'var(--dnb-text)', lineHeight: 1.5 } }, row.body),
-                    ),
-                  ),
-                )
-              : blocks.length
-                ? blocks.map((blk, i) =>
-                    h(
-                      'div',
-                      { key: i, style: { marginTop: i === 0 ? 0 : 12 } },
-                      blk.heading ? renderStructuredHeading(blk.heading, false) : null,
-                      (blk.items || []).map((it, j) => renderStructuredItem(it, `${i}-${j}`)),
-                    ),
-                  )
-                : h('p', { className: 'dnb-prose-p' },
-                    '当前会话尚未沉淀持久规矩或阶段结论。你可以在下方许愿框直接立规矩、整档案、定边界或吩咐参谋长调度。'),
-          ),
-
-          // Partitioned Chief Q&A Turn Collections vs System / Execution Receipts
-          chat.length > 0
-            ? (() => {
-                const turns = groupChatHistoryTurnsNewestFirst(chat.slice(-32))
-                const qaCount = turns.filter(t => t.kind === 'turn').length
-                const receiptCount = turns.filter(t => t.replies.some(r => isReceiptChatItem(r))).length
-                const filteredTurns = chatFilter === 'receipt'
-                  ? turns.filter(t => t.replies.some(r => isReceiptChatItem(r)))
-                  : (chatFilter === 'qa' ? turns.filter(t => t.kind === 'turn') : turns)
-
-                const formatChiefReplyEffortBadge = (it) => {
-                  const eff = String((it && it.thinkingEffort) || '').trim().toLowerCase()
-                  if (!eff) return ''
-                  const opt = THINKING_EFFORT_OPTIONS.find(o => o.key === eff)
-                  const label = opt ? opt.shortLabel : eff
-                  return (it && it.thinkingEffortMode === 'auto') ? `🪄 自动→${label}` : `🧠 ${label}`
-                }
-
-                const renderTurnReplyCard = (item) => {
-                  const isReceipt = isReceiptChatItem(item)
-                  const effortBadge = formatChiefReplyEffortBadge(item)
-                  return h(
-                    'div',
-                    {
-                      key: item.id,
-                      className: 'dnb-turn-reply-item',
-                      'data-role': isReceipt ? 'receipt' : (item.role === 'chief' ? 'chief' : 'user'),
-                    },
-                    h(
-                      'div',
-                      { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6, flexWrap: 'wrap' } },
-                      h(
-                        'div',
-                        { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                        isReceipt
-                          ? h('span', { className: 'dnb-receipt-badge' },
-                              item.isOneStopReport
-                                ? '🏁 一站式战报回执'
-                                : (item.resumeTaskId ? '⚡ 授权续跑回执' : '📋 执行回执'))
-                          : h('span', { className: 'dnb-qa-badge', 'data-role': 'chief' }, '✦ 参谋回答'),
-                      ),
-                      h(
-                        'div',
-                        { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                        effortBadge
-                          ? h('span', {
-                              className: 'dnb-chat-effort-badge',
-                              title: item.thinkingEffortMode === 'auto' ? '自适应换挡本次实际生效思考强度' : '本次回复固定思考强度',
-                            }, effortBadge)
-                          : null,
-                        h('span', null, timeLabel(item.at)),
-                      ),
-                    ),
-                    renderStructuredText(item.text),
-                    Array.isArray(item.actions) && item.actions.length
-                      ? h(
-                          'div',
-                          { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2 } },
-                          item.actions.map((actTag, idx) =>
-                            h('span', { key: idx, className: 'dnb-tag', style: { color: isReceipt ? '#34d399' : 'var(--dnb-accent)' } }, actTag)),
-                        )
-                      : null,
-                  )
-                }
-
-                return h(
-                  'div',
-                  { className: 'dnb-group' },
-                  h(
-                    'div',
-                    {
-                      className: 'dnb-cell dnb-cell-hover',
-                      style: { cursor: 'pointer', justifyContent: 'space-between', padding: '8px 12px', gap: 6, flexWrap: 'wrap' },
-                      onClick: () => setShowHistory(v => !v),
-                    },
-                    h('span', { style: { fontSize: 12, color: 'var(--dnb-text-2)', fontWeight: 600 } },
-                      '参谋问答与执行回执'),
-                    (() => {
-                      const collapsedMap = view.qaCollapsedTurnIds || {}
-                      const allTurnsCollapsed = showHistory && filteredTurns.length > 0 && filteredTurns.every(t => Boolean(collapsedMap[t.id]))
-                      return h(
-                        'div',
-                        { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' }, onClick: e => e.stopPropagation() },
-                        h(
-                          'div',
-                          { className: 'dnb-text-filter-bar', style: { padding: 0, gap: 3 } },
-                          [
-                            { key: 'all', label: `全部 ${turns.length}` },
-                            { key: 'qa', label: `问答 ${qaCount}` },
-                            { key: 'receipt', label: `回执 ${receiptCount}` },
-                          ].map(opt =>
-                            h('button', {
-                              key: opt.key,
-                              type: 'button',
-                              className: 'dnb-text-filter-btn',
-                              'data-active': chatFilter === opt.key ? '1' : '0',
-                              onClick: () => {
-                                setChatFilter(opt.key)
-                                if (!showHistory) setShowHistory(true)
-                              },
-                            }, opt.label),
-                          ),
-                          filteredTurns.length > 0
-                            ? h('button', {
-                                type: 'button',
-                                className: 'dnb-text-filter-btn',
-                                style: { marginLeft: 2 },
-                                title: allTurnsCollapsed ? '展开全部会话条目' : '收起全部会话条目',
-                                onClick: () => {
-                                  if (!showHistory) {
-                                    setShowHistory(true)
-                                    patch({ qaCollapsedTurnIds: {} })
-                                    return
-                                  }
-                                  if (allTurnsCollapsed) {
-                                    patch({ qaCollapsedTurnIds: {} })
-                                  } else {
-                                    const nextMap = {}
-                                    for (const t of filteredTurns) nextMap[t.id] = true
-                                    patch({ qaCollapsedTurnIds: nextMap })
-                                  }
-                                },
-                              }, allTurnsCollapsed ? '全展开' : '全收起')
-                            : null,
-                        ),
-                        h('button', {
-                          type: 'button',
-                          className: 'dnb-icon-btn',
-                          style: { width: 20, height: 20 },
-                          onClick: () => setShowHistory(v => !v),
-                        }, h(Icon, {
-                          name: 'chevron',
-                          size: 13,
-                          style: {
-                            color: 'var(--dnb-text-3)',
-                            transform: showHistory ? 'rotate(90deg)' : 'none',
-                            transition: 'transform 0.18s ease',
-                          },
-                        })),
-                      )
-                    })(),
-                  ),
-                  showHistory
-                    ? (filteredTurns.length > 0
-                        ? h(
-                            'div',
-                            { className: 'dnb-qa-stream' },
-                            filteredTurns.map(turn => {
-                              const q = turn.question
-                              const repliesToShow = chatFilter === 'receipt' && turn.kind === 'system'
-                                ? turn.replies.filter(r => isReceiptChatItem(r))
-                                : turn.replies
-                              const collapsedMap = view.qaCollapsedTurnIds || {}
-                              const isTurnCollapsed = Boolean(collapsedMap[turn.id])
-                              const toggleTurn = () => patch({
-                                qaCollapsedTurnIds: {
-                                  ...(view.qaCollapsedTurnIds || {}),
-                                  [turn.id]: !isTurnCollapsed,
-                                },
-                              })
-                              return h(
-                                'div',
-                                {
-                                  key: turn.id,
-                                  className: 'dnb-qa-turn-box',
-                                  'data-turn-kind': turn.kind,
-                                  'data-collapsed': isTurnCollapsed ? '1' : '0',
-                                },
-                                q
-                                  ? h(
-                                      'div',
-                                      {
-                                        className: 'dnb-turn-question',
-                                        title: isTurnCollapsed ? '点击拉开该轮对话与回执' : '点击收起该轮对话与回执',
-                                        onClick: toggleTurn,
-                                      },
-                                      h(
-                                        'div',
-                                        { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6 } },
-                                        h(
-                                          'div',
-                                          { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                                          h('span', { className: 'dnb-qa-badge', 'data-role': 'user' }, '🙋 你的提问'),
-                                          repliesToShow.length > 0
-                                            ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `含 ${repliesToShow.length} 条回复/回执`)
-                                            : null,
-                                        ),
-                                        h(
-                                          'div',
-                                          { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
-                                          h('span', null, timeLabel(q.at)),
-                                          h(Icon, {
-                                            name: 'chevron',
-                                            size: 12,
-                                            style: {
-                                              color: 'var(--dnb-text-3)',
-                                              transform: isTurnCollapsed ? 'none' : 'rotate(90deg)',
-                                              transition: 'transform 0.16s ease',
-                                            },
-                                          }),
-                                        ),
-                                      ),
-                                      !isTurnCollapsed && q.imageCount > 0
-                                        ? h(
-                                            'div',
-                                            {
-                                              style: {
-                                                display: 'inline-flex',
-                                                alignItems: 'center',
-                                                gap: 4,
-                                                padding: '1px 7px',
-                                                width: 'fit-content',
-                                                borderRadius: 999,
-                                                background: 'rgba(10, 132, 255, 0.15)',
-                                                color: '#409cff',
-                                                fontSize: 10.5,
-                                                fontWeight: 600,
-                                              },
-                                            },
-                                            `🖼 附图 ×${q.imageCount}`,
-                                          )
-                                        : null,
-                                      q.text
-                                        ? h('div', {
-                                            style: isTurnCollapsed
-                                              ? {
-                                                  fontSize: 12,
-                                                  color: 'var(--dnb-text)',
-                                                  lineHeight: 1.45,
-                                                  overflow: 'hidden',
-                                                  textOverflow: 'ellipsis',
-                                                  whiteSpace: 'nowrap',
-                                                }
-                                              : { fontSize: 12, color: 'var(--dnb-text)', lineHeight: 1.5, whiteSpace: 'pre-wrap' },
-                                          }, q.text)
-                                        : null,
-                                    )
-                                  : h(
-                                      'div',
-                                      {
-                                        className: 'dnb-turn-question',
-                                        title: isTurnCollapsed ? '点击拉开该组回执' : '点击收起该组回执',
-                                        onClick: toggleTurn,
-                                      },
-                                      h(
-                                        'div',
-                                        { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6 } },
-                                        h(
-                                          'div',
-                                          { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                                          h('span', { className: 'dnb-receipt-badge' }, '📋 系统回执集合'),
-                                          repliesToShow.length > 0
-                                            ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `含 ${repliesToShow.length} 条回执`)
-                                            : null,
-                                        ),
-                                        h(
-                                          'div',
-                                          { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
-                                          turn.at ? h('span', null, timeLabel(turn.at)) : null,
-                                          h(Icon, {
-                                            name: 'chevron',
-                                            size: 12,
-                                            style: {
-                                              color: 'var(--dnb-text-3)',
-                                              transform: isTurnCollapsed ? 'none' : 'rotate(90deg)',
-                                              transition: 'transform 0.16s ease',
-                                            },
-                                          }),
-                                        ),
-                                      ),
-                                    ),
-                                !isTurnCollapsed && repliesToShow.length > 0
-                                  ? h(
-                                      'div',
-                                      { className: 'dnb-turn-replies' },
-                                      repliesToShow.map(renderTurnReplyCard),
-                                    )
-                                  : null,
-                              )
-                            }),
-                          )
-                        : h('div', { className: 'dnb-cell', style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } },
-                            chatFilter === 'receipt' ? '暂无执行与系统回执记录' : '暂无问答对话记录'))
-                    : null,
-                )
-              })()
-            : null,
-        )
-      : h(
-          React.Fragment,
-          null,
-          // Quick Add Durable Fact
-            h(
-              'div',
-              { className: 'dnb-group', style: { padding: 8, marginBottom: 10 } },
-              h(
-                'div',
-                { style: { display: 'flex', gap: 6, alignItems: 'center' } },
-                h('select', {
-                  className: 'dnb-input',
-                  style: { width: 74, height: 28, padding: '0 6px', borderRadius: 99, fontSize: 11.5, flexShrink: 0 },
-                  value: view.secNewFactCat || 'discipline',
-                  onChange: e => patch({ secNewFactCat: e.target.value }),
-                }, FACT_CATEGORIES.map(c => h('option', { key: c.key, value: c.key }, c.label))),
-                h('input', {
-                  className: 'dnb-input',
-                  style: { height: 28, borderRadius: 99, padding: '0 11px', fontSize: 12 },
-                  placeholder: '立一条长期规矩或团队约定…',
-                  value: view.secNewFactText || '',
-                  onChange: e => patch({ secNewFactText: e.target.value }),
-                  onKeyDown: e => { if (e.key === 'Enter') submitNewFact() },
-                }),
-                (view.secNewFactText || '').trim()
-                  ? h('button', { className: 'dnb-primary-btn', style: { height: 28, padding: '0 10px' }, onClick: submitNewFact }, '记住')
+              AccCard,
+              {
+                open: !view.chiefDigestCollapsed,
+                onToggle: () => patch({ chiefDigestCollapsed: !view.chiefDigestCollapsed }),
+                title: useSixBriefCards ? bi('⚡ 极简目标战报', '⚡ Concise Goal Brief') : bi('态势摘要', 'Situation Digest'),
+                headTitle: view.chiefDigestCollapsed ? bi('点击拉起态势摘要', 'Expand situation digest') : bi('点击收起态势摘要', 'Collapse situation digest'),
+                preview: digestPreview,
+                headerExtra: !view.chiefDigestCollapsed
+                  ? h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', whiteSpace: 'nowrap' } }, digestStatusText)
                   : null,
-              ),
+                badges: h(
+                  React.Fragment,
+                  null,
+                  narrative.byModel
+                    ? h('span', {
+                        className: 'dnb-acc-badge',
+                        title: narrative.byModel,
+                      }, shortModelName(narrative.byModel, view.secModelsCatalog || (sec && sec.models), true))
+                    : null,
+                  ledgerTotalCalls > 0
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-acc-badge',
+                        style: { cursor: 'pointer', border: '1px solid var(--dnb-border)', background: 'var(--dnb-fill)' },
+                        title: bi('查看参谋长 LLM 账本与托管硬预算上限', 'View Chief LLM ledger & hard budget caps'),
+                        onClick: e => {
+                          e.stopPropagation()
+                          patch({ settingsOpen: true })
+                        },
+                      }, '⚡ ' + ledgerChipLabel)
+                    : null,
+                ),
+                bodyStyle: { padding: '10px 12px 12px' },
+              },
+              useSixBriefCards
+                ? h(
+                    'div',
+                    { className: 'dnb-six-brief' },
+                    sixGoalRows.map(row =>
+                      h(
+                        'div',
+                        { key: row.key, className: 'dnb-six-row' },
+                        h(
+                          'span',
+                          {
+                            className: 'dnb-six-tag',
+                            style: { color: row.color, background: row.bg },
+                          },
+                          row.key,
+                        ),
+                        h('span', { style: { flex: 1, fontSize: 12.2, color: 'var(--dnb-text)', lineHeight: 1.5 } }, row.body),
+                      ),
+                    ),
+                  )
+                : blocks.length
+                  ? blocks.map((blk, i) =>
+                      h(
+                        'div',
+                        { key: i, style: { marginTop: i === 0 ? 0 : 12 } },
+                        blk.heading ? renderStructuredHeading(blk.heading, false) : null,
+                        (blk.items || []).map((it, j) => renderStructuredItem(it, `${i}-${j}`)),
+                      ),
+                    )
+                  : h('p', { className: 'dnb-prose-p' },
+                      '当前会话尚未沉淀持久规矩或阶段结论。你可以在下方许愿框直接立规矩、整档案、定边界或吩咐参谋长调度。'),
             ),
 
-            facts.length
-              ? h(
-                  'div',
-                  { className: 'dnb-group' },
-                  facts.map(fact => {
-                    const isEditing = editingFactId === fact.id
+            // Partitioned Chief Q&A Turn Collections vs System / Execution Receipts
+            chat.length > 0
+              ? (() => {
+                  const turns = groupChatHistoryTurnsNewestFirst(chat.slice(-32))
+                  const qaCount = turns.filter(t => t.kind === 'turn').length
+                  const receiptCount = turns.filter(t => t.replies.some(r => isReceiptChatItem(r))).length
+                  const filteredTurns = chatFilter === 'receipt'
+                    ? turns.filter(t => t.replies.some(r => isReceiptChatItem(r)))
+                    : (chatFilter === 'qa' ? turns.filter(t => t.kind === 'turn') : turns)
+
+                  const formatChiefReplyEffortBadge = (it) => {
+                    const eff = String((it && it.thinkingEffort) || '').trim().toLowerCase()
+                    if (!eff) return ''
+                    const opt = THINKING_EFFORT_OPTIONS.find(o => o.key === eff)
+                    const label = opt ? opt.shortLabel : eff
+                    return (it && it.thinkingEffortMode === 'auto') ? `🪄 自动→${label}` : `🧠 ${label}`
+                  }
+
+                  const renderTurnReplyCard = (item) => {
+                    const isReceipt = isReceiptChatItem(item)
+                    const effortBadge = formatChiefReplyEffortBadge(item)
                     return h(
                       'div',
-                      { key: fact.id, className: 'dnb-cell dnb-cell-hover', style: { flexDirection: 'column', alignItems: 'flex-start', gap: 5 } },
+                      {
+                        key: item.id,
+                        className: 'dnb-turn-reply-item',
+                        'data-role': isReceipt ? 'receipt' : (item.role === 'chief' ? 'chief' : 'user'),
+                      },
                       h(
                         'div',
-                        { style: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
+                        { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6, flexWrap: 'wrap' } },
                         h(
                           'div',
                           { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                          fact.pinned ? h(Icon, { name: 'pin', size: 11.5, style: { color: 'var(--dnb-accent)' } }) : null,
-                          (() => {
-                            const ft = FACT_CAT_TONE[fact.category]
-                            return h('span', {
-                              className: 'dnb-tag',
-                              style: ft ? { background: ft.bg, color: ft.fg, border: '1px solid ' + ft.border } : undefined,
-                            }, FACT_CAT_LABEL[fact.category] || '条目')
-                          })(),
-                          h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, relativeTimeLabel(fact.updatedAt || fact.addedAt)),
+                          isReceipt
+                            ? h('span', { className: 'dnb-receipt-badge' },
+                                item.isOneStopReport
+                                  ? '🏁 一站式战报回执'
+                                  : (item.resumeTaskId ? '⚡ 授权续跑回执' : '📋 执行回执'))
+                            : h('span', { className: 'dnb-qa-badge', 'data-role': 'chief' }, '✦ 参谋回答'),
                         ),
                         h(
                           'div',
-                          { className: 'dnb-row-actions' },
-                          h('button', {
-                            className: 'dnb-icon-btn',
-                            style: { width: 22, height: 22, color: fact.pinned ? 'var(--dnb-accent)' : undefined },
-                            title: fact.pinned ? '取消锁定（允许参谋长自动修订）' : '锁定置顶',
-                            onClick: () => void mutateFact({ op: 'pin', id: fact.id, pinned: !fact.pinned }),
-                          }, h(Icon, { name: 'pin', size: 11.5 })),
-                          h('button', {
-                            className: 'dnb-icon-btn',
-                            style: { width: 22, height: 22 },
-                            title: '编辑',
-                            onClick: () => {
-                              setEditingFactId(isEditing ? '' : fact.id)
-                              setEditingFactText(fact.text || '')
-                            },
-                          }, h(Icon, { name: 'edit', size: 11.5 })),
-                          h('button', {
-                            className: 'dnb-icon-btn',
-                            style: { width: 22, height: 22, color: '#ff453a' },
-                            title: '删除',
-                            onClick: () => void mutateFact({ op: 'remove', id: fact.id }),
-                          }, h(Icon, { name: 'trash', size: 11.5 })),
+                          { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+                          effortBadge
+                            ? h('span', {
+                                className: 'dnb-chat-effort-badge',
+                                title: item.thinkingEffortMode === 'auto' ? '自适应换挡本次实际生效思考强度' : '本次回复固定思考强度',
+                              }, effortBadge)
+                            : null,
+                          h('span', null, timeLabel(item.at)),
                         ),
                       ),
-                      isEditing
+                      renderStructuredText(item.text),
+                      Array.isArray(item.actions) && item.actions.length
                         ? h(
                             'div',
-                            { style: { display: 'flex', width: '100%', gap: 6, marginTop: 2 } },
-                            h('input', {
-                              className: 'dnb-input',
-                              style: { height: 28, fontSize: 12 },
-                              value: editingFactText,
-                              onChange: e => setEditingFactText(e.target.value),
-                              onKeyDown: e => {
-                                if (e.key === 'Enter' && editingFactText.trim()) {
-                                  void mutateFact({ op: 'edit', id: fact.id, text: editingFactText.trim(), category: fact.category })
-                                  setEditingFactId('')
+                            { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2 } },
+                            item.actions.map((actTag, idx) =>
+                              h('span', { key: idx, className: 'dnb-tag', style: { color: isReceipt ? '#34d399' : 'var(--dnb-accent)' } }, actTag)),
+                          )
+                        : null,
+                    )
+                  }
+
+                  const collapsedMap = view.qaCollapsedTurnIds || {}
+                  const allTurnsCollapsed = showHistory && filteredTurns.length > 0 && filteredTurns.every(t => Boolean(collapsedMap[t.id]))
+
+                  return h(
+                    AccCard,
+                    {
+                      open: showHistory,
+                      onToggle: () => setShowHistory(v => !v),
+                      title: bi('参谋问答与回执', 'Chief Q&A & Receipts'),
+                      count: `${turns.length}`,
+                      bodyStyle: { padding: 0 },
+                      actions: h(
+                        'div',
+                        { className: 'dnb-text-filter-bar', style: { padding: 0, gap: 3 } },
+                        [
+                          { key: 'all', label: `${bi('全部', 'All')} ${turns.length}` },
+                          { key: 'qa', label: `${bi('问答', 'Q&A')} ${qaCount}` },
+                          { key: 'receipt', label: `${bi('回执', 'Receipts')} ${receiptCount}` },
+                        ].map(opt =>
+                          h('button', {
+                            key: opt.key,
+                            type: 'button',
+                            className: 'dnb-text-filter-btn',
+                            'data-active': chatFilter === opt.key ? '1' : '0',
+                            onClick: () => {
+                              setChatFilter(opt.key)
+                              if (!showHistory) setShowHistory(true)
+                            },
+                          }, opt.label),
+                        ),
+                        filteredTurns.length > 0
+                          ? h('button', {
+                              type: 'button',
+                              className: 'dnb-text-filter-btn',
+                              style: { marginLeft: 2 },
+                              title: allTurnsCollapsed ? bi('展开全部会话条目', 'Expand all turns') : bi('收起全部会话条目', 'Collapse all turns'),
+                              onClick: () => {
+                                if (!showHistory) {
+                                  setShowHistory(true)
+                                  patch({ qaCollapsedTurnIds: {} })
+                                  return
+                                }
+                                if (allTurnsCollapsed) {
+                                  patch({ qaCollapsedTurnIds: {} })
+                                } else {
+                                  const nextMap = {}
+                                  for (const t of filteredTurns) nextMap[t.id] = true
+                                  patch({ qaCollapsedTurnIds: nextMap })
                                 }
                               },
-                            }),
-                            h('button', {
-                              className: 'dnb-primary-btn',
-                              style: { height: 28, padding: '0 10px' },
-                              onClick: () => {
-                                if (!editingFactText.trim()) return
-                                void mutateFact({ op: 'edit', id: fact.id, text: editingFactText.trim(), category: fact.category })
-                                setEditingFactId('')
+                            }, allTurnsCollapsed ? bi('全展开', 'Expand') : bi('全收起', 'Collapse'))
+                          : null,
+                      ),
+                    },
+                    filteredTurns.length > 0
+                      ? h(
+                          'div',
+                          { className: 'dnb-qa-stream' },
+                          filteredTurns.map(turn => {
+                            const q = turn.question
+                            const repliesToShow = chatFilter === 'receipt' && turn.kind === 'system'
+                              ? turn.replies.filter(r => isReceiptChatItem(r))
+                              : turn.replies
+                            const isTurnCollapsed = Boolean(collapsedMap[turn.id])
+                            const toggleTurn = () => patch({
+                              qaCollapsedTurnIds: {
+                                ...(view.qaCollapsedTurnIds || {}),
+                                [turn.id]: !isTurnCollapsed,
                               },
-                            }, '保存'),
-                          )
-                        : h('div', { style: { fontSize: 12.5, color: 'var(--dnb-text)', lineHeight: 1.55, wordBreak: 'break-word' } }, fact.text),
-                    )
-                  }),
-                )
-              : h('div', { className: 'dnb-empty', style: { padding: '18px 12px' } }, '暂无持久纪律条目'),
-
-            // Collapsible Raw Turn Memory (Original MemoryTab)
+                            })
+                            return h(
+                              'div',
+                              {
+                                key: turn.id,
+                                className: 'dnb-qa-turn-box',
+                                'data-turn-kind': turn.kind,
+                                'data-collapsed': isTurnCollapsed ? '1' : '0',
+                              },
+                              q
+                                ? h(
+                                    'div',
+                                    {
+                                      className: 'dnb-turn-question',
+                                      title: isTurnCollapsed ? '点击拉开该轮对话与回执' : '点击收起该轮对话与回执',
+                                      onClick: toggleTurn,
+                                    },
+                                    h(
+                                      'div',
+                                      { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6 } },
+                                      h(
+                                        'div',
+                                        { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+                                        h('span', { className: 'dnb-qa-badge', 'data-role': 'user' }, '🙋 你的提问'),
+                                        repliesToShow.length > 0
+                                          ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `含 ${repliesToShow.length} 条回复/回执`)
+                                          : null,
+                                      ),
+                                      h(
+                                        'div',
+                                        { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
+                                        h('span', null, timeLabel(q.at)),
+                                        h(Icon, {
+                                          name: 'chevron',
+                                          size: 12,
+                                          style: {
+                                            color: 'var(--dnb-text-3)',
+                                            transform: isTurnCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+                                            transition: 'transform 0.16s ease',
+                                          },
+                                        }),
+                                      ),
+                                    ),
+                                    !isTurnCollapsed && q.imageCount > 0
+                                      ? h(
+                                          'div',
+                                          {
+                                            style: {
+                                              display: 'inline-flex',
+                                              alignItems: 'center',
+                                              gap: 4,
+                                              padding: '1px 7px',
+                                              width: 'fit-content',
+                                              borderRadius: 999,
+                                              background: 'rgba(10, 132, 255, 0.15)',
+                                              color: '#409cff',
+                                              fontSize: 10.5,
+                                              fontWeight: 600,
+                                            },
+                                          },
+                                          `🖼 附图 ×${q.imageCount}`,
+                                        )
+                                      : null,
+                                    q.text
+                                      ? h('div', {
+                                          style: isTurnCollapsed
+                                            ? {
+                                                fontSize: 12,
+                                                color: 'var(--dnb-text)',
+                                                lineHeight: 1.45,
+                                                overflow: 'hidden',
+                                                textOverflow: 'ellipsis',
+                                                whiteSpace: 'nowrap',
+                                              }
+                                            : { fontSize: 12, color: 'var(--dnb-text)', lineHeight: 1.5, whiteSpace: 'pre-wrap' },
+                                        }, q.text)
+                                      : null,
+                                  )
+                                : h(
+                                    'div',
+                                    {
+                                      className: 'dnb-turn-question',
+                                      title: isTurnCollapsed ? '点击拉开该组回执' : '点击收起该组回执',
+                                      onClick: toggleTurn,
+                                    },
+                                    h(
+                                      'div',
+                                      { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6 } },
+                                      h(
+                                        'div',
+                                        { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+                                        h('span', { className: 'dnb-receipt-badge' }, '📋 系统回执集合'),
+                                        repliesToShow.length > 0
+                                          ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `含 ${repliesToShow.length} 条回执`)
+                                          : null,
+                                      ),
+                                      h(
+                                        'div',
+                                        { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
+                                        turn.at ? h('span', null, timeLabel(turn.at)) : null,
+                                        h(Icon, {
+                                          name: 'chevron',
+                                          size: 12,
+                                          style: {
+                                            color: 'var(--dnb-text-3)',
+                                            transform: isTurnCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+                                            transition: 'transform 0.16s ease',
+                                          },
+                                        }),
+                                      ),
+                                    ),
+                                  ),
+                              !isTurnCollapsed && repliesToShow.length > 0
+                                ? h(
+                                    'div',
+                                    { className: 'dnb-turn-replies' },
+                                    repliesToShow.map(renderTurnReplyCard),
+                                  )
+                                : null,
+                            )
+                          }),
+                        )
+                      : h('div', { className: 'dnb-cell', style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } },
+                          chatFilter === 'receipt' ? '暂无执行与系统回执记录' : '暂无问答对话记录'),
+                  )
+                })()
+              : null,
+          )
+        })()
+      : h(
+          React.Fragment,
+          null,
+          h(
+            AccCard,
+            {
+              open: !view.chiefFactsCollapsed,
+              onToggle: () => patch({ chiefFactsCollapsed: !view.chiefFactsCollapsed }),
+              title: bi('持久纪律与团队约定', 'Persistent Disciplines & Facts'),
+              count: facts.length ? String(facts.length) : '',
+              preview: facts.length ? clampTitle(facts[0].text || '', 28) : bi('尚未设定长期纪律', 'No facts saved yet'),
+              bodyStyle: { padding: 0 },
+            },
             h(
               'div',
-              { className: 'dnb-group', style: { marginTop: 10 } },
-              h(
-                'div',
-                {
-                  className: 'dnb-cell dnb-cell-hover',
-                  style: { cursor: 'pointer', justifyContent: 'space-between' },
-                  onClick: () => patch({ secShowRawTurns: !view.secShowRawTurns }),
-                },
-                h('span', { style: { fontSize: 12, color: 'var(--dnb-text-2)', fontWeight: 500 } },
-                  '每轮原始自动流水记录' + (view.memCount ? ' (' + view.memCount + ')' : '')),
-                h(Icon, {
-                  name: 'chevron',
-                  size: 13,
-                  style: {
-                    color: 'var(--dnb-text-3)',
-                    transform: view.secShowRawTurns ? 'rotate(90deg)' : 'none',
-                    transition: 'transform 0.18s ease',
-                  },
-                }),
-              ),
+              { className: 'dnb-cell', style: { padding: '8px 10px', gap: 6 } },
+              h('select', {
+                className: 'dnb-input',
+                style: { width: 74, height: 28, padding: '0 6px', borderRadius: 99, fontSize: 11.5, flexShrink: 0 },
+                value: view.secNewFactCat || 'discipline',
+                onChange: e => patch({ secNewFactCat: e.target.value }),
+              }, FACT_CATEGORIES.map(c => h('option', { key: c.key, value: c.key }, factCatLabel(c.key) || c.label))),
+              h('input', {
+                className: 'dnb-input',
+                style: { height: 28, borderRadius: 99, padding: '0 11px', fontSize: 12 },
+                placeholder: bi('立一条长期规矩或团队约定…', 'Add a discipline or project rule…'),
+                value: view.secNewFactText || '',
+                onChange: e => patch({ secNewFactText: e.target.value }),
+                onKeyDown: e => { if (e.key === 'Enter') submitNewFact() },
+              }),
+              (view.secNewFactText || '').trim()
+                ? h('button', { className: 'dnb-primary-btn', style: { height: 28, padding: '0 10px' }, onClick: submitNewFact }, bi('记住', 'Save'))
+                : null,
             ),
-            view.secShowRawTurns ? h(MemoryTab, { board }) : null,
+            facts.length
+              ? facts.map(fact => {
+                  const isEditing = editingFactId === fact.id
+                  return h(
+                    'div',
+                    { key: fact.id, className: 'dnb-cell dnb-cell-hover', style: { flexDirection: 'column', alignItems: 'flex-start', gap: 5 } },
+                    h(
+                      'div',
+                      { style: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
+                      h(
+                        'div',
+                        { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+                        fact.pinned ? h(Icon, { name: 'pin', size: 11.5, style: { color: 'var(--dnb-accent)' } }) : null,
+                        (() => {
+                          const ft = FACT_CAT_TONE[fact.category]
+                          return h('span', {
+                            className: 'dnb-tag',
+                            style: ft ? { background: ft.bg, color: ft.fg, border: '1px solid ' + ft.border } : undefined,
+                          }, FACT_CAT_LABEL[fact.category] || '条目')
+                        })(),
+                        h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, relativeTimeLabel(fact.updatedAt || fact.addedAt)),
+                      ),
+                      h(
+                        'div',
+                        { className: 'dnb-row-actions' },
+                        h('button', {
+                          className: 'dnb-icon-btn',
+                          style: { width: 22, height: 22, color: fact.pinned ? 'var(--dnb-accent)' : undefined },
+                          title: fact.pinned ? '取消锁定（允许参谋长自动修订）' : '锁定置顶',
+                          onClick: () => void mutateFact({ op: 'pin', id: fact.id, pinned: !fact.pinned }),
+                        }, h(Icon, { name: 'pin', size: 11.5 })),
+                        h('button', {
+                          className: 'dnb-icon-btn',
+                          style: { width: 22, height: 22 },
+                          title: '编辑',
+                          onClick: () => {
+                            setEditingFactId(isEditing ? '' : fact.id)
+                            setEditingFactText(fact.text || '')
+                          },
+                        }, h(Icon, { name: 'edit', size: 11.5 })),
+                        h('button', {
+                          className: 'dnb-icon-btn',
+                          style: { width: 22, height: 22, color: '#ff453a' },
+                          title: '删除',
+                          onClick: () => void mutateFact({ op: 'remove', id: fact.id }),
+                        }, h(Icon, { name: 'trash', size: 11.5 })),
+                      ),
+                    ),
+                    isEditing
+                      ? h(
+                          'div',
+                          { style: { display: 'flex', width: '100%', gap: 6, marginTop: 2 } },
+                          h('input', {
+                            className: 'dnb-input',
+                            style: { height: 28, fontSize: 12 },
+                            value: editingFactText,
+                            onChange: e => setEditingFactText(e.target.value),
+                            onKeyDown: e => {
+                              if (e.key === 'Enter' && editingFactText.trim()) {
+                                void mutateFact({ op: 'edit', id: fact.id, text: editingFactText.trim(), category: fact.category })
+                                setEditingFactId('')
+                              }
+                            },
+                          }),
+                          h('button', {
+                            className: 'dnb-primary-btn',
+                            style: { height: 28, padding: '0 10px' },
+                            onClick: () => {
+                              if (!editingFactText.trim()) return
+                              void mutateFact({ op: 'edit', id: fact.id, text: editingFactText.trim(), category: fact.category })
+                              setEditingFactId('')
+                            },
+                          }, '保存'),
+                        )
+                      : h('div', { style: { fontSize: 12.5, color: 'var(--dnb-text)', lineHeight: 1.55, wordBreak: 'break-word' } }, fact.text),
+                  )
+                })
+              : h('div', { className: 'dnb-empty', style: { padding: '16px 12px', borderTop: '1px solid var(--dnb-border)' } }, '暂无持久纪律条目'),
           ),
+
+          // Collapsible Raw Turn Memory (Original MemoryTab) inside unified AccCard
+          h(
+            AccCard,
+            {
+              open: Boolean(view.secShowRawTurns),
+              onToggle: () => patch({ secShowRawTurns: !view.secShowRawTurns }),
+              title: '每轮原始自动流水记录',
+              count: view.memCount ? String(view.memCount) : '',
+              preview: '按轮次追溯历史事实与记忆检索',
+            },
+            h(MemoryTab, { board }),
+          ),
+        ),
   )
 }
 
@@ -897,12 +944,12 @@ export function ChiefComposerBar({ view, barRef }) {
     void updateSecConfig({ tacticalModes: { ...tm, [key]: val } })
   }
   const placeholder = secImages.length > 0
-    ? ('已附 ' + secImages.length + ' 张图，回车可直接发送或补充说明…')
+    ? bi('已附 ' + secImages.length + ' 张图，回车可直接发送或补充说明…', `${secImages.length} image(s) attached; Enter to send…`)
     : (activeTarget === 'auto'
-        ? '✦ 许愿框：整理/提炼档案、设定边界、重设任务、调整协同网络或吩咐参谋长…'
+        ? bi('✦ 许愿框：整理/提炼档案、设定边界、重设任务、调整协同网络或吩咐参谋长…', '✦ Command Chief: organize archives, set guards, adjust plan, dispatch or ask…')
         : activeTarget === 'all'
-          ? '向全体成员广播（' + modeObj.label + '）…'
-          : ('给 @' + shortAgentName(activePeer ? activePeer.name : activeTarget, true) + ' ' + modeObj.label + '…'))
+          ? bi('向全体成员广播（', 'Broadcast to all (') + modeObj.label + ')…'
+          : (bi('给 @', 'To @') + shortAgentName(activePeer ? activePeer.name : activeTarget, true) + ' ' + modeObj.label + '…'))
 
   return h(
     'div',
@@ -1508,9 +1555,9 @@ export function ChiefComposerBar({ view, barRef }) {
       h('button', {
         className: 'dnb-sec-chip',
         'data-active': activeTarget === 'auto' ? '1' : '0',
-        title: '由 DSH 参谋长研判实时进展、亲自实权查改/调度子代理或拆话递给对应成员',
+        title: bi('由 DSH 参谋长研判实时进展、亲自实权查改/调度子代理或拆话递给对应成员', 'Let DSH Chief analyze state, coordinate or route relays'),
         onClick: () => patch({ secTarget: 'auto' }),
-      }, '✦ 参谋/拆话'),
+      }, bi('✦ 参谋/拆话', '✦ Chief')),
       targetChips.map(p =>
         h('button', {
           key: p.key,

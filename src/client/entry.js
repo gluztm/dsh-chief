@@ -12,6 +12,7 @@
  */
 
 import { SIDE_ID, BRAND_NAME } from './constants.js'
+import { bi } from './i18n.js'
 import {
   store,
   patch,
@@ -68,13 +69,13 @@ export function createClientPlugin() {
           id: SIDE_ID,
           kind: SIDE_ID,
           priority: 'extension',
-          title: () => BRAND_NAME,
+          title: () => bi(BRAND_NAME, 'DSH Chief'),
           guide: [
             {
               id: SIDE_ID,
               order: 40,
-              title: () => BRAND_NAME,
-              description: () => '摘要 · 金字塔任务拓扑 · 跨对话协同 · 工程档案柜 · 宰相边界',
+              title: () => bi(BRAND_NAME, 'DSH Chief'),
+              description: () => bi('摘要 · 推进流程拓扑 · 跨对话协同 · 工程档案柜 · 宰相边界', 'Digest · Workflow Topology · Peer Sync · Archives · Guardrails'),
               icon: ChiefIcon,
             },
           ],
@@ -97,7 +98,7 @@ export function createClientPlugin() {
       ctx.effect(
         () =>
           ctx.slots.inject('sidebar.panellist', () =>
-            ctx.slots.register({ name: 'sidebar.panellist', id: SIDE_ID, order: 40, label: () => BRAND_NAME }, ChiefIcon),
+            ctx.slots.register({ name: 'sidebar.panellist', id: SIDE_ID, order: 40, label: () => bi(BRAND_NAME, 'DSH Chief') }, ChiefIcon),
           ),
         'dsh-chief: sidebar entry',
       )

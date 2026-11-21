@@ -6,11 +6,13 @@
 
 import { React, h } from '../react-runtime.js'
 import { MEMORY_SECTIONS } from '../constants.js'
+import { bi, getUiLangPref, presetList } from '../i18n.js'
 import { store, patch } from '../store.js'
 import { clampTitle, shortSession, timeLabel } from '../utils.js'
 import {
   call,
   updateSecConfig,
+  applyScenarioPreset,
   loadArchives,
   approveGoalApi,
   rejectGoalApi,
@@ -28,9 +30,24 @@ import {
   askLeadModel,
   copyText,
 } from '../api.js'
-import { Icon, Switch, ObjectiveRadarStrip, renderStructuredText } from '../components/common.js'
+import {
+  fireChiefAlertNotification,
+  getNotificationPermissionState,
+  requestNotificationPermission,
+} from '../notify.js'
+import { buildSessionReportMarkdown, downloadSessionReportMarkdown } from '../report.js'
+import { Icon, Switch, ObjectiveRadarStrip, AccCard, renderStructuredText } from '../components/common.js'
 
-export function PlanTab({ board }) {
+export function PlanTab({
+  board,
+  topSlot = null,
+  taskTopologySlot = null,
+  renderUnifiedBoard = null,
+  renderStepTasks = null,
+  orphanTasksSlot = null,
+  taskBoardExtra = null,
+  onTriggerPlanGraph = null,
+}) {
   const view = store
   const [objective, setObjective] = React.useState(null)
   const [contextMenu, setContextMenu] = React.useState(null)
@@ -100,8 +117,23 @@ export function PlanTab({ board }) {
     patch({ notice: '已退出目标督导，切回标准计划推进模式' })
   }
 
-  const keepIds = list => list.map(s => ({ id: s.id, text: s.text, done: s.done }))
+  const keepIds = list => list.map(s => (s && s.summary ? { id: s.id, text: s.text, done: s.done, summary: s.summary } : { id: s.id, text: s.text, done: s.done }))
   const pushSteps = next => void act({ action: 'plan.set', steps: next })
+
+  const addStepWithText = rawText => {
+    const text = String(rawText || '').trim()
+    if (!text) return
+    const next = keepIds(steps)
+    next.push({ text, done: false })
+    pushSteps(next)
+  }
+
+  const toggleStepDone = idx => {
+    const next = keepIds(steps)
+    if (!next[idx]) return
+    next[idx] = { ...next[idx], done: !next[idx].done }
+    pushSteps(next)
+  }
 
   const buildExplainPrompt = (stepText, idx) => {
     const goalCtx = (current || '').trim() ? `（当前核心目标：${String(current).trim().slice(0, 90)}）` : ''
@@ -133,8 +165,171 @@ export function PlanTab({ board }) {
     const clean = newStepText.trim()
     if (!clean) return
     setNewStepText('')
-    const next = keepIds(steps).concat([{ text: clean, done: false }])
-    pushSteps(next)
+    addStepWithText(clean)
+  }
+
+  const renderStepConsult = (i, stepObj = null) => {
+    const step = steps[i] || (stepObj ? { text: stepObj.title, done: stepObj.done } : null)
+    if (!step) return null
+    const isConsulting = consultIdx === i
+    const secReply = secAnswers[i] || ''
+    const isSecAsking = secAskingIdx === i
+    if (!isConsulting && !isSecAsking && !secReply) return null
+
+    return h(
+      React.Fragment,
+      null,
+      isConsulting
+        ? h(
+            'div',
+            {
+              style: {
+                padding: '8px 10px',
+                marginTop: 7,
+                borderRadius: 9,
+                background: 'rgba(10, 132, 255, 0.06)',
+                border: '1px solid rgba(10, 132, 255, 0.22)',
+                display: 'flex',
+                flexDirection: 'column',
+                gap: 6,
+              },
+              onClick: e => e.stopPropagation(),
+            },
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
+              [
+                { label: '这条是什么意思？', q: '这条具体是什么意思？请用通俗大白话解释一下。' },
+                { label: '为什么要有这步？', q: '为什么需要有这个步骤？它在整体方案里解决什么问题？' },
+                { label: step.done ? '具体改了什么？' : '目前卡在哪？', q: step.done ? '这一步具体查出了什么结论、做了什么修改？' : '这一步目前进展到哪了，有没有卡点？' },
+              ].map((preset, pi) =>
+                h('button', {
+                  key: pi,
+                  type: 'button',
+                  className: 'dnb-sec-chip',
+                  style: { fontSize: 10.5, height: 21, padding: '0 7px' },
+                  onClick: () => {
+                    const goalCtx = (current || '').trim() ? `（长期目标：${String(current).trim().slice(0, 80)}）` : ''
+                    void askLeadModel(
+                      `关于小任务板第 ${i + 1} 步「${String(step.text || '').slice(0, 80)}」${goalCtx}：${preset.q}`,
+                      '咨询小任务步骤',
+                    )
+                    setConsultIdx(-1)
+                  },
+                }, preset.label),
+              ),
+            ),
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+              h('input', {
+                className: 'dnb-input',
+                style: { flex: 1, height: 27, fontSize: 11.5 },
+                autoFocus: true,
+                placeholder: '自由输入对这一步的疑问（回车问主模型）…',
+                value: consultDraft,
+                onChange: e => setConsultDraft(e.target.value),
+                onKeyDown: e => {
+                  if (e.key === 'Enter' && consultDraft.trim()) {
+                    e.preventDefault()
+                    const q = consultDraft.trim()
+                    setConsultDraft('')
+                    setConsultIdx(-1)
+                    void askLeadModel(
+                      `关于小任务板第 ${i + 1} 步「${String(step.text || '').slice(0, 80)}」：${q}`,
+                      '咨询小任务步骤',
+                    )
+                  } else if (e.key === 'Escape') {
+                    setConsultIdx(-1)
+                  }
+                },
+              }),
+              h('button', {
+                type: 'button',
+                className: 'dnb-primary-btn',
+                style: { height: 27, padding: '0 9px', fontSize: 11, flexShrink: 0 },
+                disabled: !consultDraft.trim(),
+                onClick: () => {
+                  const q = consultDraft.trim()
+                  if (!q) return
+                  setConsultDraft('')
+                  setConsultIdx(-1)
+                  void askLeadModel(
+                    `关于小任务板第 ${i + 1} 步「${String(step.text || '').slice(0, 80)}」：${q}`,
+                    '咨询小任务步骤',
+                  )
+                },
+              }, '问模型'),
+              h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 27, padding: '0 8px', fontSize: 11, flexShrink: 0, color: 'var(--dnb-accent)' },
+                disabled: isSecAsking,
+                title: '不打断主对话，让 DSH 参谋长结合上下文直接在此处下方给出通俗解答',
+                onClick: () => {
+                  const q = consultDraft.trim()
+                  setConsultDraft('')
+                  setConsultIdx(-1)
+                  void askStepViaChief(i, step.text, q)
+                },
+              }, isSecAsking ? '解答中…' : '✦ 问参谋长'),
+            ),
+          )
+        : null,
+      (isSecAsking || secReply)
+        ? h(
+            'div',
+            {
+              style: {
+                padding: '8px 10px',
+                marginTop: 7,
+                borderRadius: 9,
+                background: 'rgba(128, 128, 136, 0.08)',
+                border: '1px solid var(--dnb-border)',
+                fontSize: 11.5,
+                color: 'var(--dnb-text-2)',
+                lineHeight: 1.5,
+              },
+              onClick: e => e.stopPropagation(),
+            },
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 } },
+              h('span', { style: { fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-accent)' } },
+                isSecAsking ? '✦ DSH 参谋长正在结合上下文解读此步…' : '✦ DSH 参谋长步骤解读'),
+              !isSecAsking
+                ? h('button', {
+                    type: 'button',
+                    className: 'dnb-icon-btn',
+                    style: { width: 18, height: 18 },
+                    title: '收起解读',
+                    onClick: () => setSecAnswers(prev => {
+                      const copy = { ...prev }
+                      delete copy[i]
+                      return copy
+                    }),
+                  }, h(Icon, { name: 'x', size: 11 }))
+                : null,
+            ),
+            isSecAsking ? null : renderStructuredText(secReply),
+          )
+        : null,
+    )
+  }
+
+  const stepApi = {
+    consultIdx,
+    secAskingIdx,
+    secAnswers,
+    onToggleStep: toggleStepDone,
+    onExplainStep: (i, stepTitle) => void askLeadModel(buildExplainPrompt(stepTitle || (steps[i] && steps[i].text) || '', i), '咨询步骤含义'),
+    onConsultStep: i => {
+      setConsultIdx(consultIdx === i ? -1 : i)
+      setConsultDraft('')
+    },
+    onOpenStepMenu: (i, x, y) => setContextMenu({ stepIndex: i, x, y }),
+    onAppendStep: addStepWithText,
+    renderStepConsult,
   }
 
   React.useEffect(() => {
@@ -149,104 +344,116 @@ export function PlanTab({ board }) {
     }
   }, [contextMenu])
 
+  const objCollapsed = Boolean(view.planObjCollapsed)
+  const handoffCollapsed = view.handoffSectionCollapsed !== false
+
   return h(
     'div',
     { className: 'dnb-view' },
-    h(ObjectiveRadarStrip, { board, compact: true }),
+    topSlot !== null ? topSlot : h(ObjectiveRadarStrip, { board, compact: true }),
 
-    // ==================== Zone 1: Long-Term Objective & Goal Supervision Box ====================
+    // ==================== Zone 1: Collapsible Core Objective Card ====================
     h(
-      'div',
+      AccCard,
       {
-        className: 'dnb-section-head',
-        style: { alignItems: 'center', gap: 6, marginBottom: 6 },
-      },
-      h(
-        'div',
-        { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
-        h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, '核心目标'),
-        isInterventionLocked
-          ? h('span', {
-              style: {
-                padding: '1px 7px',
-                borderRadius: 99,
-                fontSize: 10.5,
-                fontWeight: 600,
-                background: 'rgba(245, 158, 11, 0.18)',
-                color: '#fbbf24',
-                border: '1px solid rgba(245, 158, 11, 0.36)',
-              },
-            }, '🔒 强介入锁定目的地')
-          : null,
-        isGoalMode
-          ? h('span', {
-              style: {
-                padding: '1px 7px',
-                borderRadius: 99,
-                fontSize: 10.5,
-                fontWeight: 600,
-                background: 'rgba(245, 158, 11, 0.16)',
-                color: '#fbbf24',
-              },
-            }, '🎯 目标督导中')
-          : null,
-        board && board.objectiveAt && objective === null
-          ? h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, timeLabel(board.objectiveAt))
-          : null,
-      ),
-      h(
-        'div',
-        { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
-        h('button', {
-          className: 'dnb-pill',
-          style: {
-            height: 23,
-            padding: '0 8px',
-            fontSize: 11,
-            borderColor: isGoalMode ? 'rgba(245, 158, 11, 0.45)' : 'rgba(10, 132, 255, 0.35)',
-            background: isGoalMode ? 'rgba(245, 158, 11, 0.14)' : 'rgba(10, 132, 255, 0.09)',
-            color: isGoalMode ? '#fbbf24' : 'var(--dnb-accent)',
-            fontWeight: 600,
-          },
-          title: isGoalMode
-            ? '退出目标督导并切回标准计划模式'
-            : '设为长期目标并开启督导：达成后需您拍板结项才结束',
-          onClick: toggleGoalMode,
-        }, isGoalMode ? '退出目标' : '🎯 设为目标'),
-        h('button', {
-          className: 'dnb-pill dnb-pill-accent',
-          style: { height: 23, padding: '0 9px', fontSize: 11 },
-          title: '根据长期目标让模型拆解可视化金字塔任务图并派发子代理',
-          onClick: () => {
-            const goalText = (current || '').trim()
-            const prompt = (goalText ? `针对长期目标「${goalText.slice(0, 100)}」，` : '')
-              + '请调用 chief_board 的 graph.plan 拆解带 parentId 与 blockedBy 的可视化任务图，并用 task.dispatch 将就绪节点并行派发给子代理团队。'
-            void askLeadModel(prompt, '拆解任务图')
-            patch({ tab: 'tasks' })
-          },
-        }, h(Icon, { name: 'sparkles', size: 12 }), '拆解任务图'),
-      ),
-    ),
-    h(
-      'div',
-      {
-        className: 'dnb-group',
+        open: !objCollapsed,
+        onToggle: () => patch({ planObjCollapsed: !objCollapsed }),
+        title: bi('核心目标', 'Core Objective'),
+        headTitle: objCollapsed ? bi('点击拉起编辑核心目标', 'Expand core objective') : bi('点击收起核心目标卡', 'Collapse core objective'),
+        showPullHint: false,
         style: (isInterventionLocked || isGoalMode)
           ? {
               borderColor: 'rgba(245, 158, 11, 0.45)',
-              boxShadow: '0 0 0 1px rgba(245, 158, 11, 0.12)',
+              boxShadow: '0 0 0 1px rgba(245, 158, 11, 0.10)',
             }
           : undefined,
+        bodyStyle: { padding: 0 },
+        badges: (isInterventionLocked || isGoalMode)
+          ? h(
+              React.Fragment,
+              null,
+              isInterventionLocked
+                ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, bi('🔒 锁定', '🔒 Locked'))
+                : null,
+              isGoalMode
+                ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, bi('🎯 督导中', '🎯 Goal'))
+                : null,
+            )
+          : null,
+        headerExtra: !objCollapsed && board && board.objectiveAt && objective === null
+          ? h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', flexShrink: 0 } }, timeLabel(board.objectiveAt))
+          : null,
+        preview: (current || '').trim() ? clampTitle(String(current).trim(), 30) : bi('未设置核心目标', 'No objective set'),
+        actions: h(
+          React.Fragment,
+          null,
+          h('button', {
+            type: 'button',
+            className: 'dnb-pill',
+            style: { height: 22, padding: '0 6px', fontSize: 10.5 },
+            title: bi('一键导出干净的 Markdown 任务复盘战报 (.md)', 'Export clean Markdown retrospective report (.md)'),
+            onClick: () => {
+              const md = buildSessionReportMarkdown({
+                board,
+                secView: view.secView,
+                chiefMeta: view.chiefMeta,
+                subagents: view.subagents,
+                guardWalls: view.guardWalls,
+                sessionId: view.sessionId,
+              })
+              const dl = downloadSessionReportMarkdown(md, view.sessionId)
+              if (dl && dl.ok) {
+                patch({ notice: bi('📄 已导出复盘战报：', '📄 Exported report: ') + dl.filename })
+              } else {
+                copyText(md, bi('📄 复盘战报 Markdown 已复制到剪贴板', '📄 Report Markdown copied to clipboard'))
+              }
+            },
+          }, bi('📄 战报', '📄 Report')),
+          h('button', {
+            type: 'button',
+            className: 'dnb-pill',
+            style: {
+              height: 22,
+              padding: '0 7px',
+              fontSize: 10.5,
+              borderColor: isGoalMode ? 'rgba(245, 158, 11, 0.45)' : 'rgba(10, 132, 255, 0.35)',
+              background: isGoalMode ? 'rgba(245, 158, 11, 0.14)' : 'rgba(10, 132, 255, 0.09)',
+              color: isGoalMode ? '#fbbf24' : 'var(--dnb-accent)',
+              fontWeight: 600,
+            },
+            title: isGoalMode
+              ? bi('退出目标督导并切回标准计划模式', 'Exit goal supervision mode')
+              : bi('设为长期目标并开启督导：达成后需您拍板结项才结束', 'Enable Goal Mode (requires your sign-off to close)'),
+            onClick: toggleGoalMode,
+          }, isGoalMode ? bi('退出目标', 'Exit Goal') : bi('🎯 设为目标', '🎯 Set Goal')),
+          h('button', {
+            type: 'button',
+            className: 'dnb-pill dnb-pill-accent',
+            style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+            title: bi('根据长期目标让模型拆解推进流步骤与任务图并派发子代理', 'Ask lead model to plan steps, task graph & dispatch subagents'),
+            onClick: () => {
+              if (typeof onTriggerPlanGraph === 'function') {
+                onTriggerPlanGraph(current)
+                return
+              }
+              const goalText = (current || '').trim()
+              const prompt = (goalText ? `针对长期目标「${goalText.slice(0, 100)}」，` : '')
+                + '请先调用 chief_board 的 plan.set 定好一二三四五顺序推进步骤，再用 graph.plan（填入对应 planStepId 与可选 targetPlanStepId）和 task.dispatch 将就绪节点并行派发给子代理团队。'
+              void askLeadModel(prompt, '拆解任务图')
+              patch({ tab: 'tasks' })
+            },
+          }, h(Icon, { name: 'sparkles', size: 11 }), bi('拆解任务图', 'Plan Graph')),
+        ),
       },
       h('textarea', {
         className: 'dnb-bare-area',
-        readOnly: isInterventionLocked,
         style: isInterventionLocked
-          ? { opacity: 0.9, cursor: 'not-allowed', color: 'var(--dnb-text)' }
-          : undefined,
+          ? { minHeight: 50, opacity: 0.9, cursor: 'not-allowed', color: 'var(--dnb-text)' }
+          : { minHeight: 50 },
+        readOnly: isInterventionLocked,
         placeholder: isInterventionLocked
-          ? '主动强介入进行中，核心目标已锁定…'
-          : '输入当前阶段核心目标，点击右上「🎯 设为目标」即可开启持续督导…',
+          ? bi('主动强介入进行中，核心目标已锁定…', 'Strong intervention active; objective locked…')
+          : bi('输入当前阶段核心目标，点击右上「🎯 设为目标」即可开启持续督导…', 'Enter core objective, click "🎯 Set Goal" for supervision…'),
         value: current,
         onChange: e => { if (!isInterventionLocked) setObjective(e.target.value) },
         onBlur: () => { if (!isInterventionLocked) saveObjective() },
@@ -283,6 +490,7 @@ export function PlanTab({ board }) {
               { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
               isInterventionLocked
                 ? h('button', {
+                    type: 'button',
                     className: 'dnb-pill',
                     style: { height: 21, padding: '0 8px', fontSize: 10.5, borderColor: 'rgba(245, 158, 11, 0.42)', color: '#fbbf24' },
                     title: '关闭主动强介入以解锁修改核心目标',
@@ -291,6 +499,7 @@ export function PlanTab({ board }) {
                 : null,
               !isInterventionLocked && objective !== null
                 ? h('button', {
+                    type: 'button',
                     className: 'dnb-pill dnb-pill-accent',
                     style: { height: 21, padding: '0 8px', fontSize: 10.5 },
                     onClick: saveObjective,
@@ -438,303 +647,188 @@ export function PlanTab({ board }) {
         )
       : null,
 
-    // ==================== Zone 2: Small Task Board (Steps + Consultation) ====================
-    h(
-      'div',
-      { className: 'dnb-section-head', style: { marginTop: 14, alignItems: 'baseline' } },
-      h(
-        'div',
-        { style: { display: 'flex', alignItems: 'baseline', gap: 6 } },
-        h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, '小任务板'),
-        h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } }, '点条目可问含义与原因'),
-      ),
-      steps.length ? h('span', null, `${doneCount} / ${steps.length}`) : null,
-    ),
-    steps.length > 0
-      ? h(
+    // ==================== Zone 2: Collapsible Visual Work Topology ====================
+    taskTopologySlot || null,
+
+    // ==================== Zone 3: Unified Progress Task Board ====================
+    typeof renderUnifiedBoard === 'function'
+      ? renderUnifiedBoard(stepApi)
+      : h(
           React.Fragment,
           null,
           h(
             'div',
-            { className: 'dnb-progress', style: { marginBottom: 8 } },
-            h('div', { style: { width: (doneCount / steps.length) * 100 + '%', background: '#30d158', transition: 'width 0.3s ease' } }),
+            { className: 'dnb-section-head', style: { marginTop: 12, alignItems: 'baseline' } },
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'baseline', gap: 6 } },
+              h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, bi('推进任务板', 'Task Progress Board')),
+              h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } }, bi('步骤与任务清单 · 点条目可解释/咨询/展开', 'Steps & Tasks · click item to inspect or ask')),
+            ),
+            (steps.length || taskBoardExtra)
+              ? h('span', null, [steps.length ? `${doneCount} / ${steps.length} 步` : '', taskBoardExtra || ''].filter(Boolean).join(' · '))
+              : null,
           ),
-          h(
-            'div',
-            { className: 'dnb-group' },
-            steps.map((step, i) => {
-              const isConsulting = consultIdx === i
-              const secReply = secAnswers[i] || ''
-              const isSecAsking = secAskingIdx === i
-
-              return h(
+          (steps.length > 0 || orphanTasksSlot)
+            ? h(
                 React.Fragment,
-                { key: step.id || i },
+                null,
+                steps.length > 0
+                  ? h(
+                      'div',
+                      { className: 'dnb-progress', style: { marginBottom: 8 } },
+                      h('div', { style: { width: (doneCount / steps.length) * 100 + '%', background: '#30d158', transition: 'width 0.3s ease' } }),
+                    )
+                  : null,
+                h(
+                  'div',
+                  { className: 'dnb-group' },
+                  steps.map((step, i) => {
+                    const isConsulting = consultIdx === i
+                    const stepTasksNode = renderStepTasks ? renderStepTasks(step, i) : null
+
+                    return h(
+                      React.Fragment,
+                      { key: step.id || i },
+                      h(
+                        'div',
+                        {
+                          className: 'dnb-cell dnb-cell-hover',
+                          style: { cursor: 'pointer' },
+                          title: '点击打开咨询与操作菜单（可问这条是什么意思、为什么有这步）',
+                          onClick: e => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setContextMenu({ stepIndex: i, x: e.clientX, y: e.clientY })
+                          },
+                          onContextMenu: e => {
+                            e.preventDefault()
+                            e.stopPropagation()
+                            setContextMenu({ stepIndex: i, x: e.clientX, y: e.clientY })
+                          },
+                        },
+                        h(
+                          'span',
+                          {
+                            className: 'dnb-ring',
+                            title: step.done ? '点击标回未完成' : '点击标记已完成',
+                            style: step.done
+                              ? { background: '#30d158', borderColor: '#30d158', cursor: 'pointer' }
+                              : { cursor: 'pointer' },
+                            onClick: e => {
+                              e.preventDefault()
+                              e.stopPropagation()
+                              const next = keepIds(steps)
+                              next[i] = { ...next[i], done: !step.done }
+                              pushSteps(next)
+                            },
+                          },
+                          step.done ? h(Icon, { name: 'check', size: 11 }) : null,
+                        ),
+                        h(
+                          'span',
+                          {
+                            style: {
+                              flex: 1,
+                              fontSize: 12.5,
+                              color: step.done ? 'var(--dnb-text-3)' : 'var(--dnb-text)',
+                              textDecoration: step.done ? 'line-through' : 'none',
+                            },
+                          },
+                          h('span', { className: 'dnb-step-idx-tag' }, `第 ${i + 1} 步`),
+                          step.text || '',
+                        ),
+                        h(
+                          'span',
+                          { className: 'dnb-row-actions', style: { gap: 4 } },
+                          h('button', {
+                            className: 'dnb-pill',
+                            style: { height: 22, padding: '0 7px', fontSize: 11, color: 'var(--dnb-accent)' },
+                            title: '让模型用大白话解释这条是什么意思、为什么有这个步骤',
+                            onClick: e => {
+                              e.stopPropagation()
+                              void askLeadModel(buildExplainPrompt(step.text, i), '咨询步骤含义')
+                            },
+                          }, '解释'),
+                          h('button', {
+                            className: 'dnb-pill',
+                            'data-active': isConsulting ? '1' : '0',
+                            style: { height: 22, padding: '0 7px', fontSize: 11 },
+                            title: '展开咨询框，自由提问关于这一步的任何疑问',
+                            onClick: e => {
+                              e.stopPropagation()
+                              setConsultIdx(isConsulting ? -1 : i)
+                              setConsultDraft('')
+                            },
+                          }, '咨询'),
+                        ),
+                      ),
+                      renderStepConsult(i, step),
+                      stepTasksNode || null,
+                    )
+                  }),
+
+                  orphanTasksSlot || null,
+
+                  h(
+                    'div',
+                    {
+                      className: 'dnb-cell',
+                      style: { padding: '6px 11px', gap: 6 },
+                    },
+                    h(Icon, { name: 'plus', size: 13, style: { color: 'var(--dnb-text-3)' } }),
+                    h('input', {
+                      className: 'dnb-input',
+                      style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1, fontSize: 12 },
+                      placeholder: '添加一条步骤（回车新增）…',
+                      value: newStepText,
+                      onChange: e => setNewStepText(e.target.value),
+                      onKeyDown: e => {
+                        if (e.key === 'Enter' && newStepText.trim()) {
+                          e.preventDefault()
+                          addNewStep()
+                        }
+                      },
+                    }),
+                    newStepText.trim()
+                      ? h('button', {
+                          className: 'dnb-pill dnb-pill-accent',
+                          style: { height: 22, padding: '0 8px', fontSize: 11 },
+                          onClick: addNewStep,
+                        }, '添加')
+                      : null,
+                  ),
+                ),
+              )
+            : h(
+                'div',
+                { className: 'dnb-group' },
+                h('div', { className: 'dnb-empty', style: { padding: '16px 12px 10px' } }, '任务板暂无步骤或任务（模型调用 plan.set / todo_write / task.add 时会自动同步到这里）'),
                 h(
                   'div',
                   {
-                    className: 'dnb-cell dnb-cell-hover',
-                    style: { cursor: 'pointer' },
-                    title: '点击打开咨询与操作菜单（可问这条是什么意思、为什么有这步）',
-                    onClick: e => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setContextMenu({ stepIndex: i, x: e.clientX, y: e.clientY })
-                    },
-                    onContextMenu: e => {
-                      e.preventDefault()
-                      e.stopPropagation()
-                      setContextMenu({ stepIndex: i, x: e.clientX, y: e.clientY })
-                    },
+                    className: 'dnb-cell',
+                    style: { padding: '6px 11px', gap: 6, borderTop: '1px solid var(--dnb-border)' },
                   },
-                  h(
-                    'span',
-                    {
-                      className: 'dnb-ring',
-                      title: step.done ? '点击标回未完成' : '点击标记已完成',
-                      style: step.done
-                        ? { background: '#30d158', borderColor: '#30d158', cursor: 'pointer' }
-                        : { cursor: 'pointer' },
-                      onClick: e => {
+                  h(Icon, { name: 'plus', size: 13, style: { color: 'var(--dnb-text-3)' } }),
+                  h('input', {
+                    className: 'dnb-input',
+                    style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1, fontSize: 12 },
+                    placeholder: '手动添加一条步骤（回车新增）…',
+                    value: newStepText,
+                    onChange: e => setNewStepText(e.target.value),
+                    onKeyDown: e => {
+                      if (e.key === 'Enter' && newStepText.trim()) {
                         e.preventDefault()
-                        e.stopPropagation()
-                        const next = keepIds(steps)
-                        next[i] = { ...next[i], done: !step.done }
-                        pushSteps(next)
-                      },
+                        addNewStep()
+                      }
                     },
-                    step.done ? h(Icon, { name: 'check', size: 11 }) : null,
-                  ),
-                  h(
-                    'span',
-                    {
-                      style: {
-                        flex: 1,
-                        fontSize: 12.5,
-                        color: step.done ? 'var(--dnb-text-3)' : 'var(--dnb-text)',
-                        textDecoration: step.done ? 'line-through' : 'none',
-                      },
-                    },
-                    step.text || '',
-                  ),
-                  h(
-                    'span',
-                    { className: 'dnb-row-actions', style: { gap: 4 } },
-                    h('button', {
-                      className: 'dnb-pill',
-                      style: { height: 22, padding: '0 7px', fontSize: 11, color: 'var(--dnb-accent)' },
-                      title: '让模型用大白话解释这条是什么意思、为什么有这个步骤',
-                      onClick: e => {
-                        e.stopPropagation()
-                        void askLeadModel(buildExplainPrompt(step.text, i), '咨询步骤含义')
-                      },
-                    }, '解释'),
-                    h('button', {
-                      className: 'dnb-pill',
-                      'data-active': isConsulting ? '1' : '0',
-                      style: { height: 22, padding: '0 7px', fontSize: 11 },
-                      title: '展开咨询框，自由提问关于这一步的任何疑问',
-                      onClick: e => {
-                        e.stopPropagation()
-                        setConsultIdx(isConsulting ? -1 : i)
-                        setConsultDraft('')
-                      },
-                    }, '咨询'),
-                  ),
+                  }),
                 ),
-
-                // Inline Consultation Drawer for this step
-                isConsulting
-                  ? h(
-                      'div',
-                      {
-                        style: {
-                          padding: '8px 11px 9px',
-                          background: 'rgba(10, 132, 255, 0.05)',
-                          borderTop: '1px solid var(--dnb-border)',
-                          display: 'flex',
-                          flexDirection: 'column',
-                          gap: 6,
-                        },
-                        onClick: e => e.stopPropagation(),
-                      },
-                      h(
-                        'div',
-                        { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
-                        [
-                          { label: '这条是什么意思？', q: '这条具体是什么意思？请用通俗大白话解释一下。' },
-                          { label: '为什么要有这步？', q: '为什么需要有这个步骤？它在整体方案里解决什么问题？' },
-                          { label: step.done ? '具体改了什么？' : '目前卡在哪？', q: step.done ? '这一步具体查出了什么结论、做了什么修改？' : '这一步目前进展到哪了，有没有卡点？' },
-                        ].map((preset, pi) =>
-                          h('button', {
-                            key: pi,
-                            className: 'dnb-sec-chip',
-                            style: { fontSize: 10.5, height: 21, padding: '0 7px' },
-                            onClick: () => {
-                              const goalCtx = (current || '').trim() ? `（长期目标：${String(current).trim().slice(0, 80)}）` : ''
-                              void askLeadModel(
-                                `关于小任务板第 ${i + 1} 步「${String(step.text || '').slice(0, 80)}」${goalCtx}：${preset.q}`,
-                                '咨询小任务步骤',
-                              )
-                              setConsultIdx(-1)
-                            },
-                          }, preset.label),
-                        ),
-                      ),
-                      h(
-                        'div',
-                        { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                        h('input', {
-                          className: 'dnb-input',
-                          style: { flex: 1, height: 27, fontSize: 11.5 },
-                          autoFocus: true,
-                          placeholder: '自由输入对这一步的疑问（回车问主模型）…',
-                          value: consultDraft,
-                          onChange: e => setConsultDraft(e.target.value),
-                          onKeyDown: e => {
-                            if (e.key === 'Enter' && consultDraft.trim()) {
-                              e.preventDefault()
-                              const q = consultDraft.trim()
-                              setConsultDraft('')
-                              setConsultIdx(-1)
-                              void askLeadModel(
-                                `关于小任务板第 ${i + 1} 步「${String(step.text || '').slice(0, 80)}」：${q}`,
-                                '咨询小任务步骤',
-                              )
-                            } else if (e.key === 'Escape') {
-                              setConsultIdx(-1)
-                            }
-                          },
-                        }),
-                        h('button', {
-                          className: 'dnb-primary-btn',
-                          style: { height: 27, padding: '0 9px', fontSize: 11, flexShrink: 0 },
-                          disabled: !consultDraft.trim(),
-                          onClick: () => {
-                            const q = consultDraft.trim()
-                            if (!q) return
-                            setConsultDraft('')
-                            setConsultIdx(-1)
-                            void askLeadModel(
-                              `关于小任务板第 ${i + 1} 步「${String(step.text || '').slice(0, 80)}」：${q}`,
-                              '咨询小任务步骤',
-                            )
-                          },
-                        }, '问模型'),
-                        h('button', {
-                          className: 'dnb-pill',
-                          style: { height: 27, padding: '0 8px', fontSize: 11, flexShrink: 0, color: 'var(--dnb-accent)' },
-                          disabled: isSecAsking,
-                          title: '不打断主对话，让 DSH 参谋长结合上下文直接在此处下方给出通俗解答',
-                          onClick: () => {
-                            const q = consultDraft.trim()
-                            setConsultDraft('')
-                            setConsultIdx(-1)
-                            void askStepViaChief(i, step.text, q)
-                          },
-                        }, isSecAsking ? '解答中…' : '✦ 问参谋长'),
-                      ),
-                    )
-                  : null,
-
-                // Inline Chief Answer Card (when requested without interrupting main chat)
-                (isSecAsking || secReply)
-                  ? h(
-                      'div',
-                      {
-                        style: {
-                          padding: '8px 11px 9px',
-                          background: 'rgba(128, 128, 136, 0.08)',
-                          borderTop: '1px solid var(--dnb-border)',
-                          fontSize: 11.5,
-                          color: 'var(--dnb-text-2)',
-                          lineHeight: 1.5,
-                        },
-                        onClick: e => e.stopPropagation(),
-                      },
-                      h(
-                        'div',
-                        { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: 4 } },
-                        h('span', { style: { fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-accent)' } },
-                          isSecAsking ? '✦ DSH 参谋长正在结合上下文解读此步…' : '✦ DSH 参谋长步骤解读'),
-                        !isSecAsking
-                          ? h('button', {
-                              className: 'dnb-icon-btn',
-                              style: { width: 18, height: 18 },
-                              title: '收起解读',
-                              onClick: () => setSecAnswers(prev => {
-                                const copy = { ...prev }
-                                delete copy[i]
-                                return copy
-                              }),
-                            }, h(Icon, { name: 'x', size: 11 }))
-                          : null,
-                      ),
-                      isSecAsking ? null : renderStructuredText(secReply),
-                    )
-                  : null,
-              )
-            }),
-
-            // Quick append step input at bottom of Small Task Board
-            h(
-              'div',
-              {
-                className: 'dnb-cell',
-                style: { padding: '6px 11px', gap: 6 },
-              },
-              h(Icon, { name: 'plus', size: 13, style: { color: 'var(--dnb-text-3)' } }),
-              h('input', {
-                className: 'dnb-input',
-                style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1, fontSize: 12 },
-                placeholder: '添加一条小任务步骤（回车新增）…',
-                value: newStepText,
-                onChange: e => setNewStepText(e.target.value),
-                onKeyDown: e => {
-                  if (e.key === 'Enter' && newStepText.trim()) {
-                    e.preventDefault()
-                    addNewStep()
-                  }
-                },
-              }),
-              newStepText.trim()
-                ? h('button', {
-                    className: 'dnb-pill dnb-pill-accent',
-                    style: { height: 22, padding: '0 8px', fontSize: 11 },
-                    onClick: addNewStep,
-                  }, '添加')
-                : null,
-            ),
-          ),
-        )
-      : h(
-          'div',
-          { className: 'dnb-group' },
-          h('div', { className: 'dnb-empty', style: { padding: '16px 12px 10px' } }, '小任务板暂无步骤（模型调用 todo_write / plan.set 时会自动同步到这里）'),
-          h(
-            'div',
-            {
-              className: 'dnb-cell',
-              style: { padding: '6px 11px', gap: 6, borderTop: '1px solid var(--dnb-border)' },
-            },
-            h(Icon, { name: 'plus', size: 13, style: { color: 'var(--dnb-text-3)' } }),
-            h('input', {
-              className: 'dnb-input',
-              style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1, fontSize: 12 },
-              placeholder: '手动添加一条小任务步骤（回车新增）…',
-              value: newStepText,
-              onChange: e => setNewStepText(e.target.value),
-              onKeyDown: e => {
-                if (e.key === 'Enter' && newStepText.trim()) {
-                  e.preventDefault()
-                  addNewStep()
-                }
-              },
-            }),
-          ),
+              ),
         ),
 
-    // ==================== Zone 3: Cross-Session Handoff & One-Click Chief Deployment ====================
+    // ==================== Zone 4: Collapsible Cross-Session Handoff & Chief Deployment ====================
     (() => {
       const targets = Array.isArray(view.targets) ? view.targets : []
       const options = [{ id: 'new', label: '新建独立会话并部署参谋' }].concat(
@@ -766,205 +860,202 @@ export function PlanTab({ board }) {
       })
 
       return h(
-        React.Fragment,
-        null,
-        h('div', { className: 'dnb-section-head', style: { marginTop: 14 } },
-          h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
-            h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, '🚀 跨会话接力 & 一键部署参谋'),
-            h('span', {
-              className: 'dnb-tag',
-              style: {
-                fontSize: 10,
-                background: sourceBadge.tone === 'accent'
-                  ? 'rgba(10,132,255,0.14)'
-                  : sourceBadge.tone === 'green'
-                    ? 'rgba(48,209,88,0.14)'
-                    : undefined,
-                color: sourceBadge.tone === 'accent'
-                  ? 'var(--dnb-accent)'
-                  : sourceBadge.tone === 'green'
-                    ? '#30d158'
-                    : 'var(--dnb-text-3)',
-              },
-            }, sourceBadge.label),
-          ),
-          h('button', {
+        AccCard,
+        {
+          open: !handoffCollapsed,
+          onToggle: () => patch({ handoffSectionCollapsed: !handoffCollapsed }),
+          title: bi('🚀 跨会话接力 & 部署参谋', '🚀 Cross-Session Handoff & Deploy'),
+          headTitle: handoffCollapsed ? bi('点击拉起跨会话接力与部署面板', 'Expand handoff & deploy card') : bi('点击收起跨会话接力面板', 'Collapse handoff card'),
+          bodyStyle: { padding: 10, display: 'flex', flexDirection: 'column', gap: 8 },
+          badges: h('span', {
+            className: 'dnb-tag',
+            style: {
+              fontSize: 10,
+              background: sourceBadge.tone === 'accent'
+                ? 'rgba(10,132,255,0.14)'
+                : sourceBadge.tone === 'green'
+                  ? 'rgba(48,209,88,0.14)'
+                  : undefined,
+              color: sourceBadge.tone === 'accent'
+                ? 'var(--dnb-accent)'
+                : sourceBadge.tone === 'green'
+                  ? '#30d158'
+                  : 'var(--dnb-text-3)',
+            },
+          }, sourceBadge.label),
+          actions: h('button', {
             type: 'button',
             className: 'dnb-mini-btn',
             'data-tone': isPinned ? 'amber' : undefined,
             title: isPinned
-              ? '已定住交接单：参谋长摘要更新时不会覆盖您手写/审定的内容，点击可解除定住'
-              : '定住交接单后，参谋长提炼摘要时将禁止自动覆写交接单',
+              ? bi('已定住交接单：参谋长摘要更新时不会覆盖您手写/审定的内容，点击可解除定住', 'Handoff pinned: Chief digest updates will not overwrite it; click to unpin')
+              : bi('定住交接单后，参谋长提炼摘要时将禁止自动覆写交接单', 'Pin handoff to prevent automatic digest overwrite'),
             onClick: () => void toggleHandoffPin(!isPinned),
-          }, isPinned ? '📌 已定住(禁参谋改)' : '📌 定住防改'),
+          }, isPinned ? bi('📌 已定住', '📌 Pinned') : bi('📌 定住防改', '📌 Pin')),
+        },
+        h(
+          'div',
+          { style: { fontSize: 11, color: 'var(--dnb-text-2)' } },
+          bi('工作档案跟随策略（同步模型/纪律/战术开关，强介入默认安全置关）：', 'Archive transfer policy (syncs model/facts safely with intervention off):'),
         ),
         h(
           'div',
-          { className: 'dnb-group', style: { padding: 10, display: 'flex', flexDirection: 'column', gap: 8 } },
-          h(
-            'div',
-            { style: { fontSize: 11, color: 'var(--dnb-text-2)' } },
-            '工作档案跟随策略（同步模型/纪律/战术开关，强介入默认安全置关）：',
-          ),
-          h(
-            'div',
-            { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
-            [
-              { key: 'none', label: '不带工作档案' },
-              { key: 'mounted', label: '仅挂桌面备查' },
-              { key: 'drawer', label: '带整个抽屉' },
-              { key: 'all', label: '全柜工作档案' },
-            ].map(p =>
-              h('button', {
-                key: p.key,
-                type: 'button',
-                className: 'dnb-mini-btn',
-                'data-tone': policy === p.key ? 'accent' : undefined,
-                onClick: () => {
-                  patch({ deployArchivePolicy: p.key })
-                  if (p.key === 'drawer' && !view.archiveLoaded) void loadArchives(false)
-                },
-              }, p.label),
-            ),
-          ),
-          policy === 'drawer'
-            ? h('select', {
-                className: 'dnb-input',
-                style: { height: 28, padding: '0 9px', borderRadius: 9, fontSize: 11.5 },
-                value: view.deployDrawer || ((drawers[0] && drawers[0].id) || 'inbox'),
-                onChange: e => patch({ deployDrawer: e.target.value }),
-              }, drawers.length
-                ? drawers.map(d => h('option', { key: d.id, value: d.id }, `${d.label} (${d.count || 0} 卷)`))
-                : [h('option', { key: 'inbox', value: 'inbox' }, '未归类收件箱 (加载抽屉中…)')])
-            : null,
-          h(
-            'div',
-            { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+          { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
+          [
+            { key: 'none', label: bi('不带工作档案', 'No archives') },
+            { key: 'mounted', label: bi('仅挂桌面备查', 'Desktop only') },
+            { key: 'drawer', label: bi('带整个抽屉', 'Folder drawer') },
+            { key: 'all', label: bi('全柜工作档案', 'All session') },
+          ].map(p =>
             h('button', {
+              key: p.key,
               type: 'button',
-              className: 'dnb-primary-btn',
-              style: { flex: 1, height: 30, fontSize: 11.5 },
-              disabled: Boolean(view.handoffBusy),
-              onClick: () => void requestTransferWithGuard('create', buildTransferOpts()),
-            }, '🚀 新建窗口并部署参谋长'),
-            h('button', {
-              type: 'button',
-              className: 'dnb-pill',
-              style: { height: 30, padding: '0 10px', fontSize: 11.5 },
-              disabled: Boolean(view.handoffBusy),
-              onClick: async () => {
-                const text = store.handoffText || (await loadHandoff())?.text || ''
-                if (text) copyText(text, '自包含交接单已复制')
+              className: 'dnb-mini-btn',
+              'data-tone': policy === p.key ? 'accent' : undefined,
+              onClick: () => {
+                patch({ deployArchivePolicy: p.key })
+                if (p.key === 'drawer' && !view.archiveLoaded) void loadArchives(false)
               },
-            }, h(Icon, { name: 'copy', size: 12 }), '复制交接单'),
+            }, p.label),
           ),
+        ),
+        policy === 'drawer'
+          ? h('select', {
+              className: 'dnb-input',
+              style: { height: 28, padding: '0 9px', borderRadius: 9, fontSize: 11.5 },
+              value: view.deployDrawer || ((drawers[0] && drawers[0].id) || 'inbox'),
+              onChange: e => patch({ deployDrawer: e.target.value }),
+            }, drawers.length
+              ? drawers.map(d => h('option', { key: d.id, value: d.id }, `${d.label} (${d.count || 0} 卷)`))
+              : [h('option', { key: 'inbox', value: 'inbox' }, '未归类收件箱 (加载抽屉中…)')])
+          : null,
+        h(
+          'div',
+          { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+          h('button', {
+            type: 'button',
+            className: 'dnb-primary-btn',
+            style: { flex: 1, height: 30, fontSize: 11.5 },
+            disabled: Boolean(view.handoffBusy),
+            onClick: () => void requestTransferWithGuard('create', buildTransferOpts()),
+          }, bi('🚀 新建窗口并部署参谋长', '🚀 New Window & Deploy Chief')),
+          h('button', {
+            type: 'button',
+            className: 'dnb-pill',
+            style: { height: 30, padding: '0 10px', fontSize: 11.5 },
+            disabled: Boolean(view.handoffBusy),
+            onClick: async () => {
+              const text = store.handoffText || (await loadHandoff())?.text || ''
+              if (text) copyText(text, bi('自包含交接单已复制', 'Handoff packet copied'))
+            },
+          }, h(Icon, { name: 'copy', size: 12 }), bi('复制交接单', 'Copy Handoff')),
+        ),
+        h(
+          'div',
+          { style: { display: 'flex', gap: 6 } },
+          h('select', {
+            className: 'dnb-input',
+            style: { flex: 1, height: 28, padding: '0 10px', borderRadius: 99, fontSize: 11.5 },
+            value: target,
+            onChange: e => patch({ target: e.target.value }),
+          }, options.map(i => h('option', { key: i.id, value: i.id }, i.label))),
+          h('button', {
+            type: 'button',
+            className: 'dnb-pill dnb-pill-accent',
+            style: { height: 28, padding: '0 10px', fontSize: 11.5 },
+            disabled: Boolean(view.handoffBusy),
+            onClick: () => void requestTransferWithGuard(target === 'new' ? 'create' : target, buildTransferOpts()),
+          }, '投递并部署'),
+        ),
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
           h(
             'div',
-            { style: { display: 'flex', gap: 6 } },
-            h('select', {
-              className: 'dnb-input',
-              style: { flex: 1, height: 28, padding: '0 10px', borderRadius: 99, fontSize: 11.5 },
-              value: target,
-              onChange: e => patch({ target: e.target.value }),
-            }, options.map(i => h('option', { key: i.id, value: i.id }, i.label))),
+            { style: { display: 'flex', alignItems: 'center', gap: 5 } },
             h('button', {
               type: 'button',
-              className: 'dnb-pill dnb-pill-accent',
-              style: { height: 28, padding: '0 10px', fontSize: 11.5 },
-              disabled: Boolean(view.handoffBusy),
-              onClick: () => void requestTransferWithGuard(target === 'new' ? 'create' : target, buildTransferOpts()),
-            }, '投递并部署'),
-          ),
-          h(
-            'div',
-            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
-            h(
-              'div',
-              { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-              h('button', {
-                type: 'button',
-                className: 'dnb-mini-btn',
-                'data-tone': view.handoffEditing ? 'accent' : undefined,
-                onClick: async () => {
-                  if (view.handoffEditing) {
-                    patch({ handoffEditing: false })
-                    return
-                  }
-                  const res = await loadHandoff()
-                  const curText = (res && res.text) || store.handoffText || ''
-                  patch({ handoffEditing: true, handoffDraft: curText })
-                  setShowHandoffPreview(false)
-                },
-              }, view.handoffEditing ? '收起编辑' : '✏️ 编辑交接单'),
-              h('button', {
-                type: 'button',
-                className: 'dnb-mini-btn',
-                onClick: () => {
-                  const nextShow = !showHandoffPreview
-                  setShowHandoffPreview(nextShow)
-                  if (nextShow) void loadHandoff()
-                },
-              }, showHandoffPreview ? '收起预览' : '预览交接单'),
-              isCustom
-                ? h('button', {
-                    type: 'button',
-                    className: 'dnb-mini-btn',
-                    title: '放弃手工版本，恢复由系统与参谋实时渲染交接单',
-                    onClick: () => void resetHandoffAuto(),
-                  }, '↺ 恢复自动')
-                : null,
-            ),
-            view.transferNote
-              ? h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, view.transferNote)
+              className: 'dnb-mini-btn',
+              'data-tone': view.handoffEditing ? 'accent' : undefined,
+              onClick: async () => {
+                if (view.handoffEditing) {
+                  patch({ handoffEditing: false })
+                  return
+                }
+                const res = await loadHandoff()
+                const curText = (res && res.text) || store.handoffText || ''
+                patch({ handoffEditing: true, handoffDraft: curText })
+                setShowHandoffPreview(false)
+              },
+            }, view.handoffEditing ? '收起编辑' : '✏️ 编辑交接单'),
+            h('button', {
+              type: 'button',
+              className: 'dnb-mini-btn',
+              onClick: () => {
+                const nextShow = !showHandoffPreview
+                setShowHandoffPreview(nextShow)
+                if (nextShow) void loadHandoff()
+              },
+            }, showHandoffPreview ? '收起预览' : '预览交接单'),
+            isCustom
+              ? h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  title: '放弃手工版本，恢复由系统与参谋实时渲染交接单',
+                  onClick: () => void resetHandoffAuto(),
+                }, '↺ 恢复自动')
               : null,
           ),
-          view.handoffEditing
-            ? h(
-                'div',
-                { style: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 2 } },
-                h('textarea', {
-                  className: 'dnb-input',
-                  rows: 8,
-                  style: {
-                    width: '100%',
-                    fontSize: 11.5,
-                    lineHeight: 1.5,
-                    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
-                    resize: 'vertical',
-                    padding: '8px 10px',
-                  },
-                  value: view.handoffDraft || '',
-                  placeholder: '在此手动修订交接单（支持 Markdown）。可点击下方「保存并定住」防止被参谋长自动覆写…',
-                  onChange: e => patch({ handoffDraft: e.target.value }),
-                }),
-                h(
-                  'div',
-                  { style: { display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' } },
-                  h('button', {
-                    type: 'button',
-                    className: 'dnb-pill',
-                    style: { height: 26, padding: '0 10px', fontSize: 11 },
-                    onClick: () => patch({ handoffEditing: false }),
-                  }, '取消'),
-                  h('button', {
-                    type: 'button',
-                    className: 'dnb-pill dnb-pill-accent',
-                    style: { height: 26, padding: '0 10px', fontSize: 11 },
-                    onClick: () => void saveHandoffCustom(view.handoffDraft, false),
-                  }, '保存修改'),
-                  h('button', {
-                    type: 'button',
-                    className: 'dnb-primary-btn',
-                    style: { height: 26, padding: '0 11px', fontSize: 11, background: '#f59e0b', color: '#111', fontWeight: 700 },
-                    onClick: () => void saveHandoffCustom(view.handoffDraft, true),
-                  }, '📌 保存并定住'),
-                ),
-              )
-            : null,
-          showHandoffPreview && !view.handoffEditing
-            ? h('pre', { className: 'dnb-pre', style: { maxHeight: 170, marginTop: 2 } }, view.handoffText || '加载中…')
+          view.transferNote
+            ? h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, view.transferNote)
             : null,
         ),
+        view.handoffEditing
+          ? h(
+              'div',
+              { style: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 2 } },
+              h('textarea', {
+                className: 'dnb-input',
+                rows: 8,
+                style: {
+                  width: '100%',
+                  fontSize: 11.5,
+                  lineHeight: 1.5,
+                  fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
+                  resize: 'vertical',
+                  padding: '8px 10px',
+                },
+                value: view.handoffDraft || '',
+                placeholder: '在此手动修订交接单（支持 Markdown）。可点击下方「保存并定住」防止被参谋长自动覆写…',
+                onChange: e => patch({ handoffDraft: e.target.value }),
+              }),
+              h(
+                'div',
+                { style: { display: 'flex', justifyContent: 'flex-end', gap: 6, flexWrap: 'wrap' } },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pill',
+                  style: { height: 26, padding: '0 10px', fontSize: 11 },
+                  onClick: () => patch({ handoffEditing: false }),
+                }, '取消'),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pill dnb-pill-accent',
+                  style: { height: 26, padding: '0 10px', fontSize: 11 },
+                  onClick: () => void saveHandoffCustom(view.handoffDraft, false),
+                }, '保存修改'),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-primary-btn',
+                  style: { height: 26, padding: '0 11px', fontSize: 11, background: '#f59e0b', color: '#111', fontWeight: 700 },
+                  onClick: () => void saveHandoffCustom(view.handoffDraft, true),
+                }, '📌 保存并定住'),
+              ),
+            )
+          : null,
+        showHandoffPreview && !view.handoffEditing
+          ? h('pre', { className: 'dnb-pre', style: { maxHeight: 170, marginTop: 2 } }, view.handoffText || '加载中…')
+          : null,
       )
     })(),
 
@@ -1340,25 +1431,343 @@ function NotesTab({ board }) {
 /* -------------------------------------- Engineering Memory Archive Tab (档案柜) */
 
 export function HandoffTab({ view }) {
+  const [presetsOpen, setPresetsOpen] = React.useState(true)
+  const [notifyOpen, setNotifyOpen] = React.useState(true)
+  const [ledgerOpen, setLedgerOpen] = React.useState(true)
+  const [langOpen, setLangOpen] = React.useState(true)
+  const [guardPrefOpen, setGuardPrefOpen] = React.useState(true)
+  const [notifPerm, setNotifPerm] = React.useState(() => getNotificationPermissionState())
+  const [callsDraft, setCallsDraft] = React.useState(null)
+
   React.useEffect(() => {
     void loadTargets()
   }, [view.sessionId])
 
+  const meta = view.chiefMeta || {}
+  const perm = meta.permissionMode || 'advisor'
+  const rm = meta.runMode || 'off'
+  const activePreset = (perm === 'advisor' && rm === 'off')
+    ? 'observer'
+    : ((perm === 'strategist' && rm === 'patrol')
+        ? 'collab'
+        : ((perm === 'chief' && rm === 'managed') ? 'away' : ''))
+
+  const presets = presetList()
+  const ledger = (view.secView && view.secView.llmLedger) || meta.llmLedgerSummary || {}
+  const byCat = ledger.byCategory || {}
+  const mr = ledger.managedRun || {}
+  const maxCalls = Number(meta.managedBudgetMaxCalls ?? (ledger.budget && ledger.budget.maxCalls) ?? 30)
+  const maxTokens = Number(meta.managedBudgetMaxTokens ?? (ledger.budget && ledger.budget.maxTokens) ?? 300000)
+
+  const fmtTok = (n) => {
+    const val = Math.max(0, Math.round(Number(n) || 0))
+    if (val >= 1_000_000) return (val / 1_000_000).toFixed(2).replace(/\.00$/, '') + 'M'
+    if (val >= 1_000) return (val / 1_000).toFixed(1).replace(/\.0$/, '') + 'K'
+    return String(val)
+  }
+
+  const callsPct = maxCalls > 0 ? Math.min(100, Math.round(((mr.calls || 0) / maxCalls) * 100)) : 0
+  const tokensPct = maxTokens > 0 ? Math.min(100, Math.round(((mr.tokens || 0) / maxTokens) * 100)) : 0
+  const uiLangVal = view.uiLangPref || meta.uiLang || getUiLangPref()
+  const notifPermLabel = notifPerm === 'granted'
+    ? bi('桌面已授权', 'Granted')
+    : notifPerm === 'denied'
+      ? bi('浏览器已拦截', 'Blocked')
+      : notifPerm === 'default'
+        ? bi('待授权', 'Prompt')
+        : bi('面板提醒', 'Toast')
+
+  const commitCallsCap = () => {
+    if (callsDraft === null) return
+    const raw = Math.max(0, Math.round(Number(callsDraft) || 0))
+    const val = raw === 0 ? 0 : Math.min(500, Math.max(3, raw))
+    setCallsDraft(null)
+    void updateSecConfig({ managedBudgetMaxCalls: val })
+  }
+
   return h(
-    'div',
-    { className: 'dnb-view' },
-    // Guard Preferences (Cross-session handoff now lives in `规划` Zone 3)
-    h('div', { className: 'dnb-section-head' },
-      h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, '自动化守护偏好'),
-      h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } }, '跨会话接力已收口至「规划」页底部'),
-    ),
+    React.Fragment,
+    null,
+    // 1. One-Click Scenario Presets
     h(
-      'div',
-      { className: 'dnb-group' },
+      AccCard,
+      {
+        open: presetsOpen,
+        onToggle: () => setPresetsOpen(v => !v),
+        title: bi('🚀 一键开箱场景预设', '🚀 One-Click Scenario Presets'),
+        badges: h('span', { className: 'dnb-acc-badge', 'data-tone': activePreset ? 'accent' : undefined },
+          activePreset
+            ? (presets.find(p => p.id === activePreset)?.title || activePreset)
+            : bi('自定义', 'Custom')),
+        preview: presets.map(p => p.title).join(' / '),
+        bodyStyle: { padding: 0 },
+      },
+      h(
+        'div',
+        { className: 'dnb-preset-grid' },
+        presets.map(p => {
+          const isCur = activePreset === p.id
+          return h(
+            'button',
+            {
+              key: p.id,
+              type: 'button',
+              className: 'dnb-preset-card',
+              'data-active': isCur ? '1' : '0',
+              title: p.desc,
+              onClick: () => void applyScenarioPreset(p.id),
+            },
+            h('div', { className: 'dnb-preset-title' }, h('span', null, p.icon), h('span', null, p.title)),
+            h('span', { className: 'dnb-preset-tag' }, p.tag),
+            h('div', { className: 'dnb-preset-desc' }, p.desc),
+          )
+        }),
+      ),
+    ),
+
+    // 2. Milestone Notifications & Gentle Sound
+    h(
+      AccCard,
+      {
+        open: notifyOpen,
+        onToggle: () => setNotifyOpen(v => !v),
+        title: bi('🔔 离桌通知与轻提示音', '🔔 Away Alerts & Gentle Chime'),
+        badges: h('span', { className: 'dnb-acc-badge', 'data-tone': notifPerm === 'granted' ? 'green' : undefined }, notifPermLabel),
+        preview: meta.notifyEnabled !== false ? bi('关键节点已启用提醒', 'Milestone alerts active') : bi('提醒已关闭', 'Alerts muted'),
+        actions: h('button', {
+          type: 'button',
+          className: 'dnb-pill',
+          style: { height: 21, padding: '0 7px', fontSize: 10.5 },
+          title: bi('立即测试一条桌面通知与提示音', 'Send a test notification & chime now'),
+          onClick: async () => {
+            if (notifPerm === 'default') {
+              const p = await requestNotificationPermission()
+              setNotifPerm(p)
+            }
+            const res = fireChiefAlertNotification(
+              {
+                id: 'test-' + Date.now(),
+                kind: 'managed_auto_sleep',
+                level: 'success',
+                body: bi('离桌托管提醒管道工作正常（待批 / 撞墙 / 断流 / 熔断 / 休眠均会及时触达）。', 'Alert channel working (approvals / walls / rescues / budget / sleep).'),
+              },
+              { sound: true },
+            )
+            patch({ notice: res.toast })
+          },
+        }, bi('测试提醒', 'Test')),
+        bodyStyle: { padding: 0 },
+      },
       h(
         'div',
         { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-        h('span', { style: { fontSize: 12.5 } }, '每轮自动注入摘要'),
+        h('div', { style: { minWidth: 0 } },
+          h('div', { style: { fontSize: 12.5 } }, bi('关键节点系统桌面通知', 'Desktop notifications at milestones')),
+          h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
+            bi('待审批 / 待提权 / 撞物理墙 / 断流救活 / 预算熔断 / 自动休眠', 'Approvals / Elevation / Guard Walls / Rescue / Budget / Sleep')),
+        ),
+        h(Switch, {
+          checked: meta.notifyEnabled !== false,
+          onChange: async on => {
+            if (on && getNotificationPermissionState() === 'default') {
+              const p = await requestNotificationPermission()
+              setNotifPerm(p)
+            }
+            void updateSecConfig({ notifyEnabled: on })
+          },
+        }),
+      ),
+      h(
+        'div',
+        { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
+        h('span', { style: { fontSize: 12.5 } }, bi('轻柔提示音（默认关闭）', 'Gentle chime sound (off by default)')),
+        h(Switch, {
+          checked: Boolean(meta.notifySound),
+          onChange: on => {
+            if (on) {
+              fireChiefAlertNotification({ kind: 'auto_continue_rescue', level: 'info', body: bi('提示音已启用', 'Chime enabled') }, { sound: true })
+            }
+            void updateSecConfig({ notifySound: on })
+          },
+        }),
+      ),
+    ),
+
+    // 3. Chief LLM Ledger & Hard Budget Circuit Breaker
+    h(
+      AccCard,
+      {
+        open: ledgerOpen,
+        onToggle: () => setLedgerOpen(v => !v),
+        title: bi('📊 参谋长 LLM 账本与托管硬预算', '📊 Chief LLM Ledger & Budget Breaker'),
+        badges: mr.tripped
+          ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'red' }, bi('🛑 已熔断', '🛑 Tripped'))
+          : h('span', { className: 'dnb-acc-badge' }, `${ledger.totalCalls || 0}${bi('次', '')} · ${fmtTok(ledger.totalTokens || 0)}`),
+        preview: `${bi('本轮托管', 'Managed run')} ${mr.calls || 0}/${maxCalls || '∞'}`,
+        actions: h('button', {
+          type: 'button',
+          className: 'dnb-pill',
+          style: { height: 21, padding: '0 7px', fontSize: 10.5 },
+          title: bi('清零本轮托管次数与 Token 计数器并解除熔断状态', 'Reset managed run call/token counters'),
+          onClick: () => void updateSecConfig({ resetManagedBudget: true }),
+        }, bi('↺ 重置计数', '↺ Reset')),
+        bodyStyle: { padding: '8px 11px 10px' },
+      },
+      mr.tripped
+        ? h(
+            'div',
+            {
+              style: {
+                padding: '6px 9px',
+                marginBottom: 8,
+                borderRadius: 8,
+                border: '1px solid rgba(239, 68, 68, 0.42)',
+                background: 'rgba(239, 68, 68, 0.12)',
+                color: '#f87171',
+                fontSize: 11,
+                lineHeight: 1.45,
+              },
+            },
+            '🛑 ',
+            mr.trippedReason || bi('本轮托管已触及硬预算上限并自动切回「⏸ 关停」（人工问答仍不受影响）。', 'Hard budget limit reached; Managed mode auto-stopped (manual Q&A still works).'),
+          )
+        : null,
+      h(
+        'div',
+        { className: 'dnb-ledger-grid' },
+        [
+          { key: 'chat', label: bi('问答 / 咨询', 'Q&A'), item: byCat.chat || {} },
+          { key: 'review', label: bi('巡检 / 督导', 'Patrol'), item: byCat.review || {} },
+          { key: 'dream', label: bi('梦境 / 档案', 'Dream'), item: byCat.dream || {} },
+        ].map(cat =>
+          h(
+            'div',
+            { key: cat.key, className: 'dnb-ledger-chip' },
+            h('span', { className: 'dnb-ledger-chip-label' }, cat.label),
+            h('span', { className: 'dnb-ledger-chip-val' }, `${cat.item.calls || 0}${bi('次', 'x')} · ${fmtTok(cat.item.tokens || 0)}`),
+          ),
+        ),
+      ),
+      h(
+        'div',
+        { className: 'dnb-budget-row' },
+        h('div', { className: 'dnb-budget-meta' },
+          h('span', null, bi('本轮托管后台次数', 'Managed Calls / Run')),
+          h('span', null, `${mr.calls || 0} / ${maxCalls > 0 ? maxCalls : '∞'}`),
+        ),
+        h('div', { className: 'dnb-budget-bar' },
+          h('div', {
+            className: 'dnb-budget-fill',
+            'data-warn': callsPct >= 80 && !mr.tripped ? '1' : '0',
+            'data-tripped': mr.tripped ? '1' : '0',
+            style: { width: `${maxCalls > 0 ? callsPct : 0}%` },
+          }),
+        ),
+      ),
+      h(
+        'div',
+        { className: 'dnb-budget-row' },
+        h('div', { className: 'dnb-budget-meta' },
+          h('span', null, bi('本轮托管 Token 上限', 'Managed Tokens / Run')),
+          h('span', null, `${fmtTok(mr.tokens || 0)} / ${maxTokens > 0 ? fmtTok(maxTokens) : '∞'}`),
+        ),
+        h('div', { className: 'dnb-budget-bar' },
+          h('div', {
+            className: 'dnb-budget-fill',
+            'data-warn': tokensPct >= 80 && !mr.tripped ? '1' : '0',
+            'data-tripped': mr.tripped ? '1' : '0',
+            style: { width: `${maxTokens > 0 ? tokensPct : 0}%` },
+          }),
+        ),
+      ),
+      h(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 6, flexWrap: 'wrap' } },
+        h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('单次托管次数上限 (0=不限)', 'Call cap (0=∞)')),
+        h('input', {
+          type: 'number',
+          className: 'dnb-input',
+          style: { width: 70, height: 24, textAlign: 'right', padding: '0 7px', borderRadius: 7, fontSize: 11.5 },
+          min: 0,
+          max: 500,
+          value: callsDraft !== null ? callsDraft : String(maxCalls),
+          onChange: e => setCallsDraft(e.target.value),
+          onBlur: commitCallsCap,
+          onKeyDown: e => { if (e.key === 'Enter') commitCallsCap() },
+        }),
+      ),
+      h(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 6, flexWrap: 'wrap' } },
+        h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('Token 上限', 'Token Cap')),
+        h(
+          'div',
+          { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
+          [
+            { val: 100_000, label: '100K' },
+            { val: 300_000, label: '300K' },
+            { val: 500_000, label: '500K' },
+            { val: 1_000_000, label: '1M' },
+            { val: 0, label: bi('不限', '∞') },
+          ].map(opt =>
+            h('button', {
+              key: opt.label,
+              type: 'button',
+              className: 'dnb-mini-btn',
+              'data-tone': maxTokens === opt.val ? 'accent' : undefined,
+              onClick: () => void updateSecConfig({ managedBudgetMaxTokens: opt.val }),
+            }, opt.label),
+          ),
+        ),
+      ),
+    ),
+
+    // 4. Interface Language Switch
+    h(
+      AccCard,
+      {
+        open: langOpen,
+        onToggle: () => setLangOpen(v => !v),
+        title: bi('🌐 界面语言 / Interface Language', '🌐 Interface Language / 界面语言'),
+        preview: uiLangVal === 'en' ? 'English' : (uiLangVal === 'zh' ? '简体中文' : bi('自动跟随宿主', 'Auto (Follow Host)')),
+        bodyStyle: { padding: '8px 11px' },
+      },
+      h(
+        'div',
+        { className: 'dnb-seg', style: { padding: 2 } },
+        [
+          { key: 'auto', label: bi('自动 Auto', 'Auto') },
+          { key: 'zh', label: '简体中文' },
+          { key: 'en', label: 'English' },
+        ].map(opt =>
+          h('button', {
+            key: opt.key,
+            type: 'button',
+            className: 'dnb-seg-btn',
+            style: { padding: '4px 8px', fontSize: 11.5 },
+            'data-active': uiLangVal === opt.key ? '1' : '0',
+            onClick: () => void updateSecConfig({ uiLang: opt.key }),
+          }, opt.label),
+        ),
+      ),
+    ),
+
+    // 5. Existing Automation Guard Preferences Card
+    h(
+      AccCard,
+      {
+        open: guardPrefOpen,
+        onToggle: () => setGuardPrefOpen(v => !v),
+        title: bi('自动化设置', 'Automation Settings'),
+        showPullHint: false,
+        headerExtra: h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } },
+          bi('跨会话接力已收口至「任务」页底部', 'Cross-session handoff lives in Tasks tab')),
+        bodyStyle: { padding: 0 },
+      },
+      h(
+        'div',
+        { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
+        h('span', { style: { fontSize: 12.5 } }, bi('每轮自动注入摘要', 'Inject digest every turn')),
         h(Switch, {
           checked: !!view.autoInject,
           onChange: on => {
@@ -1370,7 +1779,7 @@ export function HandoffTab({ view }) {
       h(
         'div',
         { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-        h('span', { style: { fontSize: 12.5 } }, '空转自动提醒'),
+        h('span', { style: { fontSize: 12.5 } }, bi('空转自动提醒', 'Idle & spin reminders')),
         h(Switch, {
           checked: !!view.guardIdle,
           onChange: on => {
@@ -1382,7 +1791,7 @@ export function HandoffTab({ view }) {
       h(
         'div',
         { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-        h('span', { style: { fontSize: 12.5 } }, '单会话提醒上限'),
+        h('span', { style: { fontSize: 12.5 } }, bi('单会话提醒上限', 'Max nudges / session')),
         h(
           'div',
           { style: { display: 'flex', alignItems: 'center', gap: 6 } },
@@ -1410,7 +1819,7 @@ export function HandoffTab({ view }) {
       h(
         'div',
         { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-        h('span', { style: { fontSize: 12.5 } }, '短回复字数线'),
+        h('span', { style: { fontSize: 12.5 } }, bi('短回复字数线', 'Short-reply char threshold')),
         h('input', {
           type: 'number',
           className: 'dnb-input',

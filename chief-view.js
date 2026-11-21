@@ -25,6 +25,7 @@ import {
   beginChiefActiveWork,
   endChiefActiveWork,
   getChiefActiveWork,
+  summarizeLlmLedger,
 } from './chief-state.js'
 import { listChiefModels, callChiefLlm } from './chief-models.js'
 import { collectClusterPeerProgress, listPeerDirectory } from './chief-network.js'
@@ -566,6 +567,8 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
     inquiries: (Array.isArray(ownWs.inquiries) ? ownWs.inquiries : []).slice(-12).reverse(),
     guardWalls: listGuardWalls({ cwd: resolveSessionWorkspaceCwd(deps, rootId) }),
     activeWork: getChiefActiveWork(rootId),
+    llmLedger: summarizeLlmLedger(ownWs.llmLedger, effectiveConfig),
+    alertEvents: (Array.isArray(ownWs.alertEvents) ? ownWs.alertEvents : []).slice(-12),
     auditLog: (Array.isArray(ownWs.auditLog) ? ownWs.auditLog : []).slice(-50).reverse(),
   }
 }

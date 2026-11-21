@@ -21,8 +21,16 @@ import {
   openSubagentChat,
 } from '../store.js'
 import { clampTitle, shortAgentName, buildAgentHierarchy, resolveTaskAgents } from '../utils.js'
+import { bi, statusLabel } from '../i18n.js'
 import { act, sendToComposer, askLeadModel, openTaskEditor } from '../api.js'
-import { Icon, StatusBadge, ObjectiveRadarStrip, SubagentFleetBar } from '../components/common.js'
+import { Icon, StatusBadge, AccCard, SubagentFleetBar } from '../components/common.js'
+import {
+  buildTaskFlowModel,
+  computeFlowCanvasLayout,
+  TaskFlowPipelineView,
+  TaskFlowCanvasView,
+} from './tasks-flow.js'
+import { PlanTab } from './plan.js'
 
 function TaskInspectorDrawer({ board, task }) {
   const [dispatchAgent, setDispatchAgent] = React.useState('')
@@ -60,6 +68,8 @@ function TaskInspectorDrawer({ board, task }) {
       intent: store.editTaskIntent || '',
       evidence: store.editTaskEvidence || '',
       parentId: store.editTaskParentId || '',
+      planStepId: store.editTaskPlanStepId || '',
+      targetPlanStepId: store.editTaskTargetPlanStepId || '',
       blockedBy: store.editTaskBlockedBy || [],
     })
   }
@@ -264,6 +274,38 @@ function TaskInspectorDrawer({ board, task }) {
           .filter(t => t.id !== task.id)
           .map(t => h('option', { key: t.id, value: t.id }, '父级: ' + clampTitle(t.title, 10))),
       ),
+      (board && Array.isArray(board.plan) && board.plan.length > 0)
+        ? h(
+            React.Fragment,
+            null,
+            h('select', {
+              className: 'dnb-pill',
+              style: { height: 24, padding: '0 8px', maxWidth: 146 },
+              title: '该任务所属的推进步骤',
+              value: task.planStepId || '',
+              onChange: e => {
+                patch({ editTaskPlanStepId: e.target.value })
+                void act({ action: 'task.update', id: task.id, planStepId: e.target.value })
+              },
+            },
+              h('option', { value: '' }, '步骤: 自动归位'),
+              board.plan.map((s, idx) => h('option', { key: s.id, value: s.id }, `步骤 ${idx + 1}: ${clampTitle(s.text, 9)}`)),
+            ),
+            h('select', {
+              className: 'dnb-pill',
+              style: { height: 24, padding: '0 8px', maxWidth: 146 },
+              title: '子代理或任务完成后回指的目标步骤',
+              value: task.targetPlanStepId || '',
+              onChange: e => {
+                patch({ editTaskTargetPlanStepId: e.target.value })
+                void act({ action: 'task.update', id: task.id, targetPlanStepId: e.target.value })
+              },
+            },
+              h('option', { value: '' }, '回指: 同归属步'),
+              board.plan.map((s, idx) => h('option', { key: s.id, value: s.id }, `回指 ${idx + 1}: ${clampTitle(s.text, 9)}`)),
+            ),
+          )
+        : null,
       (task.blockedBy || []).map(depId => {
         const dep = byId.get(depId)
         const isDone = dep && dep.status === 'done'
@@ -397,10 +439,12 @@ function explainTaskMeaning(task, board) {
 function AddTask({ board }) {
   const [text, setText] = React.useState('')
   const [parentId, setParentId] = React.useState('')
+  const [planStepId, setPlanStepId] = React.useState('')
   const [ownerPick, setOwnerPick] = React.useState('')
   const [customOwner, setCustomOwner] = React.useState('')
   const [blockedById, setBlockedById] = React.useState('')
   const allTasks = (board && Array.isArray(board.tasks)) ? board.tasks.filter(Boolean) : []
+  const planSteps = (board && Array.isArray(board.plan)) ? board.plan.filter(Boolean) : []
   const openTasks = allTasks.filter(task => task.status !== 'done')
   const hier = buildAgentHierarchy(store.subagents, store.agentIdentity)
   const knownAgents = hier.children
@@ -413,6 +457,7 @@ function AddTask({ board }) {
     setText('')
     const args = { action: 'task.add', title }
     if (parentId) args.parentId = parentId
+    if (planStepId) args.planStepId = planStepId
     if (resolvedOwner) {
       args.owner = resolvedOwner
       args.subagent = resolvedOwner
@@ -447,6 +492,18 @@ function AddTask({ board }) {
     h(
       'div',
       { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center', marginTop: 7 } },
+      planSteps.length > 0
+        ? h('select', {
+            className: 'dnb-pill',
+            style: { flex: '1 1 112px', height: 26, padding: '0 8px', fontSize: 11 },
+            value: planStepId,
+            title: '选择挂入哪个顺序推进步骤',
+            onChange: e => setPlanStepId(e.target.value),
+          },
+            h('option', { value: '' }, '步骤：自动归入当前步'),
+            planSteps.map((s, idx) => h('option', { key: s.id, value: s.id }, `步骤 ${idx + 1} · ${clampTitle(s.text, 12)}`)),
+          )
+        : null,
       h('select', {
         className: 'dnb-pill',
         style: { flex: '1 1 112px', height: 26, padding: '0 8px', fontSize: 11 },
@@ -504,6 +561,9 @@ function TaskRow({ task, board, depth = 0 }) {
   const color = STATUS_HEX[task.status] || STATUS_HEX.todo
   const rawAgent = task.subagent || task.owner || ''
   const showAgentTag = rawAgent && !GENERIC_OWNERS.has(String(rawAgent).toLowerCase())
+  const stepIdx = (board && Array.isArray(board.plan) && task.planStepId)
+    ? board.plan.findIndex(s => s && s.id === task.planStepId)
+    : -1
 
   return h(
     'div',
@@ -575,6 +635,9 @@ function TaskRow({ task, board, depth = 0 }) {
             },
           },
           task.title,
+          stepIdx >= 0
+            ? h('span', { className: 'dnb-tag' }, `步骤 ${stepIdx + 1}`)
+            : null,
           showAgentTag
             ? h('span', { className: 'dnb-tag', style: { color: 'var(--dnb-accent)' } }, '@' + shortAgentName(rawAgent))
             : null,
@@ -669,7 +732,9 @@ export function TasksTab({ board }) {
   const allById = new Map(allTasks.map(t => [t.id, t]))
   const filterAgent = store.filterAgent || ''
   const statusFilter = store.taskStatusFilter || 'all'
-  const viewMode = store.taskViewMode || 'graph'
+  const topoViewMode = store.taskViewMode === 'graph' ? 'graph' : 'canvas'
+  const topoCollapsed = store.topoSectionCollapsed !== false
+  const boardCollapsed = Boolean(store.boardSectionCollapsed)
   const subagentsRaw = Array.isArray(store.subagents) ? store.subagents : []
   const hier = buildAgentHierarchy(subagentsRaw, store.agentIdentity)
 
@@ -716,12 +781,36 @@ export function TasksTab({ board }) {
   const [zoom, setZoom] = React.useState(1)
   const [hoveredId, setHoveredId] = React.useState('')
   const [contextMenu, setContextMenu] = React.useState(null)
+  const [addTaskOpen, setAddTaskOpen] = React.useState(false)
+  const [expandAllStages, setExpandAllStages] = React.useState(false)
+  const [pyrOpenNodes, setPyrOpenNodes] = React.useState(() => new Set())
+  const [pyrOpenDetails, setPyrOpenDetails] = React.useState(() => new Set())
+  const [pyrOpenDoneGroups, setPyrOpenDoneGroups] = React.useState({})
   const pyrRootRef = React.useRef(null)
   const canvasRef = React.useRef(null)
   const panRef = React.useRef(null)
+  const boardSectionRef = React.useRef(null)
 
   const toggleCollapse = nodeKey => {
     setCollapsed(prev => {
+      const next = new Set(prev)
+      if (next.has(nodeKey)) next.delete(nodeKey)
+      else next.add(nodeKey)
+      return next
+    })
+  }
+
+  const togglePyrNode = nodeKey => {
+    setPyrOpenNodes(prev => {
+      const next = new Set(prev)
+      if (next.has(nodeKey)) next.delete(nodeKey)
+      else next.add(nodeKey)
+      return next
+    })
+  }
+
+  const togglePyrDetail = nodeKey => {
+    setPyrOpenDetails(prev => {
       const next = new Set(prev)
       if (next.has(nodeKey)) next.delete(nodeKey)
       else next.add(nodeKey)
@@ -1043,15 +1132,21 @@ export function TasksTab({ board }) {
     return { pNodes, apexNode, depEdges, spotlight }
   }
 
-  const hasPyramidContent = tasks.length > 0 || hier.children.length > 0 || Boolean(board && board.objective)
-  const { pNodes, depEdges, spotlight } = (hasPyramidContent && viewMode === 'canvas')
-    ? layoutPyramidTree()
-    : { pNodes: [], depEdges: [], spotlight: null }
-
-  const maxX = Math.max(...pNodes.map(n => n.x + n.w), spotlight ? spotlight.x + spotlight.w : 0, 0)
-  const maxY = Math.max(...pNodes.map(n => n.y + n.h), spotlight ? spotlight.y + spotlight.h : 0, 0)
-  const svgW = Math.max(maxX + 26, 332)
-  const svgH = Math.max(maxY + 26, 150)
+  const planSteps = (board && Array.isArray(board.plan)) ? board.plan.filter(Boolean) : []
+  const hasPyramidContent = tasks.length > 0 || hier.children.length > 0 || Boolean(board && board.objective) || planSteps.length > 0
+  const flowModel = hasPyramidContent
+    ? buildTaskFlowModel(board, allTasks, tasks, hier, {
+        statusFilter,
+        filterAgent,
+        focusedTaskScopeSet,
+        focusedAgentSet,
+      })
+    : null
+  const flowCanvasLayout = (!topoCollapsed && hasPyramidContent && topoViewMode === 'canvas' && flowModel)
+    ? computeFlowCanvasLayout(flowModel, isLR)
+    : null
+  const svgW = flowCanvasLayout ? flowCanvasLayout.svgW : 320
+  const spotlight = null
 
   const fitZoom = React.useCallback(() => {
     const el = canvasRef.current
@@ -1064,9 +1159,9 @@ export function TasksTab({ board }) {
     setZoom(+ratio.toFixed(2))
   }, [svgW])
 
-  // Auto-fit SVG canvas width on open/resize so even Canvas mode doesn't clip horizontally
+  // Auto-fit SVG canvas width when topology drawer opens or canvas layout changes
   React.useEffect(() => {
-    if (viewMode !== 'canvas' || !canvasRef.current) return undefined
+    if (topoCollapsed || topoViewMode !== 'canvas' || !canvasRef.current) return undefined
     fitZoom()
     if (typeof ResizeObserver === 'function') {
       const ro = new ResizeObserver(() => fitZoom())
@@ -1074,12 +1169,12 @@ export function TasksTab({ board }) {
       return () => ro.disconnect()
     }
     return undefined
-  }, [viewMode, svgW, fitZoom])
+  }, [topoCollapsed, topoViewMode, svgW, fitZoom])
 
-  // Smoothly scroll spotlighted branch/card into view in Grand Pyramid OR SVG Canvas
+  // Smoothly scroll spotlighted branch/card into view in Grand Pyramid
   React.useEffect(() => {
-    if (!store.focusTaskId) return
-    if (viewMode === 'graph' && pyrRootRef.current) {
+    if (!store.focusTaskId || topoCollapsed) return
+    if (topoViewMode === 'graph' && pyrRootRef.current) {
       const targetEl = pyrRootRef.current.querySelector('[data-pyr-spotlight="1"]')
       if (targetEl && typeof targetEl.scrollIntoView === 'function') {
         try {
@@ -1088,18 +1183,7 @@ export function TasksTab({ board }) {
       }
       return
     }
-    if (viewMode === 'canvas' && spotlight && canvasRef.current) {
-      const el = canvasRef.current
-      const targetLeft = Math.max(0, (spotlight.x + spotlight.w / 2) * zoom - el.clientWidth / 2)
-      const targetTop = Math.max(0, (spotlight.y + spotlight.h / 2) * zoom - el.clientHeight / 2)
-      try {
-        el.scrollTo({ left: targetLeft, top: targetTop, behavior: 'smooth' })
-      } catch {
-        el.scrollLeft = targetLeft
-        el.scrollTop = targetTop
-      }
-    }
-  }, [store.focusTaskId, viewMode, spotlight ? spotlight.x : 0, spotlight ? spotlight.y : 0])
+  }, [store.focusTaskId, topoViewMode, topoCollapsed])
 
   const selectedTask = allTasks.find(t => t && t.id === store.selectedTaskId) || null
   const doneTotal = allTasks.filter(t => t && t.status === 'done').length
@@ -1109,24 +1193,97 @@ export function TasksTab({ board }) {
 
   const triggerAiPlanGraph = () => {
     const goal = (board && board.objective ? `针对「${board.objective.slice(0, 80)}」，` : '')
-    const sent = sendToComposer(goal + '请调用 chief_board 的 graph.plan 拆解金字塔可视化任务图，并用 task.dispatch 调度子代理团队并行推进。')
-    patch({ notice: sent || '请在对话中让模型规划任务图' })
+    const sent = sendToComposer(goal + '请先调用 chief_board 的 plan.set 定好一二三四五顺序推进步骤，再用 graph.plan（填入对应 planStepId 与可选 targetPlanStepId）和 task.dispatch 调度子代理支线推进。')
+    patch({ notice: sent || '请在对话中让模型规划流程任务图' })
   }
 
-  /* ---------------- Grand Full-Width Zero-Drag Pyramid Renderers ---------------- */
+  /* ---------------- Expandable Attention-First Organization Tree ---------------- */
+
+  const markTaskSubtreeVisited = (taskList, visitedTaskIds) => {
+    for (const t of taskList || []) {
+      if (!t || visitedTaskIds.has(t.id)) continue
+      visitedTaskIds.add(t.id)
+      markTaskSubtreeVisited(childrenOf(t.id), visitedTaskIds)
+    }
+  }
+
+  const markAgentSubtreeVisited = (agentObj, visitedAgents, visitedTaskIds) => {
+    if (!agentObj || visitedAgents.has(agentObj.name)) return
+    visitedAgents.add(agentObj.name)
+    markTaskSubtreeVisited(tasksByAgent.get(agentObj.name) || [], visitedTaskIds)
+    const subAgents = hier.kidsMap.get(agentObj.name) || []
+    for (const sa of subAgents) markAgentSubtreeVisited(sa, visitedAgents, visitedTaskIds)
+  }
+
+  const renderTreeTaskList = (list, visitedTaskIds, groupKey) => {
+    const cleanList = (list || []).filter(t => t && !visitedTaskIds.has(t.id))
+    if (!cleanList.length) return null
+    const rankTreeTask = t => (t.status === 'blocked' ? 0 : t.status === 'doing' ? 1 : 2)
+    const activeItems = cleanList.filter(t => t.status !== 'done').sort((a, b) => rankTreeTask(a) - rankTreeTask(b))
+    const doneItems = cleanList.filter(t => t.status === 'done')
+    const foldDone = doneItems.length > 0 && statusFilter !== 'done' && activeItems.length > 0
+    const doneExpanded = Boolean(
+      pyrOpenDoneGroups[groupKey]
+      || doneItems.some(t => t.id === store.selectedTaskId || t.id === store.focusTaskId),
+    )
+
+    if (foldDone && !doneExpanded) {
+      markTaskSubtreeVisited(doneItems, visitedTaskIds)
+    }
+
+    const wrapTaskItem = t => {
+      const tTone = t.status === 'blocked' ? 'blocked' : t.status === 'doing' ? 'doing' : t.status === 'done' ? 'done' : undefined
+      return h(
+        'div',
+        { key: 'tr-' + t.id, className: 'dnb-pyr-subitem', 'data-tone': tTone },
+        renderGrandTaskCard(t, visitedTaskIds),
+      )
+    }
+
+    return h(
+      React.Fragment,
+      null,
+      activeItems.map(wrapTaskItem),
+      doneItems.length > 0
+        ? foldDone
+          ? h(
+              'div',
+              { key: 'df-' + groupKey, className: 'dnb-flow-done-fold', style: { marginTop: 2 } },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dnb-flow-done-fold-btn',
+                  'data-open': doneExpanded ? '1' : '0',
+                  onClick: () => setPyrOpenDoneGroups(prev => ({ ...prev, [groupKey]: !doneExpanded })),
+                },
+                h(
+                  'span',
+                  { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
+                  h(Icon, { name: 'check', size: 11, style: { color: '#22c55e' } }),
+                  bi(`已完成 ${doneItems.length} 项任务`, `${doneItems.length} done tasks`),
+                ),
+                h('span', { className: 'dnb-flow-done-fold-hint' }, doneExpanded ? bi('收起 ▴', 'Fold ▴') : bi('拉起 ▾', 'Pull ▾')),
+              ),
+              doneExpanded ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 5 } }, doneItems.map(wrapTaskItem)) : null,
+            )
+          : doneItems.map(wrapTaskItem)
+        : null,
+    )
+  }
 
   const renderGrandTaskCard = (task, visitedTaskIds) => {
     if (!task || visitedTaskIds.has(task.id)) return null
     visitedTaskIds.add(task.id)
     const nodeKey = 'task:' + task.id
     const kids = childrenOf(task.id)
-    const isCol = collapsed.has(nodeKey)
     const isSelected = store.selectedTaskId === task.id
     const isFocusedTarget = store.focusTaskId === task.id
     const inFocusScope = focusedTaskScopeSet.has(task.id)
     const isDoing = task.status === 'doing'
     const isBlocked = task.status === 'blocked'
     const isDone = task.status === 'done'
+    const nextStatus = STATUSES[(STATUSES.indexOf(task.status) + 1) % STATUSES.length]
 
     const rawAgent = task.subagent || task.owner || ''
     const showAgentTag = rawAgent && !GENERIC_OWNERS.has(String(rawAgent).toLowerCase())
@@ -1140,6 +1297,24 @@ export function TasksTab({ board }) {
       : ''
     const dimmed = focusedTask && !inFocusScope && !kids.some(k => focusedTaskScopeSet.has(k.id))
 
+    const detailOpen = pyrOpenDetails.has(nodeKey) || isSelected || isFocusedTarget
+    const kidsOpen = kids.length > 0 && (
+      pyrOpenNodes.has(nodeKey)
+      || kids.some(k => focusedTaskScopeSet.has(k.id) || k.id === store.selectedTaskId)
+    )
+    if (!kidsOpen && kids.length > 0) {
+      markTaskSubtreeVisited(kids, visitedTaskIds)
+    }
+
+    const handleToggleDetail = () => {
+      if (detailOpen) {
+        if (isSelected) patch({ selectedTaskId: '', editTaskId: '' })
+        if (pyrOpenDetails.has(nodeKey)) togglePyrDetail(nodeKey)
+      } else {
+        togglePyrDetail(nodeKey)
+      }
+    }
+
     return h(
       'div',
       {
@@ -1150,290 +1325,245 @@ export function TasksTab({ board }) {
       h(
         'div',
         {
-          className: 'dnb-pyr-task-card',
+          className: 'dnb-pyr-task-card dnb-pyr-tree-node',
           'data-status': task.status || 'todo',
           'data-spotlight': spotlightKind || undefined,
+          'data-open': detailOpen ? '1' : '0',
           onContextMenu: e => {
             e.preventDefault()
             e.stopPropagation()
             setContextMenu({ taskId: task.id, task, x: e.clientX, y: e.clientY })
           },
         },
-        // Header row: full wrapping title + prominent status badge
+        // Compact 1-line Tree Node Header (click row to pull open detail & actions)
         h(
           'div',
-          { style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 8 } },
+          {
+            className: 'dnb-pyr-node-head',
+            onClick: handleToggleDetail,
+            title: detailOpen ? '点击收起详情' : '点击拉起任务详情与操作',
+          },
+          kids.length > 0
+            ? h('button', {
+                type: 'button',
+                className: 'dnb-flow-mini-btn',
+                style: { width: 18, height: 18, flexShrink: 0 },
+                title: kidsOpen ? '收起子任务' : `展开 ${kids.length} 项子任务`,
+                onClick: e => {
+                  e.stopPropagation()
+                  togglePyrNode(nodeKey)
+                },
+              }, h(Icon, {
+                name: 'chevron',
+                size: 11,
+                style: { transform: kidsOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' },
+              }))
+            : null,
           h(
-            'div',
+            'button',
             {
-              style: {
-                flex: 1,
-                minWidth: 0,
-                fontWeight: (isDoing || isBlocked) ? 600 : 500,
-                fontSize: 12.8,
-                lineHeight: 1.44,
-                color: isDone ? 'var(--dnb-text-2)' : 'var(--dnb-text)',
-                wordBreak: 'break-word',
+              type: 'button',
+              className: 'dnb-ring',
+              style: isDone
+                ? { width: 16, height: 16, background: '#22c55e', borderColor: '#22c55e', color: '#fff', flexShrink: 0 }
+                : { width: 16, height: 16, borderColor: STATUS_HEX[task.status] || STATUS_HEX.todo, flexShrink: 0 },
+              title: '点击切换为 ' + (STATUS_LABEL[nextStatus] || nextStatus),
+              onClick: e => {
+                e.stopPropagation()
+                void act({ action: 'task.update', id: task.id, status: nextStatus })
               },
+            },
+            isDone
+              ? h(Icon, { name: 'check', size: 9.5 })
+              : isDoing
+                ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8.5px', color: '#3b82f6' } })
+                : null,
+          ),
+          h(
+            'span',
+            {
+              className: 'dnb-pyr-node-title',
+              'data-done': isDone ? '1' : '0',
             },
             task.title || task.id,
           ),
-          h(StatusBadge, { status: task.status }),
+          showAgentTag
+            ? h('span', {
+                className: 'dnb-tag',
+                style: { fontSize: 9.5, color: 'var(--dnb-accent)', padding: '0 5px', flexShrink: 0 },
+              }, '@' + clampTitle(shortAgentName(rawAgent), 10))
+            : null,
+          unresolvedDeps.length > 0
+            ? h('span', {
+                className: 'dnb-tag',
+                style: { fontSize: 9.5, background: 'rgba(245, 158, 11, 0.16)', color: '#fbbf24', flexShrink: 0 },
+                title: '存在未完成前置依赖',
+              }, `⏳${unresolvedDeps.length}`)
+            : null,
+          kids.length > 0
+            ? h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, bi(`${kids.length}子项`, `${kids.length} sub`))
+            : null,
+          h('span', { className: 'dnb-pyr-detail-pill' }, detailOpen ? bi('收起 ▴', 'Fold ▴') : bi('详情 ▾', 'Details ▾')),
         ),
 
-        // Owner / Dependency / Intent / Evidence / Assumptions details
-        (showAgentTag || unresolvedDeps.length > 0 || doneDeps.length > 0 || task.intent || task.evidence || task.note || (Array.isArray(task.assumptions) && task.assumptions.length > 0))
+        // Expanded Pull-Open Detail Drawer (hidden by default!)
+        detailOpen
           ? h(
               'div',
-              { style: { display: 'flex', flexDirection: 'column', gap: 4, marginTop: 6 } },
-              (showAgentTag || unresolvedDeps.length > 0 || doneDeps.length > 0)
+              { className: 'dnb-pyr-node-detail', onClick: e => e.stopPropagation() },
+              (showAgentTag || unresolvedDeps.length > 0 || doneDeps.length > 0 || task.intent || task.evidence || task.note || (Array.isArray(task.assumptions) && task.assumptions.length > 0))
                 ? h(
                     'div',
-                    { style: { display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' } },
-                    showAgentTag
-                      ? h('span', {
-                          className: 'dnb-tag',
-                          style: { color: 'var(--dnb-accent)', fontWeight: 600, fontSize: 10.5 },
-                        }, '@' + shortAgentName(rawAgent))
+                    { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+                    (showAgentTag || unresolvedDeps.length > 0 || doneDeps.length > 0)
+                      ? h(
+                          'div',
+                          { style: { display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' } },
+                          showAgentTag
+                            ? h('span', { className: 'dnb-tag', style: { color: 'var(--dnb-accent)', fontWeight: 600, fontSize: 10.5 } }, '@' + shortAgentName(rawAgent))
+                            : null,
+                          unresolvedDeps.map(d =>
+                            h('span', {
+                              key: d.id,
+                              className: 'dnb-tag',
+                              style: { background: 'rgba(245, 158, 11, 0.16)', color: '#fbbf24', fontSize: 10.5 },
+                            }, '⏳ 等待前置：' + clampTitle(d.title || d.id, 14)),
+                          ),
+                          doneDeps.map(d =>
+                            h('span', {
+                              key: d.id,
+                              className: 'dnb-tag',
+                              style: { background: STATUS_BG.done, color: '#30d158', fontSize: 10.5 },
+                            }, '✓ 前置就绪：' + clampTitle(d.title || d.id, 12)),
+                          ),
+                        )
                       : null,
-                    unresolvedDeps.map(d =>
-                      h('span', {
-                        key: d.id,
-                        className: 'dnb-tag',
-                        style: { background: 'rgba(245, 158, 11, 0.16)', color: '#fbbf24', fontSize: 10.5 },
-                      }, '⏳ 等待前置：' + clampTitle(d.title || d.id, 14)),
-                    ),
-                    doneDeps.map(d =>
-                      h('span', {
-                        key: d.id,
-                        className: 'dnb-tag',
-                        style: { background: STATUS_BG.done, color: '#30d158', fontSize: 10.5 },
-                      }, '✓ 前置就绪：' + clampTitle(d.title || d.id, 12)),
-                    ),
+                    task.intent ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, '意图 · ' + task.intent) : null,
+                    task.evidence ? h('div', { style: { fontSize: 11.5, color: '#30d158', lineHeight: 1.42, wordBreak: 'break-word' } }, '结论 · ' + task.evidence) : null,
+                    task.note ? h('div', { style: { fontSize: 11.5, color: isBlocked ? '#ff6961' : 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, task.note) : null,
+                    Array.isArray(task.assumptions) && task.assumptions.length > 0
+                      ? h(
+                          'div',
+                          { style: { display: 'flex', flexDirection: 'column', gap: 3, marginTop: 2 } },
+                          task.assumptions.map((assum, idx) =>
+                            h(
+                              'div',
+                              { key: idx, style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 } },
+                              h('button', {
+                                className: 'dnb-ring',
+                                style: {
+                                  width: 15,
+                                  height: 15,
+                                  ...(assum.verified ? { background: '#30d158', borderColor: '#30d158' } : { borderColor: '#f59e0b' }),
+                                },
+                                onClick: e => {
+                                  e.stopPropagation()
+                                  if (!assum.verified) void act({ action: 'task.verify', id: task.id, assumptionIndex: idx })
+                                },
+                              }, assum.verified ? h(Icon, { name: 'check', size: 9 }) : null),
+                              h('span', { style: assum.verified ? { textDecoration: 'line-through', opacity: 0.58 } : null }, assum.text),
+                            ),
+                          ),
+                        )
+                      : null,
                   )
                 : null,
-              task.intent
-                ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, '意图 · ' + task.intent)
-                : null,
-              task.evidence
-                ? h('div', { style: { fontSize: 11.5, color: '#30d158', lineHeight: 1.42, wordBreak: 'break-word' } }, '结论 · ' + task.evidence)
-                : null,
-              task.note
-                ? h('div', { style: { fontSize: 11.5, color: isBlocked ? '#ff6961' : 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, task.note)
-                : null,
-              Array.isArray(task.assumptions) && task.assumptions.length > 0
-                ? h(
-                    'div',
-                    { style: { display: 'flex', flexDirection: 'column', gap: 3, marginTop: 2 } },
-                    task.assumptions.map((assum, idx) =>
-                      h(
-                        'div',
-                        { key: idx, style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 } },
-                        h('button', {
-                          className: 'dnb-ring',
-                          style: {
-                            width: 15,
-                            height: 15,
-                            ...(assum.verified ? { background: '#30d158', borderColor: '#30d158' } : { borderColor: '#f59e0b' }),
-                          },
-                          onClick: e => {
-                            e.stopPropagation()
-                            if (!assum.verified) void act({ action: 'task.verify', id: task.id, assumptionIndex: idx })
-                          },
-                        }, assum.verified ? h(Icon, { name: 'check', size: 9 }) : null),
-                        h('span', { style: assum.verified ? { textDecoration: 'line-through', opacity: 0.58 } : null }, assum.text),
-                      ),
-                    ),
-                  )
-                : null,
-            )
-          : null,
 
-        // Row 1 of Open Options: Direct 4-State Status Switcher Pills
-        h(
-          'div',
-          { className: 'dnb-pyr-st-row' },
-          STATUSES.map(st =>
-            h(
-              'button',
-              {
-                key: st,
-                type: 'button',
-                className: 'dnb-pyr-st-btn',
-                'data-st': st,
-                'data-active': task.status === st ? '1' : '0',
-                onClick: e => {
-                  e.stopPropagation()
-                  if (task.status !== st) void act({ action: 'task.update', id: task.id, status: st })
-                },
-              },
-              h('span', {
-                style: {
-                  width: 5.5,
-                  height: 5.5,
-                  borderRadius: '50%',
-                  background: STATUS_HEX[st],
-                },
-              }),
-              st === 'done' ? '已完成' : STATUS_LABEL[st],
-            ),
-          ),
-        ),
+              h(
+                'div',
+                { className: 'dnb-pyr-st-row', style: { marginTop: 2 } },
+                STATUSES.map(st =>
+                  h(
+                    'button',
+                    {
+                      key: st,
+                      type: 'button',
+                      className: 'dnb-pyr-st-btn',
+                      'data-st': st,
+                      'data-active': task.status === st ? '1' : '0',
+                      onClick: () => { if (task.status !== st) void act({ action: 'task.update', id: task.id, status: st }) },
+                    },
+                    h('span', { style: { width: 5.5, height: 5.5, borderRadius: '50%', background: STATUS_HEX[st] } }),
+                    st === 'done' ? '已完成' : STATUS_LABEL[st],
+                  ),
+                ),
+              ),
 
-        // Row 2 of Open Options: All Action Buttons Laid Out Openly
-        h(
-          'div',
-          { className: 'dnb-pyr-act-row' },
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dnb-pyr-act-btn',
-              'data-accent': '1',
-              title: '让模型用通俗大白话解释这条任务是什么意思、为什么需要这一步',
-              onClick: e => { e.stopPropagation(); explainTaskMeaning(task, board) },
-            },
-            h(Icon, { name: 'sparkles', size: 11 }),
-            '解释',
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dnb-pyr-act-btn',
-              title: '派发或唤醒子代理推进此任务',
-              onClick: e => {
-                e.stopPropagation()
-                void act({
-                  action: 'task.dispatch',
-                  id: task.id,
-                  agent: rawAgent || ('worker-' + String(task.id).slice(-4)),
-                })
-              },
-            },
-            h(Icon, { name: 'play', size: 10.5 }),
-            isDoing ? '唤醒' : '派发',
-          ),
-          isDoing && showAgentTag
-            ? h(
-                'button',
-                {
+              h(
+                'div',
+                { className: 'dnb-pyr-act-row' },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pyr-act-btn',
+                  'data-accent': '1',
+                  title: '让模型用通俗大白话解释这条任务',
+                  onClick: () => explainTaskMeaning(task, board),
+                }, h(Icon, { name: 'sparkles', size: 11 }), '解释'),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pyr-act-btn',
+                  title: '派发或唤醒子代理推进此任务',
+                  onClick: () => void act({
+                    action: 'task.dispatch',
+                    id: task.id,
+                    agent: rawAgent || ('worker-' + String(task.id).slice(-4)),
+                  }),
+                }, h(Icon, { name: 'play', size: 10.5 }), isDoing ? '唤醒' : '派发'),
+                isDoing && showAgentTag
+                  ? h('button', {
+                      type: 'button',
+                      className: 'dnb-pyr-act-btn',
+                      'data-danger': '1',
+                      onClick: () => void act({ action: 'team.interrupt', id: task.id, agent: rawAgent }),
+                    }, h(Icon, { name: 'stop', size: 10.5 }), '停止')
+                  : null,
+                matchedAgent && matchedAgent.id
+                  ? h('button', {
+                      type: 'button',
+                      className: 'dnb-pyr-act-btn',
+                      onClick: () => { if (!openSubagentChat(matchedAgent)) patch({ notice: '该子代理暂无独立会话面板' }) },
+                    }, h(Icon, { name: 'chat', size: 11 }), '对话')
+                  : null,
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pyr-act-btn',
+                  style: isFocusedTarget ? { borderColor: '#409cff', color: '#409cff', background: 'rgba(10,132,255,0.14)' } : undefined,
+                  onClick: () => focusObjectiveInPyramid(isFocusedTarget ? '' : task.id),
+                }, h(Icon, { name: 'target', size: 11 }), isFocusedTarget ? '已框选' : '框选'),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pyr-act-btn',
+                  onClick: () => {
+                    if (isSelected) patch({ selectedTaskId: '', editTaskId: '' })
+                    else openTaskEditor(task)
+                  },
+                }, h(Icon, { name: 'edit', size: 11 }), isSelected ? '收起编辑' : '编辑'),
+                h('button', {
                   type: 'button',
                   className: 'dnb-pyr-act-btn',
                   'data-danger': '1',
-                  title: '停止该子代理当前轮次',
-                  onClick: e => {
-                    e.stopPropagation()
-                    void act({ action: 'team.interrupt', id: task.id, agent: rawAgent })
+                  onClick: () => {
+                    if (store.selectedTaskId === task.id) patch({ selectedTaskId: '', editTaskId: '' })
+                    if (store.focusTaskId === task.id) patch({ focusTaskId: '' })
+                    void act({ action: 'task.remove', id: task.id })
                   },
-                },
-                h(Icon, { name: 'stop', size: 10.5 }),
-                '停止',
-              )
-            : null,
-          matchedAgent && matchedAgent.id
-            ? h(
-                'button',
-                {
-                  type: 'button',
-                  className: 'dnb-pyr-act-btn',
-                  title: '在分屏打开负责该任务的子代理实时会话',
-                  onClick: e => {
-                    e.stopPropagation()
-                    if (!openSubagentChat(matchedAgent)) patch({ notice: '该子代理暂无独立会话面板' })
-                  },
-                },
-                h(Icon, { name: 'chat', size: 11 }),
-                '对话',
-              )
-            : null,
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dnb-pyr-act-btn',
-              title: isFocusedTarget ? '退出聚光灯框选' : '框选高亮负责推进此任务的代理链路',
-              style: isFocusedTarget ? { borderColor: '#409cff', color: '#409cff', background: 'rgba(10,132,255,0.14)' } : undefined,
-              onClick: e => {
-                e.stopPropagation()
-                focusObjectiveInPyramid(isFocusedTarget ? '' : task.id)
-              },
-            },
-            h(Icon, { name: 'target', size: 11 }),
-            isFocusedTarget ? '已框选' : '框选',
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dnb-pyr-act-btn',
-              title: '展开编辑详情、前置依赖与自定义派发指令',
-              onClick: e => {
-                e.stopPropagation()
-                if (isSelected) {
-                  patch({ selectedTaskId: '', editTaskId: '' })
-                } else {
-                  openTaskEditor(task)
-                }
-              },
-            },
-            h(Icon, { name: 'edit', size: 11 }),
-            isSelected ? '收起' : '编辑',
-          ),
-          h(
-            'button',
-            {
-              type: 'button',
-              className: 'dnb-pyr-act-btn',
-              'data-danger': '1',
-              title: '删除此任务节点',
-              onClick: e => {
-                e.stopPropagation()
-                if (store.selectedTaskId === task.id) patch({ selectedTaskId: '', editTaskId: '' })
-                if (store.focusTaskId === task.id) patch({ focusTaskId: '' })
-                void act({ action: 'task.remove', id: task.id })
-              },
-            },
-            h(Icon, { name: 'trash', size: 11 }),
-            '删除',
-          ),
-          kids.length > 0
-            ? h(
-                'button',
-                {
-                  type: 'button',
-                  className: 'dnb-pyr-act-btn',
-                  style: { marginLeft: 'auto' },
-                  onClick: e => {
-                    e.stopPropagation()
-                    toggleCollapse(nodeKey)
-                  },
-                },
-                isCol ? `+ 展开子项 (${kids.length})` : `− 收起子项 (${kids.length})`,
-              )
-            : null,
-        ),
+                }, h(Icon, { name: 'trash', size: 11 }), '删除'),
+              ),
 
-        // Inline Drawer right inside the card when selected for editing/custom dispatch!
-        isSelected ? h(TaskInspectorDrawer, { board, task }) : null,
+              isSelected ? h(TaskInspectorDrawer, { board, task }) : null,
+            )
+          : null,
       ),
 
-      // Child Sub-tasks connected with vertical spine (`竖线连接`)
-      (!isCol && kids.length > 0)
+      // Nested Child Sub-tasks connected with vertical spine (expanded on demand)
+      kidsOpen
         ? h(
             'div',
             {
               className: 'dnb-pyr-subtree',
               'data-tone': isBlocked ? 'blocked' : isDoing ? 'doing' : undefined,
             },
-            kids.map(kid => {
-              const kTone = kid.status === 'blocked' ? 'blocked' : kid.status === 'doing' ? 'doing' : kid.status === 'done' ? 'done' : undefined
-              return h(
-                'div',
-                { key: kid.id, className: 'dnb-pyr-subitem', 'data-tone': kTone },
-                renderGrandTaskCard(kid, visitedTaskIds),
-              )
-            }),
+            renderTreeTaskList(kids, visitedTaskIds, 'task-kids:' + task.id),
           )
         : null,
     )
@@ -1444,7 +1574,6 @@ export function TasksTab({ board }) {
     visitedAgents.add(agentObj.name)
 
     const nodeKey = 'agent:' + agentObj.name
-    const isCol = collapsed.has(nodeKey)
     const isRunning = agentObj.status === 'running'
     const isAgentFocused = focusedAgentSet.has(agentObj.name)
     const isFiltered = store.filterAgent === agentObj.name
@@ -1459,118 +1588,136 @@ export function TasksTab({ board }) {
       : ''
     const spineTone = focusTone || (isRunning ? 'live' : undefined)
 
+    const detailOpen = pyrOpenDetails.has(nodeKey) || isAgentFocused
+    const childrenOpen = totalKids > 0 && (
+      pyrOpenNodes.has(nodeKey)
+      || isAgentFocused
+      || subAgents.some(sa => focusedAgentSet.has(sa.name))
+      || directTasks.some(t => focusedTaskScopeSet.has(t.id) || t.id === store.selectedTaskId)
+    )
+    if (!childrenOpen && totalKids > 0) {
+      markTaskSubtreeVisited(directTasks, visitedTaskIds)
+      for (const sa of subAgents) markAgentSubtreeVisited(sa, visitedAgents, visitedTaskIds)
+    }
+
     return h(
       'div',
       { key: nodeKey, style: { minWidth: 0 } },
       h(
         'div',
         {
-          className: 'dnb-pyr-agent-card',
+          className: 'dnb-pyr-agent-card dnb-pyr-tree-node',
           'data-running': isRunning ? '1' : '0',
           'data-focused': focusTone || undefined,
+          'data-open': detailOpen ? '1' : '0',
         },
+        // Compact 1-Line Agent Tree Header
         h(
           'div',
-          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' } },
-          h(
-            'div',
-            { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
-            isRunning
-              ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9px', color: '#409cff' } })
-              : h('span', {
-                  style: {
-                    width: 8,
-                    height: 8,
-                    borderRadius: '50%',
-                    background: focusTone === 'blocked' ? '#ff453a' : focusTone === 'doing' ? '#409cff' : 'var(--dnb-text-3)',
-                    flexShrink: 0,
-                  },
-                }),
-            h(Icon, { name: 'agentSub', size: 12, style: { color: '#34d399', flexShrink: 0 } }),
-            h('span', {
-              style: { fontWeight: 700, fontSize: 13, color: 'var(--dnb-text)', wordBreak: 'break-all' },
-            }, '@' + shortAgentName(agentObj.name, tier > 1)),
-            agentObj.reasoningEffort
-              ? h('span', { className: 'dnb-chat-effort-badge', style: { fontSize: 9.5 } }, `🧠${agentObj.reasoningEffort}`)
-              : null,
-          ),
-          h(
-            'span',
-            {
-              className: 'dnb-tag',
-              style: {
-                fontSize: 10.5,
-                fontWeight: 600,
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4,
-                color: isRunning ? '#409cff' : (focusTone ? (focusTone === 'blocked' ? '#ff453a' : '#409cff') : 'var(--dnb-text-2)'),
-              },
-            },
-            isRunning ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#409cff' } }) : null,
-            isRunning ? `${tierLabel} · 运行中` : tierLabel,
-          ),
-        ),
-        desc
-          ? h('div', {
-              style: { fontSize: 11.5, color: isRunning ? '#409cff' : 'var(--dnb-text-2)', marginTop: 4, lineHeight: 1.4, wordBreak: 'break-word' },
-            }, desc)
-          : null,
-        // Openly laid-out subagent actions right on the agent card
-        h(
-          'div',
-          { className: 'dnb-pyr-act-row', style: { marginTop: 8 } },
-          agentObj.id
-            ? h('button', {
-                type: 'button',
-                className: 'dnb-pyr-act-btn',
-                'data-accent': '1',
-                title: '在分屏打开该子代理独立会话视图',
-                onClick: () => {
-                  if (!openSubagentChat(agentObj)) patch({ notice: '该子代理暂无独立会话视图' })
-                },
-              }, h(Icon, { name: 'chat', size: 11 }), '分屏对话')
-            : null,
-          h('button', {
-            type: 'button',
-            className: 'dnb-pyr-act-btn',
-            title: '锁定底部参谋长输入栏直接给该子代理递话或插话',
-            onClick: () => {
-              patch({
-                secTarget: agentObj.name,
-                secMode: isRunning ? 'steer' : 'followup',
-                notice: '已在下方锁定 @' + shortAgentName(agentObj.name, true) + '，输入指令回车即达',
-              })
-              focusSecInput()
-            },
-          }, h(Icon, { name: 'send', size: 10.5 }), '@递话'),
-          h('button', {
-            type: 'button',
-            className: 'dnb-pyr-act-btn',
-            style: isFiltered ? { borderColor: 'var(--dnb-accent)', color: 'var(--dnb-accent)' } : undefined,
-            onClick: () => patch({ filterAgent: isFiltered ? '' : agentObj.name }),
-          }, isFiltered ? '显示全员' : '只看TA'),
-          isRunning
-            ? h('button', {
-                type: 'button',
-                className: 'dnb-pyr-act-btn',
-                'data-danger': '1',
-                onClick: () => void act({ action: 'team.interrupt', agent: agentObj.name }),
-              }, h(Icon, { name: 'stop', size: 10.5 }), '停止')
-            : null,
+          {
+            className: 'dnb-pyr-node-head',
+            onClick: () => togglePyrDetail(nodeKey),
+            title: detailOpen ? '点击收起代理操作' : '点击拉起代理详情与指令按钮',
+          },
           totalKids > 0
             ? h('button', {
                 type: 'button',
-                className: 'dnb-pyr-act-btn',
-                style: { marginLeft: 'auto' },
-                onClick: () => toggleCollapse(nodeKey),
-              }, isCol ? `+ 展开 (${totalKids})` : `− 收起 (${totalKids})`)
+                className: 'dnb-flow-mini-btn',
+                style: { width: 18, height: 18, flexShrink: 0 },
+                title: childrenOpen ? '收起下级子代理与任务' : `展开 ${totalKids} 个下级子节点`,
+                onClick: e => {
+                  e.stopPropagation()
+                  togglePyrNode(nodeKey)
+                },
+              }, h(Icon, {
+                name: 'chevron',
+                size: 11,
+                style: { transform: childrenOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' },
+              }))
             : null,
+          isRunning
+            ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8.5px', color: '#409cff' } })
+            : h('span', {
+                style: {
+                  width: 7,
+                  height: 7,
+                  borderRadius: '50%',
+                  background: focusTone === 'blocked' ? '#ff453a' : focusTone === 'doing' ? '#409cff' : 'var(--dnb-text-3)',
+                  flexShrink: 0,
+                },
+              }),
+          h(Icon, { name: 'agentSub', size: 11.5, style: { color: '#34d399', flexShrink: 0 } }),
+          h('span', { style: { fontWeight: 700, fontSize: 12, color: 'var(--dnb-text)', whiteSpace: 'nowrap' } },
+            '@' + shortAgentName(agentObj.name, tier > 1)),
+          agentObj.reasoningEffort
+            ? h('span', { className: 'dnb-chat-effort-badge', style: { fontSize: 9.5 } }, `🧠${agentObj.reasoningEffort}`)
+            : null,
+          h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, isRunning ? '运行中' : tierLabel),
+          totalKids > 0
+            ? h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, bi(`${totalKids} 项`, `${totalKids}`))
+            : null,
+          !detailOpen && desc
+            ? h('span', { className: 'dnb-acc-preview', style: { fontSize: 11 } }, desc)
+            : null,
+          h('span', { className: 'dnb-pyr-detail-pill' }, detailOpen ? bi('收起 ▴', 'Fold ▴') : bi('详情 ▾', 'Details ▾')),
         ),
+
+        // Expanded Pull-Open Agent Details & Action Strip
+        detailOpen
+          ? h(
+              'div',
+              { className: 'dnb-pyr-node-detail', onClick: e => e.stopPropagation() },
+              desc
+                ? h('div', { style: { fontSize: 11.5, color: isRunning ? '#409cff' : 'var(--dnb-text-2)', lineHeight: 1.4, wordBreak: 'break-word' } }, desc)
+                : null,
+              h(
+                'div',
+                { className: 'dnb-pyr-act-row', style: { marginTop: 2 } },
+                agentObj.id
+                  ? h('button', {
+                      type: 'button',
+                      className: 'dnb-pyr-act-btn',
+                      'data-accent': '1',
+                      title: bi('在分屏打开该子代理独立会话视图', 'Open split pane for subagent'),
+                      onClick: () => {
+                        if (!openSubagentChat(agentObj)) patch({ notice: bi('该子代理暂无独立会话视图', 'No dedicated view for this subagent') })
+                      },
+                    }, h(Icon, { name: 'chat', size: 11 }), bi('分屏对话', 'Split Chat'))
+                  : null,
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pyr-act-btn',
+                  title: bi('锁定底部参谋长输入栏直接给该子代理递话或插话', 'Lock bottom input to steer/relay to this subagent'),
+                  onClick: () => {
+                    patch({
+                      secTarget: agentObj.name,
+                      secMode: isRunning ? 'steer' : 'followup',
+                      notice: bi('已在下方锁定 @', 'Locked target @') + shortAgentName(agentObj.name, true) + bi('，输入指令回车即达', ', type instruction & Enter'),
+                    })
+                    focusSecInput()
+                  },
+                }, h(Icon, { name: 'send', size: 10.5 }), bi('@递话', '@Relay')),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pyr-act-btn',
+                  style: isFiltered ? { borderColor: 'var(--dnb-accent)', color: 'var(--dnb-accent)' } : undefined,
+                  onClick: () => patch({ filterAgent: isFiltered ? '' : agentObj.name }),
+                }, isFiltered ? bi('显示全员', 'Show All') : bi('只看TA', 'Focus Only')),
+                isRunning
+                  ? h('button', {
+                      type: 'button',
+                      className: 'dnb-pyr-act-btn',
+                      'data-danger': '1',
+                      onClick: () => void act({ action: 'team.interrupt', agent: agentObj.name }),
+                    }, h(Icon, { name: 'stop', size: 10.5 }), bi('停止', 'Stop'))
+                  : null,
+              ),
+            )
+          : null,
       ),
 
-      // Vertical Tree Spine connecting Tier-2+ subagents & this agent's assigned tasks
-      (!isCol && totalKids > 0)
+      // Vertical Tree Spine connecting Tier-2+ subagents & this agent's assigned tasks (expanded on demand)
+      childrenOpen
         ? h(
             'div',
             { className: 'dnb-pyr-subtree', 'data-tone': spineTone },
@@ -1585,14 +1732,7 @@ export function TasksTab({ board }) {
                 renderGrandAgentSubtree(sa, tier + 1, visitedAgents, visitedTaskIds),
               ),
             ),
-            directTasks.map(t => {
-              const tTone = t.status === 'blocked' ? 'blocked' : t.status === 'doing' ? 'doing' : t.status === 'done' ? 'done' : undefined
-              return h(
-                'div',
-                { key: 'st-' + t.id, className: 'dnb-pyr-subitem', 'data-tone': tTone },
-                renderGrandTaskCard(t, visitedTaskIds),
-              )
-            }),
+            renderTreeTaskList(directTasks, visitedTaskIds, 'agent:' + agentObj.name),
           )
         : null,
     )
@@ -1635,15 +1775,13 @@ export function TasksTab({ board }) {
     ]
 
     const runningKidsCount = hier.children.filter(a => a.status === 'running').length
-    const leadCollapsed = collapsed.has('agent:lead')
     const isLeadSpotlight = Boolean(focusedTask && focusInfo && focusInfo.includeLead && focusedAgentSet.size === 0)
     const apexSpotlightTone = isLeadSpotlight ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing') : ''
     const trunkTone = focusedTask
       ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing')
       : (blockedTotal > 0 ? 'blocked' : doingTotal > 0 ? 'doing' : runningKidsCount > 0 ? 'live' : '')
 
-    // Build Tier-1 columns under the Apex
-    const columns = []
+    const treeItems = []
 
     for (const ag of sortedTier1Agents) {
       const descAgents = hier.descendantsOf(ag.name)
@@ -1656,135 +1794,101 @@ export function TasksTab({ board }) {
       const colTone = spotTone || (ag.status === 'running' ? 'live' : '')
       const dimmedBranch = Boolean(focusedTask && !branchHasSpotlight)
 
-      columns.push(
+      treeItems.push(
         h(
           'div',
           {
             key: 'col-agent-' + ag.name,
-            className: 'dnb-pyr-branch',
+            className: 'dnb-pyr-subitem',
             'data-tone': colTone || undefined,
             'data-pyr-spotlight': branchHasSpotlight ? '1' : undefined,
             style: { opacity: dimmedBranch ? 0.38 : 1 },
           },
-          h(
-            'div',
-            {
-              className: 'dnb-pyr-branch-box',
-              'data-spotlight': spotTone || undefined,
-            },
-            branchHasSpotlight
-              ? h(
-                  'div',
-                  { className: 'dnb-pyr-spot-tag', 'data-blocked': spotTone === 'blocked' ? '1' : '0' },
-                  spotTone === 'blocked' ? '⚠ 受阻关联代理 · @' + shortAgentName(ag.name, true) : '🎯 正在推进 · @' + shortAgentName(ag.name, true),
-                )
-              : null,
-            renderGrandAgentSubtree(ag, 1, visitedAgents, visitedTaskIds),
-          ),
+          branchHasSpotlight
+            ? h(
+                'div',
+                { className: 'dnb-pyr-spot-tag', 'data-blocked': spotTone === 'blocked' ? '1' : '0' },
+                spotTone === 'blocked' ? '⚠ 受阻关联代理 · @' + shortAgentName(ag.name, true) : '🎯 正在推进 · @' + shortAgentName(ag.name, true),
+              )
+            : null,
+          renderGrandAgentSubtree(ag, 1, visitedAgents, visitedTaskIds),
         ),
       )
     }
 
     if (leadDirectRoots.length > 0) {
       if (sortedTier1Agents.length === 0) {
-        // Pure Lead tasks: lay out each root phase/objective as its own clean Tier-1 pyramid branch!
-        for (const rt of leadDirectRoots) {
-          const inSpot = Boolean(focusedTask && focusedTaskScopeSet.has(rt.id))
-          const spotTone = inSpot ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing') : ''
-          const colTone = spotTone || (rt.status === 'blocked' ? 'blocked' : rt.status === 'doing' ? 'doing' : '')
-          columns.push(
-            h(
-              'div',
-              {
-                key: 'col-task-' + rt.id,
-                className: 'dnb-pyr-branch',
-                'data-tone': colTone || undefined,
-              },
-              renderGrandTaskCard(rt, visitedTaskIds),
-            ),
-          )
-        }
+        treeItems.push(renderTreeTaskList(leadDirectRoots, visitedTaskIds, 'lead-direct-root'))
       } else {
-        // Hybrid mode (Subagent columns + Lead's direct phase tasks): group Lead's direct tasks into a clear sibling column
         const leadGroupInSpot = Boolean(focusedTask && leadDirectRoots.some(t => focusedTaskScopeSet.has(t.id)))
         const spotTone = leadGroupInSpot ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing') : ''
-        const groupColKey = 'agent:lead-direct'
-        const groupCollapsed = collapsed.has(groupColKey)
-        columns.push(
+        const groupKey = 'lead-direct-group'
+        const groupDetailOpen = pyrOpenDetails.has(groupKey)
+        const groupOpen = pyrOpenNodes.has(groupKey) || leadGroupInSpot || leadDirectRoots.some(t => t.id === store.selectedTaskId)
+        if (!groupOpen) {
+          markTaskSubtreeVisited(leadDirectRoots, visitedTaskIds)
+        }
+        treeItems.push(
           h(
             'div',
             {
               key: 'col-lead-direct',
-              className: 'dnb-pyr-branch',
+              className: 'dnb-pyr-subitem',
               'data-tone': spotTone || undefined,
               'data-pyr-spotlight': leadGroupInSpot ? '1' : undefined,
               style: { opacity: (focusedTask && !leadGroupInSpot) ? 0.42 : 1 },
             },
             h(
               'div',
-              {
-                className: 'dnb-pyr-branch-box',
-                'data-spotlight': spotTone || undefined,
-              },
-              leadGroupInSpot
-                ? h(
-                    'div',
-                    { className: 'dnb-pyr-spot-tag', 'data-blocked': spotTone === 'blocked' ? '1' : '0' },
-                    spotTone === 'blocked' ? '⚠ 受阻 · 主代理直管' : '🎯 正在推进 · 主代理直管',
-                  )
-                : null,
+              { className: 'dnb-pyr-agent-card dnb-pyr-tree-node', 'data-focused': spotTone || undefined, 'data-open': groupDetailOpen ? '1' : '0' },
               h(
                 'div',
-                { className: 'dnb-pyr-agent-card' },
-                h(
-                  'div',
-                  { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-                  h(
-                    'span',
-                    { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontWeight: 700, fontSize: 12.8, color: 'var(--dnb-text)' } },
-                    h(Icon, { name: 'agentLead', size: 12.5, style: { color: '#60a5fa', flexShrink: 0 } }),
-                    '主代理直管阶段',
-                  ),
-                  h('span', { className: 'dnb-tag', style: { fontSize: 10.5 } }, `${leadDirectRoots.length} 项任务`),
-                ),
-                h(
-                  'div',
-                  { className: 'dnb-pyr-act-row', style: { marginTop: 7 } },
-                  h('button', {
-                    type: 'button',
-                    className: 'dnb-pyr-act-btn',
-                    onClick: () => {
-                      patch({
-                        secTarget: 'lead',
-                        secMode: 'steer',
-                        notice: '已在下方锁定 @主对话',
-                      })
-                      focusSecInput()
-                    },
-                  }, h(Icon, { name: 'send', size: 10.5 }), '@主对话'),
-                  h('button', {
-                    type: 'button',
-                    className: 'dnb-pyr-act-btn',
-                    style: { marginLeft: 'auto' },
-                    onClick: () => toggleCollapse(groupColKey),
-                  }, groupCollapsed ? `+ 展开 (${leadDirectRoots.length})` : `− 收起 (${leadDirectRoots.length})`),
-                ),
+                { className: 'dnb-pyr-node-head', onClick: () => togglePyrDetail(groupKey) },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-flow-mini-btn',
+                  style: { width: 18, height: 18, flexShrink: 0 },
+                  title: groupOpen ? '收起直管任务' : `展开 ${leadDirectRoots.length} 项直管任务`,
+                  onClick: e => {
+                    e.stopPropagation()
+                    togglePyrNode(groupKey)
+                  },
+                }, h(Icon, {
+                  name: 'chevron',
+                  size: 11,
+                  style: { transform: groupOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' },
+                })),
+                h(Icon, { name: 'agentLead', size: 12, style: { color: '#60a5fa', flexShrink: 0 } }),
+                h('span', { style: { fontWeight: 700, fontSize: 12, color: 'var(--dnb-text)' } }, bi('主代理直管任务', 'Lead Direct Tasks')),
+                h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, bi(`${leadDirectRoots.length} 项`, `${leadDirectRoots.length}`)),
+                h('span', { className: 'dnb-pyr-detail-pill' }, groupDetailOpen ? bi('收起 ▴', 'Fold ▴') : bi('操作 ▾', 'Actions ▾')),
               ),
-              !groupCollapsed
+              groupDetailOpen
                 ? h(
                     'div',
-                    { className: 'dnb-pyr-subtree', 'data-tone': spotTone || undefined },
-                    leadDirectRoots.map(rt => {
-                      const tTone = rt.status === 'blocked' ? 'blocked' : rt.status === 'doing' ? 'doing' : rt.status === 'done' ? 'done' : undefined
-                      return h(
-                        'div',
-                        { key: 'ld-' + rt.id, className: 'dnb-pyr-subitem', 'data-tone': tTone },
-                        renderGrandTaskCard(rt, visitedTaskIds),
-                      )
-                    }),
+                    { className: 'dnb-pyr-node-detail', onClick: e => e.stopPropagation() },
+                    h(
+                      'div',
+                      { className: 'dnb-pyr-act-row' },
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-pyr-act-btn',
+                        onClick: () => {
+                          patch({ secTarget: 'lead', secMode: 'steer', notice: bi('已在下方锁定 @主对话', 'Locked target @Lead') })
+                          focusSecInput()
+                        },
+                      }, h(Icon, { name: 'send', size: 10.5 }), bi('@主对话', '@Lead')),
+                    ),
                   )
                 : null,
             ),
+            groupOpen
+              ? h(
+                  'div',
+                  { className: 'dnb-pyr-subtree', 'data-tone': spotTone || undefined },
+                  renderTreeTaskList(leadDirectRoots, visitedTaskIds, groupKey),
+                )
+              : null,
           ),
         )
       }
@@ -1793,145 +1897,138 @@ export function TasksTab({ board }) {
     // Catch any cycle/leftover tasks so nothing ever disappears
     const leftovers = tasks.filter(t => !visitedTaskIds.has(t.id))
     for (const lf of leftovers) {
-      columns.push(
+      treeItems.push(
         h(
           'div',
-          { key: 'col-lf-' + lf.id, className: 'dnb-pyr-branch' },
+          { key: 'col-lf-' + lf.id, className: 'dnb-pyr-subitem' },
           renderGrandTaskCard(lf, visitedTaskIds),
         ),
       )
     }
 
+    const leadOpen = pyrOpenNodes.has('agent:lead') || Boolean(focusedTask)
+    const toggleLeadOpen = () => {
+      if (treeItems.length === 0) return
+      if (leadOpen) {
+        setPyrOpenNodes(prev => {
+          const next = new Set(prev)
+          next.delete('agent:lead')
+          return next
+        })
+        if (store.focusTaskId) patch({ focusTaskId: '' })
+      } else {
+        setPyrOpenNodes(prev => {
+          const next = new Set(prev)
+          next.add('agent:lead')
+          return next
+        })
+      }
+    }
+
     return h(
       'div',
       { ref: pyrRootRef, className: 'dnb-pyr-root' },
-      // Tier 0 Apex Hero Card (`👑 主代理 · 总指挥`)
+      // Tier 0 Compact Apex Node (`👑 主代理 · 总指挥`, click anywhere on card to expand/collapse)
       h(
         'div',
         {
           className: 'dnb-pyr-apex',
           'data-spotlight': apexSpotlightTone || undefined,
+          style: treeItems.length > 0 ? { cursor: 'pointer' } : undefined,
+          title: treeItems.length > 0
+            ? (leadOpen ? bi('点击收起主代理下级任务与子代理', 'Collapse Lead tasks & subagents') : bi('点击展开主代理下级任务与子代理', 'Expand Lead tasks & subagents'))
+            : undefined,
+          onClick: treeItems.length > 0 ? toggleLeadOpen : undefined,
         },
         h(
           'div',
-          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' } },
+          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
           h(
             'div',
-            { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+            { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 } },
+            treeItems.length > 0
+              ? h('button', {
+                  type: 'button',
+                  className: 'dnb-flow-mini-btn',
+                  style: { width: 18, height: 18, flexShrink: 0 },
+                  title: leadOpen ? bi('收起组织树下级节点', 'Collapse org tree children') : bi('展开组织树下级节点', 'Expand org tree children'),
+                  onClick: e => {
+                    e.stopPropagation()
+                    toggleLeadOpen()
+                  },
+                }, h(Icon, {
+                  name: 'chevron',
+                  size: 11,
+                  style: { transform: leadOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' },
+                }))
+              : null,
             h('span', {
               style: {
                 display: 'inline-flex',
                 alignItems: 'center',
                 gap: 4,
-                height: 22,
-                padding: '0 9px',
+                height: 20,
+                padding: '0 8px',
                 borderRadius: 99,
-                background: 'rgba(10, 132, 255, 0.2)',
+                background: 'rgba(10, 132, 255, 0.18)',
                 color: '#409cff',
-                fontSize: 11.5,
+                fontSize: 11,
                 fontWeight: 700,
               },
-            }, '👑 主代理 · 总指挥'),
+            }, bi('👑 主代理', '👑 Lead')),
             runningKidsCount > 0
-              ? h(
-                  'span',
-                  {
-                    className: 'dnb-tag',
-                    style: {
-                      background: 'rgba(10, 132, 255, 0.15)',
-                      color: '#409cff',
-                      fontWeight: 600,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4.5,
-                    },
-                  },
-                  h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8.5px', color: '#409cff' } }),
-                  `${runningKidsCount} 子代理运行中`,
-                )
+              ? h('span', { className: 'dnb-acc-count', style: { color: '#409cff' } }, bi(`${runningKidsCount} 运行`, `${runningKidsCount} active`))
               : null,
             doingTotal > 0
-              ? h(
-                  'span',
-                  {
-                    className: 'dnb-tag',
-                    style: {
-                      background: STATUS_BG.doing,
-                      color: '#409cff',
-                      fontWeight: 600,
-                      display: 'inline-flex',
-                      alignItems: 'center',
-                      gap: 4.5,
-                    },
-                  },
-                  h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8.5px', color: '#409cff' } }),
-                  `推进 ${doingTotal}`,
-                )
+              ? h('span', { className: 'dnb-acc-count', style: { color: '#409cff' } }, bi(`${doingTotal} 推进`, `${doingTotal} doing`))
               : null,
             blockedTotal > 0
-              ? h('span', { className: 'dnb-tag', style: { background: STATUS_BG.blocked, color: '#ff453a', fontWeight: 600 } }, `受阻 ${blockedTotal}`)
+              ? h('span', { className: 'dnb-acc-count', style: { color: '#ff453a' } }, bi(`${blockedTotal} 受阻`, `${blockedTotal} blocked`))
               : null,
             doneTotal > 0
-              ? h('span', { className: 'dnb-tag', style: { background: STATUS_BG.done, color: '#30d158' } }, `完成 ${doneTotal}/${allTasks.length}`)
+              ? h('span', { className: 'dnb-acc-count', style: { color: '#30d158' } }, bi(`${doneTotal}/${allTasks.length} 完`, `${doneTotal}/${allTasks.length} done`))
               : null,
           ),
           h(
             'div',
-            { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
+            { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
             h('button', {
               type: 'button',
-              className: 'dnb-pill dnb-pill-accent',
-              style: { height: 24, padding: '0 9px', fontSize: 11 },
-              title: '让主对话模型将目标拆解为金字塔任务图并调度子代理',
-              onClick: triggerAiPlanGraph,
-            }, h(Icon, { name: 'sparkles', size: 11.5 }), '拆解任务图'),
-            columns.length > 0
-              ? h('button', {
-                  type: 'button',
-                  className: 'dnb-pill',
-                  style: { height: 24, padding: '0 8px', fontSize: 11 },
-                  onClick: () => toggleCollapse('agent:lead'),
-                }, leadCollapsed ? `+ 展开金字塔 (${columns.length})` : '− 收起下级')
+              className: 'dnb-mini-btn',
+              'data-tone': 'accent',
+              style: { height: 22, padding: '0 7px', fontSize: 10.5 },
+              title: bi('让主对话模型将目标拆解为任务图并调度子代理', 'Ask Lead model to decompose objective & dispatch subagents'),
+              onClick: e => {
+                e.stopPropagation()
+                triggerAiPlanGraph()
+              },
+            }, h(Icon, { name: 'sparkles', size: 10.5 }), bi('拆解', 'Plan')),
+            treeItems.length > 0
+              ? h('span', { className: 'dnb-acc-pull-hint' }, leadOpen ? bi('收起 ▴', 'Fold ▴') : bi('拉起 ▾', 'Pull ▾'))
               : null,
           ),
         ),
-        h(
-          'div',
-          {
-            style: {
-              marginTop: 8,
-              fontSize: 13,
-              fontWeight: 600,
-              lineHeight: 1.46,
-              color: 'var(--dnb-text)',
-              wordBreak: 'break-word',
-            },
-          },
-          (board && board.objective)
-            ? board.objective
-            : (allTasks.length
-                ? `共 ${allTasks.length} 项任务节点（推进中 ${doingTotal} · 受阻 ${blockedTotal} · 待推进 ${todoTotal} · 已完成 ${doneTotal}）`
-                : '尚未设定长期目标（可在「规划」页签设定目标，或点右上「拆解任务图」）'),
-        ),
+        (board && board.objective)
+          ? h('div', {
+              style: {
+                marginTop: 5,
+                fontSize: 11.5,
+                color: 'var(--dnb-text-2)',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+              },
+              title: board.objective,
+            }, '🎯 ' + board.objective)
+          : null,
       ),
 
-      // Orthogonal Pyramid Spine + Crossbar + Multi-Column Responsive Branches
-      (!leadCollapsed && columns.length > 0)
+      // Expandable Vertical Tree under Apex (collapsed by default, click Apex card to pull open)
+      (leadOpen && treeItems.length > 0)
         ? h(
-            React.Fragment,
-            null,
-            h('div', { className: 'dnb-pyr-trunk', 'data-tone': trunkTone || undefined }),
-            columns.length > 1
-              ? h('div', { className: 'dnb-pyr-crossbar', 'data-tone': trunkTone || undefined })
-              : null,
-            h(
-              'div',
-              {
-                className: 'dnb-pyr-grid',
-                'data-single': columns.length === 1 ? '1' : '0',
-              },
-              columns,
-            ),
+            'div',
+            { className: 'dnb-pyr-tree-list', 'data-tone': trunkTone || undefined },
+            treeItems,
           )
         : null,
     )
@@ -2458,271 +2555,320 @@ export function TasksTab({ board }) {
     )
   }
 
-  const renderListTree = (list, depth = 0, seen = new Set()) => {
-    const out = []
-    for (const t of list) {
-      if (!t || seen.has(t.id)) continue
-      seen.add(t.id)
-      out.push(h(TaskRow, { key: t.id, task: t, board, depth }))
-      const kids = childrenOf(t.id)
-      if (kids.length) out.push(...renderListTree(kids, depth + 1, seen))
-    }
-    return out
-  }
-
   const STATUS_FILTERS = [
-    { key: 'all', label: '全部', count: allTasks.length },
-    { key: 'doing', label: '推进中', count: doingTotal, color: '#0a84ff' },
-    { key: 'blocked', label: '受阻', count: blockedTotal, color: '#ff453a' },
-    { key: 'todo', label: '待推进', count: todoTotal, color: '#8e8e93' },
-    { key: 'done', label: '已完成', count: doneTotal, color: '#30d158' },
+    { key: 'all', label: bi('全部', 'All'), count: allTasks.length },
+    { key: 'doing', label: statusLabel('doing'), count: doingTotal, color: '#0a84ff' },
+    { key: 'blocked', label: statusLabel('blocked'), count: blockedTotal, color: '#ff453a' },
+    { key: 'todo', label: statusLabel('todo'), count: todoTotal, color: '#8e8e93' },
+    { key: 'done', label: statusLabel('done'), count: doneTotal, color: '#30d158' },
   ]
 
-  return h(
-    'div',
-    { className: 'dnb-view' },
-    h(SubagentFleetBar, { board }),
-    h(ObjectiveRadarStrip, { board }),
-    h(AddTask, { board }),
+  const jumpToBoardStage = stageId => {
+    if (!stageId) return
+    if (boardCollapsed) patch({ boardSectionCollapsed: false })
+    setTimeout(() => {
+      const root = boardSectionRef.current
+      if (!root || typeof root.querySelector !== 'function') return
+      const el = root.querySelector(`[data-flow-stage-id="${stageId}"]`)
+      if (el && typeof el.scrollIntoView === 'function') {
+        try { el.scrollIntoView({ behavior: 'smooth', block: 'center' }) } catch {}
+      }
+    }, boardCollapsed ? 60 : 0)
+  }
 
-    // Progress + Open Filter Bar + Open View Switcher
-    hasPyramidContent
-      ? h(
-          'div',
-          { style: { marginBottom: 10 } },
-          allTasks.length > 0
-            ? h(
-                'div',
-                { className: 'dnb-progress', style: { marginBottom: 8 } },
-                doneTotal ? h('div', { style: { width: (doneTotal / allTasks.length) * 100 + '%', background: '#30d158', transition: 'width 0.3s ease' } }) : null,
-                doingTotal ? h('div', { style: { width: (doingTotal / allTasks.length) * 100 + '%', background: '#0a84ff', transition: 'width 0.3s ease' } }) : null,
-                blockedTotal ? h('div', { style: { width: (blockedTotal / allTasks.length) * 100 + '%', background: '#ff453a', transition: 'width 0.3s ease' } }) : null,
-              )
-            : null,
+  const topSlot = h(SubagentFleetBar, { board })
 
-          // Minimal Text Status Filter Strip
-          allTasks.length > 0
-            ? h(
-                'div',
-                { className: 'dnb-text-filter-bar', style: { marginBottom: 6 } },
-                STATUS_FILTERS.map(f =>
-                  h(
-                    'button',
-                    {
-                      key: f.key,
-                      type: 'button',
-                      className: 'dnb-text-filter-btn',
-                      'data-active': statusFilter === f.key ? '1' : '0',
-                      onClick: () => patch({ taskStatusFilter: f.key }),
-                    },
-                    f.key === 'doing' && doingTotal > 0
-                      ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#409cff' } })
-                      : f.color
-                        ? h('span', { style: { width: 5.5, height: 5.5, borderRadius: '50%', background: f.color } })
-                        : null,
-                    `${f.label} ${f.count}`,
-                  ),
-                ),
-                (statusFilter !== 'all' || filterAgent || store.focusTaskId)
-                  ? h(
-                      'button',
-                      {
-                        type: 'button',
-                        className: 'dnb-text-filter-btn',
-                        style: { marginLeft: 'auto' },
-                        onClick: () => patch({ taskStatusFilter: 'all', filterAgent: '', focusTaskId: '' }),
-                      },
-                      '重置 ×',
-                    )
-                  : null,
-              )
-            : null,
+  const flowStages = (flowModel && Array.isArray(flowModel.stages)) ? flowModel.stages : []
+  const flowStats = (flowModel && flowModel.stats) || {}
+  const planDoneCount = planSteps.filter(s => s && s.done).length
+  const runningAgentsCount = hier.children.filter(a => a && a.status === 'running').length
 
-          // Open View Mode & Layout Controls Row
-          h(
+  // ==================== Zone 2: Collapsible Pure Visual Work Topology ====================
+  const taskTopologySlot = h(
+    AccCard,
+    {
+      open: !topoCollapsed,
+      onToggle: () => patch({ topoSectionCollapsed: !topoCollapsed }),
+      className: 'dnb-topo-card',
+      title: bi('可视化工作拓扑', 'Work Topology'),
+      headTitle: topoCollapsed ? bi('点击拉起可视化工作拓扑（流程画布 / 组织树）', 'Expand work topology (Flow Canvas / Org Tree)') : bi('点击收起可视化工作拓扑', 'Collapse work topology'),
+      headerExtra: flowStages.length > 0
+        ? h(
             'div',
-            { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
-            h(
-              'div',
-              { style: { display: 'flex', gap: 5, alignItems: 'center', flexWrap: 'wrap' } },
+            {
+              className: 'dnb-acc-mini-miles',
+              onClick: e => e.stopPropagation(),
+            },
+            flowStages.slice(0, 8).map((st, idx) =>
               h(
-                'div',
-                { className: 'dnb-seg', style: { padding: 2 } },
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-seg-btn',
-                  style: { padding: '3px 9px', fontSize: 11.5 },
-                  'data-active': viewMode === 'graph' ? '1' : '0',
-                  title: '零横向拖拽、自适应铺开的大气金字塔树',
-                  onClick: () => patch({ taskViewMode: 'graph' }),
-                }, h(Icon, { name: 'network', size: 12 }), '金字塔'),
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-seg-btn',
-                  style: { padding: '3px 9px', fontSize: 11.5 },
-                  'data-active': viewMode === 'canvas' ? '1' : '0',
-                  title: '可自由缩放的全景 SVG 画布',
-                  onClick: () => patch({ taskViewMode: 'canvas' }),
-                }, '画布'),
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-seg-btn',
-                  style: { padding: '3px 9px', fontSize: 11.5 },
-                  'data-active': viewMode === 'list' ? '1' : '0',
-                  onClick: () => patch({ taskViewMode: 'list' }),
-                }, h(Icon, { name: 'list', size: 12 }), '列表'),
+                React.Fragment,
+                { key: 'tm-' + st.id },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dnb-acc-mini-mile',
+                    'data-status': st.status,
+                    title: bi(`步骤 ${st.index}: ${st.title}（点击定位到下方任务板）`, `Step ${st.index}: ${st.title} (jump to board)`),
+                    onClick: () => jumpToBoardStage(st.id),
+                  },
+                  st.status === 'done' ? h(Icon, { name: 'check', size: 9 }) : String(st.index),
+                ),
+                idx < Math.min(flowStages.length, 8) - 1
+                  ? h('span', { className: 'dnb-acc-mini-link', 'data-done': st.status === 'done' ? '1' : '0' })
+                  : null,
               ),
-              viewMode === 'canvas'
-                ? h('button', {
-                    type: 'button',
-                    className: 'dnb-pill',
-                    style: { height: 24, padding: '0 8px', fontSize: 11 },
-                    onClick: () => patch({ graphDir: isLR ? 'TD' : 'LR' }),
-                  }, isLR ? '横向树' : '竖向树')
-                : null,
-              collapsed.size > 0
-                ? h('button', {
-                    type: 'button',
-                    className: 'dnb-pill',
-                    style: { height: 24, padding: '0 8px', fontSize: 11 },
-                    onClick: () => setCollapsed(new Set()),
-                  }, '展开全部分支')
-                : null,
             ),
-            viewMode === 'canvas'
-              ? h(
-                  'div',
-                  { style: { display: 'flex', gap: 3, alignItems: 'center' } },
-                  h('button', { className: 'dnb-pill', style: { height: 24, padding: '0 7px' }, onClick: () => setZoom(z => Math.max(0.42, +(z - 0.12).toFixed(2))) }, '−'),
-                  h('button', { className: 'dnb-pill', style: { height: 24, padding: '0 7px', fontSize: 11 }, onClick: fitZoom, title: '点击自动适配当前宽度' }, Math.round(zoom * 100) + '%'),
-                  h('button', { className: 'dnb-pill', style: { height: 24, padding: '0 7px' }, onClick: () => setZoom(z => Math.min(1.6, +(z + 0.12).toFixed(2))) }, '+'),
-                )
+            flowStages.length > 8
+              ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)', marginLeft: 2 } }, `+${flowStages.length - 8}`)
               : null,
-          ),
-        )
-      : null,
-
-    // Active Focus Banner above Pyramid when spotlighting an objective
-    focusedTask && (viewMode === 'graph' || viewMode === 'canvas')
+          )
+        : null,
+      count: flowStages.length > 0 ? bi(`${flowStats.doneStages || 0}/${flowStats.totalStages || flowStages.length} 步`, `${flowStats.doneStages || 0}/${flowStats.totalStages || flowStages.length} steps`) : '',
+      badges: runningAgentsCount > 0
+        ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'accent' }, bi(`${runningAgentsCount} 代理`, `${runningAgentsCount} active`))
+        : null,
+      actions: !topoCollapsed
+        ? h(
+            'div',
+            { className: 'dnb-seg', style: { padding: 2 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-seg-btn',
+              style: { padding: '2px 8px', fontSize: 10.5 },
+              'data-active': topoViewMode === 'canvas' ? '1' : '0',
+              title: bi('顺序推进流 + 子代理分支与回指箭头 SVG 流程画布', 'Sequential stages + subagent branches SVG flow canvas'),
+              onClick: () => patch({ taskViewMode: 'canvas' }),
+            }, bi('流程画布', 'Flow Canvas')),
+            h('button', {
+              type: 'button',
+              className: 'dnb-seg-btn',
+              style: { padding: '2px 8px', fontSize: 10.5 },
+              'data-active': topoViewMode === 'graph' ? '1' : '0',
+              title: bi('按主/子代理层级展开拉起的组织树', 'Expandable Lead / Subagent hierarchy tree'),
+              onClick: () => patch({ taskViewMode: 'graph' }),
+            }, h(Icon, { name: 'network', size: 10.5 }), bi('组织树', 'Org Tree')),
+          )
+        : null,
+    },
+    focusedTask
       ? h(
           'div',
-          { className: 'dnb-focus-banner', 'data-blocked': focusedTask.status === 'blocked' ? '1' : '0' },
+          { className: 'dnb-focus-banner', 'data-blocked': focusedTask.status === 'blocked' ? '1' : '0', style: { marginBottom: 8 } },
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
             h(Icon, { name: 'target', size: 13 }),
             h('span', { style: { wordBreak: 'break-word' } },
-              (focusedTask.status === 'blocked' ? '已框选受阻关联代理：' : '已框选正在推进的子代理：')
+              (focusedTask.status === 'blocked' ? bi('已框选受阻关联代理：', 'Focused blocked agents: ') : bi('已框选正在推进的子代理：', 'Focused active subagents: '))
               + (focusInfo && focusInfo.agentNames.length
-                  ? focusInfo.agentNames.map(n => '@' + shortAgentName(n, true)).join('、')
-                  : '@主代理')),
+                  ? focusInfo.agentNames.map(n => '@' + shortAgentName(n, true)).join(bi('、', ', '))
+                  : bi('@主代理', '@Lead'))),
           ),
           h(
             'div',
             { style: { display: 'flex', gap: 5, flexShrink: 0 } },
             h('button', {
+              type: 'button',
               className: 'dnb-pill',
               style: { height: 21, padding: '0 7px', fontSize: 10.5 },
               onClick: () => patch({ selectedTaskId: store.selectedTaskId === focusedTask.id ? '' : focusedTask.id }),
-            }, '详情'),
+            }, bi('详情', 'Details')),
             h('button', {
+              type: 'button',
               className: 'dnb-pill',
               style: { height: 21, padding: '0 7px', fontSize: 10.5 },
               onClick: () => patch({ focusTaskId: '' }),
-            }, '退出框选 ×'),
+            }, bi('退出框选 ×', 'Unfocus ×')),
           ),
         )
       : null,
 
-    // Main Task Body: Grand Zero-Drag Pyramid ('graph') | Auto-Fit SVG Canvas ('canvas') | List ('list')
     hasPyramidContent
-      ? viewMode === 'list'
-        ? (tasks.length
-            ? h('div', { className: 'dnb-group' }, renderListTree(roots))
-            : h('div', { className: 'dnb-empty' }, '当前筛选下暂无任务条目'))
-        : viewMode === 'canvas'
-          ? h(
-              React.Fragment,
-              null,
+      ? topoViewMode === 'canvas'
+        ? h(
+            React.Fragment,
+            null,
+            h(
+              'div',
+              { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6, marginBottom: 6 } },
+              h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+                onClick: () => patch({ graphDir: isLR ? 'TD' : 'LR' }),
+              }, isLR ? bi('横向流', 'Horizontal') : bi('竖向流', 'Vertical')),
               h(
                 'div',
-                {
-                  ref: canvasRef,
-                  className: 'dnb-canvas',
-                  style: {
-                    padding: 8,
-                    textAlign: 'center',
-                    cursor: 'grab',
-                  },
-                  onWheel: e => {
-                    if (e.ctrlKey || e.metaKey) {
-                      e.preventDefault()
-                      const delta = e.deltaY < 0 ? 0.1 : -0.1
-                      setZoom(z => Math.min(1.6, Math.max(0.42, +(z + delta).toFixed(2))))
-                    }
-                  },
-                  onMouseDown: e => {
-                    if (e.button !== 0 || e.target.closest('g')) return
-                    const el = canvasRef.current
-                    if (!el) return
-                    panRef.current = { x: e.clientX, y: e.clientY, sl: el.scrollLeft, st: el.scrollTop }
-                    const onMove = ev => {
-                      if (!panRef.current) return
-                      el.scrollLeft = panRef.current.sl - (ev.clientX - panRef.current.x)
-                      el.scrollTop = panRef.current.st - (ev.clientY - panRef.current.y)
-                    }
-                    const onUp = () => {
-                      panRef.current = null
-                      window.removeEventListener('mousemove', onMove)
-                      window.removeEventListener('mouseup', onUp)
-                    }
-                    window.addEventListener('mousemove', onMove)
-                    window.addEventListener('mouseup', onUp)
-                  },
-                  onClick: () => {
-                    if (store.selectedTaskId || store.focusTaskId) {
-                      patch({ selectedTaskId: '', editTaskId: '', focusTaskId: '' })
-                    }
-                  },
-                },
-                h(
-                  'svg',
-                  {
-                    width: Math.round(svgW * zoom),
-                    height: Math.round(svgH * zoom),
-                    viewBox: `0 0 ${svgW} ${svgH}`,
-                    style: { display: 'inline-block', userSelect: 'none' },
-                  },
-                  h(
-                    'defs',
-                    null,
-                    h('marker', {
-                      id: 'dnb-arrow-wait', viewBox: '0 0 10 10', refX: '8', refY: '5',
-                      markerWidth: '5.5', markerHeight: '5.5', orient: 'auto-start-reverse',
-                    }, h('path', { d: 'M 0 1.5 L 9 5 L 0 8.5 z', fill: '#f59e0b' })),
-                    h('marker', {
-                      id: 'dnb-arrow-done', viewBox: '0 0 10 10', refX: '8', refY: '5',
-                      markerWidth: '5.5', markerHeight: '5.5', orient: 'auto-start-reverse',
-                    }, h('path', { d: 'M 0 1.5 L 9 5 L 0 8.5 z', fill: '#30d158' })),
-                  ),
-                  pNodes.map(renderPyramidConnectors),
-                  depEdges.map(renderDepEdge),
-                  renderSpotlightFrame(spotlight),
-                  pNodes.map(renderPyramidNode),
-                ),
+                { style: { display: 'flex', gap: 3, alignItems: 'center' } },
+                h('button', { type: 'button', className: 'dnb-pill', style: { height: 22, padding: '0 7px' }, onClick: () => setZoom(z => Math.max(0.42, +(z - 0.12).toFixed(2))) }, '−'),
+                h('button', { type: 'button', className: 'dnb-pill', style: { height: 22, padding: '0 7px', fontSize: 10.5 }, onClick: fitZoom, title: bi('点击自动适配当前宽度', 'Auto-fit canvas width') }, Math.round(zoom * 100) + '%'),
+                h('button', { type: 'button', className: 'dnb-pill', style: { height: 22, padding: '0 7px' }, onClick: () => setZoom(z => Math.min(1.6, +(z + 0.12).toFixed(2))) }, '+'),
               ),
-              selectedTask ? h(TaskInspectorDrawer, { board, task: selectedTask }) : null,
-            )
-          : renderGrandPyramid()
+            ),
+            h(
+              'div',
+              { className: 'dnb-topo-canvas-wrap' },
+              h(TaskFlowCanvasView, {
+                flowModel,
+                flowLayout: flowCanvasLayout,
+                board,
+                isLR,
+                zoom,
+                setZoom,
+                canvasRef,
+                panRef,
+                selectedTask,
+                onSelectStage: st => jumpToBoardStage(st.id),
+                renderInspector: t => h(TaskInspectorDrawer, { board, task: t }),
+              }),
+            ),
+          )
+        : h('div', { className: 'dnb-topo-pyr-wrap' }, renderGrandPyramid())
       : h(
           'div',
-          { className: 'dnb-empty' },
-          h('div', { style: { marginBottom: 10 } }, '暂无任务节点'),
+          { className: 'dnb-empty', style: { padding: '14px 10px' } },
+          h('div', { style: { marginBottom: 8 } }, bi('暂无推进流程或任务拓扑', 'No work topology or flow graph yet')),
           h('button', {
+            type: 'button',
             className: 'dnb-pill dnb-pill-accent',
             onClick: triggerAiPlanGraph,
-          }, h(Icon, { name: 'sparkles', size: 13 }), '让模型规划任务图'),
+          }, h(Icon, { name: 'sparkles', size: 12 }), bi('让模型规划推进流程', 'Ask Lead to Plan Execution Flow')),
         ),
+  )
+
+  // ==================== Zone 3: Unified Progress Task Board (Merged Flow + Plan Board) ====================
+  const renderUnifiedBoard = stepApi => {
+    const taskMetaParts = []
+    if (blockedTotal > 0) taskMetaParts.push(bi(`${blockedTotal} 受阻`, `${blockedTotal} blocked`))
+    if (doingTotal > 0) taskMetaParts.push(bi(`${doingTotal} 推进`, `${doingTotal} active`))
+    if (doneTotal > 0) taskMetaParts.push(bi(`${doneTotal} 已完`, `${doneTotal} done`))
+    const taskCountLabel = taskMetaParts.length > 0
+      ? taskMetaParts.join(' · ')
+      : (allTasks.length ? bi(`${doneTotal}/${allTasks.length} 任务`, `${doneTotal}/${allTasks.length} tasks`) : '')
+
+    return h(
+      AccCard,
+      {
+        cardRef: boardSectionRef,
+        open: !boardCollapsed,
+        onToggle: () => patch({ boardSectionCollapsed: !boardCollapsed }),
+        className: 'dnb-board-card',
+        title: bi('推进任务板', 'Progress Task Board'),
+        headTitle: boardCollapsed ? bi('点击拉起推进任务板', 'Expand Progress Task Board') : bi('点击收起推进任务板', 'Collapse Progress Task Board'),
+        count: [planSteps.length > 0 ? bi(`${planDoneCount}/${planSteps.length} 步`, `${planDoneCount}/${planSteps.length} steps`) : '', taskCountLabel].filter(Boolean).join(' · '),
+        actions: h(
+          React.Fragment,
+          null,
+          h('button', {
+            type: 'button',
+            className: 'dnb-pill',
+            'data-active': addTaskOpen ? '1' : '0',
+            style: { height: 22, padding: '0 7px', fontSize: 10.5 },
+            title: addTaskOpen ? bi('收起新增任务表单', 'Close add-task form') : bi('展开新增任务表单', 'Add new task'),
+            onClick: () => {
+              if (boardCollapsed) patch({ boardSectionCollapsed: false })
+              setAddTaskOpen(v => !v)
+            },
+          }, h(Icon, { name: 'plus', size: 10.5 }), addTaskOpen ? bi('收起', 'Close') : bi('任务', 'Task')),
+          flowStages.length > 0
+            ? h('button', {
+                type: 'button',
+                className: 'dnb-mini-btn',
+                'data-tone': expandAllStages ? 'accent' : undefined,
+                title: expandAllStages ? bi('切回聚焦模式（自动折叠已完成与未开始步骤）', 'Switch back to focused mode') : bi('一键展开全部步骤', 'Expand all steps'),
+                onClick: () => {
+                  if (boardCollapsed) patch({ boardSectionCollapsed: false })
+                  setExpandAllStages(v => !v)
+                },
+              }, expandAllStages ? bi('仅看聚焦', 'Focused') : bi('全展开', 'Expand All'))
+            : null,
+        ),
+      },
+      addTaskOpen ? h(AddTask, { board }) : null,
+
+      allTasks.length > 0
+        ? h(
+            'div',
+            { style: { marginBottom: 8 } },
+            h(
+              'div',
+              { className: 'dnb-progress', style: { marginBottom: 6 } },
+              doneTotal ? h('div', { style: { width: (doneTotal / allTasks.length) * 100 + '%', background: '#30d158', transition: 'width 0.3s ease' } }) : null,
+              doingTotal ? h('div', { style: { width: (doingTotal / allTasks.length) * 100 + '%', background: '#0a84ff', transition: 'width 0.3s ease' } }) : null,
+              blockedTotal ? h('div', { style: { width: (blockedTotal / allTasks.length) * 100 + '%', background: '#ff453a', transition: 'width 0.3s ease' } }) : null,
+            ),
+            h(
+              'div',
+              { className: 'dnb-text-filter-bar' },
+              STATUS_FILTERS.map(f =>
+                h(
+                  'button',
+                  {
+                    key: f.key,
+                    type: 'button',
+                    className: 'dnb-text-filter-btn',
+                    'data-active': statusFilter === f.key ? '1' : '0',
+                    onClick: () => patch({ taskStatusFilter: f.key }),
+                  },
+                  f.key === 'doing' && doingTotal > 0
+                    ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#409cff' } })
+                    : f.color
+                      ? h('span', { style: { width: 5.5, height: 5.5, borderRadius: '50%', background: f.color } })
+                      : null,
+                  `${f.label} ${f.count}`,
+                ),
+              ),
+              (statusFilter !== 'all' || filterAgent || store.focusTaskId)
+                ? h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dnb-text-filter-btn',
+                      style: { marginLeft: 'auto' },
+                      onClick: () => patch({ taskStatusFilter: 'all', filterAgent: '', focusTaskId: '' }),
+                    },
+                    bi('重置 ×', 'Reset ×'),
+                  )
+                : null,
+            ),
+          )
+        : null,
+
+      h(TaskFlowPipelineView, {
+        flowModel,
+        board,
+        collapsed,
+        onToggleCollapse: toggleCollapse,
+        onExplainTask: t => explainTaskMeaning(t, board),
+        onOpenEditor: openTaskEditor,
+        onContextMenu: (e, t) => setContextMenu({ x: e.clientX, y: e.clientY, task: t, taskId: t.id }),
+        selectedTask,
+        renderInspector: t => h(TaskInspectorDrawer, { board, task: t }),
+        onTriggerAiPlan: triggerAiPlanGraph,
+        hideRail: true,
+        statusFilter,
+        expandAllStages,
+        stepApi,
+      }),
+    )
+  }
+
+  return h(
+    React.Fragment,
+    null,
+    h(PlanTab, {
+      board,
+      topSlot,
+      taskTopologySlot,
+      renderUnifiedBoard,
+      onTriggerPlanGraph: goalText => {
+        const cleanGoal = String(goalText || '').trim()
+        const prompt = (cleanGoal ? `针对长期目标「${cleanGoal.slice(0, 100)}」，` : '')
+          + '请先调用 chief_board 的 plan.set 定好一二三四五顺序推进步骤，再用 graph.plan（填入对应 planStepId 与可选 targetPlanStepId）和 task.dispatch 将就绪节点并行派发给子代理团队。'
+        void askLeadModel(prompt, '拆解任务图')
+      },
+    }),
 
     // Right-click Context Menu (still supported as bonus shortcut alongside open buttons!)
     contextMenu && contextMenu.task

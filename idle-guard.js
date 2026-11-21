@@ -121,6 +121,10 @@ const LOOP_REPEAT = 4
 /** A session's recent calls, capped, so one long turn cannot grow it forever. */
 const callTrail = new Map()
 
+/** Per-session mid-turn spin & consecutive tool-error tracker (capped at 64 sessions). */
+const spinState = new Map()
+const MID_TURN_SPIN_COOLDOWN_MS = 15_000
+
 /** Tools whose identical repetition is ordinary, not a stuck loop. */
 const READ_ONLY_ACTION = /"action"\s*:\s*"(?:snapshot|memory\.ask)"/u
 
@@ -139,6 +143,47 @@ function hashCall(name, argumentsValue) {
   return hash.toString(36) + ':' + text.length.toString(36)
 }
 
+function fuzzyNormalizeArgs(argumentsValue) {
+  let text = String(argumentsValue === undefined || argumentsValue === null ? '' : argumentsValue)
+  text = text.replace(/(?:^|\s)(?:\/\/|#)[^\n\r]*/g, '')
+  text = text.replace(/\b[0-9a-fA-F]{6,}(?:-[0-9a-fA-F]{4,}){0,4}\b/g, '#HEX#')
+  text = text.replace(/\d+(?:\.\d+)?/g, '#')
+  return text.replace(/\s+/g, ' ').trim()
+}
+
+function getSpinEntry(sessionId, create = true) {
+  const id = String(sessionId || '')
+  if (!id) return null
+  let st = spinState.get(id)
+  if (!st && create) {
+    st = {
+      consecutiveErrors: 0,
+      lastErrorTool: '',
+      lastErrorPreview: '',
+      callsSinceActed: 0,
+      lastActedAt: 0,
+    }
+    spinState.set(id, st)
+    if (spinState.size > 64) {
+      const oldest = spinState.keys().next().value
+      if (oldest !== undefined && oldest !== id) spinState.delete(oldest)
+    }
+  }
+  return st || null
+}
+
+function extractToolResultText(data) {
+  if (!data || typeof data !== 'object') return typeof data === 'string' ? data : ''
+  if (typeof data.error === 'string' && data.error) return data.error
+  if (data.error && typeof data.error === 'object' && typeof data.error.message === 'string') return data.error.message
+  const raw = data.result ?? data.output ?? data.text ?? data.content ?? ''
+  if (typeof raw === 'string') return raw
+  if (Array.isArray(raw)) {
+    return raw.map(b => (b && typeof b.text === 'string' ? b.text : '')).filter(Boolean).join('\n')
+  }
+  return ''
+}
+
 export function noteCallTrail(sessionId, name, argumentsValue) {
   const id = String(sessionId || '')
   let trail = callTrail.get(id)
@@ -152,15 +197,139 @@ export function noteCallTrail(sessionId, name, argumentsValue) {
   }
   trail.push({
     key: hashCall(name, argumentsValue),
+    fuzzyKey: hashCall(name, fuzzyNormalizeArgs(argumentsValue)),
     name: String(name || ''),
     readOnly: isReadOnlyCall(name, argumentsValue),
+    planWrite: isPlanWrite(name, argumentsValue),
     preview: String(argumentsValue === undefined || argumentsValue === null ? '' : argumentsValue).slice(0, 120),
   })
   if (trail.length > 16) trail.splice(0, trail.length - 16)
+  const st = getSpinEntry(id, true)
+  if (st) st.callsSinceActed += 1
+}
+
+/** Track consecutive failing tool results so mid-turn error thrashing is caught live. */
+export function noteCallResult(sessionId, data = {}) {
+  const id = String(sessionId || '')
+  if (!id) return
+  const st = getSpinEntry(id, true)
+  if (!st) return
+  const text = extractToolResultText(data)
+  const isFailure = Boolean(data && (data.isError === true || data.error))
+    || /^\s*(?:Error:|ENOENT\b|EPERM\b|failed\b|Exit code\b)/i.test(text)
+  if (isFailure) {
+    st.consecutiveErrors += 1
+    st.lastErrorTool = String((data && (data.name || data.toolName)) || st.lastErrorTool || 'tool')
+    st.lastErrorPreview = String(text || (data && data.message) || '').replace(/\s+/g, ' ').trim().slice(0, 120)
+  } else {
+    st.consecutiveErrors = 0
+    st.lastErrorTool = ''
+    st.lastErrorPreview = ''
+  }
 }
 
 /** Read-only repeats get a higher bar: re-reading after each edit is normal. */
 const LOOP_REPEAT_READ = LOOP_REPEAT + 3
+
+/**
+ * Detect live mid-turn spinning across three patterns: exact loop, varying-arg
+ * polling loop (`fuzzyKey`), and consecutive failing tool calls (`error-thrash`).
+ */
+export function detectMidTurnSpin(sessionId, { strongIntervention = false } = {}) {
+  const id = String(sessionId || '')
+  if (!id) return null
+  const st = getSpinEntry(id, false)
+  if (st && st.lastActedAt > 0 && Date.now() - st.lastActedAt < MID_TURN_SPIN_COOLDOWN_MS && st.callsSinceActed < 3) {
+    return null
+  }
+  const trail = callTrail.get(id)
+  if (trail && trail.length > 0) {
+    const last = trail[trail.length - 1]
+    let exactCount = 0
+    for (let index = trail.length - 1; index >= 0; index -= 1) {
+      if (trail[index].key !== last.key) break
+      exactCount += 1
+    }
+    const exactLimit = last.readOnly ? (strongIntervention ? 6 : LOOP_REPEAT_READ) : (strongIntervention ? 3 : LOOP_REPEAT)
+    if (exactCount >= exactLimit) {
+      return { kind: 'exact-loop', name: last.name, preview: last.preview, count: exactCount }
+    }
+    if (!last.planWrite) {
+      let fuzzyCount = 0
+      for (let index = trail.length - 1; index >= 0; index -= 1) {
+        if (trail[index].fuzzyKey !== last.fuzzyKey || trail[index].planWrite) break
+        fuzzyCount += 1
+      }
+      const fuzzyLimit = (strongIntervention ? 4 : 6) + (last.readOnly ? 2 : 0)
+      if (fuzzyCount >= fuzzyLimit) {
+        return { kind: 'fuzzy-loop', name: last.name, preview: last.preview, count: fuzzyCount }
+      }
+    }
+  }
+  const errLimit = strongIntervention ? 4 : 5
+  if (st && st.consecutiveErrors >= errLimit) {
+    return {
+      kind: 'error-thrash',
+      name: st.lastErrorTool || 'tool',
+      preview: st.lastErrorPreview || '',
+      count: st.consecutiveErrors,
+    }
+  }
+  return null
+}
+
+/** Record mid-turn intervention cooldown and trim tail repeat streak to prevent double firing. */
+export function markMidTurnSpinActed(sessionId) {
+  const id = String(sessionId || '')
+  if (!id) return
+  const st = getSpinEntry(id, true)
+  if (st) {
+    st.lastActedAt = Date.now()
+    st.callsSinceActed = 0
+    st.consecutiveErrors = 0
+  }
+  const trail = callTrail.get(id)
+  if (trail && trail.length > 1) trail.splice(0, trail.length - 1)
+}
+
+/** Reset per-turn spin counters on turn/start while avoiding false positives across turns. */
+export function clearMidTurnSpin(sessionId) {
+  const id = String(sessionId || '')
+  if (!id) {
+    spinState.clear()
+    callTrail.clear()
+    return
+  }
+  spinState.delete(id)
+  callTrail.delete(id)
+}
+
+/** Build steer notice for a live running agent spinning mid-turn. */
+export function buildMidTurnSpinNotice(spin, board) {
+  const s = spin && typeof spin === 'object' ? spin : { kind: 'exact-loop', name: '?', preview: '', count: 0 }
+  const obj = String((board && board.objective) || '').trim().slice(0, 120)
+  const lines = ['[参谋看板 · 运行中空转急刹]']
+  if (s.kind === 'error-thrash') {
+    lines.push(
+      `检测到本轮工具已连续报错 ${s.count} 次（最近一次：${s.name}${s.preview ? ' -> ' + s.preview : ''}），继续硬撞不会成功。`,
+    )
+  } else if (s.kind === 'fuzzy-loop') {
+    lines.push(
+      `检测到你连续 ${s.count} 次以高度相似参数反复轮询/重试 ${s.name}${s.preview ? ' (' + s.preview + ')' : ''}，疑似原地轮询空转。`,
+    )
+  } else {
+    lines.push(
+      `检测到同一调用连续重复 ${s.count} 次（${s.name}${s.preview ? ' ' + s.preview : ''}），没有产生新推进。`,
+    )
+  }
+  if (obj) lines.push(`当前锁定核心目标：${obj}`)
+  lines.push(
+    '请立刻停止同类重复尝试，马上二选一：',
+    '1) 读取真实错误/服务状态并切换完全不同的修复路径或参数，同时用 chief_board 更新断点进度；',
+    '2) 若确认当前环境或依赖已卡死无法突破，立即停止重试，用 chief_board cursor.set(blocked) 标明卡点，并直接汇报阻塞原因请求人工/参谋处理。',
+  )
+  return buildMessage(lines.join('\n'))
+}
 
 /**
  * The tail of this Session's calls when the same (name, arguments) pair has
@@ -309,7 +478,7 @@ export function turnHadToolCall(sessionId, turn, session) {
  * reader can use, which is exactly what the guard exists for.
  */
 export function readAnswer(session, turn) {
-  const result = { hasMessage: false, chars: 0, thoughtChars: 0 }
+  const result = { hasMessage: false, chars: 0, thoughtChars: 0, lastText: '' }
   if (!session || typeof session.snapshotEvents !== 'function') return result
   try {
     const events = session.snapshotEvents()
@@ -321,13 +490,50 @@ export function readAnswer(session, turn) {
       if (message && Array.isArray(message.content)) {
         for (const block of message.content) {
           if (!block || typeof block.text !== 'string') continue
-          if (block.type === 'text') result.chars += block.text.length
-          else if (block.type === 'reasoning') result.thoughtChars += block.text.length
+          if (block.type === 'text') {
+            result.chars += block.text.length
+            const trimmed = block.text.trim()
+            if (trimmed) result.lastText = trimmed.slice(0, 400)
+          } else if (block.type === 'reasoning') {
+            result.thoughtChars += block.text.length
+          }
         }
       }
     }
   } catch {}
   return result
+}
+
+const PREMATURE_ASK_OR_STOP_RE = /(?:请确认|请选择|是否继续|需要您|您看|请指示|请拍板|全部完成|已交付完毕|已完成交付|本轮无进展|卡住了，因为|已暂停待命|优雅退出|收工待命)/
+const COMPLETED_ACTION_PHRASE_RE = /(?:(?:已|已经|刚|刚刚|刚才)?(?:重启|拉起|补跑|续跑|写入?|跑)(?:完成|完毕|好了?|了|成功)|(?:重启|补跑|拉起)前|已(?:重启|拉起|补跑|续跑|写完|完成)|无需(?:重启|补跑|继续))/g
+const PREMATURE_PROMISE_CUE_RE = /(?:重启|拉起|补跑|续跑|继续跑|继续执行|开始跑|开始写|写[^\n。]{0,20}驱动|接下来(?:我|先|去|开始|将)|下面(?:我|先|开始)|马上(?:去|执行|重启|补跑|修复)|这就去|现在(?:去|开始|重启|补跑))/
+
+/**
+ * Detect short wrap-up answers that merely promise the next concrete action
+ * (e.g. "重启 ComfyUI 补跑。" / "写 round-5 驱动。") while stopping the turn.
+ */
+export function detectPrematurePromiseText(text) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!clean || clean.length > 320) return ''
+  if (/[?？]\s*$/.test(clean) || PREMATURE_ASK_OR_STOP_RE.test(clean)) return ''
+  const segs = clean.split(/[。！？\n]+/).map(s => s.trim()).filter(Boolean)
+  const tailSegs = segs.slice(-2)
+  for (let idx = tailSegs.length - 1; idx >= 0; idx -= 1) {
+    const seg = tailSegs[idx]
+    const pendingPart = seg.replace(COMPLETED_ACTION_PHRASE_RE, ' ').trim()
+    if (PREMATURE_PROMISE_CUE_RE.test(pendingPart)) {
+      return seg.slice(0, 120)
+    }
+  }
+  return ''
+}
+
+function resolveEffectiveMaxPerSession(limits, { strongIntervention = false, maxInterventionTurns = 0 } = {}) {
+  const baseMax = limits.maxPerSession
+  if (!strongIntervention || baseMax === 0) return baseMax
+  const n = Number(maxInterventionTurns)
+  if (n === 0) return Math.max(baseMax, 16)
+  return Math.max(baseMax, Math.min(20, Math.round(n || baseMax)))
 }
 
 /** Open work on the board: unfinished plan steps and tasks that are not done. */
@@ -341,7 +547,7 @@ export function openWork(board) {
  * Decide whether this close is premature. Every condition must hold, so the
  * guard stays out of ordinary conversation.
  */
-export function shouldGuard({ board, session, sessionId, turn, settings }) {
+export function shouldGuard({ board, session, sessionId, turn, settings, strongIntervention = false, maxInterventionTurns = 0 }) {
   const flags = settings || {}
   if (flags.guardIdle === false) return null
   // One nudge per turn: steering re-opens the same turn, so a second close in
@@ -350,7 +556,8 @@ export function shouldGuard({ board, session, sessionId, turn, settings }) {
 
   const used = interventions.get(String(sessionId)) || 0
   const limits = guardLimits(flags)
-  if (used >= limits.maxPerSession) return null
+  const effectiveMax = resolveEffectiveMaxPerSession(limits, { strongIntervention, maxInterventionTurns })
+  if (used >= effectiveMax) return null
 
   const answer = readAnswer(session, turn)
   // No committed answer means the turn produced nothing for the reader yet;
@@ -376,6 +583,13 @@ export function shouldGuard({ board, session, sessionId, turn, settings }) {
   if ((board && board.mode) === 'goal' && !objective) {
     if (!called || turnWroteGoal(sessionId, turn, session)) return null
     return { kind: 'no-goal', work, answer }
+  }
+
+  // Shape 6, premature-promise: closed turn right after verbally promising the
+  // next concrete execution action ("重启 XX 补跑 / 写驱动"), even if it updated the board.
+  if (work.total > 0 || Boolean(objective)) {
+    const promiseCue = detectPrematurePromiseText(answer.lastText)
+    if (promiseCue) return { kind: 'premature-promise', work, answer, promiseCue }
   }
 
   // Shape 3, no-plan: the board never held a plan or task graph, so nothing can
@@ -414,7 +628,7 @@ export function shouldGuard({ board, session, sessionId, turn, settings }) {
  * busy turn "you did not call any tool" would be a lie the model can disprove
  * from its own transcript, which is the fastest way to lose its attention.
  */
-export function buildNotice({ kind, work, answer, loop, board }) {
+export function buildNotice({ kind, work, answer, loop, promiseCue, board }) {
   const steps = work.steps.slice(0, 3).map(step => '· ' + String(step.text).slice(0, 80))
   const tasks = work.tasks.slice(0, 3).map(task => '· ' + String(task.title).slice(0, 80))
   const counting = '(' + work.steps.length + ' 个规划步骤 / ' + work.tasks.length + ' 条待办)'
@@ -432,6 +646,10 @@ export function buildNotice({ kind, work, answer, loop, board }) {
       '参谋看板处在「持续目标」模式，但板子上连一句目标都没有：这轮做了 ' + work.total
         + ' 项 ' + counting + '，却没有一句能说明这些动作是为了什么。'
         + '没有目标，步骤列表接着改也只是原地打转。',
+    )
+  } else if (kind === 'premature-promise') {
+    lines.push(
+      '你刚才只用文字预告了下一步动作（『' + String(promiseCue || '').slice(0, 80) + '』），却直接结束回合而未调用工具执行，请立刻调用工具落实并验证。',
     )
   } else if (kind === 'no-plan') {
     lines.push(
@@ -466,6 +684,12 @@ export function buildNotice({ kind, work, answer, loop, board }) {
       '1) chief_board objective.set 写一句「这活最终要变成什么样」——一句话，可验收，别写过程，',
       '2) 目标写完后，回答「目标有没有真的前进」，没前进就明说没前进、卡在哪；',
       '3) 如果这活本来就是一串可勾的步骤、不需要持续目标，用 mode.set 回到 plan，别让空目标一直挂着。',
+    )
+  } else if (kind === 'premature-promise') {
+    lines.push(
+      '禁止只做口头预告就停手交卷。现在立刻落实：',
+      '1) 立即调用对应工具执行你刚才提到的操作（重启服务 / 补跑脚本 / 写入文件 / 验证结果），',
+      '2) 执行完毕后更新 chief_board 状态并汇报可核验证据；若确实遇外部阻塞必须由人类处理，请明确写「卡住了，因为 …」并标记 cursor.set(blocked)。',
     )
   } else if (kind === 'no-plan') {
     lines.push(
@@ -530,7 +754,8 @@ export function clearInterventions(sessionId) {
 }
 
 /** Whether this Session still has interventions left (for reporting). */
-export function remainingInterventions(sessionId, settings) {
+export function remainingInterventions(sessionId, settings, opts = {}) {
   const limits = guardLimits(settings)
-  return Math.max(0, limits.maxPerSession - (interventions.get(String(sessionId || '')) || 0))
+  const max = resolveEffectiveMaxPerSession(limits, opts)
+  return Math.max(0, max - (interventions.get(String(sessionId || '')) || 0))
 }

@@ -10,8 +10,13 @@ import { renderDigest } from './digest.js'
 import { appendMemory, captureTurn } from './memory.js'
 import {
   buildNotice,
+  buildMidTurnSpinNotice,
   clearCallTrail,
+  clearMidTurnSpin,
+  detectMidTurnSpin,
   isPlanWrite,
+  markMidTurnSpinActed,
+  noteCallResult,
   noteCallTrail,
   noteIntervention,
   notePlanWrite,
@@ -36,11 +41,15 @@ import {
   upsertTaskLedgerOnWs,
   normalizeSuggestion,
   ensureWorkspace,
+  recordWorkspaceAlertEvent,
   SUGGESTIONS_CAP,
+  CHAT_CAP,
+  nextId,
+  clamp,
 } from './chief-state.js'
 import { createAutoContinueEngine } from './auto-continue.js'
 import { bootstrapArchivesFromSharedBoard } from './archives.js'
-import { normalizePermissionMode, evaluatePreExecuteDefense, evaluateSafetyGuardHardRules, listGuardWalls } from './chief-executor.js'
+import { normalizePermissionMode, buildCapabilityScope, evaluatePreExecuteDefense, evaluateSafetyGuardHardRules, listGuardWalls } from './chief-executor.js'
 import {
   newId,
   nowMs,
@@ -172,12 +181,23 @@ export function createRuntimeHooks(deps) {
       pushLog,
     })
 
+    const isExplicitStopped = (rootKey, sid) => {
+      try {
+        const st = loadChiefState()
+        const rk = resolveRootSessionId(rootKey || sid) || rootKey || sid
+        const cfg = resolveWorkspaceConfig(st, rk)
+        return Boolean(cfg.stopped || cfg.paceMode === 'stopped')
+      } catch {
+        return false
+      }
+    }
+
     const isRootStopped = (rootKey, sid) => {
       try {
         const st = loadChiefState()
         const rk = resolveRootSessionId(rootKey || sid) || rootKey || sid
         const cfg = resolveWorkspaceConfig(st, rk)
-        return Boolean(cfg.stopped || cfg.paceMode === 'stopped' || cfg.runMode === 'off')
+        return Boolean(cfg.stopped || cfg.paceMode === 'stopped' || (cfg.runMode === 'off' && !(cfg.tacticalModes && cfg.tacticalModes.intervention)))
       } catch {
         return false
       }
@@ -208,8 +228,9 @@ export function createRuntimeHooks(deps) {
           const ws = state && state.workspaces && state.workspaces[key] ? state.workspaces[key] : null
           const effCfg = resolveWorkspaceConfig(state, key)
           const runMode = effCfg && effCfg.runMode ? effCfg.runMode : 'off'
-          if ((effCfg && effCfg.stopped) || (runMode !== 'patrol' && runMode !== 'managed')) {
-            return { allowed: false, skipped: 'run-mode-off', logMessage: '参谋处于「⏸ 关停」模式，仅 patrol/managed 模式允许 Auto continue 唤醒' }
+          const interventionOn = Boolean(effCfg && effCfg.tacticalModes && effCfg.tacticalModes.intervention)
+          if ((effCfg && effCfg.stopped) || (runMode !== 'patrol' && runMode !== 'managed' && !interventionOn)) {
+            return { allowed: false, skipped: 'run-mode-off', logMessage: '参谋处于「⏸ 关停」模式，仅 patrol/managed 或强介入激活时允许 Auto continue 唤醒' }
           }
 
           // Check forbidden bounds and active guard walls BEFORE continuing
@@ -337,6 +358,15 @@ export function createRuntimeHooks(deps) {
             pushLog(board, `🔄 断线续跑：${msg}`, 'chief', sid)
             saveBoard(board, file)
           })
+          if (String(msg || '').includes('断线续跑已触发')) {
+            recordWorkspaceAlertEvent(rootId, {
+              kind: 'auto_continue_rescue',
+              level: 'info',
+              title: '🔄 断流救活已触发续跑',
+              body: String(msg).slice(0, 180),
+              dedupeKey: `rescue:${rootId}:${Math.floor(Date.now() / 5_000)}`,
+            })
+          }
         } catch {}
       },
     })
@@ -489,6 +519,128 @@ export function createRuntimeHooks(deps) {
       } catch {}
     }), 'dsh-chief: deliver pending transfer')
 
+    function handleMidTurnSpinCheck(id, rootId) {
+      try {
+        const agents = runtime && runtime.get ? runtime.get('agents') : null
+        const liveAgent = agents && typeof agents.get === 'function' ? agents.get(id) : null
+        if (!liveAgent || liveAgent.status !== 'running') return
+
+        const st = loadChiefState()
+        const effCfg = resolveWorkspaceConfig(st, rootId)
+        if (effCfg.stopped || effCfg.paceMode === 'stopped') return
+
+        const strongIntervention = Boolean(effCfg.tacticalModes && effCfg.tacticalModes.intervention)
+        const shared = loadBoard(boardFile())
+        const board = boardForSession(boardFileFor(id))
+        const settings = { ...(board.settings || {}), ...(shared.settings || {}) }
+        const guardIdleEnabled = settings.guardIdle !== false
+        if (!strongIntervention && !guardIdleEnabled) return
+
+        const spin = detectMidTurnSpin(id, { strongIntervention })
+        if (!spin) return
+
+        const canSteer = typeof liveAgent.steer === 'function'
+        const logLine = guardLogText({ kind: 'mid-turn-spin', spin }, 0, 0)
+        const ident = resolveAgentIdentity(runtime, id, liveAgent)
+        const targetHandle = (ident && ident.isChild && ident.self) ? ident.self : 'lead'
+
+        if (spin.kind === 'exact-loop' && guardIdleEnabled) {
+          if (!canSteer) return
+          liveAgent.steer(buildMidTurnSpinNotice(spin, board))
+          markMidTurnSpinActed(id)
+          const bFile = boardFileFor(id)
+          withBoardLock(bFile, () => {
+            const b = loadBoard(bFile)
+            pushLog(b, logLine, 'guard', id)
+            saveBoard(b, bFile)
+          })
+          scheduleChiefTurnReview(makeChiefDeps(runtime), { agent: liveAgent, sessionId: id, abnormalTrigger: 'mid_turn_spin' })
+          return
+        }
+
+        if (!strongIntervention) return
+        const wsSnap = st.workspaces && st.workspaces[rootId] ? st.workspaces[rootId] : null
+        const permMode = normalizePermissionMode(effCfg.permissionMode, {
+          requireAck: true,
+          hasChiefRiskAck: hasValidChiefRiskAck(wsSnap),
+        })
+        const spinSummary = `${spin.name || 'tool'}${spin.preview ? ' (' + String(spin.preview).slice(0, 60) + ')' : ''}`
+
+        if (permMode === 'chief' && canSteer) {
+          liveAgent.steer(buildMidTurnSpinNotice(spin, board))
+          markMidTurnSpinActed(id)
+          mutateChiefState((s) => {
+            const ws = ensureWorkspace(s, rootId)
+            ws.chat.push({
+              id: nextId('chat'),
+              role: 'chief',
+              kind: 'receipt',
+              text: `- 【⚡ 强介入 · 运行中空转急刹】已当场插话制止 \`@${targetHandle}\` 原地空转/连续报错（${spin.kind} ×${spin.count}：${clamp(spinSummary, 140)}）。`,
+              actions: [`⚡ 急刹 ×${spin.count}`],
+              at: Date.now(),
+            })
+            if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+          })
+          appendChiefAuditLog(rootId, {
+            mode: permMode,
+            stage: 'executor',
+            rule: 'mid_turn_spin_brake',
+            decision: 'executed',
+            operation: '强介入运行中空转急刹',
+            target: id,
+            reason: `${spin.kind} ×${spin.count}: ${clamp(spinSummary, 120)}`,
+            outcome: 'ok',
+            by: 'chief',
+          })
+        } else if (permMode === 'strategist') {
+          markMidTurnSpinActed(id)
+          const noticeObj = buildMidTurnSpinNotice(spin, board)
+          const noticeTxt = (noticeObj.content && noticeObj.content[0] && noticeObj.content[0].text) || ''
+          queueChiefApproval(rootId, {
+            category: 'main_workflow',
+            operationLabel: '强介入 · 运行中空转急刹插话',
+            targetLabel: targetHandle === 'lead' ? '主对话 (@lead)' : `@${targetHandle}`,
+            reason: `检测到运行中连续空转/报错（${spin.kind} ×${spin.count}），L2 参谋模式需您授权后插话急刹`,
+            impact: '允许后立即向运行中的目标插入纠偏通知',
+            preview: clamp(spinSummary, 200),
+            dedupeKey: `midspin:${rootId}:${spin.kind}:${spin.name}`,
+            kind: 'relay',
+            capabilityScope: buildCapabilityScope({ kind: 'relay', tool: 'relay', target: targetHandle }),
+            payload: {
+              fromSession: rootId,
+              fromLabel: 'DSH 参谋 (运行中空转急刹)',
+              target: targetHandle,
+              subject: '运行中空转急刹',
+              text: noticeTxt,
+              mode: 'steer',
+            },
+            by: 'chief',
+          })
+        } else {
+          markMidTurnSpinActed(id)
+          mutateChiefState((s) => {
+            const ws = ensureWorkspace(s, rootId)
+            ws.chat.push({
+              id: nextId('chat'),
+              role: 'chief',
+              kind: 'receipt',
+              text: `- 【👁 运行中空转告警 (${permMode === 'assistant' ? 'L1' : 'L0'})】检测到 \`@${targetHandle}\` 正在连续空转/报错（${spin.kind} ×${spin.count}：${clamp(spinSummary, 140)}），当前权限不自动插话。`,
+              actions: ['⚠️ 运行空转告警'],
+              at: Date.now(),
+            })
+            if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+          })
+        }
+        const bFile = boardFileFor(id)
+        withBoardLock(bFile, () => {
+          const b = loadBoard(bFile)
+          pushLog(b, logLine, 'guard', id)
+          saveBoard(b, bFile)
+        })
+        scheduleChiefTurnReview(makeChiefDeps(runtime), { agent: liveAgent, sessionId: id, abnormalTrigger: 'mid_turn_spin' })
+      } catch {}
+    }
+
     // 2c) Incremental record of what each turn actually did + Auto-Continue detection
     // on interruptions / transient failures / empty outputs (unless Chief is stopped).
     ctx.effect(() => ctx.on('session/event', (session, event) => {
@@ -499,11 +651,17 @@ export function createRuntimeHooks(deps) {
         if (event.type === 'turn/start' || event.type === 'message/user' || event.type === 'tool/call' || event.type === 'turn/end') {
           touchWorkspaceActivity(rootIdForAct)
         }
-        if (event.type === 'tool/call' && event.data) {
+        if (event.type === 'turn/start') {
+          clearMidTurnSpin(id)
+        } else if (event.type === 'tool/call' && event.data) {
           const turn = event.data.turn
           noteToolCall(id, turn)
           if (isPlanWrite(event.data.name, event.data.arguments)) notePlanWrite(id, turn)
           noteCallTrail(id, event.data.name, event.data.arguments)
+          handleMidTurnSpinCheck(id, rootIdForAct)
+        } else if (event.type === 'tool/result' && event.data) {
+          noteCallResult(id, event.data)
+          handleMidTurnSpinCheck(id, rootIdForAct)
         }
         autoContinue.onSessionEvent(session, event)
 
@@ -519,8 +677,11 @@ export function createRuntimeHooks(deps) {
           const steerKey = `${id}:${turnNum}`
           const steeredAt = deps.hostState.autoSteeredTurns.get(steerKey) || 0
           if (steeredAt) deps.hostState.autoSteeredTurns.delete(steerKey)
-          if (!isStoppedByUserOrPolicy && !(steeredAt && Date.now() - steeredAt < 30_000)) {
-            const rootId = resolveRootSessionId(id) || id
+          const stNow = loadChiefState()
+          const rootId = resolveRootSessionId(id) || id
+          const cfgNow = resolveWorkspaceConfig(stNow, rootId)
+          const strongIntervention = Boolean(cfgNow.tacticalModes && cfgNow.tacticalModes.intervention)
+          if (!isStoppedByUserOrPolicy && (strongIntervention || !(steeredAt && Date.now() - steeredAt < 30_000))) {
             if (!isRootStopped(rootId, id) || abnormalTrig) {
               const agents = runtime && runtime.get ? runtime.get('agents') : null
               const liveAgent = agents && typeof agents.get === 'function' ? agents.get(id) : null
@@ -607,7 +768,12 @@ export function createRuntimeHooks(deps) {
                 }
                 task.updatedAt = nowMs()
                 settledCount += 1
-                pushLog(board, '✅ 子代理 ' + identity.self + ' 完成任务 #' + task.id + '「' + task.title.slice(0, 36) + '」', identity.self, id)
+                const returnStepId = task.targetPlanStepId || task.planStepId
+                const returnStepIdx = returnStepId && Array.isArray(board.plan)
+                  ? board.plan.findIndex(s => s && s.id === returnStepId)
+                  : -1
+                const returnTag = returnStepIdx >= 0 ? '（已回指步骤 ' + (returnStepIdx + 1) + '）' : ''
+                pushLog(board, '✅ 子代理 ' + identity.self + ' 完成任务 #' + task.id + '「' + task.title.slice(0, 36) + '」' + returnTag, identity.self, id)
               }
             }
             if (settledCount > 0) {
@@ -622,7 +788,7 @@ export function createRuntimeHooks(deps) {
           }
 
           const rootId = resolveRootSessionId(id, agent) || id
-          if (isRootStopped(rootId, id)) {
+          if (isExplicitStopped(rootId, id)) {
             saveBoard(board, file)
             return
           }
@@ -631,7 +797,18 @@ export function createRuntimeHooks(deps) {
           // same rule so one switch turns the guard off everywhere.
           const shared = loadBoard(boardFile())
           const settings = { ...(board.settings || {}), ...(shared.settings || {}) }
-          const verdict = shouldGuard({ board, session: agent && agent.session, sessionId: id, turn, settings })
+          const effCfg = resolveWorkspaceConfig(loadChiefState(), rootId)
+          const strongIntervention = Boolean(effCfg.tacticalModes && effCfg.tacticalModes.intervention)
+          const maxInterventionTurns = Number(effCfg.tacticalModes && effCfg.tacticalModes.maxInterventionTurns) || 0
+          const verdict = shouldGuard({
+            board,
+            session: agent && agent.session,
+            sessionId: id,
+            turn,
+            settings,
+            strongIntervention,
+            maxInterventionTurns,
+          })
           if (!verdict) {
             saveBoard(board, file)
             scheduleChiefTurnReview(makeChiefDeps(runtime), { agent, sessionId: id, turn })
@@ -658,7 +835,8 @@ export function createRuntimeHooks(deps) {
           // Clear the trail only once the steer landed: a loop that survived a
           // failed steer deserves the next nudge, not a silent reset.
           if (verdict.kind === 'loop') clearCallTrail(id)
-          pushLog(board, guardLogText(verdict, turn, remainingInterventions(id, settings)), 'guard', id)
+          const remAfter = remainingInterventions(id, settings, { strongIntervention, maxInterventionTurns })
+          pushLog(board, guardLogText(verdict, turn, remAfter), 'guard', id)
 
           // Auto-handoff: when the guard has spent its last intervention and the
           // session still has open work, the turn is not idle — it is stuck in a
@@ -666,7 +844,7 @@ export function createRuntimeHooks(deps) {
           // handover packet right now so the next Session (or a manual reopen)
           // inherits it instead of a blank board. The steer already fired above
           // tells the model to wrap up; this packet is what the next one reads.
-          if (remainingInterventions(id, settings) === 0) {
+          if (remAfter === 0) {
             try {
               const packet = resolveEffectiveHandoff(runtime, id, board).text
               const pendingFile_ = pendingFile()
@@ -741,6 +919,13 @@ export function createRuntimeHooks(deps) {
                 reason: verdict.reason,
                 outcome: 'blocked',
                 by: actorName,
+              })
+              recordWorkspaceAlertEvent(rootId, {
+                kind: 'guard_wall_blocked',
+                level: 'danger',
+                title: '🧱 物理驻墙已拦截越界调用',
+                body: `@${actorName} 调用 ${exec.name}：${String(verdict.reason || '').slice(0, 140)}`,
+                dedupeKey: `wall:${rootId}:${exec.name}:${verdict.wallId || verdict.rule || ''}`,
               })
               try {
                 const bFile = rootId !== 'global' ? boardFileFor(rootId) : boardFile()
@@ -830,6 +1015,56 @@ export function createRuntimeHooks(deps) {
       )
       if (hasNeedReconcile) mutateChiefState(() => {})
     } catch {}
+
+    // Idle watchdog for Strong Intervention: catch already-stalled lead sessions cleanly without extra turns
+    const lastWatchdogByRoot = new Map()
+    const watchdogTimer = setInterval(() => {
+      try {
+        const agents = runtime && runtime.get ? runtime.get('agents') : null
+        const allAgents = agents && typeof agents.list === 'function' ? (agents.list() || []) : []
+        if (!allAgents.length) return
+        const state = loadChiefState()
+        const now = Date.now()
+        for (const ag of allAgents) {
+          const agId = String((ag && ag.id) || '').trim()
+          if (!agId) continue
+          const rootId = resolveRootSessionId(agId, ag) || agId
+          if (rootId !== agId) continue
+          const effCfg = resolveWorkspaceConfig(state, rootId)
+          if (effCfg.stopped || effCfg.paceMode === 'stopped') continue
+          if (!(effCfg.tacticalModes && effCfg.tacticalModes.intervention)) continue
+          if (ag.status === 'running') continue
+
+          const hasRunningChild = allAgents.some(c => {
+            const cId = String((c && c.id) || '').trim()
+            if (!cId || cId === rootId) return false
+            if ((resolveRootSessionId(cId, c) || cId) !== rootId) return false
+            if (/^mnemon-(?:review|run)/i.test(String((c && c.name) || cId))) return false
+            return c && c.status === 'running'
+          })
+          if (hasRunningChild) continue
+
+          const ws = state.workspaces && state.workspaces[rootId] ? state.workspaces[rootId] : null
+          const rg = (ws && ws.runtimeGuard) || {}
+          if (rg.circuitBroken || rg.hazardAlert) continue
+          const hasPendingApr = Array.isArray(ws && ws.pendingApprovals) && ws.pendingApprovals.some(a => a && a.status === 'pending')
+          if (hasPendingApr || (ws && ws.pendingElevation)) continue
+          const hasPendingGoalSug = Array.isArray(ws && ws.suggestions) && ws.suggestions.some(s => s && s.status === 'pending' && s.kind === 'goal_approval')
+          if (hasPendingGoalSug) continue
+
+          const refAt = Math.max(Number(rg.lastActivityAt) || 0, Number(lastWatchdogByRoot.get(rootId)) || 0)
+          if (now - refAt < 22_000) continue
+          lastWatchdogByRoot.set(rootId, now)
+          scheduleChiefTurnReview(makeChiefDeps(runtime), {
+            agent: ag,
+            sessionId: rootId,
+            abnormalTrigger: 'idle_watchdog',
+          })
+        }
+      } catch {}
+    }, 25_000)
+    watchdogTimer.unref?.()
+    ctx.effect(() => () => clearInterval(watchdogTimer), 'dsh-chief: strong intervention watchdog cleanup')
   }
 
   return {

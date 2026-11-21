@@ -22,17 +22,9 @@ import {
   isSubagentSessionId,
   runtimeRefs,
 } from './store.js'
-import {
-  normalizeMaxTurnsVal,
-  clampTitle,
-  shortSession,
-  fullModelWithChannel,
-  shortAgentName,
-  snippetOf,
-  sessionIdFromUrl,
-  encodeImageForChief,
-  truncationNotice,
-} from './utils.js'
+import { normalizeMaxTurnsVal, clampTitle, shortSession, fullModelWithChannel, shortAgentName, snippetOf, sessionIdFromUrl, encodeImageForChief, truncationNotice } from './utils.js'
+import { bi, setRuntimeUiLang } from './i18n.js'
+import { processIncomingAlertEvents } from './notify.js'
 
 function syncBackendActiveWork(activeWork) {
   const cleanWork = activeWork && activeWork.id ? activeWork : null
@@ -85,6 +77,13 @@ function applySecView(viewData) {
   const resolvedRef = (modelsObj && modelsObj.resolvedRef) || pinnedRef || followRef || ''
   const prevMeta = store.chiefMeta || {}
   const cfg = (viewData && viewData.config && typeof viewData.config === 'object') ? viewData.config : {}
+  const incomingAlerts = Array.isArray(viewData.alertEvents) ? viewData.alertEvents : (prevMeta.alertEvents || [])
+  const nextNotifyEnabled = typeof cfg.notifyEnabled === 'boolean' ? cfg.notifyEnabled : (prevMeta.notifyEnabled !== false)
+  const nextNotifySound = typeof cfg.notifySound === 'boolean' ? cfg.notifySound : Boolean(prevMeta.notifySound)
+  const nextUiLang = typeof cfg.uiLang === 'string' && cfg.uiLang ? cfg.uiLang : (prevMeta.uiLang || 'auto')
+  if (typeof cfg.uiLang === 'string' && cfg.uiLang && (cfg.uiLang !== 'auto' || (prevMeta.uiLang && prevMeta.uiLang !== 'auto'))) {
+    setRuntimeUiLang(cfg.uiLang)
+  }
   const mergedTactical = cfg.tacticalModes && typeof cfg.tacticalModes === 'object'
     ? {
         ...(prevMeta.tacticalModes || {}),
@@ -96,12 +95,20 @@ function applySecView(viewData) {
     : (prevMeta.tacticalModes || {})
   const patchObj = {
     secView: viewData,
+    uiLangPref: nextUiLang,
     ...(viewData.models ? { secModelsCatalog: viewData.models } : {}),
     ...(Array.isArray(viewData.guardWalls) ? { guardWalls: viewData.guardWalls } : {}),
     chiefMeta: {
       ...prevMeta,
       runMode: cfg.runMode || (cfg.stopped ? 'off' : (cfg.paceMode === 'auto' ? 'managed' : (cfg.paceMode === 'smart' ? 'patrol' : 'off'))),
       managedIdleTimeoutMs: Number(cfg.managedIdleTimeoutMs) || prevMeta.managedIdleTimeoutMs || (15 * 60 * 1000),
+      notifyEnabled: nextNotifyEnabled,
+      notifySound: nextNotifySound,
+      uiLang: nextUiLang,
+      managedBudgetMaxCalls: cfg.managedBudgetMaxCalls !== undefined ? cfg.managedBudgetMaxCalls : (prevMeta.managedBudgetMaxCalls ?? 30),
+      managedBudgetMaxTokens: cfg.managedBudgetMaxTokens !== undefined ? cfg.managedBudgetMaxTokens : (prevMeta.managedBudgetMaxTokens ?? 300000),
+      llmLedgerSummary: viewData.llmLedger !== undefined ? viewData.llmLedger : (prevMeta.llmLedgerSummary || null),
+      alertEvents: incomingAlerts,
       paceMode: cfg.paceMode || 'manual',
       stopped: Boolean(cfg.stopped || cfg.paceMode === 'stopped'),
       permissionMode: cfg.permissionMode || prevMeta.permissionMode || 'advisor',
@@ -140,6 +147,13 @@ function applySecView(viewData) {
   const nextWorkVal = patchObj.chiefMeta.activeWork
   patch(patchObj)
   syncBackendActiveWork(nextWorkVal)
+  if (Array.isArray(viewData.alertEvents)) {
+    processIncomingAlertEvents(viewData.alertEvents, {
+      notifyEnabled: nextNotifyEnabled,
+      notifySound: nextNotifySound,
+      sessionId: store.sessionId,
+    })
+  }
 }
 
 export async function call(path, init) {
@@ -164,7 +178,12 @@ export async function call(path, init) {
   if (value && (value.chiefMeta || value.hostCompat)) {
     const patchObj = {}
     if (value.chiefMeta) {
-      const nextChiefMeta = { ...store.chiefMeta, ...value.chiefMeta }
+      const prevMeta = store.chiefMeta || {}
+      const nextChiefMeta = { ...prevMeta, ...value.chiefMeta }
+      if (typeof nextChiefMeta.uiLang === 'string' && nextChiefMeta.uiLang && (nextChiefMeta.uiLang !== 'auto' || (prevMeta.uiLang && prevMeta.uiLang !== 'auto'))) {
+        setRuntimeUiLang(nextChiefMeta.uiLang)
+        patchObj.uiLangPref = nextChiefMeta.uiLang
+      }
       patchObj.chiefMeta = nextChiefMeta
       if (String(path || '').startsWith('snapshot')) {
         patchObj.staleBackendDetected = value.chiefMeta.backendBuild !== EXPECTED_BACKEND_BUILD
@@ -183,6 +202,15 @@ export async function call(path, init) {
     patch(patchObj)
     if (value.chiefMeta && Object.prototype.hasOwnProperty.call(value.chiefMeta, 'activeWork')) {
       syncBackendActiveWork(value.chiefMeta.activeWork)
+    }
+    if (value.chiefMeta && Array.isArray(value.chiefMeta.alertEvents)) {
+      const effNotify = value.chiefMeta.notifyEnabled !== undefined ? value.chiefMeta.notifyEnabled : (store.chiefMeta && store.chiefMeta.notifyEnabled !== false)
+      const effSound = value.chiefMeta.notifySound !== undefined ? value.chiefMeta.notifySound : Boolean(store.chiefMeta && store.chiefMeta.notifySound)
+      processIncomingAlertEvents(value.chiefMeta.alertEvents, {
+        notifyEnabled: effNotify,
+        notifySound: effSound,
+        sessionId: store.sessionId,
+      })
     }
   }
   if (value && value.archiveMeta) {
@@ -282,6 +310,13 @@ export async function loadChiefModels(fresh = false) {
 
 export async function updateSecConfig(nextCfg) {
   try {
+    if (nextCfg && typeof nextCfg.uiLang === 'string') {
+      const normLang = setRuntimeUiLang(nextCfg.uiLang)
+      patch({
+        uiLangPref: normLang,
+        chiefMeta: { ...store.chiefMeta, uiLang: normLang },
+      })
+    }
     let lockPatchPayload = null
     if (nextCfg && nextCfg.toggleLockAgentEffort && typeof nextCfg.toggleLockAgentEffort === 'object') {
       const t = String(nextCfg.toggleLockAgentEffort.target || 'lead').trim()
@@ -418,6 +453,24 @@ export async function updateSecConfig(nextCfg) {
       const t = nextCfg.toggleLockAgentEffort.target || 'lead'
       const l = Boolean(nextCfg.toggleLockAgentEffort.locked)
       patch({ notice: l ? `🔒 已锁定 @${t} 思考挡位，参谋 L2/L3 无法自动覆写` : `🔓 已解除 @${t} 思考挡位锁定` })
+    } else if (nextCfg.preset) {
+      const presetMap = {
+        observer: bi('👁 已切换至「只读旁观」预设：L0 · ⏸ 关停 · 低思考强度', '👁 Switched to Observer preset: L0 · Off · Low effort'),
+        collab: bi('🤝 已切换至「日常协作」预设：L2 · 🛡 巡检 · 逐项审批 · 红线哨兵', '🤝 Switched to Co-Pilot preset: L2 · Patrol · Approvals · Sentinel'),
+        away: bi('🚀 已切换至「离桌托管」预设：L3 · 🤖 托管 · 80%自动压缩 · 30次/300K硬预算', '🚀 Switched to Away Managed preset: L3 · Managed · 80% Compact · Budget Cap'),
+      }
+      patch({ notice: presetMap[nextCfg.preset] || bi('✦ 已应用场景预设', '✦ Scenario preset applied') })
+    } else if (typeof nextCfg.uiLang === 'string') {
+      const langNames = { auto: bi('自动跟随宿主', 'Auto'), zh: '简体中文', en: 'English' }
+      patch({ notice: bi('🌐 界面语言已切换为：', '🌐 Interface language: ') + (langNames[nextCfg.uiLang] || nextCfg.uiLang) })
+    } else if (nextCfg.resetManagedBudget) {
+      patch({ notice: bi('↺ 已重置本轮托管硬预算计数器', '↺ Managed budget counter reset') })
+    } else if (typeof nextCfg.notifyEnabled === 'boolean') {
+      patch({ notice: nextCfg.notifyEnabled ? bi('🔔 已开启关键节点系统通知提醒', '🔔 Desktop milestone alerts enabled') : bi('🔕 已关闭关键节点系统通知提醒', '🔕 Desktop milestone alerts disabled') })
+    } else if (typeof nextCfg.notifySound === 'boolean') {
+      patch({ notice: nextCfg.notifySound ? bi('🔊 已开启轻柔提示音', '🔊 Gentle alert chime enabled') : bi('🔇 已静音提示音', '🔇 Alert chime muted') })
+    } else if (nextCfg.managedBudgetMaxCalls !== undefined || nextCfg.managedBudgetMaxTokens !== undefined) {
+      patch({ notice: bi('💰 已更新托管硬预算熔断上限', '💰 Managed hard budget limits updated') })
     } else if (typeof nextCfg.paceMode === 'string') {
       const paceNotice = nextCfg.paceMode === 'stopped'
         ? '⏹ 已停止参谋长：后台强介入、空转监控与断线续跑全部暂停（可随时切回恢复）'
@@ -442,16 +495,38 @@ export async function updateSecConfig(nextCfg) {
   } catch (error) {
     const payload = error && error.payload
     if (payload && payload.requireChiefRiskConfirm) {
+      if (nextCfg && nextCfg.preset === 'away') {
+        patch({ awayPresetModalOpen: true, awayPresetAgreed: false, secPermMenuOpen: false, secPaceMenuOpen: false })
+        return null
+      }
       patch({ chiefRiskModalOpen: true, chiefRiskAgreed: false, secPermMenuOpen: false })
       return null
     }
     if (payload && payload.requireAutoPilotConfirm) {
+      if (nextCfg && nextCfg.preset === 'away') {
+        patch({ awayPresetModalOpen: true, awayPresetAgreed: false, secPermMenuOpen: false, secPaceMenuOpen: false })
+        return null
+      }
       patch({ autoPilotConfirmOpen: true, secPaceMenuOpen: false })
       return null
     }
     patch({ error: String((error && error.message) || error) })
     return null
   }
+}
+
+export async function applyScenarioPreset(presetId, extra = {}) {
+  const id = String(presetId || '').trim().toLowerCase()
+  if (!id) return null
+  if (id === 'away' && !(extra && extra.confirmedChiefRisk && extra.confirmedAutoPilot)) {
+    const meta = store.chiefMeta || {}
+    const alreadyReady = Boolean(meta.chiefRiskVerified) && meta.permissionMode === 'chief' && meta.runMode === 'managed'
+    if (!alreadyReady) {
+      patch({ awayPresetModalOpen: true, awayPresetAgreed: false, secPermMenuOpen: false, secPaceMenuOpen: false })
+      return null
+    }
+  }
+  return updateSecConfig({ preset: id, ...extra })
 }
 
 export async function decideApproval(approvalId, decision) {
@@ -812,7 +887,7 @@ function classifyChiefWorkFx(text, quickTag = '') {
     hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在编排任务看板中...' })
   }
   if (/执行计划|规划步骤|交接单|handoff/i.test(clean)) {
-    hits.push({ tone: 'tasks', tab: 'plan', label: '参谋长正在推演执行计划中...' })
+    hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在推演执行计划中...' })
   }
   if (/协同网络|跨窗|关联会话|子代理|广播/i.test(clean)) {
     hits.push({ tone: 'peers', tab: 'peers', label: '参谋长正在协调团队网络中...' })
@@ -1987,9 +2062,9 @@ export function searchBoard(term) {
     }
   }
   for (const step of board.plan || []) {
-    if (hit(step.text)) hits.push({ kind: '规划', tab: 'plan', id: step.id, title: step.text, snippet: '' })
+    if (hit(step.text)) hits.push({ kind: '规划', tab: 'tasks', id: step.id, title: step.text, snippet: '' })
   }
-  if (hit(board.objective)) hits.push({ kind: '目标', tab: 'plan', id: 'objective', title: '当前目标', snippet: snippetOf(board.objective, needle, 36) })
+  if (hit(board.objective)) hits.push({ kind: '目标', tab: 'tasks', id: 'objective', title: '当前目标', snippet: snippetOf(board.objective, needle, 36) })
   for (const item of board.memory || []) {
     if (hit(item.title) || hit(item.text)) {
       hits.push({ kind: '回合记录', tab: 'chief', subTab: 'facts', showRawTurns: true, id: item.id, title: item.title || SECTION_LABEL[item.section] || '记忆', snippet: snippetOf(item.text || item.title, needle, 36) })
@@ -2222,6 +2297,8 @@ export function openTaskEditor(task) {
     editTaskIntent: task.intent || '',
     editTaskEvidence: task.evidence || '',
     editTaskParentId: task.parentId || '',
+    editTaskPlanStepId: task.planStepId || '',
+    editTaskTargetPlanStepId: task.targetPlanStepId || '',
     editTaskBlockedBy: Array.isArray(task.blockedBy) ? [...task.blockedBy] : [],
   })
 }

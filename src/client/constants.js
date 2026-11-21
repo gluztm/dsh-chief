@@ -10,7 +10,7 @@ export const SIDE_ID = 'dsh-chief'
 
 export const BRAND_NAME = 'DSH 参谋长'
 
-export const EXPECTED_BACKEND_BUILD = '1.5.0'
+export const EXPECTED_BACKEND_BUILD = '1.6.0'
 
 export const CHIEF_PERMISSION_LABELS = {
   advisor: 'L0 · 顾问模式',
@@ -65,7 +65,6 @@ export const TABS = [
   { key: 'chief', label: '参谋' },
   { key: 'tasks', label: '任务' },
   { key: 'peers', label: '协同' },
-  { key: 'plan', label: '规划' },
   { key: 'archive', label: '档案' },
   { key: 'boundaries', label: '边界' },
 ]

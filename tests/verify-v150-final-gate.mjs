@@ -323,9 +323,9 @@ try {
   // =========================================================================
   // F1: Version alignment, client selectors & frosted dream glass, 0 stale term
   // =========================================================================
-  assert.equal(pkgJson.version, '1.5.0', 'F1 package.json must be 1.5.0')
-  assert.equal(schemaMod.BACKEND_BUILD, '1.5.0', 'F1 board-schema BACKEND_BUILD must be 1.5.0')
-  assert.equal(constMod.EXPECTED_BACKEND_BUILD, '1.5.0', 'F1 constants EXPECTED_BACKEND_BUILD must be 1.5.0')
+  assert.match(String(pkgJson.version || ''), /^1\.[5-9]\.\d+/, 'F1 package.json version must be >= 1.5.0')
+  assert.equal(schemaMod.BACKEND_BUILD, pkgJson.version, 'F1 board-schema BACKEND_BUILD must align with package.json')
+  assert.equal(constMod.EXPECTED_BACKEND_BUILD, pkgJson.version, 'F1 constants EXPECTED_BACKEND_BUILD must align with package.json')
 
   const clientBundle = fs.readFileSync(path.join(PKG, 'client.js'), 'utf8')
   for (const needle of [

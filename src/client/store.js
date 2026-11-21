@@ -6,6 +6,7 @@
 
 import { React } from './react-runtime.js'
 import { SIDE_ID } from './constants.js'
+import { readSavedUiLang } from './i18n.js'
 
 export const store = {
   open: false,
@@ -29,10 +30,21 @@ export const store = {
   editTaskIntent: '',
   editTaskEvidence: '',
   editTaskParentId: '',
+  editTaskPlanStepId: '',
+  editTaskTargetPlanStepId: '',
   editTaskBlockedBy: [],
   selectedTaskId: '',
   focusTaskId: '',
-  taskViewMode: 'graph',
+  taskViewMode: 'canvas',
+  planObjCollapsed: false,
+  topoSectionCollapsed: true,
+  boardSectionCollapsed: false,
+  handoffSectionCollapsed: true,
+  chiefDigestCollapsed: false,
+  chiefFactsCollapsed: false,
+  peersNetCollapsed: false,
+  peersFedCollapsed: null,
+  peersMailCollapsed: false,
   graphDir: 'TD',
   taskStatusFilter: 'all',
   filterAgent: '',
@@ -96,6 +108,13 @@ export const store = {
   chiefMeta: {
     runMode: 'off',
     managedIdleTimeoutMs: 15 * 60 * 1000,
+    notifyEnabled: true,
+    notifySound: false,
+    uiLang: 'auto',
+    managedBudgetMaxCalls: 30,
+    managedBudgetMaxTokens: 300000,
+    llmLedgerSummary: null,
+    alertEvents: [],
     paceMode: 'manual',
     stopped: false,
     permissionMode: 'advisor',
@@ -181,6 +200,12 @@ export const store = {
   interventionAgreed: false,
   unlimitedTurnsModalOpen: false,
   autoPilotConfirmOpen: false,
+  awayPresetModalOpen: false,
+  awayPresetAgreed: false,
+  uiLangPref: readSavedUiLang(),
+  seenAlertEventIds: {},
+  ledgerExpanded: false,
+  settingsOpen: false,
   chiefRiskModalOpen: false,
   chiefRiskAgreed: false,
   chiefRiskBusy: false,
@@ -300,6 +325,7 @@ export const runtimeRefs = {
   sessionClearTimer: null,
   initialRightbarSeeded: false,
   userDismissedChief: false,
+  alertBaselineBySession: {},
 }
 
 let noticeTimer = null
@@ -348,9 +374,11 @@ export function focusObjectiveInPyramid(taskId, opts = {}) {
     patch({ focusTaskId: '' })
     return
   }
+  const keepMode = store.taskViewMode === 'graph' ? 'graph' : 'canvas'
   patch({
     tab: 'tasks',
-    taskViewMode: 'graph',
+    taskViewMode: keepMode,
+    topoSectionCollapsed: false,
     graphDir: 'TD',
     focusTaskId: taskId,
     filterAgent: '',

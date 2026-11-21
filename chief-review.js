@@ -7,6 +7,7 @@
 import crypto from 'node:crypto'
 import { loadArchiveStore } from './archives.js'
 import { normalizePermissionMode, permissionRank } from './chief-executor.js'
+import { detectPrematurePromiseText } from './idle-guard.js'
 import {
   CHAT_CAP,
   REVIEW_DELAY_MS,
@@ -34,6 +35,7 @@ import {
   beginChiefActiveWork,
   updateChiefActiveWork,
   endChiefActiveWork,
+  pushAlertEventToWs,
 } from './chief-state.js'
 import { listChiefModels, callChiefLlm } from './chief-models.js'
 import { listPeerDirectory, deliverCrossMessage } from './chief-network.js'
@@ -65,7 +67,7 @@ const TURN_REVIEW_SYSTEM = [
   '   - 当 `INTERVENTION_SUPERVISOR` 或 `AUTO_PILOT_SESSION_ONLY` 开启时，你必须严密审查：主/子代理刚刚提出、准备执行、请求用户拍板，或接下来继续推进是否**存在重大不可逆风险，或继续推进必然会撞穿当前生效边界（尤其 🚫 禁止红线）**？',
   '   - **重要提示（下列仅是常见举例，绝不限于此！）**：包括但不限于实际花钱/扣费/下单/付费 API 调用、不可逆删除或清空文件/数据/仓库、下载超大文件占用巨额磁盘或流量、关闭/重启服务器或关键宿主服务、对外公开推送/发布不可撤回变更、破坏宿主机隔离边界、以及任何一旦继续推跑就会导致不可逆损失或必然撞穿红线的情形。',
   '   - 一旦命中任一上述风险或必然撞边界：**必须立即设 `"hazardStop": { "triggered": true, "category": "...", "title": "简短醒目告警标题", "reason": "用清晰人话说清具体会造成什么不可逆损失或必然撞上哪条边界，以及为何必须立即停下等用户处理" }`，并强制设 `"shouldIntervene": false`、`interventionText: ""`**（严禁再推下一轮！）。',
-  '6. `shouldIntervene` & `interventionText`：当开启「主动强介入 (`INTERVENTION_SUPERVISOR`)」且 `hazardStop.triggered === false`、主代理停下时，对照「核心目标 + 必做事项 + 最新用户诉求」逐项核验！只要目标或必做事项尚未真正做完、缺少实测验证证据却自称完成，必须设 `shouldIntervene: true` 并写出清晰可执行、可直接投递给 `@lead` 继续推进下一回合的督导指令；若处于 `strictVerify` 模式但回复无实测输出证据，务必驳回自称完成并要求补跑验证；若开启 `conciseBrief`，督导指令严格限定在 3 条以内要点。仅当核心目标与必做事项均已完成 (`achieved`)、或正在等待子代理回信时，设 `shouldIntervene: false`。',
+  '6. `shouldIntervene` & `interventionText`：当开启「主动强介入 (`INTERVENTION_SUPERVISOR`)」且 `hazardStop.triggered === false` 时，**触发复盘代表主对话刚刚结束了本轮输出、当前已停下进入空闲 (`status=idle`)**！对照「核心目标 + 必做事项 + 最新用户/参谋诉求」逐项核验：只要目标或必做事项尚未真正做完、主对话仅用「重启 XX / 补跑剩余 N 张 / 接下来写脚本 / 继续推进」等口头预告收尾却未真正调用工具落实、或缺少实测验证证据却自称完成，**必须**设 `shouldIntervene: true` 并写出清晰可执行、可直接投递给 `@lead` 继续推进下一回合的 `interventionText` 督导指令；若处于 `strictVerify` 模式但回复无实测输出证据，务必驳回自称完成并要求补跑验证；若开启 `conciseBrief`，督导指令严格限定在 3 条以内要点。仅当核心目标与必做事项均已完成 (`achieved`)、或确认有活跃子代理正在后台运行等待回信时，才设 `shouldIntervene: false`。',
   '7. `suggestions`（最多 1 条，宁缺毋滥）：',
   '   - `"kind": "bound"`：明显撞墙或发现长期红线/必做规矩时请示注入边界；',
   '   - `"kind": "relay"`：发现明确跨对话信息差时的递话建议；',
@@ -146,6 +148,58 @@ function detectEmergencyHazardFallback({ parsed, digestText = '', bounds = {}, i
 
 const reviewTimers = new Map()
 
+const DIRECTIVE_SOURCE_KINDS = new Set([
+  '',
+  'user',
+  'dsh-chief-relay',
+  'dsh-chief-execution-request',
+  'dsh-chief-auto-continue',
+])
+
+const HIGH_RISK_FALLBACK_RE = /(?:花钱|扣费|付款|付费|下单|充值|删库|永久删除|清空目录|格式化|关闭服务器|停服|重启宿主|git\s+push|npm\s+publish|请确认|请选择|需要您|请指示|请拍板)/i
+
+function extractMessageTextBlocks(msg) {
+  const blocks = Array.isArray(msg && msg.content)
+    ? msg.content
+    : (typeof (msg && msg.content) === 'string' ? [{ type: 'text', text: msg.content }] : [])
+  const textParts = []
+  const toolHints = []
+  for (const b of blocks) {
+    if (!b || typeof b !== 'object') continue
+    if (b.type === 'text' && typeof b.text === 'string' && b.text.trim()) {
+      textParts.push(b.text.trim())
+    } else if ((b.type === 'tool_use' || b.type === 'tool-call' || b.type === 'toolCall') && (b.name || b.toolName)) {
+      const tName = String(b.name || b.toolName)
+      let argHint = ''
+      try {
+        const rawArgs = b.input || b.arguments || b.args
+        const obj = typeof rawArgs === 'string' ? JSON.parse(rawArgs) : rawArgs
+        if (obj && typeof obj === 'object') {
+          const val = obj.action || obj.command || obj.cmd || obj.path || obj.file_path || obj.agent || obj.title || ''
+          if (val) argHint = clamp(String(val), 40)
+        }
+      } catch {}
+      toolHints.push(argHint ? `${tName}(${argHint})` : tName)
+    }
+  }
+  return {
+    text: textParts.join('\n').trim(),
+    toolHints,
+  }
+}
+
+function resolveTurnTag(turn) {
+  if (typeof turn === 'number' && Number.isFinite(turn)) return String(turn)
+  if (turn && typeof turn === 'object') {
+    if (turn.turn !== undefined) return String(turn.turn)
+    if (turn.index !== undefined) return String(turn.index)
+    if (turn.id !== undefined) return String(turn.id)
+    if (turn.ok) return 'ok'
+    if (turn.error) return 'err'
+  }
+  return 't'
+}
+
 function extractLatestTurnDigest(agent, turn) {
   if (!agent || !agent.session) return null
   try {
@@ -155,48 +209,63 @@ function extractLatestTurnDigest(agent, turn) {
       for (let i = msgs.length - 1; i >= 0; i -= 1) {
         const um = msgs[i]
         if (!um || um.role !== 'user') continue
-        if (um.source && um.source.kind && um.source.kind !== 'user') continue
-        const uBlocks = Array.isArray(um.content) ? um.content : []
-        const uTxt = uBlocks
-          .filter(b => b && b.type === 'text' && typeof b.text === 'string')
-          .map(b => b.text)
-          .join('\n')
-          .trim()
+        const srcKind = String((um.source && um.source.kind) || '').trim()
+        if (!DIRECTIVE_SOURCE_KINDS.has(srcKind)) continue
+        const uTxt = extractMessageTextBlocks(um).text
         if (uTxt && !isInternalCheckpointNoise(uTxt)) {
           latestUserPrompt = clamp(uTxt, 1000)
           break
         }
       }
 
-      const tail = msgs.slice(-6)
-      const lines = []
+      const scanStart = Math.max(0, msgs.length - 24)
+      const collected = []
       let hasUser = false
-      for (const m of tail) {
+      let lastAssistantText = ''
+      for (let i = msgs.length - 1; i >= scanStart && collected.length < 8; i -= 1) {
+        const m = msgs[i]
         if (!m || !m.role) continue
-        if (m.source && m.source.kind && m.source.kind !== 'user' && m.role === 'user') continue
-        const blocks = Array.isArray(m.content) ? m.content : []
-        const txt = blocks
-          .filter(b => b && b.type === 'text' && typeof b.text === 'string')
-          .map(b => b.text)
-          .join('\n')
-          .trim()
-        if (!txt || isInternalCheckpointNoise(txt)) continue
+        const srcKind = String((m.source && m.source.kind) || '').trim()
         if (m.role === 'user') {
-          hasUser = true
-          lines.push('User: ' + clamp(txt, 1200))
+          if (!DIRECTIVE_SOURCE_KINDS.has(srcKind)) continue
+          const uTxt = extractMessageTextBlocks(m).text
+          if (!uTxt || isInternalCheckpointNoise(uTxt)) continue
+          if (!srcKind || srcKind === 'user') {
+            hasUser = true
+            collected.push('User: ' + clamp(uTxt, 1200))
+          } else {
+            collected.push('Chief->Lead: ' + clamp(uTxt, 900))
+          }
         } else if (m.role === 'assistant') {
-          lines.push('Assistant: ' + clamp(txt, 900))
+          const { text: aTxt, toolHints } = extractMessageTextBlocks(m)
+          const cleanTxt = aTxt && !isInternalCheckpointNoise(aTxt) ? aTxt : ''
+          if (!cleanTxt && !toolHints.length) continue
+          if (cleanTxt) {
+            if (!lastAssistantText) lastAssistantText = cleanTxt
+            collected.push('Assistant: ' + clamp(cleanTxt, 900) + (toolHints.length ? ` [Tools: ${toolHints.slice(0, 4).join(' -> ')}]` : ''))
+          } else {
+            collected.push('Assistant Tools: ' + toolHints.slice(0, 6).join(' -> '))
+          }
         }
       }
-      if (lines.length > 0) return { text: lines.join('\n'), hasUser, latestUserPrompt, stamp: msgs.length }
+      const lines = collected.reverse()
+      if (lines.length > 0) {
+        const joined = lines.join('\n')
+        const lastMsg = msgs[msgs.length - 1]
+        const lastMsgId = String((lastMsg && (lastMsg.id || lastMsg.messageId || lastMsg.timestamp)) || 'm').slice(0, 24)
+        const tailHash8 = crypto.createHash('sha1').update(joined).digest('hex').slice(0, 8)
+        const stamp = `${resolveTurnTag(turn)}:${msgs.length}:${lastMsgId}:${tailHash8}`
+        return { text: joined, hasUser, latestUserPrompt, lastAssistantText, msgCount: msgs.length, stamp }
+      }
     }
   } catch {}
   return null
 }
 
 const lastReviewAtByRoot = new Map()
+const lastFallbackStampByRoot = new Map()
 
-export function scheduleChiefTurnReview(deps, { agent, sessionId, turn, abnormalTrigger = '' }) {
+export function scheduleChiefTurnReview(deps, { agent, sessionId, turn, abnormalTrigger = '', delayOverrideMs = null }) {
   const sid = String(sessionId || (agent && agent.id) || '').trim()
   if (!sid) return
   // Never waste tokens reviewing internal mnemon checkpoint / probe subagents
@@ -211,16 +280,17 @@ export function scheduleChiefTurnReview(deps, { agent, sessionId, turn, abnormal
   const wsSnap = state.workspaces && state.workspaces[rootKey] ? state.workspaces[rootKey] : null
   const pendingSmart = Boolean(wsSnap && wsSnap.runtimeGuard && wsSnap.runtimeGuard.pendingSmartCompact)
   const compactChannel = Boolean(tactical.autoCompact || tactical.smartCompact || pendingSmart)
+  const interventionChannel = Boolean(tactical.intervention)
 
-  if (effCfg.stopped || (runMode === 'off' && !compactChannel)) {
+  if (effCfg.stopped || (runMode === 'off' && !compactChannel && !interventionChannel)) {
     clearTimeout(reviewTimers.get(rootKey))
     reviewTimers.delete(rootKey)
     return
   }
 
-  // In PATROL mode: normal turns consume 0 background tokens; wake ONLY on explicit abnormal triggers or compaction checks
+  // In PATROL mode: normal turns consume 0 background tokens; wake ONLY on explicit abnormal triggers, compaction, or intervention
   const hasAbnormal = Boolean(String(abnormalTrigger || '').trim())
-  if (runMode === 'patrol' && !hasAbnormal && !compactChannel) {
+  if (runMode === 'patrol' && !hasAbnormal && !compactChannel && !interventionChannel) {
     return
   }
 
@@ -228,10 +298,12 @@ export function scheduleChiefTurnReview(deps, { agent, sessionId, turn, abnormal
     ? deps.boardForSession(deps.boardFileFor(rootKey))
     : null
   const isGoalMode = Boolean(board && board.mode === 'goal')
-  const hasHighPriorityChannel = hasAbnormal || isGoalMode || compactChannel || tactical.intervention || tactical.redlineSentinel || tactical.strictVerify
+  const hasHighPriorityChannel = hasAbnormal || isGoalMode || compactChannel || interventionChannel || tactical.redlineSentinel || tactical.strictVerify
 
   clearTimeout(reviewTimers.get(rootKey))
-  const delayMs = hasHighPriorityChannel ? 1_200 : REVIEW_DELAY_MS
+  const delayMs = delayOverrideMs !== null && Number.isFinite(Number(delayOverrideMs)) && Number(delayOverrideMs) >= 0
+    ? Math.max(100, Math.round(Number(delayOverrideMs)))
+    : (hasHighPriorityChannel ? 1_200 : REVIEW_DELAY_MS)
   const timer = setTimeout(() => {
     reviewTimers.delete(rootKey)
     runTurnReview(deps, { agent, sessionId: sid, turn, abnormalTrigger }).catch(() => {})
@@ -253,12 +325,13 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   const wsBefore = ensureWorkspace(stateBefore, rootId)
   const pendingSmart = Boolean(wsBefore.runtimeGuard && wsBefore.runtimeGuard.pendingSmartCompact)
   const compactChannel = Boolean(tactical.autoCompact || tactical.smartCompact || pendingSmart)
+  const interventionChannel = Boolean(tactical.intervention)
   const hasAbnormal = Boolean(String(abnormalTrigger || '').trim())
 
   if (!force && effCfgBefore.stopped) {
     return { ok: false, skipped: 'chief-stopped' }
   }
-  if (!force && runMode === 'off' && !compactChannel) {
+  if (!force && runMode === 'off' && !compactChannel && !interventionChannel) {
     return { ok: false, skipped: 'off' }
   }
   const board = deps.boardForSession && deps.boardFileFor
@@ -266,7 +339,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     : null
   const isGoalMode = Boolean(board && board.mode === 'goal')
   const smartCoManaged = Boolean(tactical.smartCompact)
-  const hasHighPriority = hasAbnormal || isGoalMode || tactical.intervention || tactical.redlineSentinel || tactical.strictVerify || compactChannel
+  const hasHighPriority = hasAbnormal || isGoalMode || interventionChannel || tactical.redlineSentinel || tactical.strictVerify || compactChannel
 
   // Always check pre-compaction pipeline first when autoCompact/smartCompact/pendingSmartCompact is active
   if (compactChannel) {
@@ -278,21 +351,22 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
         }
         return { ok: false, error: msg }
       })
-    if (preRes && preRes.ok && preRes.smartCompacted) {
+    if (preRes && preRes.ok && preRes.smartCompacted && !interventionChannel) {
       return { ok: true, smartCompacted: true, harvestId: preRes.harvestId }
     }
   }
 
   // If runMode === 'off' and we only entered for standalone smartCompact/autoCompact pre-check,
-  // exit cleanly once autoCompact threshold isn't forcing LLM, except when smartCoManaged needs its idle evaluation.
-  if (!force && runMode === 'off' && !smartCoManaged) {
+  // exit cleanly once autoCompact threshold isn't forcing LLM, except when smartCoManaged or intervention needs evaluation.
+  if (!force && runMode === 'off' && !smartCoManaged && !interventionChannel) {
     return { ok: true, onlyCompactionChecked: true }
   }
 
-  // If ONLY fixed-threshold autoCompact was on (without smartCompact or patrol-abnormal or managed), exit cleanly
+  // If ONLY fixed-threshold autoCompact was on (without smartCompact, intervention, patrol-abnormal, or managed), exit cleanly
   const needsSupervisorLlm = (runMode === 'managed')
     || (runMode === 'patrol' && hasAbnormal)
     || smartCoManaged
+    || interventionChannel
     || (force && (isGoalMode || tactical.intervention || tactical.redlineSentinel || tactical.strictVerify))
   if (!force && !needsSupervisorLlm && runMode !== 'patrol') {
     return { ok: true, onlyCompactionChecked: true }
@@ -302,7 +376,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   if (!digest || !digest.text) return { ok: false, skipped: 'no-digest' }
 
   const hasWallCue = hasAbnormal || /(?:permission denied|eacces|eperm|forbidden|blocked|not allowed|sandbox|read-only|撞墙|受阻|权限拒绝|越界)/i.test(digest.text)
-  if (!force && runMode === 'patrol' && !hasWallCue && !smartCoManaged) {
+  if (!force && runMode === 'patrol' && !hasWallCue && !smartCoManaged && !interventionChannel) {
     return { ok: false, skipped: 'patrol-no-abnormal' }
   }
 
@@ -319,7 +393,14 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   const cooldownMs = hasHighPriority
     ? (smartCoManaged && !isGoalMode && !tactical.intervention && !hasAbnormal ? 12_000 : 4_000)
     : (runMode === 'patrol' ? (hasWallCue ? 45_000 : SMART_REVIEW_COOLDOWN_MS) : AUTO_REVIEW_COOLDOWN_MS)
-  if (!force && now - lastAt < cooldownMs) return { ok: false, skipped: 'cooldown' }
+  if (!force && now - lastAt < cooldownMs) {
+    if (interventionChannel || isGoalMode || hasAbnormal) {
+      const waitMs = Math.max(500, cooldownMs - (now - lastAt) + 250)
+      scheduleChiefTurnReview(deps, { agent, sessionId: sid, turn, abnormalTrigger, delayOverrideMs: waitMs })
+      return { ok: false, skipped: 'cooldown', rescheduled: true, waitMs }
+    }
+    return { ok: false, skipped: 'cooldown' }
+  }
 
   // Wait if supervisor/goal/smart-compact is active so turn-stopping settles to idle before evaluating usage
   if ((tactical.intervention || isGoalMode || smartCoManaged) && typeof deps.getAgentStatus === 'function' && !force) {
@@ -344,7 +425,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     if (smartCoManaged && runMode === 'off') {
       const ratio = liveUsage && liveUsage.contextWindow ? (Number(liveUsage.totalTokens) || 0) / Number(liveUsage.contextWindow) : 0
       const sinceCompact = now - ((wsBefore.runtimeGuard && wsBefore.runtimeGuard.lastCompactedAt) || 0)
-      if ((digest.stamp < 4 && ratio < 0.25) || sinceCompact < 20_000) {
+      if ((digest.msgCount < 4 && ratio < 0.25) || sinceCompact < 20_000) {
         return { ok: false, skipped: 'smart-compact-light' }
       }
     } else if (runMode === 'managed') {
@@ -388,7 +469,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   ].filter(Boolean)
 
   const smartUsageHint = smartCoManaged
-    ? `智选共管状态（硬阈值已停用）：消息序号≈${digest.stamp}${liveUsage && liveUsage.totalTokens ? `，当前估算上下文 ${liveUsage.totalTokens}/${liveUsage.contextWindow} (${Math.round((liveUsage.totalTokens / liveUsage.contextWindow) * 100)}%)` : ''}`
+    ? `智选共管状态（硬阈值已停用）：消息数≈${digest.msgCount}${liveUsage && liveUsage.totalTokens ? `，当前估算上下文 ${liveUsage.totalTokens}/${liveUsage.contextWindow} (${Math.round((liveUsage.totalTokens / liveUsage.contextWindow) * 100)}%)` : ''}`
     : ''
 
   const prompt = [
@@ -423,10 +504,56 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     prompt,
     maxTokens: SUMMARY_MAX_TOKENS,
   })
-  if (!res.ok) return { ok: false, error: res.error }
-
-  const parsed = extractJsonObject(res.text)
-  if (!parsed) return { ok: false, error: 'non-json-review' }
+  const parsed = res && res.ok ? extractJsonObject(res.text) : null
+  if (!res.ok || !parsed) {
+    const errTag = !res.ok ? (res.error || 'review-llm-failed') : 'non-json-review'
+    if (interventionChannel) {
+      if (typeof deps.appendBoardLog === 'function' && rootId !== 'global') {
+        deps.appendBoardLog(rootId, `⚠️ 强介入后台复盘异常（${clamp(errTag, 100)}），准备自动重试/兜底检查`, 'chief')
+      }
+      if (!force && abnormalTrigger !== 'review_retry') {
+        scheduleChiefTurnReview(deps, { agent, sessionId: sid, turn, abnormalTrigger: 'review_retry', delayOverrideMs: 5_000 })
+      }
+      const permCheck = normalizePermissionMode(effCfgBefore.permissionMode, {
+        requireAck: true,
+        hasChiefRiskAck: hasValidChiefRiskAck(wsBefore),
+      })
+      const canZeroLlmFallback = permCheck === 'chief'
+        && hasValidChiefRiskAck(wsBefore)
+        && !(identity && identity.isChild)
+        && !HIGH_RISK_FALLBACK_RE.test(digest.lastAssistantText || '')
+      const fallbackCue = canZeroLlmFallback ? detectPrematurePromiseText(digest.lastAssistantText || '') : ''
+      if (fallbackCue && lastFallbackStampByRoot.get(rootId) !== digest.stamp) {
+        lastFallbackStampByRoot.set(rootId, digest.stamp)
+        const fbMsg = `【⚡ 参谋长零模型兜底续推】后台复盘模型暂时波动（${clamp(errTag, 60)}），但我检测到你刚才以口头预告下一步（「${fallbackCue}」）直接停在空闲态，且无高危风险提示。请立即调用工具落实该步并验证结果。`
+        const fbDeliv = await deliverCrossMessage(deps, {
+          fromSession: rootId,
+          fromLabel: 'DSH 参谋长 (强介入安全兜底)',
+          target: 'lead',
+          subject: '口头预告停摆 · 安全兜底推进',
+          text: fbMsg,
+          mode: 'followup',
+          envelopeKind: 'execution_request',
+        }).catch(() => null)
+        if (fbDeliv && fbDeliv.ok && fbDeliv.deliveredPhysical !== false) {
+          mutateChiefState((s) => {
+            const ws = ensureWorkspace(s, rootId)
+            ws.chat.push({
+              id: nextId('chat'),
+              role: 'chief',
+              kind: 'receipt',
+              text: `- 【⚡ 强介入兜底推进】复盘模型暂不可用，已针对口头预告停摆（「${fallbackCue}」）触发安全兜底唤醒 \`@lead\`。`,
+              actions: ['⚡ 兜底续推'],
+              at: Date.now(),
+            })
+            if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+          })
+          return { ok: true, fallbackIntervened: true, reason: errTag }
+        }
+      }
+    }
+    return !res.ok ? { ok: false, error: res.error } : { ok: false, error: 'non-json-review' }
+  }
 
   const cfgNow = resolveWorkspaceConfig(loadChiefState(), rootId)
   const wsNowPerm = ensureWorkspace(loadChiefState(), rootId)
@@ -497,6 +624,11 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   const relaysForApproval = []
   const autoBoundUpdates = []
   let shouldAutoOrganizeSession = false
+
+  const hasRunningChild = realPeers.some(p => p.kind === 'subagent' && p.status === 'running')
+  const prematureCue = !(identity && identity.isChild)
+    ? detectPrematurePromiseText(digest.lastAssistantText || '')
+    : ''
 
   const isInternalRelayTarget = (targetRaw) => {
     const tq = String(targetRaw || '').trim().replace(/^@/, '')
@@ -647,15 +779,41 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
       })
       if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
       pushAuditToWs(ws, { mode: permNow, stage: 'safety_guard', decision: 'hazard_stop', operation: '强介入紧急煞车', target: 'lead', reason: hazardAlertCreated.reason, outcome: 'blocked', by: 'chief' })
+      pushAlertEventToWs(ws, {
+        kind: 'hazard_halt',
+        level: 'danger',
+        title: hazardAlertCreated.title,
+        body: hazardAlertCreated.reason,
+        dedupeKey: 'haz:' + hazardAlertCreated.id,
+        at: hazardAlertCreated.at || Date.now(),
+      })
     } else {
       // Intervention Supervisor follow-up + Circuit Breaker (differentiated across L0 / L1 / L2 / L3)
       const unmetMustDoFallback = unmetMustDo.length > 0
         ? '当前尚有以下【必做事项】未确认交付或缺少验证证据，请逐项补齐并交卷：\n' + unmetMustDo.map((u, idx) => `${idx + 1}. ${u}`).join('\n')
         : ''
+      const goalMissingFallback = cleanMultiline(parsed.goalMissing || '', 420)
+        ? `对照锁定核心目标尚有未闭环缺口：${cleanMultiline(parsed.goalMissing, 360)}。请基于当前进展立刻调用工具补齐并提交验证结果。`
+        : ''
+      const prematureFallback = prematureCue && !hasRunningChild
+        ? `检测到你刚才以口头预告下一步（「${prematureCue}」）直接结束了回合，但核心目标仍未收口。请立即调用工具把该步实际执行到位并验证输出。`
+        : ''
       const candidateIntervention = parsed.interventionText
         || unmetMustDoFallback
+        || goalMissingFallback
+        || prematureFallback
         || (parsed.nextActionForLead && (parsed.shouldIntervene || parsed.goalStatus === 'in_progress') ? parsed.nextActionForLead : '')
-      if (!isGoalAchieved && tactical.intervention && (parsed.shouldIntervene || parsed.goalStatus === 'in_progress' || unmetMustDo.length > 0) && candidateIntervention) {
+      const wantsIntervene = Boolean(
+        parsed.shouldIntervene
+        || unmetMustDo.length > 0
+        || (parsed.goalStatus === 'in_progress' && (
+          Boolean(parsed.interventionText)
+          || Boolean(parsed.nextActionForLead)
+          || Boolean(parsed.goalMissing)
+          || Boolean(prematureCue && !hasRunningChild)
+        ))
+      )
+      if (!isGoalAchieved && tactical.intervention && wantsIntervene && candidateIntervention) {
         const assistantTail = (digest.text.split('Assistant:').pop() || digest.text)
         const sig = crypto
           .createHash('sha1')
@@ -805,7 +963,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
         } else {
           const contextWindow = Math.max(1000, Number(liveUsage && liveUsage.contextWindow) || 128_000)
           const totalTokens = Number(liveUsage && liveUsage.totalTokens) || 0
-          const seq = Math.max(0, Math.round(Number(liveUsage && liveUsage.seq) || digest.stamp || 0))
+          const seq = Math.max(0, Math.round(Number(liveUsage && liveUsage.seq) || digest.msgCount || 0))
           const ratioPct = totalTokens > 0 ? (totalTokens / contextWindow) * 100 : 0
           updateChiefActiveWork(rootId, reviewWorkId, {
             tone: 'archive',
@@ -866,20 +1024,59 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     })
   }
 
+  let interventionDeliveredFailed = false
   if (interventionMessage) {
     const tags = [
       tactical.strictVerify ? '严格校验实测' : '',
       tactical.redlineSentinel ? '红线哨兵巡检' : '',
       tactical.conciseBrief ? '精炼要点' : '',
     ].filter(Boolean).join(' · ')
-    await deliverCrossMessage(deps, {
+    const delivRes = await deliverCrossMessage(deps, {
       fromSession: rootId,
       fromLabel: `DSH 参谋长 (接管督导${tags ? '·' + tags : ''})`,
       target: 'lead',
       subject: '参谋长自动督导推进',
       text: interventionMessage,
       mode: 'followup',
-    })
+      envelopeKind: 'execution_request',
+    }).catch(err => ({ ok: false, deliveredPhysical: false, error: String(err && err.message ? err.message : err) }))
+    const deliveredOk = Boolean(delivRes && delivRes.ok && delivRes.deliveredPhysical !== false)
+    if (deliveredOk) {
+      mutateChiefState((s) => {
+        const ws = ensureWorkspace(s, rootId)
+        const turnIdx = ws.runtimeGuard.interventionTurns || 1
+        ws.chat.push({
+          id: nextId('chat'),
+          role: 'chief',
+          kind: 'receipt',
+          ...(res.thinkingEffort ? { thinkingEffort: res.thinkingEffort } : {}),
+          ...(res.thinkingEffortMode ? { thinkingEffortMode: res.thinkingEffortMode } : {}),
+          text: `- 【⚡ 强介入督导 · 第 ${turnIdx} 轮】已推动 \`@lead\` 继续执行：${clamp(interventionMessage, 220)}`,
+          actions: [`⚡ 强介入督导 #${turnIdx}`],
+          at: Date.now(),
+        })
+        if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+      })
+    } else {
+      interventionDeliveredFailed = true
+      const failReason = (delivRes && (delivRes.note || delivRes.error)) || '目标会话句柄不可用或离线排队'
+      mutateChiefState((s) => {
+        const ws = ensureWorkspace(s, rootId)
+        ws.runtimeGuard.interventionTurns = Math.max(0, (ws.runtimeGuard.interventionTurns || 0) - 1)
+        ws.chat.push({
+          id: nextId('chat'),
+          role: 'chief',
+          kind: 'receipt',
+          text: `- 【⚠️ 强介入督导未能物理唤醒】未能直接推醒 \`@lead\`（${clamp(failReason, 160)}），本轮未计入强介入次数。`,
+          actions: ['⚠️ 强介入未送达'],
+          at: Date.now(),
+        })
+        if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+      })
+      if (typeof deps.appendBoardLog === 'function' && rootId !== 'global') {
+        deps.appendBoardLog(rootId, `⚠️ 强介入督导投递未物理唤醒 @lead：${clamp(failReason, 140)}`, 'chief')
+      }
+    }
   }
 
   if (permRankNow >= 1 && autoBoundUpdates.length > 0 && deps.runAction) {
@@ -1044,7 +1241,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     goalProposalCreated,
     hazardStopped,
     ...(hazardAlertCreated ? { hazardAlert: hazardAlertCreated } : {}),
-    intervened: Boolean(interventionMessage),
+    intervened: Boolean(interventionMessage && !interventionDeliveredFailed),
     queuedInterventionApproval: Boolean(interventionForApproval),
     smartCompacted,
     circuitTripped,
@@ -1083,6 +1280,9 @@ export async function checkAndStopIdleAutoPilot(deps, sessionId, opts = {}) {
   const wsBefore = ensureWorkspace(stBefore, rootId)
   if (effBefore.stopped || effBefore.runMode !== 'managed') {
     return { ok: true, stopped: false, reason: 'not-managed' }
+  }
+  if (effBefore.tacticalModes && effBefore.tacticalModes.intervention && !opts.goalAchievedFastStop) {
+    return { ok: true, stopped: false, reason: 'intervention-active' }
   }
   // Condition 5a: 0 pending review timers
   if (reviewTimers.has(rootId)) {
@@ -1227,6 +1427,13 @@ export async function checkAndStopIdleAutoPilot(deps, sessionId, opts = {}) {
       at: Date.now(),
     })
     if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+    pushAlertEventToWs(ws, {
+      kind: 'managed_auto_sleep',
+      level: 'success',
+      title: '🌙 托管已自动休眠收工',
+      body: '连续闲置达阈值且在途任务、待批弹窗与问询均已清零，已切回「⏸ 关停」。',
+      dedupeKey: `sleep:${rootId}:${Math.floor(Date.now() / 15_000)}`,
+    })
     stoppedNow = true
   })
 

@@ -9,7 +9,7 @@
 
 <br />
 
-<img src="assets/v150-highlights.png" alt="dsh-chief v1.5.0 feature highlights: 180-degree fan effort gauge, click-through frosted Dream Roam keeping flowing neon border, Cognitive Desktop & stack-of-papers vaults, pre-execute Guard Walls" width="100%" />
+<img src="assets/v160-highlights.png" alt="dsh-chief v1.6.0 feature highlights: SVG Flow Canvas with cross-step return arcs, attention-first click-to-expand Org Tree, top-bar rotating Settings gear with Presets/Alerts/Hard Budget Breaker, and live zh/en bilingual UI plus redacted .md report" width="100%" />
 
 <br />
 
@@ -31,23 +31,23 @@
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-> **Current release `v1.5.0`**: Adds the **Cognitive Desktop (`2,400 Tokens / 6 items` sole prompt-injected vault)** + top-down stack-of-papers drawers with 3-tier hook isolation, **orthogonal runtime control (`⏸ Off | 🛡 Patrol | 🤖 Managed`)** with background `🌙 Dream Roam` (**click anywhere on the frosted overlay to dismiss the blur and regain panel control while the flowing neon border stays lit to signal background work**), 5-condition auto-sleep + `L3` One-Stop Report, **`180°` fan-shaped thinking effort gauge** + Team `Auto / Manual` toggle, plain-language Consult mode, mandatory Core Objective lock for Strong Intervention, blocker-gated wall removal requests, full DSH light-theme support, and subagent entry hiding on DSH `0.2.2-rc.5`.  
+> **Current release `v1.6.0`**: Ships **Visual Work Topology (SVG sequential Flow Canvas with cross-step return arrows + click-to-expand Org Tree) inside the consolidated 5-tab layout**, **Away Managed last-mile loop (7 milestone desktop alerts & optional gentle chime, categorized LLM usage ledger + hard budget circuit breaker, and redacted `.md` retrospective report export)**, plus **top-bar rotating Settings gear, 3 one-click Scenario Presets, and live `zh / en` bilingual switching** — alongside the `2,400T / 6` Cognitive Desktop, `180°` fan effort gauge, click-through Dream Roam, `--format` zero-false-positive guard, and DSH `0.2.2-rc.5` support.  
 > Shares the Router + Workers split from DeepSeek's **[SuperAgent (`dsh-superagent-prototype`)](https://github.com/deepseek-ai/dsh-superagent-prototype)** while keeping Chief state and prompts isolated from the main session.
 
 [简体中文 (`README.md`)](README.md) · **English** · [Changelog (`CHANGELOG.md`)](CHANGELOG.md) · [Architecture (`ARCHITECTURE.md`)](ARCHITECTURE.md)
 
-[v1.5.0 Highlights](#what-changed-in-v150) · [Problems Fixed](#daily-friction-this-plugin-fixes) · [Inside the Sidebar](#inside-the-sidebar) · [Architecture](#modular-architecture-v150) · [Installation](#installation--host-compatibility) · [Security](#local-storage--security-guarantees) · [Contributors](#contributors)
+[v1.6.0 Highlights](#what-changed-in-v160) · [Problems Fixed](#daily-friction-this-plugin-fixes) · [Inside the Sidebar](#inside-the-sidebar) · [Architecture](#modular-architecture-v160) · [Installation](#installation--host-compatibility) · [Security](#local-storage--security-guarantees) · [Contributors](#contributors)
 
 </div>
 
 ---
 
-## What Changed in `v1.5.0`
+## What Changed in `v1.6.0`
 
-- **🗂️ Cognitive Desktop & Stack-of-Papers Hook Isolation**: Eliminates full-text archive leaks into the main prompt — only documents explicitly pinned to the **📌 Cognitive Desktop (`2,400 Tokens / 6 items` cap)** are injected per turn. Session / Global / Precipitated drawers use collapsible paper-dossier cards with lightweight `🪝` keyword hooks so agents pull dossiers on demand, while un-flipped Precipitated records remain `0-byte` double-blind to AI.
-- **🤖 Orthogonal Runtime Modes & Click-Through `🌙 Dream Roam`**: Header switches cleanly between `⏸ Off` (0 background calls), `🛡 Patrol` (0 idle cost; wakes only on guard blocks, errors, or stream interrupts), and `🤖 Managed` (active oversight + idle Dream Roam organization). Clicking anywhere on the frosted Dream Roam overlay immediately dismisses the blur/blocker so you can keep using the sidebar while the animated outer neon border continues to indicate background work. Auto-sleeps back to `Off` after all 5 idle checks clear.
-- **🧠 `180°` Fan Thinking Effort Gauge & Team Control**: Drag along the 180° rainbow arc (`Off / Low / Medium / High / Max`) or tap the center hub for `🪄 Auto` (lowers effort on summaries/roam, raises effort for diagnostics & wall crafting), paired with a clean `Team Thinking Effort: Auto / Manual` toggle and per-reply effort badges.
-- **🛡️ Sharpened Guardrails & Theme Fixes**: Strong Intervention now enforces locking a Core Objective before activation; `💡 Consult` answers honestly without forcing synthetic action buttons; blocker-only `wall_removal` requests require human approval across every L0–L3 tier; solid popover contrast fixes dark-mode transparency overlap; and `SidebarChiefTab` hides cleanly inside subagent threads alongside full DSH light-theme styling.
+- **🧭 Visual Work Topology, 5-Tab Consolidation & Unified Pull-Cards**: Merges Plan into the **Tasks** tab cleanly (`Chief / Tasks / Peers / Archives / Guards`): **Flow Canvas** plots sequential stages, nested subagent branches, and explicit cross-step return arrows via SVG, while **Org Tree** stays folded by default until you click the Lead card, matching uniform `AccCard` pull-to-expand interactions and full light-theme support.
+- **🌙 Away Managed Last-Mile Loop**: Emits session-baseline-suppressed desktop `Notification` alerts and optional 2-note WebAudio chimes across 7 milestone events (approvals, elevations, wall blocks, rescue continues, auto-sleep, budget break, hazard halt); tracks calls/tokens by `chat / review / dream` with a default `30 calls / 300K tokens` Managed circuit breaker (never blocking human `ask_chief`); and exports/copies secret-redacted Markdown session reports.
+- **⚙️ Top-Bar Settings Gear, 3 Scenario Presets & Bilingual UI**: Moves configuration into a smooth rotating gear button between the title and `v1.6.0` badge, offering **Observer / Co-Pilot / Away Mode** one-click presets (with mandatory dual-risk modal for L3/Managed) plus instant `Auto / 简体中文 / English` switching backed by `locale/zh.json` & `locale/en.json`.
+- **🛡️ Safety & Mid-Turn Spin Hardening**: Disambiguates `--format` CLI flags from destructive disk-format commands (`format C:` still hard-denied); adds mid-turn duplicate/error-thrash spin detection (`detectMidTurnSpin`) with `planWrite` exemption; and blocks delayed background calls immediately after a budget breaker trip.
 
 ---
 
@@ -97,8 +97,8 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 
 ---
 
-### 02 · Coordinator & Subagent Pyramid Tree (`任务` Tab)
-- Displays the root coordinator and active subagent lanes with dedicated coordinator/worker icons, inline status toggles, bottom `@steer` pills, and `分屏` live stream panes.
+### 02 · Visual Flow Canvas & Click-to-Expand Org Tree (`任务 / Tasks` Tab)
+- **Dual Topology Views**: Switch between **Flow Canvas** (SVG sequential plan backbone, sprouted subagent branches, and dashed cross-step return arcs) and **Org Tree** (collapsed to a crisp one-line summary by default to conserve attention; click anywhere on the lead card to expand/collapse subordinate lanes—zero redundant toggle buttons), above the consolidated progress board and `分屏` live stream panes.
 
 <div align="center">
   <img src="assets/screenshots/02-full-spread-pyramid-dag.png" alt="02 - Subagent DAG View" width="80%" />
@@ -115,8 +115,8 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 
 ---
 
-### 04 · Objective Lock & Step Q&A (`规划` Top)
-- Click `🎯 设为目标` to lock your Core Objective before Strong Intervention, or click `解释` on any step to get a plain-language breakdown without interrupting `@lead`.
+### 04 · Objective Lock, Flow Topology & Step Q&A (`Tasks` Tab)
+- Click `🎯 Set Objective` to lock your Core Objective before Strong Intervention, inspect the collapsible **Work Topology** (Flow Canvas / Org Tree) and unified Progress Task Board below, or click `Explain` on any step without interrupting `@lead`.
 
 <div align="center">
   <img src="assets/screenshots/04-dual-tier-goal-and-step-qa.png" alt="04 - Goal Supervision and Step Q&A" width="68%" />
@@ -144,8 +144,8 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 
 ---
 
-### 07 · Session Handoff & Deployment (`规划` Bottom)
-- Edit the Markdown handoff packet directly and freeze it via `📌 定住防改`.
+### 07 · Top-Bar Rotating Gear Settings: Presets, Budget Breaker & Bilingual UI
+- Click the rotating `⚙️` gear between `DSH 参谋长` and the version chip to open the dedicated **Settings** page: **3 One-Click Scenario Presets** (Observer / Co-Pilot / Away Mode), **7 Milestone Desktop Alerts & Gentle Chime**, **categorized LLM Ledger (`chat / review / dream`) & hard budget circuit breaker**, and live `zh / en` switching — while `📌 Pin Lock` Session Handoff and secret-redacted `.md` report export live in `Tasks`.
 - Choose which archive scope follows into a new session (`None`, `Spotlight Only`, `Entire Drawer`, or `Full Session Cabinet`), while Strong Intervention safely resets to off.
 
 <div align="center">
@@ -166,19 +166,19 @@ If you run multi-step coding tasks inside DeepSeek Harness, these six problems t
 
 ---
 
-## Modular Architecture (`v1.5.0`)
+## Modular Architecture (`v1.6.0`)
 
-`v1.5.0` spans **38 backend modules (including 9 isolated modules under `pkg/safety/`) and 16 frontend modules** with zero `export let` bindings and zero circular imports. See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and module contracts.
+`v1.6.0` spans **38 backend modules (including 9 isolated modules under `pkg/safety/`) and 20 frontend modules** with zero `export let` bindings and zero circular imports. See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and module contracts.
 
 ```mermaid
 flowchart TB
-  subgraph UI["DSH Right Sidebar (client.js <- 16 source modules)"]
-    T1["Chief Tab (180° Effort Gauge · Click-Through FX · Grouped Q&A)"]
-    T2["Tasks Tab (Coordinator Pyramid · Split Stream · @steer)"]
-    T3["Peers Tab (Cross-Window Link + Mailbox)"]
-    T4["Plan Tab (Core Objective Lock · Step Explain · Pinned Handoff)"]
+  subgraph UI["DSH Right Sidebar (client.js <- 20 modules · 5 Tabs + Top-Bar Settings)"]
+    T1["Chief Tab (180° Effort Gauge · Click-Through FX · Report Export)"]
+    T2["Tasks Tab (Core Objective · Flow Canvas / Org Tree · Unified Board · Handoff)"]
+    T3["Peers Tab (Cross-Window Link + Mailbox · Split Stream)"]
     T5["Archives Tab (2400T Cognitive Desktop · Hooked Stack-of-Papers)"]
-    T6["Boundaries Tab (Guard Walls · Blocker Removal · 📌 Redlines)"]
+    T6["Guards Tab (Guard Walls · Blocker Removal · 📌 Redlines)"]
+    T7["Top-Bar ⚙️ Settings (Presets · Desktop Alerts · Budget Ledger · zh/en)"]
   end
 
   subgraph Core["Local Backend & Safety Kernel (Zero External Deps · 38 modules)"]
@@ -210,14 +210,14 @@ flowchart TB
 Search **`dsh-chief`** inside [dshmarket](https://github.com/dsh-market/dsh-market) / DSH Plugin Market, or install via CLI (replace `desktop` with `web` for the web profile):
 
 ```bash
-# Option 1: Install latest release (v1.5.0) from npm
+# Option 1: Install latest release (v1.6.0) from npm
 dsh plugin --profile desktop add dsh-chief
 
 # Option 2: Install directly from GitHub main branch
 dsh plugin --profile desktop add github:gluztm/dsh-chief
 
-# Option 3: Install prebuilt GitHub Release tarball (v1.5.0)
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.5.0/dsh-chief-1.5.0.tgz
+# Option 3: Install prebuilt GitHub Release tarball (v1.6.0)
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.6.0/dsh-chief-1.6.0.tgz
 ```
 
 ### Host Version Compatibility

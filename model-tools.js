@@ -105,7 +105,8 @@ export function createModelTools(deps) {
         ],
         description:
           'Board operation (MUST be called whenever recording tasks/status/conclusions or relaying messages; plain text alone does NOT update the board or notify peers). '
-          + 'Use "graph.plan" (or "task.batch") to plan a hierarchical/DAG task graph in one call (supports parentId, blockedBy, owner/subagent, intent, evidence). '
+          + 'Use "graph.plan" (or "task.batch") to plan a hierarchical/DAG task graph in one call (supports parentId, blockedBy, planStepId, targetPlanStepId, owner/subagent, intent, evidence). '
+          + 'For multi-step workflows, define ordered steps via "plan.set" first and bind tasks/subagents with "planStepId" (and optional "targetPlanStepId") so the workflow topology displays step-by-step progress and subagent return arrows. '
           + 'Use "task.dispatch" to spawn or message a subagent, "team.steer" to steer a subagent, and "mail.send" to relay messages across lead/subagents/sessions. '
           + 'Use "inquiry.reply" (inquiryId, text) whenever you see a priority [INQUIRY #id] from DSH Chief — answer accurately and continue your current work immediately without stopping. '
           + 'Use "chief.request" (subject, text) to ask DSH Chief for cross-session coordination, permission elevation, to report exploration & planning results, or when blocked by an insurmountable guard wall that cannot be bypassed safely. '
@@ -125,6 +126,8 @@ export function createModelTools(deps) {
             id: { type: 'string', description: 'Task id or temporary symbolic key (e.g. "t1", "api-design") referenced by parentId or blockedBy.' },
             title: { type: 'string', description: 'Short task title.' },
             parentId: { type: 'string', description: 'Parent task id/key for hierarchical decomposition.' },
+            planStepId: { type: 'string', description: 'Optional plan step id (from board.plan) this task or subagent branch belongs to; auto-binds to the current active step if omitted.' },
+            targetPlanStepId: { type: 'string', description: 'Optional plan step id that this task/subagent reports back to upon completion (defaults to planStepId; set to a later step for cross-step handoff).' },
             blockedBy: { type: 'array', items: { type: 'string' }, description: 'Upstream task ids/keys that must finish (done) before this task unlocks.' },
             owner: { type: 'string', description: 'Assigned subagent name (e.g. "researcher", "coder", "verifier") or owner.' },
             subagent: { type: 'string', description: 'Subagent name to bind to this task.' },
@@ -227,6 +230,8 @@ export function createModelTools(deps) {
       taskId: { type: 'string', description: 'task id for task.update / task.claim / task.release / task.remove / task.verify / task.dispatch (alias for id).' },
       target: { type: 'string', description: 'task.add / task.update / task.dispatch: who this task is assigned to — visible in tree view as owner label.' },
       parentId: { type: 'string', description: 'task.add / task.update: parent task id for tree hierarchy — renders the child indented under its parent.' },
+      planStepId: { type: 'string', description: 'task.add / task.update / task.dispatch: optional plan step id (from board.plan) this task or subagent belongs to; auto-binds to the current active step if omitted.' },
+      targetPlanStepId: { type: 'string', description: 'task.add / task.update / task.dispatch: optional plan step id that this task/subagent reports back to upon completion (defaults to planStepId).' },
       status: { type: 'string', enum: STATUSES, description: 'Task status.' },
       priority: { type: 'string', enum: PRIORITIES, description: 'Task priority.' },
       field: {

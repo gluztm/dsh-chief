@@ -24,7 +24,8 @@ export const HARD_GUARD_RULE_IDS = Object.freeze([
 const DESTRUCTIVE_COMMAND_PATTERNS = [
   /\brm\s+-[a-z]*(?:r[a-z]*f|f[a-z]*r)[a-z]*\s+(?:\/(?:etc|usr|bin|sbin|var|lib|boot|dev|proc|sys|root|home|\*)?(?=$|[\s/])|~|\*|\.\.)/i,
   /\bgit\s+(?:reset\s+--hard|clean\s+-[a-z]*f[a-z]*d|push\s+(?:--force|-f)\b)/i,
-  /\b(?:format|diskpart|cipher\s+\/w|bcdedit)\b/i,
+  /\b(?:diskpart|cipher\s+\/w|bcdedit)\b/i,
+  /(?:^|[;&|]\s*|(?:cmd(?:\.exe)?\s+\/c|powershell(?:\.exe)?\s+-[a-z]*c\w*|pwsh(?:\.exe)?\s+-[a-z]*c\w*)\s+["']?)\bformat(?:\.com)?\s+(?:[a-z]:|\/(?:fs|q|v|x|p|y)\b)/i,
   /\bdel\s+\/[fqs][^\n]*[a-z]:\\/i,
   /\bRemove-Item\b[^\n]*-Recurse[^\n]*-Force[^\n]*(?:[a-z]:\\|\*)/i,
   /\b(?:shutdown(?:\.exe)?|restart-computer|stop-computer|mkfs|dd\s+if=.*of=\/dev\/)\b/i,

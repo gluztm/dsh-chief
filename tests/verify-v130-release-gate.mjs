@@ -144,7 +144,7 @@ try {
   // -------------------------------------------------------------------------
   // G1. Facade Exports, Version Alignment, Zero Mutable Exports, Acyclic DAG
   // -------------------------------------------------------------------------
-  assert.match(String(pkgJson.version || ''), /^1\.(?:4|5)\.\d+/, 'package.json version must be >= 1.4.0')
+  assert.match(String(pkgJson.version || ''), /^1\.[4-9]\.\d+/, 'package.json version must be >= 1.4.0')
   assert.equal(schemaMod.BACKEND_BUILD, pkgJson.version, 'BACKEND_BUILD must align with package.json version')
   assert.equal(constMod.EXPECTED_BACKEND_BUILD, pkgJson.version, 'EXPECTED_BACKEND_BUILD must align with package.json version')
   assert.equal(Object.keys(indexMod).length, 6, 'index.js must export 6 symbols')

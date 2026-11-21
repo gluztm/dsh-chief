@@ -26,6 +26,7 @@ import {
   CAP_TASK_INTENT,
   asBool,
   normalizeTask,
+  resolveActivePlanStepId,
   pushLog,
   safe,
 } from './board-schema.js'
@@ -514,6 +515,17 @@ export function createSubagentRuntime(deps) {
       '- **任务标题**: ' + task.title,
     ]
     if (board.objective) lines.push('- **全局目标**: ' + board.objective.slice(0, 400))
+    const planSteps = Array.isArray(board && board.plan) ? board.plan : []
+    const stepIdx = task.planStepId ? planSteps.findIndex(s => s && s.id === task.planStepId) : -1
+    if (stepIdx >= 0) {
+      const targetIdx = task.targetPlanStepId && task.targetPlanStepId !== task.planStepId
+        ? planSteps.findIndex(s => s && s.id === task.targetPlanStepId)
+        : -1
+      const returnHint = targetIdx >= 0
+        ? '；完成后成果回指第 ' + (targetIdx + 1) + ' 步「' + planSteps[targetIdx].text + '」'
+        : ''
+      lines.push('- **所属推进步骤**: 第 ' + (stepIdx + 1) + ' 步「' + planSteps[stepIdx].text + '」' + returnHint)
+    }
     if (task.intent) lines.push('- **任务意图 (Intent)**: ' + task.intent)
     if (task.evidence) lines.push('- **验收标准 (Expected Evidence)**: ' + task.evidence)
     if (task.note) lines.push('- **补充说明 (Note)**: ' + task.note)
@@ -1287,7 +1299,16 @@ export function createSubagentRuntime(deps) {
       }
 
       const requestedTarget = str(args.agent || args.subagent || args.target || targetTask.subagent || targetTask.owner, '').trim()
-      const brief = buildTaskDispatchBrief(boardSnapshot, targetTask, args.prompt || args.message || args.text)
+      const explicitPlanStepId = typeof args.planStepId === 'string' ? args.planStepId.trim().slice(0, 120) : ''
+      const explicitTargetStepId = typeof args.targetPlanStepId === 'string' ? args.targetPlanStepId.trim().slice(0, 120) : ''
+      const effectivePlanStepId = explicitPlanStepId || targetTask.planStepId || resolveActivePlanStepId(boardSnapshot)
+      const effectiveTargetStepId = explicitTargetStepId || targetTask.targetPlanStepId || ''
+      const briefTask = {
+        ...targetTask,
+        planStepId: effectivePlanStepId,
+        targetPlanStepId: effectiveTargetStepId,
+      }
+      const brief = buildTaskDispatchBrief(boardSnapshot, briefTask, args.prompt || args.message || args.text)
       let dispatchedName = requestedTarget
       let childSessionId = ''
       let dispatchMode = 'assigned'
@@ -1404,6 +1425,12 @@ export function createSubagentRuntime(deps) {
         task.subagent = dispatchedName
         if (childSessionId) task.session = childSessionId
         if (args.preset) task.preset = str(args.preset, '').slice(0, 80)
+        if (explicitPlanStepId) task.planStepId = explicitPlanStepId
+        else if (!task.planStepId) {
+          const autoStep = resolveActivePlanStepId(board)
+          if (autoStep) task.planStepId = autoStep
+        }
+        if (explicitTargetStepId) task.targetPlanStepId = explicitTargetStepId
         task.dispatchedAt = nowMs()
         task.updatedAt = nowMs()
         board.cursor = {

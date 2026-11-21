@@ -99,6 +99,264 @@ export const DEFAULT_MANAGED_IDLE_TIMEOUT_MS = 15 * 60 * 1000
 
 export const CHIEF_THINKING_EFFORTS = ['auto', 'off', 'low', 'medium', 'high', 'xhigh']
 
+export const ALERT_EVENTS_CAP = 20
+
+export const LLM_LEDGER_RECENT_CAP = 20
+
+export const DEFAULT_MANAGED_BUDGET_MAX_CALLS = 30
+
+export const DEFAULT_MANAGED_BUDGET_MAX_TOKENS = 300_000
+
+export const CHIEF_UI_LANGS = ['auto', 'zh', 'en']
+
+export const CHIEF_SCENARIO_PRESETS = {
+  observer: {
+    id: 'observer',
+    permissionMode: 'advisor',
+    runMode: 'off',
+    thinkingEffort: 'low',
+    tacticalModes: {
+      intervention: false,
+      autoCompact: false,
+      smartCompact: false,
+      redlineSentinel: false,
+    },
+    notifyEnabled: true,
+  },
+  collab: {
+    id: 'collab',
+    permissionMode: 'strategist',
+    runMode: 'patrol',
+    thinkingEffort: 'auto',
+    tacticalModes: {
+      intervention: false,
+      redlineSentinel: true,
+    },
+    notifyEnabled: true,
+  },
+  away: {
+    id: 'away',
+    permissionMode: 'chief',
+    runMode: 'managed',
+    thinkingEffort: 'auto',
+    tacticalModes: {
+      autoCompact: true,
+      compactThresholdMode: 'pct',
+      compactThresholdPct: 80,
+      redlineSentinel: true,
+    },
+    notifyEnabled: true,
+    managedBudgetMaxCalls: DEFAULT_MANAGED_BUDGET_MAX_CALLS,
+    managedBudgetMaxTokens: DEFAULT_MANAGED_BUDGET_MAX_TOKENS,
+  },
+}
+
+export function normalizeUiLang(raw) {
+  const s = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+  if (s === 'zh' || s === 'zh-cn' || s === 'zh-hans') return 'zh'
+  if (s === 'en' || s === 'en-us' || s === 'en-gb') return 'en'
+  return 'auto'
+}
+
+export function normalizeManagedBudgetCalls(raw) {
+  if (raw === 0 || raw === '0') return 0
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return DEFAULT_MANAGED_BUDGET_MAX_CALLS
+  if (n <= 0) return 0
+  return Math.min(500, Math.max(3, Math.round(n)))
+}
+
+export function normalizeManagedBudgetTokens(raw) {
+  if (raw === 0 || raw === '0') return 0
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return DEFAULT_MANAGED_BUDGET_MAX_TOKENS
+  if (n <= 0) return 0
+  return Math.min(5_000_000, Math.max(10_000, Math.round(n)))
+}
+
+export function classifyChiefLlmCategory(reasonKind = '') {
+  const rk = String(reasonKind || '').trim().toLowerCase()
+  if (!rk) return 'chat'
+  if (
+    rk === 'dream_roam'
+    || rk === 'precipitate'
+    || rk === 'distill'
+    || rk.startsWith('archive_')
+  ) {
+    return 'dream'
+  }
+  if (
+    rk === 'turn_review'
+    || rk === 'auto_summary'
+    || rk === 'chat_summary'
+    || rk === 'wall_blocked'
+    || rk === 'strong_intervention'
+    || rk === 'hazard_diagnosis'
+    || rk === 'idle_watchdog'
+    || rk === 'config_activated'
+  ) {
+    return 'review'
+  }
+  if (
+    rk === 'ask_chief'
+    || rk === 'consult_chief'
+    || rk === 'blank_explore'
+    || rk === 'craft_wall'
+    || rk === 'extract_bounds'
+    || rk === 'consolidate_bounds'
+    || rk === 'suggest_objective'
+    || rk === 'recommend_compact'
+  ) {
+    return 'chat'
+  }
+  return 'other'
+}
+
+const LLM_LEDGER_CALLS_MAX = 1_000_000
+const LLM_LEDGER_TOKENS_MAX = 1_000_000_000
+
+export function emptyLlmLedger() {
+  return {
+    totalCalls: 0,
+    totalInputTokens: 0,
+    totalOutputTokens: 0,
+    totalTokens: 0,
+    byCategory: {
+      chat: { calls: 0, tokens: 0 },
+      review: { calls: 0, tokens: 0 },
+      dream: { calls: 0, tokens: 0 },
+      other: { calls: 0, tokens: 0 },
+    },
+    managedRun: {
+      startedAt: 0,
+      calls: 0,
+      tokens: 0,
+      tripped: false,
+      trippedAt: 0,
+      trippedReason: '',
+    },
+    recent: [],
+  }
+}
+
+export function normalizeLlmLedger(raw) {
+  const base = emptyLlmLedger()
+  if (!raw || typeof raw !== 'object') return base
+  const nonNegTs = v => Math.max(0, Math.round(Number(v) || 0))
+  const clampCalls = v => Math.min(LLM_LEDGER_CALLS_MAX, Math.max(0, Math.round(Number(v) || 0)))
+  const clampTokens = v => Math.min(LLM_LEDGER_TOKENS_MAX, Math.max(0, Math.round(Number(v) || 0)))
+  base.totalCalls = clampCalls(raw.totalCalls)
+  base.totalInputTokens = clampTokens(raw.totalInputTokens)
+  base.totalOutputTokens = clampTokens(raw.totalOutputTokens)
+  base.totalTokens = clampTokens(raw.totalTokens) || clampTokens(base.totalInputTokens + base.totalOutputTokens)
+  const rawCats = raw.byCategory && typeof raw.byCategory === 'object' ? raw.byCategory : {}
+  for (const k of ['chat', 'review', 'dream', 'other']) {
+    const c = rawCats[k] && typeof rawCats[k] === 'object' ? rawCats[k] : {}
+    base.byCategory[k] = { calls: clampCalls(c.calls), tokens: clampTokens(c.tokens) }
+  }
+  const mr = raw.managedRun && typeof raw.managedRun === 'object' ? raw.managedRun : {}
+  base.managedRun = {
+    startedAt: nonNegTs(mr.startedAt),
+    calls: clampCalls(mr.calls),
+    tokens: clampTokens(mr.tokens),
+    tripped: Boolean(mr.tripped),
+    trippedAt: nonNegTs(mr.trippedAt),
+    trippedReason: clamp(mr.trippedReason || '', 220),
+  }
+  base.recent = (Array.isArray(raw.recent) ? raw.recent : [])
+    .filter(r => r && typeof r === 'object')
+    .slice(-LLM_LEDGER_RECENT_CAP)
+    .map(r => {
+      const inTok = clampTokens(r.inputTokens)
+      const outTok = clampTokens(r.outputTokens)
+      return {
+        id: typeof r.id === 'string' && r.id ? r.id : nextId('llm'),
+        at: nonNegTs(r.at) || Date.now(),
+        category: ['chat', 'review', 'dream', 'other'].includes(r.category) ? r.category : 'other',
+        reasonKind: clamp(r.reasonKind || '', 40),
+        modelRef: clamp(r.modelRef || '', 80),
+        inputTokens: inTok,
+        outputTokens: outTok,
+        totalTokens: clampTokens(r.totalTokens) || clampTokens(inTok + outTok),
+        estimated: Boolean(r.estimated),
+        ok: r.ok !== false,
+      }
+    })
+  return base
+}
+
+export function summarizeLlmLedger(rawLedger, cfg = null) {
+  const ledger = normalizeLlmLedger(rawLedger)
+  const maxCalls = cfg && cfg.managedBudgetMaxCalls !== undefined
+    ? normalizeManagedBudgetCalls(cfg.managedBudgetMaxCalls)
+    : DEFAULT_MANAGED_BUDGET_MAX_CALLS
+  const maxTokens = cfg && cfg.managedBudgetMaxTokens !== undefined
+    ? normalizeManagedBudgetTokens(cfg.managedBudgetMaxTokens)
+    : DEFAULT_MANAGED_BUDGET_MAX_TOKENS
+  return {
+    totalCalls: ledger.totalCalls,
+    totalInputTokens: ledger.totalInputTokens,
+    totalOutputTokens: ledger.totalOutputTokens,
+    totalTokens: ledger.totalTokens,
+    byCategory: {
+      chat: { ...ledger.byCategory.chat },
+      review: { ...ledger.byCategory.review },
+      dream: { ...ledger.byCategory.dream },
+      other: { ...ledger.byCategory.other },
+    },
+    managedRun: { ...ledger.managedRun },
+    budget: {
+      maxCalls,
+      maxTokens,
+    },
+    recent: ledger.recent.slice(-8),
+  }
+}
+
+export function normalizeAlertEvent(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const title = clamp(raw.title || '', 100)
+  if (!title) return null
+  const validKinds = [
+    'pending_approval',
+    'pending_elevation',
+    'guard_wall_blocked',
+    'auto_continue_rescue',
+    'managed_auto_sleep',
+    'budget_circuit_break',
+    'hazard_halt',
+  ]
+  const kind = validKinds.includes(raw.kind) ? raw.kind : 'pending_approval'
+  const level = ['info', 'warn', 'danger', 'success'].includes(raw.level) ? raw.level : 'info'
+  return {
+    id: typeof raw.id === 'string' && raw.id ? raw.id : nextId('alt'),
+    kind,
+    level,
+    title,
+    body: clamp(raw.body || '', 220),
+    dedupeKey: clamp(raw.dedupeKey || '', 100),
+    at: Number(raw.at) || Date.now(),
+  }
+}
+
+export function pushAlertEventToWs(ws, spec = {}) {
+  if (!ws || typeof ws !== 'object') return null
+  if (!Array.isArray(ws.alertEvents)) ws.alertEvents = []
+  const norm = normalizeAlertEvent(spec)
+  if (!norm) return null
+  if (norm.dedupeKey) {
+    const dup = ws.alertEvents.find(
+      a => a && a.dedupeKey === norm.dedupeKey && Math.abs(norm.at - (Number(a.at) || 0)) < 5_000,
+    )
+    if (dup) return dup
+  }
+  ws.alertEvents.push(norm)
+  if (ws.alertEvents.length > ALERT_EVENTS_CAP) {
+    ws.alertEvents = ws.alertEvents.slice(-ALERT_EVENTS_CAP)
+  }
+  return norm
+}
+
 export function normalizeRunMode(raw, fallbackCfg = null) {
   const s = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
   if (s === 'off' || s === 'patrol' || s === 'managed') return s
@@ -753,6 +1011,8 @@ function emptyWorkspace() {
       lastAutoArchiveOrgAt: 0,
     },
     flippedPrecipitatedIds: [],
+    llmLedger: emptyLlmLedger(),
+    alertEvents: [],
   }
 }
 
@@ -1004,6 +1264,11 @@ function normalizeWorkspace(raw) {
       permissionMode: rawPerm,
       runMode: rm,
       managedIdleTimeoutMs,
+      ...(typeof src.config.notifyEnabled === 'boolean' ? { notifyEnabled: src.config.notifyEnabled } : {}),
+      ...(typeof src.config.notifySound === 'boolean' ? { notifySound: src.config.notifySound } : {}),
+      ...(typeof src.config.uiLang === 'string' ? { uiLang: normalizeUiLang(src.config.uiLang) } : {}),
+      ...(src.config.managedBudgetMaxCalls !== undefined ? { managedBudgetMaxCalls: normalizeManagedBudgetCalls(src.config.managedBudgetMaxCalls) } : {}),
+      ...(src.config.managedBudgetMaxTokens !== undefined ? { managedBudgetMaxTokens: normalizeManagedBudgetTokens(src.config.managedBudgetMaxTokens) } : {}),
       ...(typeof src.config.thinkingEffort === 'string' ? { thinkingEffort: normalizeThinkingEffort(src.config.thinkingEffort) } : {}),
       ...(typeof src.config.teamEffortMode === 'string' ? { teamEffortMode: normalizeTeamEffortMode(src.config.teamEffortMode) } : {}),
       ...(Object.keys(lockedModelEfforts).length ? { lockedModelEfforts } : {}),
@@ -1018,6 +1283,11 @@ function normalizeWorkspace(raw) {
   base.flippedPrecipitatedIds = Array.isArray(src.flippedPrecipitatedIds)
     ? [...new Set(src.flippedPrecipitatedIds.map(x => String(x || '').trim()).filter(Boolean))].slice(0, 20)
     : []
+  base.llmLedger = normalizeLlmLedger(src.llmLedger)
+  base.alertEvents = (Array.isArray(src.alertEvents) ? src.alertEvents : [])
+    .map(normalizeAlertEvent)
+    .filter(Boolean)
+    .slice(-ALERT_EVENTS_CAP)
   return base
 }
 
@@ -1139,11 +1409,37 @@ export function resolveWorkspaceConfig(state, sessionId = '') {
     : (Number.isFinite(Number(base.managedIdleTimeoutMs)) && Number(base.managedIdleTimeoutMs) >= 50
         ? Math.min(2 * 60 * 60 * 1000, Math.round(Number(base.managedIdleTimeoutMs)))
         : DEFAULT_MANAGED_IDLE_TIMEOUT_MS)
+  const notifyEnabled = typeof (wsCfg && wsCfg.notifyEnabled) === 'boolean'
+    ? wsCfg.notifyEnabled
+    : (typeof base.notifyEnabled === 'boolean' ? base.notifyEnabled : true)
+  const notifySound = typeof (wsCfg && wsCfg.notifySound) === 'boolean'
+    ? wsCfg.notifySound
+    : (typeof base.notifySound === 'boolean' ? base.notifySound : false)
+  const uiLang = normalizeUiLang(
+    (wsCfg && typeof wsCfg.uiLang === 'string' && wsCfg.uiLang)
+      || (typeof base.uiLang === 'string' && base.uiLang)
+      || 'auto',
+  )
+  const managedBudgetMaxCalls = (wsCfg && wsCfg.managedBudgetMaxCalls !== undefined)
+    ? normalizeManagedBudgetCalls(wsCfg.managedBudgetMaxCalls)
+    : (base.managedBudgetMaxCalls !== undefined
+        ? normalizeManagedBudgetCalls(base.managedBudgetMaxCalls)
+        : DEFAULT_MANAGED_BUDGET_MAX_CALLS)
+  const managedBudgetMaxTokens = (wsCfg && wsCfg.managedBudgetMaxTokens !== undefined)
+    ? normalizeManagedBudgetTokens(wsCfg.managedBudgetMaxTokens)
+    : (base.managedBudgetMaxTokens !== undefined
+        ? normalizeManagedBudgetTokens(base.managedBudgetMaxTokens)
+        : DEFAULT_MANAGED_BUDGET_MAX_TOKENS)
   return {
     modelRef,
     paceMode,
     runMode,
     managedIdleTimeoutMs,
+    notifyEnabled,
+    notifySound,
+    uiLang,
+    managedBudgetMaxCalls,
+    managedBudgetMaxTokens,
     thinkingEffort,
     teamEffortMode,
     lockedModelEfforts,
@@ -1234,6 +1530,11 @@ function normalizeState(raw) {
       managedIdleTimeoutMs: Number.isFinite(Number(cfg.managedIdleTimeoutMs)) && Number(cfg.managedIdleTimeoutMs) >= 50
         ? Math.min(2 * 60 * 60 * 1000, Math.round(Number(cfg.managedIdleTimeoutMs)))
         : DEFAULT_MANAGED_IDLE_TIMEOUT_MS,
+      notifyEnabled: typeof cfg.notifyEnabled === 'boolean' ? cfg.notifyEnabled : true,
+      notifySound: typeof cfg.notifySound === 'boolean' ? cfg.notifySound : false,
+      uiLang: normalizeUiLang(cfg.uiLang),
+      managedBudgetMaxCalls: normalizeManagedBudgetCalls(cfg.managedBudgetMaxCalls),
+      managedBudgetMaxTokens: normalizeManagedBudgetTokens(cfg.managedBudgetMaxTokens),
       thinkingEffort: normalizeThinkingEffort(cfg.thinkingEffort),
       teamEffortMode: normalizeTeamEffortMode(cfg.teamEffortMode),
       stopped,
@@ -1279,6 +1580,14 @@ export function enqueueApprovalToWs(ws, item = {}) {
   if (ws.pendingApprovals.length > APPROVALS_CAP) {
     ws.pendingApprovals = ws.pendingApprovals.slice(-APPROVALS_CAP)
   }
+  pushAlertEventToWs(ws, {
+    kind: 'pending_approval',
+    level: 'warn',
+    title: '🔐 等待人类逐项审批',
+    body: clamp(`${norm.operationLabel}${norm.targetLabel ? ' · ' + norm.targetLabel : ''}`, 180),
+    dedupeKey: 'apr:' + norm.id,
+    at: now,
+  })
   return norm
 }
 
@@ -1320,6 +1629,14 @@ export function enqueueElevationToWs(ws, req = {}) {
     outcome: 'pending',
     by: norm.by,
   }, req.sessionId || '')
+  pushAlertEventToWs(ws, {
+    kind: 'pending_elevation',
+    level: 'warn',
+    title: '⬆️ 参谋申请提权',
+    body: clamp(`${CHIEF_PERMISSION_META[currentMode].level} -> ${CHIEF_PERMISSION_META[targetMode].level}：${norm.reason}`, 180),
+    dedupeKey: 'elv:' + norm.id,
+    at: now,
+  })
   return norm
 }
 
@@ -1941,7 +2258,19 @@ export function deployChiefWorkspaceState(deps, {
 /* -------------------------------------------------------------------------- */
 
 export function updateChiefConfig(patch) {
-  const safePatch = patch && typeof patch === 'object' ? patch : {}
+  const rawInput = patch && typeof patch === 'object' ? patch : {}
+  const rawPreset = typeof rawInput.preset === 'string' ? rawInput.preset.trim().toLowerCase() : ''
+  const presetSpec = CHIEF_SCENARIO_PRESETS[rawPreset] || null
+  const safePatch = presetSpec
+    ? {
+        ...presetSpec,
+        ...rawInput,
+        tacticalModes: {
+          ...(presetSpec.tacticalModes || {}),
+          ...(rawInput.tacticalModes && typeof rawInput.tacticalModes === 'object' ? rawInput.tacticalModes : {}),
+        },
+      }
+    : rawInput
   const sid = String(safePatch.sessionId || safePatch.session || '').trim() || 'global'
   return mutateChiefState((state) => {
     const ws = ensureWorkspace(state, sid)
@@ -2138,6 +2467,34 @@ export function updateChiefConfig(patch) {
       ws.runtimeGuard.managedStartedAt = now
       ws.runtimeGuard.lastActivityAt = now
       ws.runtimeGuard.autoPilotHadTurn = false
+      ws.llmLedger = normalizeLlmLedger(ws.llmLedger)
+      ws.llmLedger.managedRun = {
+        startedAt: now,
+        calls: 0,
+        tokens: 0,
+        tripped: false,
+        trippedAt: 0,
+        trippedReason: '',
+      }
+    }
+    if (ws && !wantsAutoPilot && safePatch.runMode === 'patrol' && ws.llmLedger && ws.llmLedger.managedRun && ws.llmLedger.managedRun.tripped) {
+      ws.llmLedger.managedRun.tripped = false
+      ws.llmLedger.managedRun.trippedAt = 0
+      ws.llmLedger.managedRun.trippedReason = ''
+    }
+    if (ws && safePatch.resetManagedBudget === true) {
+      ws.llmLedger = normalizeLlmLedger(ws.llmLedger)
+      ws.llmLedger.managedRun = {
+        startedAt: Date.now(),
+        calls: 0,
+        tokens: 0,
+        tripped: false,
+        trippedAt: 0,
+        trippedReason: '',
+      }
+    }
+    if (ws && safePatch.resetLlmLedger === true) {
+      ws.llmLedger = emptyLlmLedger()
     }
 
     let compactLowWarning = ''
@@ -2168,6 +2525,15 @@ export function updateChiefConfig(patch) {
       }
       if (Number.isFinite(Number(safePatch.managedIdleTimeoutMs)) && Number(safePatch.managedIdleTimeoutMs) >= 50) {
         targetCfg.managedIdleTimeoutMs = Math.min(2 * 60 * 60 * 1000, Math.round(Number(safePatch.managedIdleTimeoutMs)))
+      }
+      if (typeof safePatch.notifyEnabled === 'boolean') targetCfg.notifyEnabled = safePatch.notifyEnabled
+      if (typeof safePatch.notifySound === 'boolean') targetCfg.notifySound = safePatch.notifySound
+      if (typeof safePatch.uiLang === 'string') targetCfg.uiLang = normalizeUiLang(safePatch.uiLang)
+      if (safePatch.managedBudgetMaxCalls !== undefined) {
+        targetCfg.managedBudgetMaxCalls = normalizeManagedBudgetCalls(safePatch.managedBudgetMaxCalls)
+      }
+      if (safePatch.managedBudgetMaxTokens !== undefined) {
+        targetCfg.managedBudgetMaxTokens = normalizeManagedBudgetTokens(safePatch.managedBudgetMaxTokens)
       }
       if (allowLocks && (
         (safePatch.lockedModelEfforts && typeof safePatch.lockedModelEfforts === 'object')
@@ -2265,6 +2631,11 @@ export function updateChiefConfig(patch) {
         thinkingEffort: effBefore.thinkingEffort || 'auto',
         teamEffortMode: effBefore.teamEffortMode || 'auto',
         managedIdleTimeoutMs: effBefore.managedIdleTimeoutMs || DEFAULT_MANAGED_IDLE_TIMEOUT_MS,
+        notifyEnabled: effBefore.notifyEnabled !== false,
+        notifySound: Boolean(effBefore.notifySound),
+        uiLang: effBefore.uiLang || 'auto',
+        managedBudgetMaxCalls: effBefore.managedBudgetMaxCalls ?? DEFAULT_MANAGED_BUDGET_MAX_CALLS,
+        managedBudgetMaxTokens: effBefore.managedBudgetMaxTokens ?? DEFAULT_MANAGED_BUDGET_MAX_TOKENS,
         lockedModelEfforts: { ...(effBefore.lockedModelEfforts || {}) },
         permissionMode: effBefore.permissionMode || DEFAULT_CHIEF_PERMISSION_MODE,
         tacticalModes: { ...effBefore.tacticalModes },
@@ -2329,8 +2700,10 @@ export function updateChiefConfig(patch) {
     }
     return {
       ok: true,
+      ...(presetSpec ? { appliedPreset: presetSpec.id } : {}),
       ...(compactLowWarning ? { compactLowWarning } : {}),
       config: { ...finalCfg, tacticalModes: { ...finalCfg.tacticalModes } },
+      llmLedger: summarizeLlmLedger(ws.llmLedger, finalCfg),
     }
   })
 }
@@ -2520,4 +2893,186 @@ export function getChiefActiveWork(rootSessionId) {
     return null
   }
   return { ...cur }
+}
+
+/** Persist a critical alert event onto a workspace so UI can fire desktop notifications / gentle chimes without replay storms. */
+export function recordWorkspaceAlertEvent(rootSessionId, spec = {}) {
+  const key = String(rootSessionId || 'global').trim() || 'global'
+  try {
+    return mutateChiefState((state) => {
+      const ws = ensureWorkspace(state, key)
+      return pushAlertEventToWs(ws, spec)
+    })
+  } catch {
+    return null
+  }
+}
+
+function tripManagedBudgetCircuit(state, ws, rootId, reason) {
+  const now = Date.now()
+  const effNow = resolveWorkspaceConfig(state, rootId)
+  if (!ws.config || typeof ws.config !== 'object') ws.config = { ...effNow }
+  ws.config.runMode = 'off'
+  ws.config.paceMode = 'manual'
+  ws.config.autoPilot = false
+  ws.config.autoReview = false
+  ws.config.tacticalModes = { ...normalizeTacticalModes(ws.config.tacticalModes), intervention: false }
+  if (state.config && (state.config.runMode === 'managed' || state.config.paceMode === 'auto')) {
+    state.config.runMode = 'off'
+    state.config.paceMode = 'manual'
+    state.config.autoPilot = false
+    state.config.autoReview = false
+  }
+  ws.llmLedger = normalizeLlmLedger(ws.llmLedger)
+  ws.llmLedger.managedRun.tripped = true
+  ws.llmLedger.managedRun.trippedAt = now
+  ws.llmLedger.managedRun.trippedReason = clamp(reason || '已触及托管硬预算上限，自动熔断休眠', 200)
+  ws.chat.push({
+    id: nextId('chat'),
+    role: 'chief',
+    kind: 'receipt',
+    text: `- 【🛑 托管硬预算熔断】${ws.llmLedger.managedRun.trippedReason}\n- 已自动将运行模式退回「⏸ 关停」（人工问答仍可随时使用），保护 Token 费用。`,
+    actions: ['🛑 硬预算熔断'],
+    at: now,
+  })
+  if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+  pushAuditToWs(ws, {
+    mode: effNow.permissionMode,
+    stage: 'budget_guard',
+    rule: 'managed_budget_exceeded',
+    decision: 'tripped',
+    operation: '托管硬预算上限熔断',
+    target: rootId,
+    reason: ws.llmLedger.managedRun.trippedReason,
+    outcome: 'blocked',
+    by: 'chief',
+  }, rootId)
+  pushAlertEventToWs(ws, {
+    kind: 'budget_circuit_break',
+    level: 'danger',
+    title: '🛑 托管已达预算上限并熔断',
+    body: ws.llmLedger.managedRun.trippedReason,
+    dedupeKey: `budget:${rootId}:${ws.llmLedger.managedRun.startedAt || 0}`,
+    at: now,
+  })
+  return ws.llmLedger.managedRun.trippedReason
+}
+
+/** Check before background Managed LLM calls; never blocks human-initiated chat or consultation. */
+export function checkManagedBudgetBeforeCall(rootSessionId, reasonKind = '') {
+  const rootId = String(rootSessionId || 'global').trim() || 'global'
+  const category = classifyChiefLlmCategory(reasonKind)
+  if (category !== 'review' && category !== 'dream') {
+    return { allowed: true, category }
+  }
+  const st = loadChiefState()
+  const effCfg = resolveWorkspaceConfig(st, rootId)
+  const wsSnap = st.workspaces && st.workspaces[rootId] ? st.workspaces[rootId] : null
+  const ledger = normalizeLlmLedger(wsSnap && wsSnap.llmLedger)
+  const mr = ledger.managedRun
+  if (mr.tripped && !effCfg.stopped && effCfg.runMode !== 'patrol') {
+    return {
+      allowed: false,
+      tripped: true,
+      category,
+      reason: mr.trippedReason || '本轮托管硬预算已触发熔断，请重置计数后再继续',
+    }
+  }
+  if (effCfg.stopped || effCfg.runMode !== 'managed') {
+    return { allowed: true, category }
+  }
+  const maxCalls = normalizeManagedBudgetCalls(effCfg.managedBudgetMaxCalls)
+  const maxTokens = normalizeManagedBudgetTokens(effCfg.managedBudgetMaxTokens)
+  let exceedReason = ''
+  if (mr.tripped) {
+    exceedReason = mr.trippedReason || '本轮托管硬预算已触发熔断，请重置计数后再继续'
+  } else if (maxCalls > 0 && mr.calls >= maxCalls) {
+    exceedReason = `托管后台 LLM 调用已达上限 ${mr.calls}/${maxCalls} 次`
+  } else if (maxTokens > 0 && mr.tokens >= maxTokens) {
+    exceedReason = `托管后台 Token 消耗已达上限 ${formatCompactTokenShort(mr.tokens)}/${formatCompactTokenShort(maxTokens)}`
+  }
+  if (!exceedReason) {
+    return { allowed: true, category }
+  }
+  const trippedReason = mutateChiefState((state) => {
+    const ws = ensureWorkspace(state, rootId)
+    return tripManagedBudgetCircuit(state, ws, rootId, exceedReason)
+  })
+  return { allowed: false, tripped: true, category, reason: trippedReason }
+}
+
+/** Record every Chief LLM call usage and enforce Managed-mode hard budget cap immediately when reached. */
+export function recordChiefLlmUsage(rootSessionId, {
+  reasonKind = '',
+  modelRef = '',
+  inputTokens = 0,
+  outputTokens = 0,
+  estimated = false,
+  ok = true,
+} = {}) {
+  const rootId = String(rootSessionId || 'global').trim() || 'global'
+  const category = classifyChiefLlmCategory(reasonKind)
+  const inTok = Math.min(LLM_LEDGER_TOKENS_MAX, Math.max(0, Math.round(Number(inputTokens) || 0)))
+  const outTok = Math.min(LLM_LEDGER_TOKENS_MAX, Math.max(0, Math.round(Number(outputTokens) || 0)))
+  const totTok = Math.min(LLM_LEDGER_TOKENS_MAX, inTok + outTok)
+  const now = Date.now()
+  return mutateChiefState((state) => {
+    const ws = ensureWorkspace(state, rootId)
+    const effCfg = resolveWorkspaceConfig(state, rootId)
+    ws.llmLedger = normalizeLlmLedger(ws.llmLedger)
+    const ledger = ws.llmLedger
+    ledger.totalCalls = Math.min(LLM_LEDGER_CALLS_MAX, ledger.totalCalls + 1)
+    ledger.totalInputTokens = Math.min(LLM_LEDGER_TOKENS_MAX, ledger.totalInputTokens + inTok)
+    ledger.totalOutputTokens = Math.min(LLM_LEDGER_TOKENS_MAX, ledger.totalOutputTokens + outTok)
+    ledger.totalTokens = Math.min(LLM_LEDGER_TOKENS_MAX, ledger.totalTokens + totTok)
+    if (!ledger.byCategory[category]) ledger.byCategory[category] = { calls: 0, tokens: 0 }
+    ledger.byCategory[category].calls = Math.min(LLM_LEDGER_CALLS_MAX, ledger.byCategory[category].calls + 1)
+    ledger.byCategory[category].tokens = Math.min(LLM_LEDGER_TOKENS_MAX, ledger.byCategory[category].tokens + totTok)
+    ledger.recent.push({
+      id: nextId('llm'),
+      at: now,
+      category,
+      reasonKind: clamp(reasonKind || '', 40),
+      modelRef: clamp(modelRef || '', 80),
+      inputTokens: inTok,
+      outputTokens: outTok,
+      totalTokens: totTok,
+      estimated: Boolean(estimated),
+      ok: ok !== false,
+    })
+    if (ledger.recent.length > LLM_LEDGER_RECENT_CAP) {
+      ledger.recent = ledger.recent.slice(-LLM_LEDGER_RECENT_CAP)
+    }
+
+    let trippedReason = ''
+    if (!effCfg.stopped && effCfg.runMode === 'managed' && (category === 'review' || category === 'dream')) {
+      if (!ledger.managedRun.startedAt) ledger.managedRun.startedAt = now
+      ledger.managedRun.calls = Math.min(LLM_LEDGER_CALLS_MAX, ledger.managedRun.calls + 1)
+      ledger.managedRun.tokens = Math.min(LLM_LEDGER_TOKENS_MAX, ledger.managedRun.tokens + totTok)
+      const maxCalls = normalizeManagedBudgetCalls(effCfg.managedBudgetMaxCalls)
+      const maxTokens = normalizeManagedBudgetTokens(effCfg.managedBudgetMaxTokens)
+      if (maxCalls > 0 && ledger.managedRun.calls >= maxCalls) {
+        trippedReason = tripManagedBudgetCircuit(
+          state,
+          ws,
+          rootId,
+          `托管后台 LLM 调用已达硬预算上限 (${ledger.managedRun.calls}/${maxCalls} 次)`,
+        )
+      } else if (maxTokens > 0 && ledger.managedRun.tokens >= maxTokens) {
+        trippedReason = tripManagedBudgetCircuit(
+          state,
+          ws,
+          rootId,
+          `托管后台 Token 消耗已达硬预算上限 (${formatCompactTokenShort(ledger.managedRun.tokens)}/${formatCompactTokenShort(maxTokens)})`,
+        )
+      }
+    }
+    return {
+      ok: true,
+      category,
+      tripped: Boolean(ws.llmLedger.managedRun.tripped && trippedReason),
+      trippedReason,
+      ledger: summarizeLlmLedger(ws.llmLedger, resolveWorkspaceConfig(state, rootId)),
+    }
+  })
 }

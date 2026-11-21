@@ -15,6 +15,8 @@ import {
   resolveWorkspaceConfig,
   loadChiefState,
   mutateChiefState,
+  checkManagedBudgetBeforeCall,
+  recordChiefLlmUsage,
 } from './chief-state.js'
 
 let dshLlmModulePromise = null
@@ -480,6 +482,36 @@ function pickRouteFromItems(items, selectedRef, followRef, deps, sessionId, regi
   return queue[0] || null
 }
 
+export function estimateTokensRough(text = '') {
+  const s = String(text || '')
+  if (!s) return 0
+  let cjk = 0
+  for (let i = 0; i < s.length; i += 1) {
+    const code = s.charCodeAt(i)
+    if (code >= 0x4E00 && code <= 0x9FFF) cjk += 1
+  }
+  const rest = s.length - cjk
+  return Math.max(1, Math.round(cjk * 0.72 + rest * 0.28))
+}
+
+function extractUsageMetrics(rawUsage, promptText = '', outputText = '') {
+  const u = rawUsage && typeof rawUsage === 'object' ? rawUsage : null
+  const inRaw = u ? Number(u.inputTokens ?? u.promptTokens ?? u.prompt_tokens ?? u.input_tokens ?? 0) : 0
+  const outRaw = u ? Number(u.outputTokens ?? u.completionTokens ?? u.completion_tokens ?? u.output_tokens ?? 0) : 0
+  if (Number.isFinite(inRaw) && Number.isFinite(outRaw) && (inRaw > 0 || outRaw > 0)) {
+    return {
+      inputTokens: Math.max(0, Math.round(inRaw)),
+      outputTokens: Math.max(0, Math.round(outRaw)),
+      estimated: false,
+    }
+  }
+  return {
+    inputTokens: estimateTokensRough(promptText),
+    outputTokens: estimateTokensRough(outputText),
+    estimated: true,
+  }
+}
+
 async function callOneRoute(llm, route, system, userText, maxTokens = SUMMARY_MAX_TOKENS, sessionId = '', imageBlocks = [], desiredEffort = 'medium') {
   const caps = await resolveRouteCapabilities(llm, route.provider, route.model)
   const modelDefaultMaxTokens = caps.defaultMaxTokens || 0
@@ -491,6 +523,7 @@ async function callOneRoute(llm, route, system, userText, maxTokens = SUMMARY_MA
   const retryBudget = firstBudget < targetBudget ? targetBudget : SUMMARY_RETRY_MAX_TOKENS
   const budgets = retryBudget > firstBudget ? [firstBudget, retryBudget] : [firstBudget]
   const safeImages = Array.isArray(imageBlocks) ? imageBlocks : []
+  const promptBasis = `${system || ''}\n${userText || ''}`
 
   const runOnce = async (budget) => {
     const userContent = [...safeImages, { type: 'text', text: userText || '请查看附图并回答。' }]
@@ -508,8 +541,12 @@ async function callOneRoute(llm, route, system, userText, maxTokens = SUMMARY_MA
     const dshLlm = await loadDshLlm()
     if (dshLlm && typeof dshLlm.BlockAssembler === 'function') {
       const assembler = new dshLlm.BlockAssembler()
+      let streamUsage = null
       for await (const chunk of llm.stream(request)) {
         assembler.push(chunk)
+        if (chunk && typeof chunk === 'object' && (chunk.usage || chunk.type === 'usage')) {
+          streamUsage = chunk.usage || chunk
+        }
       }
       const finish = assembler.finish
       if (finish && (finish.kind === 'error' || finish.kind === 'aborted')) {
@@ -523,14 +560,19 @@ async function callOneRoute(llm, route, system, userText, maxTokens = SUMMARY_MA
         .map(b => b.text)
         .join('\n')
         .trim()
-      return { text, finishKind: finish?.kind || '', modelRef: route.ref, thinkingEffort: effort || 'none' }
+      const usage = extractUsageMetrics(assembler.usage || finish?.usage || finish?.reason?.usage || streamUsage, promptBasis, text)
+      return { text, finishKind: finish?.kind || '', modelRef: route.ref, thinkingEffort: effort || 'none', usage }
     }
 
     // Pure standalone fallback stream reader (for unit tests / lightweight hosts)
     const parts = []
     let finishKind = ''
+    let streamUsage = null
     for await (const chunk of llm.stream(request)) {
       if (!chunk || typeof chunk !== 'object') continue
+      if (chunk.usage || chunk.type === 'usage') {
+        streamUsage = chunk.usage || chunk
+      }
       if (chunk.type === 'text-delta' || chunk.type === 'text_delta') {
         if (typeof chunk.text === 'string') parts.push(chunk.text)
         else if (typeof chunk.delta === 'string') parts.push(chunk.delta)
@@ -538,6 +580,7 @@ async function callOneRoute(llm, route, system, userText, maxTokens = SUMMARY_MA
       else if (typeof chunk.content === 'string') parts.push(chunk.content)
       else if (chunk.type === 'finish') {
         finishKind = chunk.reason?.kind || chunk.finishReason || ''
+        if (chunk.reason?.usage) streamUsage = chunk.reason.usage
         if (finishKind === 'error') {
           const err = new Error(chunk.reason?.failure?.message || 'LLM stream error')
           err.failure = chunk.reason?.failure
@@ -545,18 +588,26 @@ async function callOneRoute(llm, route, system, userText, maxTokens = SUMMARY_MA
         }
       }
     }
-    return { text: parts.join('').trim(), finishKind, modelRef: route.ref, thinkingEffort: effort || 'none' }
+    const text = parts.join('').trim()
+    const usage = extractUsageMetrics(streamUsage, promptBasis, text)
+    return { text, finishKind, modelRef: route.ref, thinkingEffort: effort || 'none', usage }
   }
 
-  let lastRes = { text: '', finishKind: '', modelRef: route.ref, thinkingEffort: effort || 'none' }
+  let lastRes = {
+    text: '',
+    finishKind: '',
+    modelRef: route.ref,
+    thinkingEffort: effort || 'none',
+    usage: extractUsageMetrics(null, promptBasis, ''),
+  }
   for (let i = 0; i < budgets.length; i += 1) {
     const res = await runOnce(budgets[i])
     lastRes = res
     if (res.text && res.finishKind !== 'max-tokens') {
-      return { text: res.text, modelRef: res.modelRef, thinkingEffort: res.thinkingEffort }
+      return { text: res.text, modelRef: res.modelRef, thinkingEffort: res.thinkingEffort, usage: res.usage }
     }
   }
-  return { text: lastRes.text, modelRef: lastRes.modelRef, thinkingEffort: lastRes.thinkingEffort }
+  return { text: lastRes.text, modelRef: lastRes.modelRef, thinkingEffort: lastRes.thinkingEffort, usage: lastRes.usage }
 }
 
 async function filterVisionRoutes(llm, queue) {
@@ -609,6 +660,20 @@ export async function callChiefLlm(deps, {
       })
     : cfgEffort
 
+  const budgetCheck = checkManagedBudgetBeforeCall(rootSid, reasonKind)
+  if (budgetCheck && !budgetCheck.allowed) {
+    return {
+      ok: false,
+      budgetExceeded: true,
+      budgetTripped: true,
+      error: budgetCheck.reason || '已触发托管硬预算熔断',
+      thinkingEffort: desiredEffort,
+      thinkingEffortMode,
+    }
+  }
+
+  const promptBasis = `${system || ''}\n${prompt || ''}`
+
   if (deps && typeof deps.callLlmOverride === 'function') {
     const overrideRes = await deps.callLlmOverride({
       sessionId,
@@ -622,9 +687,20 @@ export async function callChiefLlm(deps, {
       thinkingEffortMode,
     })
     if (overrideRes && typeof overrideRes === 'object') {
+      const usage = extractUsageMetrics(overrideRes.usage, promptBasis, overrideRes.text || '')
+      const ledgerRec = recordChiefLlmUsage(rootSid, {
+        reasonKind,
+        modelRef: overrideRes.modelRef || 'override',
+        inputTokens: usage.inputTokens,
+        outputTokens: usage.outputTokens,
+        estimated: usage.estimated,
+        ok: overrideRes.ok !== false,
+      })
       return {
         thinkingEffort: overrideRes.thinkingEffort || desiredEffort,
         thinkingEffortMode: overrideRes.thinkingEffortMode || thinkingEffortMode,
+        usage,
+        ...(ledgerRec && ledgerRec.tripped ? { budgetTripped: true } : {}),
         ...overrideRes,
       }
     }
@@ -669,6 +745,15 @@ export async function callChiefLlm(deps, {
     try {
       const res = await callOneRoute(llm, route, system, prompt, maxTokens, sessionId, sendImages, desiredEffort)
       if (res.text) {
+        const usage = res.usage || extractUsageMetrics(null, promptBasis, res.text)
+        const ledgerRec = recordChiefLlmUsage(rootSid, {
+          reasonKind,
+          modelRef: res.modelRef,
+          inputTokens: usage.inputTokens,
+          outputTokens: usage.outputTokens,
+          estimated: usage.estimated,
+          ok: true,
+        })
         return {
           ok: true,
           text: res.text,
@@ -676,6 +761,8 @@ export async function callChiefLlm(deps, {
           degradedToTextOnly,
           thinkingEffort: res.thinkingEffort || desiredEffort,
           thinkingEffortMode,
+          usage,
+          ...(ledgerRec && ledgerRec.tripped ? { budgetTripped: true } : {}),
         }
       }
       lastError = `${route.ref} 返回内容为空`
@@ -686,6 +773,15 @@ export async function callChiefLlm(deps, {
         try {
           const textRes = await callOneRoute(llm, route, system, prompt, maxTokens, sessionId, [], desiredEffort)
           if (textRes.text) {
+            const usage = textRes.usage || extractUsageMetrics(null, promptBasis, textRes.text)
+            const ledgerRec = recordChiefLlmUsage(rootSid, {
+              reasonKind,
+              modelRef: textRes.modelRef,
+              inputTokens: usage.inputTokens,
+              outputTokens: usage.outputTokens,
+              estimated: usage.estimated,
+              ok: true,
+            })
             return {
               ok: true,
               text: textRes.text,
@@ -693,6 +789,8 @@ export async function callChiefLlm(deps, {
               degradedToTextOnly: true,
               thinkingEffort: textRes.thinkingEffort || desiredEffort,
               thinkingEffortMode,
+              usage,
+              ...(ledgerRec && ledgerRec.tripped ? { budgetTripped: true } : {}),
             }
           }
         } catch {}
@@ -700,6 +798,15 @@ export async function callChiefLlm(deps, {
       markRouteFailure(route, err)
     }
   }
+  const failUsage = extractUsageMetrics(null, promptBasis, '')
+  recordChiefLlmUsage(rootSid, {
+    reasonKind,
+    modelRef: queue[0] ? queue[0].ref : '',
+    inputTokens: failUsage.inputTokens,
+    outputTokens: 0,
+    estimated: true,
+    ok: false,
+  })
   return { ok: false, error: lastError, degradedToTextOnly, thinkingEffort: desiredEffort, thinkingEffortMode }
 }
 

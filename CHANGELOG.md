@@ -5,6 +5,38 @@ All notable changes to **`dsh-chief`** (**DSH 参谋长**) will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.6.0] - 2026-11-21
+
+> **Release Theme**: **简明可视 · 节约注意力资源（Visual Clarity & Attention Conservation）** — consolidated 5-tab navigation, SVG Flow Canvas & click-to-expand Org Tree, top-bar rotating `⚙️` Settings page, Away Managed reliability loop, and live `zh / en` bilingual UI.
+
+### Added
+
+#### 🧭 可视化工作拓扑、5 页签整合与全站统一拉起交互 (`board-schema.js` / `board-actions.js` / `digest.js` / `subagent-runtime.js` / `tabs/tasks-flow.js` / `tabs/tasks.js` / `components/common.js`)
+- **工程实现**：
+  - **5 页签一体化任务工作台**：将原「规划」页签正式合并入「任务」页签（顶栏保持 `参谋 / 任务 / 协同 / 档案 / 边界` 5 大页签），按「**核心目标 → 可视化工作拓扑（流程画布 / 组织树）→ 推进任务板（步骤与任务列表合一）→ 跨会话接力与部署**」清晰排布。
+  - **工作流推进流与跨步回指拓扑 (`planStepId` / `targetPlanStepId` / `derivePlanFlowProgress`)**：任务卡片支持关联规划步骤及目标回指步骤（并对历史看板基于 `graph.plan` 自动回填）；「流程画布」使用 SVG 绘制主线顺序阶段节点、可嵌套子代理分支卡片与跨步回指连线（支持横竖向切换与缩放适配器）。
+  - **全站统一拉起折叠体验**：抽象通用可折叠组件 `AccCard`，推进任务板默认折叠已完成任务分组；「组织树」默认收起，移除冗余的全局 `全部收起 / 全展开` 按钮，改为点击 `👑 主代理` 卡片整卡即可直接拉起/收起下级子代理与任务树，并补齐 DSH 浅色主题全部覆盖样式。
+- **用户感知**：打开「任务」页即可在一屏内看懂主代理和子代理现在推到第几步、卡在哪步、谁做完会向哪步交卷；平时层级保持收起干净，需要排查哪一条再点开即可。
+
+#### 🌙 离桌托管闭环：关键节点告警、LLM 调用账本与硬预算熔断、复盘战报导出 (`chief-state.js` / `chief-models.js` / `chief-review.js` / `runtime-hooks.js` / `src/client/notify.js` / `src/client/report.js`)
+- **工程实现**：
+  - **7 类关键里程碑告警与静默基线引擎**：后端在 `pending_approval`、`pending_elevation`、`guard_wall_blocked`、`auto_continue_rescue`、`managed_auto_sleep`、`budget_circuit_break`、`hazard_halt` 事件写入 `alertEvents`（5s 同键去重、20 条滚动上限）；前端 `notify.js` 为每个会话建立首次静默基线（绝不重放历史旧告警），后续增量推送按开关触发系统桌面 `Notification` 与双音阶 WebAudio 轻柔提示音。
+  - **参谋长 LLM 分类账本与硬预算熔断 (`llmLedger` / `checkManagedBudgetBeforeCall` / `recordChiefLlmUsage`)**：按 `问答(chat) / 巡检(review) / 梦境漫游(dream) / other` 统计调用次与输入/输出 Token（对累计统计字段施加 `1M calls / 1B tokens` 安全上限夹紧）；在 `托管` 模式下触及单轮次数上限（默认 30 次，可设 `3–500` 或 `0=不限`）或 Token 上限（默认 `300K`，可选 `100K/300K/500K/1M/不限`）立即触发硬熔断并退回 `⏸ 关停`，同时确保人类主动 `ask_chief` 问答永远豁免阻断。
+  - **Markdown 复盘战报导出 (`report.js`)**：汇集核心目标、规划进度、任务验收证据、子代理名册、参谋摘要、红线/物理驻墙及账本消耗生成结构化中/英文 `.md` 战报（自动脱敏 `sk-` / `ghp_` / `AKIA` / `AIza` / `Bearer` 及私钥块），支持一键下载 `.md` 文件或复制剪贴板。
+- **用户感知**：离开电脑挂机时，遇到必须拍板或触发熔断会第一时间在桌面收到提醒，再也不用担心后台循环烧光额度；回来点一下就能导出或复制脱敏干净的整局战报交差归档。
+
+#### ⚙️ 顶栏旋转齿轮「设置」页、3 档开箱情景预设与中英双语 (`components/Panel.js` / `tabs/plan.js` / `tabs/boundaries.js` / `src/client/i18n.js` / `locale/zh.json` / `locale/en.json`)
+- **工程实现**：
+  - **顶栏齿轮入口与边界页减负**：将设置页从「边界」二级页签移至顶栏 `DSH 参谋长` 与版本号 `v1.6.0` 之间的旋转齿轮按钮（点击顺滑旋转 `180°` 切换设置页），让「边界」页专注物理驻墙、红线列表与运行环境信息。
+  - **3 档情景预设 (`CHIEF_SCENARIO_PRESETS`)**：支持一键切换「👁 只读旁观 (`L0 · 关停`) / 🤝 日常协作 (`L2 · 巡检 + 红线哨兵`) / 🚀 离桌托管 (`L3 · 托管 + 80% 压缩 + 30次/300K 熔断 + 桌面告警`)」；切换离桌托管必须经过弹窗双重风险确认（后端硬拦截无确认直传）。
+  - **全界面中英双语 (`i18n.js`)**：补全 `locale/zh.json` 与 `locale/en.json`，支持 `跟随宿主 (auto) / 简体中文 (zh) / English (en)` 运行时无刷新切换并覆盖全部 5 个页签、弹窗及导出战报。
+- **用户感知**：新装用户点顶栏齿轮就能 1 秒选好合身的协作挡位，也可以随时一键切换中英文界面。
+
+### Fixed
+- **修复 `--format` 选项误触发破坏性磁盘格式化拦截 (`safety/invariant-guards.js`)**：将命令行参数里的 `--format` 与真实磁盘格式化命令（如 `format C:`、`format.com D:`、`cmd /c format ...`）精确区分，`git log --format=...` 等高频开发命令零误杀，真实格式化命令仍 100% 硬拦截。
+- **加固强介入防空转与冷却期接续 (`idle-guard.js` / `chief-review.js`)**：新增回合中途卡死/重复打转与连续工具报错空转识别 `detectMidTurnSpin`（写入规划操作豁免计数）；修复 `off` / `patrol` 模式下开启强介入被忽略、4 秒冷却期内跳过不重排、以及 LLM 未给出 `interventionText` 但存在 `goalMissing` 时漏发督导续推的问题。
+- **修复硬预算熔断后的滞后调用拦截 (`chief-state.js`)**：`checkManagedBudgetBeforeCall` 在 `mr.tripped` 为真且未切入 `patrol` 时直接拦截滞后后台 `review` / `dream` 调用，防止熔断瞬间仍有在途定时器漏跑；显式切回 `patrol` / `managed` 或点击重置计数时同步清除熔断标记。
+
 ## [1.5.0] - 2026-11-20
 
 ### Added

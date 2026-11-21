@@ -2,5 +2,76 @@
   "meta": {
     "title": "DSH Chief",
     "description": "Let AI manage AI — it minds the flow itself and stops a runaway before it costs you. No screen-sitting, no repeated confirmations; it keeps working while you are away, and asks before touching your workspace."
+  },
+  "ui": {
+    "brandName": "DSH Chief",
+    "tabs": {
+      "chief": "Chief",
+      "tasks": "Tasks",
+      "peers": "Peers",
+      "archive": "Archives",
+      "boundaries": "Guards"
+    },
+    "runModes": {
+      "off": "⏸ Off",
+      "patrol": "🛡 Patrol",
+      "managed": "🤖 Managed"
+    },
+    "perms": {
+      "advisor": "L0 · Advisor",
+      "assistant": "L1 · Assistant",
+      "strategist": "L2 · Strategist",
+      "chief": "L3 · Chief"
+    },
+    "presets": {
+      "title": "🚀 One-Click Scenario Presets",
+      "observer": {
+        "title": "👁 Read-Only Observer",
+        "tag": "L0 · ⏸ Off",
+        "desc": "Zero background burn or edits; read-only digest & low-effort summaries."
+      },
+      "collab": {
+        "title": "🤝 Daily Co-Pilot",
+        "tag": "L2 · 🛡 Patrol",
+        "desc": "0 idle cost; wakes only on errors/walls with per-action approval popups."
+      },
+      "away": {
+        "title": "🚀 Away Managed",
+        "tag": "L3 · 🤖 Managed",
+        "desc": "Continuous supervision, 80% auto-compact, 30-call/300K budget cap & alerts."
+      }
+    },
+    "notify": {
+      "title": "🔔 Away Alerts & Gentle Chime",
+      "desktopToggle": "Desktop notifications at key milestones",
+      "soundToggle": "Gentle chime sound (off by default)",
+      "testBtn": "Test alert",
+      "permGranted": "Permission granted",
+      "permDefault": "Click to authorize",
+      "permDenied": "Blocked in browser",
+      "permUnsupported": "In-panel toast alerts"
+    },
+    "ledger": {
+      "title": "📊 Chief LLM Ledger & Hard Budget Cap",
+      "totalCalls": "Total calls",
+      "totalTokens": "Total tokens",
+      "catChat": "Q&A",
+      "catReview": "Patrol",
+      "catDream": "Dream Roam",
+      "managedCallsCap": "Managed call cap / run",
+      "managedTokensCap": "Managed token cap / run",
+      "resetManaged": "Reset run counter",
+      "tripped": "🛑 Hard budget cap reached — auto-stopped to protect tokens"
+    },
+    "report": {
+      "exportMd": "📄 Export Report (.md)",
+      "copyMd": "📋 Copy Markdown Report"
+    },
+    "lang": {
+      "title": "🌐 Interface Language / 界面语言",
+      "auto": "Auto",
+      "zh": "简体中文",
+      "en": "English"
+    }
   }
 }

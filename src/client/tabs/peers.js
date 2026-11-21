@@ -6,6 +6,7 @@
 
 import { React, h } from '../react-runtime.js'
 import { SESSION_PALETTE } from '../constants.js'
+import { bi } from '../i18n.js'
 import { patch, focusSecInput, openSubagentChat } from '../store.js'
 import {
   clampTitle,
@@ -15,7 +16,7 @@ import {
   colorForRootSession,
 } from '../utils.js'
 import { call, loadChiefView, requestTogglePeerLink } from '../api.js'
-import { Icon, Switch } from '../components/common.js'
+import { Icon, Switch, AccCard } from '../components/common.js'
 
 export function PeersTab({ view }) {
   React.useEffect(() => {
@@ -62,7 +63,7 @@ export function PeersTab({ view }) {
     if (mail.detachedFromCluster) {
       ensureDrawer('detached', {
         kind: 'detached',
-        title: '已脱离协同历史（已隔离不注入）',
+        title: bi('已脱离协同历史（已隔离不注入）', 'Detached History (Isolated)'),
         colors: [{ dot: '#8e8e93', bg: 'rgba(142,142,147,0.1)', border: 'rgba(142,142,147,0.3)' }],
         order: 99,
         defaultOpen: false,
@@ -81,7 +82,7 @@ export function PeersTab({ view }) {
         .map(id => colorForRootSession(id, selfRootId))
       ensureDrawer('broadcast', {
         kind: 'broadcast',
-        title: '🌐 全网广播 (@全体)',
+        title: bi('🌐 全网广播 (@全体)', '🌐 Broadcast (@All)'),
         colors: cols.length ? cols : [SESSION_PALETTE[0], SESSION_PALETTE[1]],
         order: 0,
         defaultOpen: true,
@@ -93,7 +94,7 @@ export function PeersTab({ view }) {
       const sorted = uniqueRoots.slice().sort()
       ensureDrawer('multi:' + sorted.join('|'), {
         kind: 'cross',
-        title: `🔀 ${sorted.slice(0, 3).map(labelForRoot).join(' · ')}${sorted.length > 3 ? ` 等${sorted.length}窗` : ''} 多方协同`,
+        title: `🔀 ${sorted.slice(0, 3).map(labelForRoot).join(' · ')}${sorted.length > 3 ? bi(` 等${sorted.length}窗`, ` +${sorted.length}`) : ''} ${bi('多方协同', 'Group Relay')}`,
         colors: sorted.slice(0, 4).map(id => colorForRootSession(id, selfRootId)),
         order: 1,
         defaultOpen: true,
@@ -105,7 +106,7 @@ export function PeersTab({ view }) {
       if (pair.length >= 2 && pair[0] !== pair[1]) {
         ensureDrawer('pair:' + pair.join('|'), {
           kind: 'cross',
-          title: `↔ ${labelForRoot(pair[0])} ↔ ${labelForRoot(pair[1])} 跨窗传话`,
+          title: `↔ ${labelForRoot(pair[0])} ↔ ${labelForRoot(pair[1])} ${bi('跨窗传话', 'Cross-Window')}`,
           colors: pair.map(id => colorForRootSession(id, selfRootId)),
           order: 2,
           defaultOpen: true,
@@ -117,7 +118,7 @@ export function PeersTab({ view }) {
     const col = colorForRootSession(internalRoot, selfRootId)
     ensureDrawer('internal:' + internalRoot, {
       kind: 'internal',
-      title: `📁 ${labelForRoot(internalRoot)} 内部信箱`,
+      title: `📁 ${labelForRoot(internalRoot)} ${bi('内部信箱', 'Internal')}`,
       colors: [col],
       order: internalRoot === selfRootId ? 3 : 4,
       defaultOpen: internalRoot === selfRootId,
@@ -129,50 +130,54 @@ export function PeersTab({ view }) {
     .sort((a, b) => a.order - b.order)
 
   const hasLinkedNetwork = peers.some(p => p && p.kind === 'peer-session')
+  const fedOpen = (view.peersFedCollapsed === null || view.peersFedCollapsed === undefined)
+    ? otherSessions.length > 0
+    : !view.peersFedCollapsed
 
   return h(
     'div',
     { className: 'dnb-view' },
     // Section 1: Active Interconnected Peers (Lead + Subagents + Linked Windows)
     h(
-      'div',
-      { className: 'dnb-section-head' },
-      h(
-        'span',
-        {
-          title: hasLinkedNetwork ? '已入网的独立对话会自动共享进度与协同信箱；断开联动后参谋摘要立即净化隔离' : undefined,
-        },
-        '当前互通对话网络',
-      ),
-      h(
-        'div',
-        { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-        (hiddenProbePeers.length > 0 || (view.showInternalProbes && rawPeers.some(p => p && isInternalProbeName(p.name || p.key))))
-          ? h('button', {
-              className: 'dnb-pill',
-              style: { height: 22, fontSize: 10.5, padding: '0 7px', borderStyle: 'dashed' },
-              onClick: () => patch({ showInternalProbes: !view.showInternalProbes }),
-            }, view.showInternalProbes ? '隐藏内部探针' : `内部探针 (${hiddenProbePeers.length})`)
-          : null,
-        peers.length > 1
-          ? h('button', {
-              className: 'dnb-pill dnb-pill-accent',
-              style: { height: 22, fontSize: 11, padding: '0 8px' },
-              onClick: () => {
-                patch({ secTarget: 'all', secMode: 'steer', notice: '已选择向全体成员广播递话' })
-                focusSecInput()
-              },
-            }, '@全体广播')
-          : null,
-      ),
-    ),
-    peers.length
-      ? h(
-          'div',
-          { className: 'dnb-group' },
-          peers.map(peer => {
+      AccCard,
+      {
+        open: !view.peersNetCollapsed,
+        onToggle: () => patch({ peersNetCollapsed: !view.peersNetCollapsed }),
+        title: bi('当前互通对话网络', 'Connected Peer Network'),
+        headTitle: hasLinkedNetwork
+          ? bi('已入网的独立对话会自动共享进度与协同信箱；断开联动后参谋摘要立即净化隔离', 'Linked sessions share progress & relay mail; unlinking isolates digests cleanly.')
+          : undefined,
+        count: peers.length ? String(peers.length) : '',
+        preview: peers.length ? peers.slice(0, 3).map(p => p.name).join(' · ') : bi('等待会话连接…', 'Waiting for connections…'),
+        bodyStyle: { padding: 0 },
+        actions: h(
+          React.Fragment,
+          null,
+          (hiddenProbePeers.length > 0 || (view.showInternalProbes && rawPeers.some(p => p && isInternalProbeName(p.name || p.key))))
+            ? h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 22, fontSize: 10.5, padding: '0 7px', borderStyle: 'dashed' },
+                onClick: () => patch({ showInternalProbes: !view.showInternalProbes }),
+              }, view.showInternalProbes ? bi('隐藏内部探针', 'Hide Probes') : bi(`内部探针 (${hiddenProbePeers.length})`, `Probes (${hiddenProbePeers.length})`))
+            : null,
+          peers.length > 1
+            ? h('button', {
+                type: 'button',
+                className: 'dnb-pill dnb-pill-accent',
+                style: { height: 22, fontSize: 10.5, padding: '0 8px' },
+                onClick: () => {
+                  patch({ secTarget: 'all', secMode: 'steer', notice: bi('已选择向全体成员广播递话', 'Target set to broadcast @All') })
+                  focusSecInput()
+                },
+              }, bi('@全体广播', '@Broadcast'))
+            : null,
+        ),
+      },
+      peers.length
+        ? peers.map(peer => {
             const isRunning = peer.status === 'running'
-            const kindBadge = peer.kind === 'lead' ? '主对话' : peer.kind === 'peer-session' ? '联动窗口' : '子代理'
+            const kindBadge = peer.kind === 'lead' ? bi('主对话', 'Lead') : peer.kind === 'peer-session' ? bi('联动窗口', 'Linked') : bi('子代理', 'Subagent')
             const isSelected = view.secTarget === peer.key
             const peerRootId = peer.kind === 'peer-session'
               ? (peer.id || peer.rootSessionId)
@@ -234,49 +239,46 @@ export function PeersTab({ view }) {
                 peer.kind === 'subagent' && peer.id
                   ? h('button', {
                       className: 'dnb-pill',
-                      style: { height: 25, padding: '0 8px', fontSize: 11 },
-                      title: '在分栏打开子代理实时流',
+                      style: { height: 24, padding: '0 8px', fontSize: 10.5 },
+                      title: bi('在分栏打开子代理实时流', 'Open subagent live stream in split pane'),
                       onClick: () => {
-                        if (!openSubagentChat(peer)) patch({ notice: '该子代理暂无独立面板视图' })
+                        if (!openSubagentChat(peer)) patch({ notice: bi('该子代理暂无独立面板视图', 'No dedicated pane view for this subagent') })
                       },
-                    }, h(Icon, { name: 'chat', size: 11.5 }), '分屏')
+                    }, h(Icon, { name: 'chat', size: 11 }), bi('分屏', 'Split'))
                   : null,
                 h('button', {
                   className: 'dnb-pill',
                   'data-active': isSelected ? '1' : '0',
-                  style: { height: 25, padding: '0 9px', fontSize: 11 },
+                  style: { height: 24, padding: '0 8px', fontSize: 10.5 },
                   onClick: () => {
                     patch({
                       secTarget: peer.key,
                       secMode: isRunning ? 'steer' : 'followup',
-                      notice: '已在下方锁定 @' + peer.name,
+                      notice: bi('已在下方锁定 @', 'Locked target @') + peer.name,
                     })
                     focusSecInput()
                   },
-                }, '@递话'),
+                }, bi('@递话', '@Relay')),
               ),
             )
-          }),
-        )
-      : h('div', { className: 'dnb-group' }, h('div', { className: 'dnb-empty', style: { padding: '16px 12px' } }, '等待会话连接…')),
+          })
+        : h('div', { className: 'dnb-empty', style: { padding: '16px 12px' } }, '等待会话连接…'),
+    ),
 
     // Section 2: Cross-Window Federation Switches (with pollution warning before link)
     h(
-      'div',
-      { className: 'dnb-section-head', style: { marginTop: 12 } },
-      h(
-        'span',
-        { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
-        h(Icon, { name: 'link', size: 12 }),
-        '跨窗口独立会话联动',
-      ),
-      otherSessions.length ? h('span', null, otherSessions.filter(s => s.linked).length + '/' + otherSessions.length) : null,
-    ),
-    otherSessions.length
-      ? h(
-          'div',
-          { className: 'dnb-group' },
-          otherSessions.map(sess => {
+      AccCard,
+      {
+        open: fedOpen,
+        onToggle: () => patch({ peersFedCollapsed: fedOpen }),
+        icon: h(Icon, { name: 'link', size: 12.5, style: { color: 'var(--dnb-text-2)' } }),
+        title: bi('跨窗口独立会话联动', 'Cross-Window Session Federation'),
+        count: otherSessions.length ? `${otherSessions.filter(s => s.linked).length}/${otherSessions.length}` : '0',
+        preview: bi('多开独立主对话窗口后可在此开启联动', 'Open another standalone session window to link here'),
+        bodyStyle: { padding: 0 },
+      },
+      otherSessions.length
+        ? otherSessions.map(sess => {
             const col = colorForRootSession(sess.id, selfRootId)
             return h(
               'div',
@@ -318,178 +320,175 @@ export function PeersTab({ view }) {
                 onChange: on => requestTogglePeerLink(sess, on),
               }),
             )
-          }),
-        )
-      : h(
-          'div',
-          { className: 'dnb-group' },
-          h('div', { style: { padding: '12px 14px', fontSize: 11.5, color: 'var(--dnb-text-3)', lineHeight: 1.5 } },
+          })
+        : h('div', { style: { padding: '12px 14px', fontSize: 11.5, color: 'var(--dnb-text-3)', lineHeight: 1.5 } },
             '当你同时打开多个独立主对话窗口时，这里会出现联动开关——接入后共享进度与信箱（接入无关任务会提示防污染警告）。'),
-        ),
+    ),
 
     // Section 3: Color-Coded Collapsible Drawer Mailbox
     h(
-      'div',
-      { className: 'dnb-section-head', style: { marginTop: 12 } },
-      h(
-        'span',
-        { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
-        h(Icon, { name: 'mail', size: 12 }),
-        '参谋部协同信箱',
-      ),
-      h(
-        'div',
-        { className: 'dnb-text-filter-bar', style: { padding: 0, gap: 3 } },
-        [
-          { key: 'all', label: '全部' },
-          { key: 'broadcast', label: '广播' },
-          { key: 'cross', label: '跨窗' },
-          { key: 'internal', label: '内部' },
-        ].map(f =>
-          h('button', {
-            key: f.key,
-            type: 'button',
-            className: 'dnb-text-filter-btn',
-            'data-active': mailFilter === f.key ? '1' : '0',
-            onClick: () => patch({ mailChannelFilter: f.key }),
-          }, f.label),
-        ),
-        mailbox.length ? h('span', { style: { marginLeft: 4, fontSize: 10.5 } }, String(mailbox.length)) : null,
-      ),
-    ),
-    drawerList.length
-      ? h(
+      AccCard,
+      {
+        open: !view.peersMailCollapsed,
+        onToggle: () => patch({ peersMailCollapsed: !view.peersMailCollapsed }),
+        icon: h(Icon, { name: 'mail', size: 12.5, style: { color: 'var(--dnb-text-2)' } }),
+        title: bi('参谋部协同信箱', 'Chief Collaboration Mailbox'),
+        count: mailbox.length ? String(mailbox.length) : '',
+        preview: drawerList.length ? bi(`${drawerList.length} 个通道抽屉`, `${drawerList.length} channel drawers`) : bi('暂无协同通信记录', 'No relay messages yet'),
+        actions: h(
           'div',
-          { style: { display: 'flex', flexDirection: 'column', gap: 7 } },
-          drawerList.map(drawer => {
-            const hasExplicit = Object.prototype.hasOwnProperty.call(openDrawers, drawer.key)
-            const isOpen = hasExplicit ? Boolean(openDrawers[drawer.key]) : drawer.defaultOpen
-            const primaryColor = drawer.colors[0] || SESSION_PALETTE[0]
-            const secondColor = drawer.colors[1] || primaryColor
-            const accentBorder = drawer.colors.length > 1
-              ? `linear-gradient(180deg, ${primaryColor.dot}, ${secondColor.dot})`
-              : primaryColor.dot
+          { className: 'dnb-text-filter-bar', style: { padding: 0, gap: 3 } },
+          [
+            { key: 'all', label: bi('全部', 'All') },
+            { key: 'broadcast', label: bi('广播', 'Broadcast') },
+            { key: 'cross', label: bi('跨窗', 'Cross') },
+            { key: 'internal', label: bi('内部', 'Internal') },
+          ].map(f =>
+            h('button', {
+              key: f.key,
+              type: 'button',
+              className: 'dnb-text-filter-btn',
+              'data-active': mailFilter === f.key ? '1' : '0',
+              onClick: () => patch({ mailChannelFilter: f.key }),
+            }, f.label),
+          ),
+        ),
+      },
+      drawerList.length
+        ? h(
+            'div',
+            { style: { display: 'flex', flexDirection: 'column', gap: 7 } },
+            drawerList.map(drawer => {
+              const hasExplicit = Object.prototype.hasOwnProperty.call(openDrawers, drawer.key)
+              const isOpen = hasExplicit ? Boolean(openDrawers[drawer.key]) : drawer.defaultOpen
+              const primaryColor = drawer.colors[0] || SESSION_PALETTE[0]
+              const secondColor = drawer.colors[1] || primaryColor
+              const accentBorder = drawer.colors.length > 1
+                ? `linear-gradient(180deg, ${primaryColor.dot}, ${secondColor.dot})`
+                : primaryColor.dot
 
-            return h(
-              'div',
-              {
-                key: drawer.key,
-                className: 'dnb-group',
-                style: {
-                  marginBottom: 0,
-                  overflow: 'hidden',
-                  opacity: drawer.kind === 'detached' ? 0.72 : 1,
-                },
-              },
-              h(
+              return h(
                 'div',
                 {
-                  className: 'dnb-drawer-head',
+                  key: drawer.key,
+                  className: 'dnb-group',
                   style: {
-                    borderLeft: 'none',
-                    boxShadow: drawer.colors.length > 1 ? undefined : `inset 3px 0 0 ${primaryColor.dot}`,
-                    position: 'relative',
-                    background: isOpen ? primaryColor.bg : undefined,
+                    marginBottom: 0,
+                    overflow: 'hidden',
+                    opacity: drawer.kind === 'detached' ? 0.72 : 1,
                   },
-                  onClick: () => patch({
-                    mailOpenDrawers: { ...openDrawers, [drawer.key]: !isOpen },
-                  }),
                 },
-                drawer.colors.length > 1
-                  ? h('span', {
-                      style: {
-                        position: 'absolute',
-                        left: 0,
-                        top: 0,
-                        bottom: 0,
-                        width: 3,
-                        background: accentBorder,
-                      },
-                    })
-                  : null,
                 h(
                   'div',
-                  { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 } },
-                  h(
-                    'span',
-                    { style: { display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 } },
-                    drawer.colors.map((c, idx) =>
-                      h('span', {
-                        key: idx,
-                        style: {
-                          width: 7,
-                          height: 7,
-                          borderRadius: '50%',
-                          background: c.dot,
-                          marginLeft: idx > 0 ? -2 : 0,
-                          border: '1px solid var(--dnb-card)',
-                        },
-                      })),
-                  ),
-                  h('span', {
+                  {
+                    className: 'dnb-drawer-head',
                     style: {
-                      fontSize: 12,
-                      fontWeight: 600,
-                      color: 'var(--dnb-text)',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
+                      borderLeft: 'none',
+                      boxShadow: drawer.colors.length > 1 ? undefined : `inset 3px 0 0 ${primaryColor.dot}`,
+                      position: 'relative',
+                      background: isOpen ? primaryColor.bg : undefined,
                     },
-                  }, drawer.title),
-                  h('span', { className: 'dnb-tag', style: { fontSize: 10 } }, `${drawer.items.length}`),
-                ),
-                h(Icon, {
-                  name: 'chevron',
-                  size: 13,
-                  style: {
-                    color: 'var(--dnb-text-3)',
-                    transform: isOpen ? 'rotate(90deg)' : 'none',
-                    transition: 'transform 0.16s ease',
-                    flexShrink: 0,
+                    onClick: () => patch({
+                      mailOpenDrawers: { ...openDrawers, [drawer.key]: !isOpen },
+                    }),
                   },
-                }),
-              ),
-              isOpen
-                ? drawer.items.slice(0, 15).map(mail => {
-                    const modeLabel = mail.mode === 'steer' ? '⚡ 插话' : mail.mode === 'silent' ? '📌 备忘' : '📨 递话'
-                    const fColor = colorForRootSession(mail.fromRootId || mail.fromSession || selfRootId, selfRootId)
-                    const tRoot = mail.toRootId && mail.toRootId !== 'all' ? mail.toRootId : ''
-                    const tColor = tRoot ? colorForRootSession(tRoot, selfRootId) : primaryColor
-                    return h(
-                      'div',
-                      {
-                        key: mail.id,
-                        className: 'dnb-cell',
+                  drawer.colors.length > 1
+                    ? h('span', {
                         style: {
-                          flexDirection: 'column',
-                          alignItems: 'flex-start',
-                          gap: 4,
-                          borderTop: '1px solid var(--dnb-border)',
+                          position: 'absolute',
+                          left: 0,
+                          top: 0,
+                          bottom: 0,
+                          width: 3,
+                          background: accentBorder,
                         },
+                      })
+                    : null,
+                  h(
+                    'div',
+                    { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 } },
+                    h(Icon, {
+                      name: 'chevron',
+                      size: 12,
+                      style: {
+                        color: 'var(--dnb-text-3)',
+                        transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                        transition: 'transform 0.16s ease',
+                        flexShrink: 0,
                       },
-                      h(
+                    }),
+                    h(
+                      'span',
+                      { style: { display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 } },
+                      drawer.colors.map((c, idx) =>
+                        h('span', {
+                          key: idx,
+                          style: {
+                            width: 7,
+                            height: 7,
+                            borderRadius: '50%',
+                            background: c.dot,
+                            marginLeft: idx > 0 ? -2 : 0,
+                            border: '1px solid var(--dnb-card)',
+                          },
+                        })),
+                    ),
+                    h('span', {
+                      style: {
+                        fontSize: 12,
+                        fontWeight: 600,
+                        color: 'var(--dnb-text)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      },
+                    }, drawer.title),
+                    h('span', { className: 'dnb-acc-count', style: { fontSize: 10 } }, `${drawer.items.length}`),
+                  ),
+                  h('span', { className: 'dnb-acc-pull-hint' }, isOpen ? bi('收起 ▴', 'Fold ▴') : bi('拉起 ▾', 'Pull ▾')),
+                ),
+                isOpen
+                  ? drawer.items.slice(0, 15).map(mail => {
+                      const modeLabel = mail.mode === 'steer' ? '⚡ 插话' : mail.mode === 'silent' ? '📌 备忘' : '📨 递话'
+                      const fColor = colorForRootSession(mail.fromRootId || mail.fromSession || selfRootId, selfRootId)
+                      const tRoot = mail.toRootId && mail.toRootId !== 'all' ? mail.toRootId : ''
+                      const tColor = tRoot ? colorForRootSession(tRoot, selfRootId) : primaryColor
+                      return h(
                         'div',
-                        { style: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+                        {
+                          key: mail.id,
+                          className: 'dnb-cell',
+                          style: {
+                            flexDirection: 'column',
+                            alignItems: 'flex-start',
+                            gap: 4,
+                            borderTop: '1px solid var(--dnb-border)',
+                          },
+                        },
                         h(
                           'div',
-                          { style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600 } },
-                          h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: fColor.dot, flexShrink: 0 } }),
-                          h('span', { style: { color: fColor.text || 'var(--dnb-text-2)' } }, mail.from || '参谋长'),
-                          h('span', { style: { color: 'var(--dnb-text-3)' } }, '→'),
-                          h('span', { style: { color: mail.to === 'all' ? 'var(--dnb-accent)' : tColor.text } }, '@' + (mail.to || 'lead')),
-                          h('span', { className: 'dnb-tag', style: { fontSize: 10, fontWeight: 500 } }, modeLabel),
+                          { style: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+                          h(
+                            'div',
+                            { style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600 } },
+                            h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: fColor.dot, flexShrink: 0 } }),
+                            h('span', { style: { color: fColor.text || 'var(--dnb-text-2)' } }, mail.from || '参谋长'),
+                            h('span', { style: { color: 'var(--dnb-text-3)' } }, '→'),
+                            h('span', { style: { color: mail.to === 'all' ? 'var(--dnb-accent)' : tColor.text } }, '@' + (mail.to || 'lead')),
+                            h('span', { className: 'dnb-tag', style: { fontSize: 10, fontWeight: 500 } }, modeLabel),
+                          ),
+                          h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, relativeTimeLabel(mail.at)),
                         ),
-                        h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, relativeTimeLabel(mail.at)),
-                      ),
-                      mail.subject ? h('div', { style: { fontSize: 12, fontWeight: 600 } }, mail.subject) : null,
-                      h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, mail.text),
-                    )
-                  })
-                : null,
-            )
-          }),
-        )
-      : h('div', { className: 'dnb-group' }, h('div', { className: 'dnb-empty', style: { padding: '18px 12px' } }, '当前筛选下暂无协同通信记录')),
+                        mail.subject ? h('div', { style: { fontSize: 12, fontWeight: 600 } }, mail.subject) : null,
+                        h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, mail.text),
+                      )
+                    })
+                  : null,
+              )
+            }),
+          )
+        : h('div', { className: 'dnb-empty', style: { padding: '16px 12px' } }, '当前筛选下暂无协同通信记录'),
+    ),
   )
 }
 

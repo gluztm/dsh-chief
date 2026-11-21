@@ -8,7 +8,7 @@ import { normalizeMemory } from './memory.js'
 
 export const API = '/api/dsh-chief'
 
-export const BACKEND_BUILD = '1.5.0'
+export const BACKEND_BUILD = '1.6.0'
 
 export const BOARD_VERSION = 1
 
@@ -252,6 +252,8 @@ export function normalizeTask(raw) {
     evidence: str(task.evidence, '').slice(0, 600),
     blockedBy: Array.isArray(task.blockedBy) ? task.blockedBy.map(item => str(item, '')).filter(Boolean) : [],
     parentId: str(task.parentId, '').slice(0, 200),
+    planStepId: str(task.planStepId, '').slice(0, 120),
+    targetPlanStepId: str(task.targetPlanStepId, '').slice(0, 120),
     assumptions: Array.isArray(task.assumptions) ? task.assumptions.map(a => ({
       text: str(a && a.text, '').slice(0, CAP_ASSUMPTION),
       verified: a && a.verified === true,
@@ -458,11 +460,15 @@ export function normalizeBoard(raw) {
       session: str(board.cursor && board.cursor.session, ''),
     },
     plan: plan
-      .map(step => ({
-        id: str(step && step.id, newId('s')),
-        text: str(step && step.text, '').slice(0, 400),
-        done: step && step.done === true,
-      }))
+      .map(step => {
+        const cleanSummary = str(step && step.summary, '').trim().slice(0, 240)
+        return {
+          id: str(step && step.id, newId('s')),
+          text: str(step && step.text, '').slice(0, 400),
+          done: step && step.done === true,
+          ...(cleanSummary ? { summary: cleanSummary } : {}),
+        }
+      })
       .filter(step => step.text !== ''),
     tasks: tasks.map(normalizeTask).filter(task => task.title !== ''),
     notes: dedupeNotes(notes.map(normalizeNote).filter(note => note.title !== '' || note.body !== '')),
@@ -492,6 +498,15 @@ export function guardLogText(verdict, turn, remaining) {
     const loop = verdict.loop || {}
     return '空转拦截：第 ' + turn + ' 轮同一个调用连着做了 ' + (loop.count || 0) + ' 次（'
       + String(loop.name || '?').slice(0, 40) + '）结果没变' + tail
+  }
+  if (verdict && verdict.kind === 'premature-promise') {
+    return '空转拦截：第 ' + turn + ' 轮口头预告「'
+      + String(verdict.promiseCue || '').slice(0, 40) + '」却未执行就收工' + tail
+  }
+  if (verdict && verdict.kind === 'mid-turn-spin') {
+    const spin = verdict.spin || verdict.loop || {}
+    return '运行中空转急刹：连续空转/报错 ' + (spin.count || 0) + ' 次（'
+      + String(spin.name || '?').slice(0, 40) + '）已当场插话纠偏'
   }
   if (verdict && verdict.kind === 'no-goal') {
     return '空转拦截：第 ' + turn + ' 轮板子处在 goal 模式却没有目标' + tail
@@ -538,6 +553,8 @@ export function summary(board, subagents) {
       preset: task.preset || '',
       session: task.session,
       parentId: task.parentId || '',
+      planStepId: task.planStepId || '',
+      targetPlanStepId: task.targetPlanStepId || '',
       blockedBy: Array.isArray(task.blockedBy) ? task.blockedBy : [],
       intent: task.intent || '',
       evidence: task.evidence || '',
@@ -576,5 +593,313 @@ export function summary(board, subagents) {
     })),
     memoryCount: (board.memory || []).length,
     updatedAt: board.updatedAt,
+  }
+}
+
+/* ------------------------------------------------------ workflow pipeline */
+
+/**
+ * Resolve which plan step ID is currently active for auto-attaching tasks/subagents.
+ * Prefers an open step matching `cursor.step`, then the first incomplete step,
+ * and finally the last step when all are done.
+ */
+export function resolveActivePlanStepId(board) {
+  const plan = board && Array.isArray(board.plan) ? board.plan.filter(s => s && s.text) : []
+  if (!plan.length) return ''
+  const cursorStep = str(board && board.cursor && board.cursor.step, '').trim().toLowerCase()
+  if (cursorStep) {
+    const exact = plan.find(s => !s.done && str(s.text, '').trim().toLowerCase() === cursorStep)
+    if (exact) return exact.id
+    const prefix = plan.find(s => !s.done && (
+      str(s.text, '').trim().toLowerCase().startsWith(cursorStep)
+      || cursorStep.startsWith(str(s.text, '').trim().toLowerCase().slice(0, 24))
+    ))
+    if (prefix) return prefix.id
+  }
+  const firstOpen = plan.find(s => !s.done)
+  return firstOpen ? firstOpen.id : plan[plan.length - 1].id
+}
+
+function topoSortRootTasks(roots) {
+  if (roots.length <= 1) return roots.slice()
+  const byId = new Map(roots.map(t => [t.id, t]))
+  const inDeg = new Map(roots.map(t => [t.id, 0]))
+  const adj = new Map(roots.map(t => [t.id, []]))
+  for (const t of roots) {
+    const deps = Array.isArray(t.blockedBy) ? t.blockedBy : []
+    for (const depId of deps) {
+      if (byId.has(depId) && depId !== t.id) {
+        inDeg.set(t.id, (inDeg.get(t.id) || 0) + 1)
+        adj.get(depId).push(t.id)
+      }
+    }
+  }
+  const ready = roots.filter(t => (inDeg.get(t.id) || 0) === 0).sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+  const ordered = []
+  const placed = new Set()
+  while (ready.length) {
+    const cur = ready.shift()
+    if (!cur || placed.has(cur.id)) continue
+    placed.add(cur.id)
+    ordered.push(cur)
+    for (const nxtId of adj.get(cur.id) || []) {
+      const deg = (inDeg.get(nxtId) || 1) - 1
+      inDeg.set(nxtId, deg)
+      if (deg <= 0) {
+        ready.push(byId.get(nxtId))
+        ready.sort((a, b) => (a.createdAt || 0) - (b.createdAt || 0))
+      }
+    }
+  }
+  for (const t of roots) {
+    if (!placed.has(t.id)) ordered.push(t)
+  }
+  return ordered
+}
+
+function isInternalProbeAgentName(name) {
+  const raw = String(name || '').trim().replace(/^@/, '')
+  if (!raw) return false
+  const leaf = raw.split('/').pop() || raw
+  return /^mnemon-(?:review|run)(?:[-_]|$)/i.test(leaf)
+}
+
+/**
+ * Derive sequential workflow stages (`① -> ② -> ③ ...`), attached tasks,
+ * sprouted subagent branches, return-edge targets, and unified 4-state colors.
+ */
+export function derivePlanFlowProgress(board, subagents = []) {
+  const safeBoard = board && typeof board === 'object' ? board : {}
+  const plan = Array.isArray(safeBoard.plan) ? safeBoard.plan.filter(s => s && s.text) : []
+  const tasks = Array.isArray(safeBoard.tasks) ? safeBoard.tasks.filter(t => t && t.title) : []
+  const rawAgents = Array.isArray(subagents) ? subagents.filter(a => a && a.name && a.name !== 'lead') : []
+  const visibleAgents = rawAgents.filter(a => !(isInternalProbeAgentName(a.name) && a.status !== 'running'))
+
+  let mode = 'empty'
+  let stages = []
+
+  if (plan.length > 0) {
+    mode = 'plan'
+    stages = plan.map((s, idx) => ({
+      id: str(s.id, `s-${idx + 1}`),
+      index: idx + 1,
+      text: str(s.text, ''),
+      done: s.done === true,
+      summary: str(s.summary, ''),
+      source: 'plan',
+      rootTaskId: '',
+      tasks: [],
+      agents: [],
+      returnEdges: [],
+      status: 'todo',
+    }))
+  } else if (tasks.length > 0) {
+    mode = 'task-root'
+    const taskIds = new Set(tasks.map(t => t.id))
+    const roots = topoSortRootTasks(tasks.filter(t => !t.parentId || !taskIds.has(t.parentId) || t.parentId === t.id))
+    stages = roots.map((t, idx) => ({
+      id: 's-' + t.id,
+      index: idx + 1,
+      text: t.title,
+      done: t.status === 'done',
+      summary: t.evidence || '',
+      source: 'task-root',
+      rootTaskId: t.id,
+      tasks: [],
+      agents: [],
+      returnEdges: [],
+      status: 'todo',
+    }))
+  } else if (visibleAgents.length > 0 || str(safeBoard.objective, '').trim()) {
+    mode = 'synthetic'
+    stages = [{
+      id: 'stage-main',
+      index: 1,
+      text: str(safeBoard.objective, '').trim() || '当前主线任务',
+      done: false,
+      summary: '',
+      source: 'synthetic',
+      rootTaskId: '',
+      tasks: [],
+      agents: [],
+      returnEdges: [],
+      status: 'todo',
+    }]
+  }
+
+  if (!stages.length) {
+    return {
+      mode: 'empty',
+      stages: [],
+      activeStageId: '',
+      orphanTasks: [],
+      stats: {
+        totalStages: 0,
+        doneStages: 0,
+        doingStages: 0,
+        blockedStages: 0,
+        totalAgents: 0,
+        runningAgents: 0,
+        doneAgents: 0,
+      },
+    }
+  }
+
+  const stageById = new Map(stages.map(s => [s.id, s]))
+  const taskById = new Map(tasks.map(t => [t.id, t]))
+  const activeStepId = resolveActivePlanStepId(safeBoard) || (stages.find(s => !s.done)?.id || stages[stages.length - 1].id)
+  const doneStagesRev = [...stages].reverse().find(s => s.done)
+  const lastDoneStepId = doneStagesRev ? doneStagesRev.id : activeStepId
+
+  const taskStageCache = new Map()
+  const resolveTaskStageId = (task, seen = new Set()) => {
+    if (!task) return ''
+    if (taskStageCache.has(task.id)) return taskStageCache.get(task.id)
+    let hitId = ''
+    if (task.planStepId && stageById.has(task.planStepId)) {
+      hitId = task.planStepId
+    } else if (stageById.has('s-' + task.id)) {
+      hitId = 's-' + task.id
+    } else {
+      const byPrefix = stages.find(s => s.text && task.title && s.text.startsWith(task.title))
+      if (byPrefix) hitId = byPrefix.id
+    }
+    if (!hitId && task.parentId && taskById.has(task.parentId) && !seen.has(task.id)) {
+      seen.add(task.id)
+      hitId = resolveTaskStageId(taskById.get(task.parentId), seen)
+    }
+    if (!hitId) {
+      if (task.status === 'done') hitId = lastDoneStepId || activeStepId
+      else hitId = activeStepId
+    }
+    taskStageCache.set(task.id, hitId)
+    return hitId
+  }
+
+  const orphanTasks = []
+  for (const t of tasks) {
+    const sid = resolveTaskStageId(t)
+    const st = sid ? stageById.get(sid) : null
+    if (st) st.tasks.push(t)
+    else orphanTasks.push(t)
+  }
+
+  const matchAgentTasks = agentObj => {
+    const aName = str(agentObj && agentObj.name, '').trim().toLowerCase()
+    const aLeaf = aName.split('/').pop()
+    const aId = str(agentObj && agentObj.id, '').trim()
+    const aTaskId = str(agentObj && agentObj.taskId, '').trim()
+    const aTaskIds = new Set(Array.isArray(agentObj && agentObj.tasks) ? agentObj.tasks.map(x => str(x && x.id, '').trim()).filter(Boolean) : [])
+    if (aTaskId) aTaskIds.add(aTaskId)
+    return tasks.filter(t => {
+      if (aTaskIds.has(t.id)) return true
+      if (aId && t.session && String(t.session) === aId) return true
+      const ref = str(t.subagent || t.owner, '').trim().toLowerCase()
+      if (!ref || ref === 'lead' || ref === 'agent' || ref === 'operator') return false
+      return ref === aName || (aLeaf && ref.split('/').pop() === aLeaf)
+    })
+  }
+
+  let runningAgents = 0
+  let doneAgents = 0
+  for (const agentObj of visibleAgents) {
+    const agentTasks = matchAgentTasks(agentObj)
+    const rawAgentSt = str(agentObj.status, '').trim().toLowerCase()
+    const hasBlockedTask = agentTasks.some(t => t.status === 'blocked')
+    const hasDoingTask = agentTasks.some(t => t.status === 'doing')
+    const hasOpenTask = agentTasks.some(t => t.status === 'todo' || t.status === 'doing' || t.status === 'blocked')
+    const allTasksDone = agentTasks.length > 0 && agentTasks.every(t => t.status === 'done')
+    const isAgentFailed = /error|fail|crash|blocked/.test(rawAgentSt)
+    const isAgentRunning = rawAgentSt === 'running' || rawAgentSt === 'active' || rawAgentSt === 'working'
+    const isAgentEnded = rawAgentSt !== '' && !isAgentRunning && !isAgentFailed && rawAgentSt !== 'todo' && rawAgentSt !== 'queued'
+
+    let agentStatus = 'todo'
+    if (hasBlockedTask || isAgentFailed) agentStatus = 'blocked'
+    else if (isAgentRunning || hasDoingTask) agentStatus = 'doing'
+    else if (allTasksDone || (isAgentEnded && !hasOpenTask)) agentStatus = 'done'
+
+    if (agentStatus === 'doing') runningAgents += 1
+    else if (agentStatus === 'done') doneAgents += 1
+
+    const primaryTask = agentTasks.find(t => t.status === 'doing' || t.status === 'blocked')
+      || agentTasks.find(t => t.status === 'todo')
+      || agentTasks[0]
+      || null
+
+    let fromStepId = primaryTask ? resolveTaskStageId(primaryTask) : ''
+    if (!fromStepId || !stageById.has(fromStepId)) {
+      fromStepId = agentStatus === 'done' ? (lastDoneStepId || activeStepId) : activeStepId
+    }
+    const rawTargetId = primaryTask && primaryTask.targetPlanStepId ? primaryTask.targetPlanStepId : ''
+    const toStepId = (rawTargetId && stageById.has(rawTargetId)) ? rawTargetId : fromStepId
+
+    const stage = stageById.get(fromStepId) || stages[0]
+    const node = {
+      name: str(agentObj.name, ''),
+      id: str(agentObj.id, ''),
+      parentId: str(agentObj.parentId, ''),
+      rawStatus: rawAgentSt,
+      agentStatus,
+      taskIds: agentTasks.map(t => t.id),
+      primaryTaskId: primaryTask ? primaryTask.id : '',
+      fromStepId: stage.id,
+      toStepId,
+      crossStep: toStepId !== stage.id,
+    }
+    stage.agents.push(node)
+    stage.returnEdges.push({
+      fromAgent: node.name,
+      taskId: node.primaryTaskId,
+      fromStepId: stage.id,
+      toStepId,
+      status: agentStatus,
+      crossStep: toStepId !== stage.id,
+    })
+  }
+
+  const firstOpenStage = stages.find(s => !s.done) || null
+  const hasAnyDone = stages.some(s => s.done)
+  const hasCursorStep = Boolean(str(safeBoard.cursor && safeBoard.cursor.step, '').trim())
+  const hasAnyActivity = hasAnyDone
+    || hasCursorStep
+    || tasks.some(t => t.status !== 'todo')
+    || visibleAgents.length > 0
+
+  let doneStages = 0
+  let doingStages = 0
+  let blockedStages = 0
+  for (const stage of stages) {
+    if (stage.done) {
+      stage.status = 'done'
+      doneStages += 1
+    } else if (stage.tasks.some(t => t.status === 'blocked') || stage.agents.some(a => a.agentStatus === 'blocked')) {
+      stage.status = 'blocked'
+      blockedStages += 1
+    } else if (
+      stage.tasks.some(t => t.status === 'doing')
+      || stage.agents.some(a => a.agentStatus === 'doing')
+      || (firstOpenStage && firstOpenStage.id === stage.id && hasAnyActivity)
+    ) {
+      stage.status = 'doing'
+      doingStages += 1
+    } else {
+      stage.status = 'todo'
+    }
+  }
+
+  return {
+    mode,
+    stages,
+    activeStageId: activeStepId,
+    orphanTasks,
+    stats: {
+      totalStages: stages.length,
+      doneStages,
+      doingStages,
+      blockedStages,
+      totalAgents: visibleAgents.length,
+      runningAgents,
+      doneAgents,
+    },
   }
 }

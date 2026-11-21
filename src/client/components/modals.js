@@ -6,6 +6,7 @@
 
 import { React, h } from '../react-runtime.js'
 import { CHIEF_PERMISSION_LABELS, INTERVENTION_TIER_DESC, RUN_MODE_OPTIONS, THINKING_EFFORT_OPTIONS } from '../constants.js'
+import { bi, getUiLangPref, runModeMeta, permLabel } from '../i18n.js'
 import { patch, focusSecInput } from '../store.js'
 import {
   normalizeMaxTurnsVal,
@@ -18,6 +19,7 @@ import {
   call,
   loadChiefView,
   updateSecConfig,
+  applyScenarioPreset,
   decideApproval,
   decideElevation,
   togglePeerSessionLink,
@@ -101,14 +103,16 @@ export function ModelPickerPopover({ view }) {
         },
       },
       h('div', { style: { padding: '6px 10px 8px', borderBottom: '1px solid var(--dnb-border)', marginBottom: 4 } },
-        h('div', { style: { fontSize: 10.5, fontWeight: 700, color: 'var(--dnb-text-3)', marginBottom: 4 } }, '🧠 参谋长思考强度（拖住弧线调挡 · 点中心自动）'),
+        h('div', { style: { fontSize: 10.5, fontWeight: 700, color: 'var(--dnb-text-3)', marginBottom: 4 } },
+          bi('🧠 参谋长思考强度（拖住弧线调挡 · 点中心自动）', '🧠 Chief Reasoning Effort (drag arc · tap center for Auto)')),
         h(EffortFanGauge, {
           compact: true,
           value: (view.chiefMeta && view.chiefMeta.thinkingEffort) || 'auto',
           onChange: nextKey => void updateSecConfig({ thinkingEffort: nextKey }),
         }),
       ),
-      h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } }, '选择参谋长专职模型'),
+      h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } },
+        bi('选择参谋长专职模型', 'Select Dedicated Chief Model')),
       h(
         'div',
         {
@@ -120,7 +124,7 @@ export function ModelPickerPopover({ view }) {
           },
         },
         h('div', { style: { minWidth: 0, flex: 1 } },
-          h('div', null, '✦ 自动跟随主对话模型'),
+          h('div', null, bi('✦ 自动跟随主对话模型', '✦ Auto-follow Lead Model')),
           followSubtitle
             ? h('div', {
                 style: { fontSize: 10.5, color: 'var(--dnb-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' },
@@ -176,8 +180,31 @@ export function ModelPickerPopover({ view }) {
       ),
       !providers.length
         ? h('div', { style: { padding: '8px 10px', fontSize: 11, color: 'var(--dnb-text-3)' } },
-            catalog ? '未检测到额外模型提供商，将自动跟随主对话模型。' : '加载模型列表中…')
+            catalog ? bi('未检测到额外模型提供商，将自动跟随主对话模型。', 'No extra providers found; following lead model.') : bi('加载模型列表中…', 'Loading models…'))
         : null,
+      h(
+        'div',
+        { className: 'dnb-lang-inline-bar', onClick: e => e.stopPropagation() },
+        h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 600 } }, bi('🌐 语言', '🌐 Lang')),
+        h(
+          'div',
+          { className: 'dnb-seg', style: { padding: 1.5, flex: '0 0 auto' } },
+          [
+            { key: 'auto', label: bi('自动', 'Auto') },
+            { key: 'zh', label: '中文' },
+            { key: 'en', label: 'EN' },
+          ].map(opt =>
+            h('button', {
+              key: opt.key,
+              type: 'button',
+              className: 'dnb-seg-btn',
+              style: { padding: '2px 7px', fontSize: 10 },
+              'data-active': (view.uiLangPref || getUiLangPref()) === opt.key ? '1' : '0',
+              onClick: () => void updateSecConfig({ uiLang: opt.key }),
+            }, opt.label),
+          ),
+        ),
+      ),
     ),
   )
 }
@@ -207,8 +234,10 @@ export function PacePickerPopover({ view }) {
           zIndex: 9999,
         },
       },
-      h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } }, '参谋长三态运行模式（与战术正交）'),
+      h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } },
+        bi('参谋长三态运行模式（与战术正交）', 'Chief Run Mode (orthogonal to tactics)')),
       RUN_MODE_OPTIONS.map(opt => {
+        const rm = runModeMeta(opt.key)
         const active = currentRunMode === opt.key
         return h(
           'div',
@@ -235,8 +264,8 @@ export function PacePickerPopover({ view }) {
             },
           },
           h('div', { style: { minWidth: 0, flex: 1 } },
-            h('div', { style: { fontSize: 12, fontWeight: active ? 600 : 500, marginBottom: 2 } }, opt.label),
-            h('div', { style: { fontSize: 10.5, lineHeight: 1.4, color: 'var(--dnb-text-3)', whiteSpace: 'normal' } }, opt.hint),
+            h('div', { style: { fontSize: 12, fontWeight: active ? 600 : 500, marginBottom: 2 } }, rm.label || opt.label),
+            h('div', { style: { fontSize: 10.5, lineHeight: 1.4, color: 'var(--dnb-text-3)', whiteSpace: 'normal' } }, rm.hint || opt.hint),
           ),
           active ? h(Icon, { name: 'check', size: 13, style: { marginTop: 2 } }) : null,
         )
@@ -761,7 +790,7 @@ export function InterventionConfirmModal({ view, board }) {
               type: 'button',
               className: 'dnb-mini-btn',
               'data-tone': noDefenseRules ? 'amber' : 'blue',
-              onClick: () => patch({ interventionModalOpen: false, tab: 'boundaries', boundSubTab: 'rules' }),
+              onClick: () => patch({ interventionModalOpen: false, tab: 'boundaries', settingsOpen: false }),
             }, '管理边界'),
           ),
         ),
@@ -1065,7 +1094,8 @@ export function AutoPilotConfirmModal({ view }) {
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#34d399' } }, '🤖 开启托管模式 — 梦境漫游与 5 条件自动休眠确认'),
+        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#34d399' } },
+          bi('🤖 开启托管模式 — 梦境漫游、硬预算与自动休眠确认', '🤖 Enable Managed Mode — Dream Roam, Budget Cap & Auto-Sleep')),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -1077,16 +1107,25 @@ export function AutoPilotConfirmModal({ view }) {
         'div',
         { className: 'dnb-disclaimer-box' },
         h('div', { style: { marginBottom: 4 } },
-          h('strong', null, '1. 持续后台监工与会话隔离：'),
-          '托管模式下，参谋长会按当前权限等级（L0–L3）持续核查目标与红线、协同纠偏及触发断流续跑（绝不触碰全局定住红线，绝不读写冷藏档案柜）。',
+          h('strong', null, bi('1. 持续后台监工与会话隔离：', '1. Continuous Session Supervision: ')),
+          bi(
+            '托管模式下，参谋长会按当前权限等级（L0–L3）持续核查目标与红线、协同纠偏及触发断流续跑（绝不触碰全局定住红线，绝不读写冷藏档案柜）。',
+            'Supervises objectives, boundaries, steering & stream rescue within your active permission tier (L0–L3), isolated per session.',
+          ),
         ),
         h('div', { style: { marginBottom: 4 } },
-          h('strong', null, '2. 🌙 后台「梦境漫游」轻拢卷宗：'),
-          'L1+ 权限时，后台会自动将未织钩子草稿与刚撤下桌面的卷宗分拣入抽屉并织就轻量钩子（只做收纳梳理，不改代码，不擅自回推桌面）。',
+          h('strong', null, bi('2. 🌙 后台「梦境漫游」轻拢卷宗：', '2. 🌙 Background Dream Roam: ')),
+          bi(
+            'L1+ 权限时，后台会自动将未织钩子草稿与刚撤下桌面的卷宗分拣入抽屉并织就轻量钩子（只做收纳梳理，不改代码，不擅自回推桌面）。',
+            'At L1+, sorts unhooked drafts into archive folders and weaves keyword hooks without modifying code.',
+          ),
         ),
         h('div', null,
-          h('strong', null, '3. 五条件自动休眠守护（默认 15 分钟）：'),
-          '一旦连续闲置达 15 分钟（或核心目标收口）且 0 在途代理/doing 任务/待审批/在途问询/待归位列表，系统自动切回「⏸ 关停」以节省算力。',
+          h('strong', null, bi('3. 五条件自动休眠 + 硬预算熔断守护：', '3. Auto-Sleep & Hard Budget Breaker: ')),
+          bi(
+            '连续闲置达 15 分钟（或核心目标收口且待办清零）自动休眠回「⏸ 关停」；若后台达到硬预算上限也会自动熔断停机省费用。',
+            'Stands down automatically after 15m idle with 0 open items, OR immediately if the hard budget limit is hit.',
+          ),
         ),
       ),
       h(
@@ -1097,7 +1136,7 @@ export function AutoPilotConfirmModal({ view }) {
           className: 'dnb-pill',
           style: { height: 32, padding: '0 14px', fontSize: 12.5 },
           onClick: () => patch({ autoPilotConfirmOpen: false }),
-        }, '暂不开启'),
+        }, bi('暂不开启', 'Cancel')),
         h('button', {
           type: 'button',
           className: 'dnb-primary-btn',
@@ -1111,7 +1150,104 @@ export function AutoPilotConfirmModal({ view }) {
             })
             if (ok) patch({ autoPilotConfirmOpen: false })
           },
-        }, '🤖 确认开启本对话托管模式'),
+        }, bi('🤖 确认开启本对话托管模式', '🤖 Confirm Managed Mode')),
+      ),
+    ),
+  )
+}
+
+export function AwayPresetConfirmModal({ view }) {
+  if (!view.awayPresetModalOpen) return null
+  const agreed = Boolean(view.awayPresetAgreed)
+  const busy = Boolean(view.chiefRiskBusy)
+  return h(
+    'div',
+    {
+      className: 'dnb-modal-backdrop',
+      onClick: e => {
+        if (e.target === e.currentTarget && !busy) patch({ awayPresetModalOpen: false, awayPresetAgreed: false })
+      },
+    },
+    h(
+      'div',
+      { className: 'dnb-modal-card' },
+      h(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } },
+          bi('🚀 一键切换「离桌托管」场景预设', '🚀 Enable "Away Managed" Scenario Preset')),
+        h('button', {
+          type: 'button',
+          className: 'dnb-icon-btn',
+          style: { width: 22, height: 22 },
+          disabled: busy,
+          onClick: () => patch({ awayPresetModalOpen: false, awayPresetAgreed: false }),
+        }, h(Icon, { name: 'x', size: 13 })),
+      ),
+      h(
+        'div',
+        { className: 'dnb-risk-box' },
+        h('div', { style: { fontSize: 12.5, fontWeight: 700, color: '#f59e0b' } },
+          bi('⚠️ 将联动激活以下高自主配置（仍受物理驻墙与硬红线约束）：', '⚠️ This preset configures high-autonomy safeguards:')),
+        h(
+          'ul',
+          { style: { margin: '0 0 0 18px', padding: 0, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--dnb-text)' } },
+          h('li', null, bi('权限升至 L3 · 参谋长模式（自动协调主/子代理与续跑）', 'Permission tier: L3 · Chief (autonomous steering & coordination)')),
+          h('li', null, bi('运行模式切至 🤖 托管（后台督导 + 🌙 梦境漫游 + 15分钟自动休眠）', 'Run mode: 🤖 Managed (patrol + Dream Roam + 15m auto-sleep)')),
+          h('li', null, bi('开启 80% 上下文自动压缩 + 🛡️ 红线哨兵监听', 'Auto-compact at 80% + 🛡️ Redline Sentinel alerts')),
+          h('li', null, bi('启用单次托管硬预算熔断（30 次调用 / 300K Tokens 上限）与桌面通知', 'Hard budget circuit breaker (30 calls / 300K tokens) + desktop alerts')),
+        ),
+      ),
+      h(
+        'label',
+        { className: 'dnb-risk-check' },
+        h('input', {
+          type: 'checkbox',
+          checked: agreed,
+          disabled: busy,
+          style: { marginTop: 3 },
+          onChange: e => patch({ awayPresetAgreed: Boolean(e.target.checked) }),
+        }),
+        h('span', null, bi(
+          '我已阅读并知悉 L3 高权限及自动托管风险，确认开启「🚀 离桌托管」预设。',
+          'I understand the L3 autonomy risks and confirm applying the Away Managed preset.',
+        )),
+      ),
+      h(
+        'div',
+        { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
+        h('button', {
+          type: 'button',
+          className: 'dnb-pill',
+          style: { height: 32, padding: '0 14px', fontSize: 12.5 },
+          disabled: busy,
+          onClick: () => patch({ awayPresetModalOpen: false, awayPresetAgreed: false }),
+        }, bi('取消', 'Cancel')),
+        h('button', {
+          type: 'button',
+          className: 'dnb-primary-btn',
+          style: {
+            height: 32,
+            padding: '0 16px',
+            fontSize: 12.5,
+            background: agreed ? '#d97706' : 'var(--dnb-fill)',
+            color: agreed ? '#fff' : 'var(--dnb-text-3)',
+            fontWeight: 700,
+          },
+          disabled: !agreed || busy,
+          onClick: async () => {
+            patch({ chiefRiskBusy: true })
+            try {
+              const ok = await applyScenarioPreset('away', {
+                confirmedChiefRisk: true,
+                confirmedAutoPilot: true,
+              })
+              if (ok) patch({ awayPresetModalOpen: false, awayPresetAgreed: false })
+            } finally {
+              patch({ chiefRiskBusy: false })
+            }
+          },
+        }, busy ? bi('校验激活中…', 'Activating…') : bi('确认并开启离桌托管', 'Confirm & Enable Away Mode')),
       ),
     ),
   )
@@ -1435,7 +1571,7 @@ export function HazardHaltModal({ view }) {
     const alertId = m.id
     patch({
       hazardHaltModal: null,
-      ...(goTab ? { tab: goTab, ...(goTab === 'boundaries' ? { boundSubTab: 'rules' } : {}) } : {}),
+      ...(goTab ? { tab: goTab, settingsOpen: false } : {}),
     })
     try {
       if (alertId) {
@@ -1783,7 +1919,8 @@ export function ChiefRiskConfirmModal({ view }) {
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } }, 'L3 · 参谋长模式（进入前确认风险）'),
+        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b' } },
+          bi('L3 · 参谋长模式（进入前确认风险）', 'L3 · Chief Mode (Confirm Risks First)')),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -1796,18 +1933,18 @@ export function ChiefRiskConfirmModal({ view }) {
         'div',
         { className: 'dnb-risk-box' },
         h('div', { style: { fontSize: 13.5, fontWeight: 700, color: '#f59e0b', display: 'flex', alignItems: 'center', gap: 6 } },
-          '⚠️ 高权限模式风险告知'),
-        h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } }, '启用后，Agent 可能自主：'),
+          bi('⚠️ 高权限模式风险告知', '⚠️ High-Permission Risk Disclosure')),
+        h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } }, bi('启用后，Agent 可能自主：', 'Once enabled, the agent may autonomously:')),
         h(
           'ul',
           { style: { margin: '0 0 0 18px', padding: 0, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--dnb-text)' } },
-          h('li', null, '修改工作区文件'),
-          h('li', null, '执行系统命令'),
-          h('li', null, '调整主代理及子代理工作流'),
-          h('li', null, '执行可能造成不可逆影响的操作'),
+          h('li', null, bi('修改工作区文件', 'Modify workspace files')),
+          h('li', null, bi('执行系统命令', 'Execute system commands')),
+          h('li', null, bi('调整主代理及子代理工作流', 'Steer lead & subagent workflows')),
+          h('li', null, bi('执行可能造成不可逆影响的操作', 'Perform potentially irreversible operations')),
         ),
         h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text-2)' } },
-          '即使有安全卫兵，仍然不能保证完全消除风险。'),
+          bi('即使有安全卫兵，仍然不能保证完全消除风险。', 'Even with Safety Guardrails, risk cannot be completely eliminated.')),
       ),
       h(
         'label',
@@ -1819,7 +1956,7 @@ export function ChiefRiskConfirmModal({ view }) {
           style: { marginTop: 3 },
           onChange: e => patch({ chiefRiskAgreed: Boolean(e.target.checked) }),
         }),
-        h('span', null, '我已阅读并知悉上述风险，理解高权限模式可能造成的后果。'),
+        h('span', null, bi('我已阅读并知悉上述风险，理解高权限模式可能造成的后果。', 'I have read and acknowledge these risks and understand the consequences of high-permission mode.')),
       ),
       h(
         'div',
@@ -1830,7 +1967,7 @@ export function ChiefRiskConfirmModal({ view }) {
           style: { height: 32, padding: '0 14px', fontSize: 12.5 },
           disabled: busy,
           onClick: () => patch({ chiefRiskModalOpen: false, chiefRiskAgreed: false }),
-        }, '取消'),
+        }, bi('取消', 'Cancel')),
         h('button', {
           type: 'button',
           className: 'dnb-primary-btn',
@@ -1855,7 +1992,7 @@ export function ChiefRiskConfirmModal({ view }) {
               patch({ chiefRiskBusy: false })
             }
           },
-        }, busy ? 'DSH Chief 校验启用中…' : '确认并启用'),
+        }, busy ? bi('DSH Chief 校验启用中…', 'Verifying & Enabling…') : bi('确认并启用', 'Confirm & Enable')),
       ),
       h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', lineHeight: 1.4 } },
         '真正启用必须由 DSH Chief 后端执行风险授权校验，切换回低权限或新会话后将自动重置该高权限授权。'),
@@ -2135,7 +2272,8 @@ export function AuditLogModal({ view }) {
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-text)' } }, '📜 6 级安全架构与审计日志'),
+        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: 'var(--dnb-text)' } },
+          bi('📜 6 级安全架构与审计日志', '📜 6-Layer Security Architecture & Audit Log')),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
@@ -2146,7 +2284,14 @@ export function AuditLogModal({ view }) {
       h(
         'div',
         { className: 'dnb-pipe-bar' },
-        ['用户模式', '操作请求', '安全卫兵硬性规则', '权限判定', '执行器', '审计日志'].map((step, idx, arr) =>
+        [
+          bi('用户模式', 'Tier'),
+          bi('操作请求', 'Request'),
+          bi('安全卫兵硬性规则', 'Hard Guard'),
+          bi('权限判定', 'Gate'),
+          bi('执行器', 'Executor'),
+          bi('审计日志', 'Audit'),
+        ].map((step, idx, arr) =>
           h(
             React.Fragment,
             { key: step },
@@ -2157,7 +2302,7 @@ export function AuditLogModal({ view }) {
       ),
       logs.length === 0
         ? h('div', { style: { padding: '18px 8px', textAlign: 'center', fontSize: 12, color: 'var(--dnb-text-3)' } },
-            '当前会话暂无审计记录；权限切换、安全卫兵拦截、逐项授权与执行操作都将实时落盘于此。')
+            bi('当前会话暂无审计记录；权限切换、安全卫兵拦截、逐项授权与执行操作都将实时落盘于此。', 'No audit entries yet; tier switches, guard blocks, approvals and executions are logged here.'))
         : h(
             'div',
             { style: { display: 'flex', flexDirection: 'column', gap: 6, maxHeight: 340, overflowY: 'auto' } },

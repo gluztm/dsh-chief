@@ -115,7 +115,10 @@ function planLines(board, limit) {
   const open = steps.filter(step => !step.done)
   const shown = open.slice(0, limit)
   const lines = ['规划 ' + done + '/' + steps.length + (open.length > shown.length ? '（未完成 ' + open.length + '，此处列前 ' + shown.length + '）' : '') + ':']
-  for (const step of shown) lines.push('  [ ] ' + clamp(step.text, 90))
+  for (const step of shown) {
+    const idx = steps.indexOf(step) + 1
+    lines.push('  [ ] ' + idx + '. (id:' + step.id + ') ' + clamp(step.text, 86))
+  }
   lines.push(
     '  ↳ 每轮先按顺序读这一段：做完的步 plan.set 标 done；新发现的步补进去；'
       + '不再做的旧步删掉；需要拆解子代理并行时用 graph.plan 建任务图并用 task.dispatch 派发。',

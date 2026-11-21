@@ -19,10 +19,10 @@
   - **安全边界**：保证进程内只有一套缓存、锁集合与子代理谱系映射，杜绝多实例状态撕裂。
 
 - **模块**：`board-schema.js`
-  - **职责**：纯常量、字段长度上限（`BODY_LIMIT` 等）、任务 DAG 状态推演、`emptyBoard` 初始化与摘要生成。
+  - **职责**：纯常量、字段长度上限（`BODY_LIMIT` 等）、任务 DAG 与推进流程推演（`planStepId` / `targetPlanStepId` / `resolveActivePlanStepId` / `derivePlanFlowProgress`）、`emptyBoard` 初始化与摘要生成。
   - **允许依赖**：`./memory.js`
   - **禁止依赖**：`index.js`, `board-store.js`, `chief.js`, `archives.js`, `node:fs`
-  - **公开 API**：`API`, `BACKEND_BUILD`, `BOARD_VERSION`, `BODY_LIMIT`, `emptyBoard`, `normalizeTask`, `normalizeBoard`, `enforceAnchorCap` 等 45 项（内部 `seq` 不外泄）。
+  - **公开 API**：`API`, `BACKEND_BUILD`, `BOARD_VERSION`, `BODY_LIMIT`, `emptyBoard`, `normalizeTask`, `normalizeBoard`, `enforceAnchorCap`, `resolveActivePlanStepId`, `derivePlanFlowProgress` 等 47 项（内部 `seq` 不外泄）。
   - **持有状态**：私有单调 ID 计数器 `seq`。
   - **副作用**：无（纯内存数据结构标准化）。
   - **安全边界**：严格截断超长输入与越界字段，防止畸形载荷撑爆磁盘/上下文。
@@ -92,7 +92,7 @@
   - **安全边界**：所有工具与命令执行必经统一门禁与沙箱；`L2 strategist` 与受插件降级操作进入带 `capabilityScope` 锁定的审批队列。
 
 - **模块**：`chief-state.js` (L1) & `chief-models.js` (L2)
-  - **职责**：`chief-state.js` 管理 `chief-state.json` 跨进程 `O_EXCL` `.lock` 互斥锁与原子写盘、工作区配置、`permissionMode` + `capabilities` 解析、只紧不松 `policyPlugins` 配置持久化与校验、`auditLog` 联动 `safety/audit-log.js`、审批队列（`payloadHash` + `capabilityScope`）、持久化任务账本 `taskLedger`（兼容 `resumeTasks`，冷启动时自动将遗留 `running`/`resuming`/`verifying` 收敛为 `interrupted`，过期条目收敛为 `expired`）及 `pinned` 翻出索引；`chief-models.js` 管理可用模型目录缓存、失败冷却队列与 `ctx.llm` 调用。
+  - **职责**：`chief-state.js` 管理 `chief-state.json` 跨进程 `O_EXCL` `.lock` 互斥锁与原子写盘、工作区配置、`permissionMode` + `capabilities` 解析、情景预设（`observer` / `collab` / `away`）、只紧不松 `policyPlugins` 配置持久化与校验、`auditLog` 联动 `safety/audit-log.js`、审批队列（`payloadHash` + `capabilityScope`）、持久化任务账本 `taskLedger`（兼容 `resumeTasks`，冷启动时自动将遗留 `running`/`resuming`/`verifying` 收敛为 `interrupted`，过期条目收敛为 `expired`）、LLM 调用账本 `llmLedger` 与 `managedRun` 硬预算熔断（累计上限夹紧）、里程碑告警队列 `alertEvents`（5s 去重 + 20 条滚动上限）及 `pinned` 翻出索引；`chief-models.js` 管理可用模型目录缓存、失败冷却队列、Token 用量提取/预算检查与 `ctx.llm` 调用。
   - **允许依赖**：`node:*`, `./archives.js`, `./safety/index.js`（L2 仅依赖 `./chief-state.js`）。
   - **禁止依赖**：`chief.js`, `index.js`, L3–L9 上层模块。
   - **持有状态**：`chief-state.js` 唯一持有 `cachedState` / `cachedMtime` / `idSeq` / `heldStateLocks` / `activeResumingTaskIds`；`chief-models.js` 唯一持有 `modelCatalogCache` / `unusableRouteUntil`。
@@ -137,8 +137,8 @@
 
 ---
 
-## 四、客户端 ES Module 架构（`pkg/src/client/` 16 模块 → `pkg/client.js`）
+## 四、客户端 ES Module 架构（`pkg/src/client/` 20 模块 → `pkg/client.js`）
 
-- **分层结构**：`react-runtime.js` / `constants.js` (L0 常量与宿主桥) → `store.js` (L1 **唯一可变状态所有者**：`store`, `listeners`, `SESSION_SOURCES`, `runtimeRefs`) → `utils.js` (L2 纯工具) → `api.js` (L3 HTTP 通信与会话切换状态清理) / `styles.js` (L3 CSS，含 `data-tone="dream"` 毛玻璃与 `.dnb-paper-dossier` 动态俯视纸质卡) → `components/common.js` / `modals.js` (L4 通用组件与弹窗) → `tabs/*.js` (L5 6 个业务页签) → `components/Panel.js` (L6 主面板顶栏正交三态切换与 8 插槽外壳) → `entry.js` (L7 `createClientPlugin()` 入口)。
+- **分层结构**：`react-runtime.js` / `constants.js` (L0 常量与宿主桥) → `i18n.js` (L0.5 运行时中英双语选择器，零本地模块依赖) → `store.js` (L1 **唯一可变状态所有者**：`store`, `listeners`, `SESSION_SOURCES`, `runtimeRefs`) → `utils.js` (L2 纯工具) / `notify.js` (L2 桌面 `Notification` 与 WebAudio 提示音引擎) / `report.js` (L2 密钥脱敏与 Markdown 战报生成器) → `api.js` (L3 HTTP 通信与会话切换状态清理) / `styles.js` (L3 CSS，含 `.dnb-flow-*` 顺序推进流样式、`.dnb-gear-btn` 顶栏齿轮设置样式、`data-tone="dream"` 毛玻璃与 `.dnb-paper-dossier` 动态俯视纸质卡) → `components/common.js` / `modals.js` (L4 通用组件与弹窗) → `tabs/tasks-flow.js` (L5 推进流与全景 SVG 流程拓扑，绝不反向依赖 `tabs/tasks.js` 与 `tabs/plan.js`) / `tabs/plan.js` (L5 核心目标 + 合并任务板 + 跨会话接力部署 + MemoryTab/HandoffTab) / `tabs/*.js` (L5 其余业务页签，`tabs/tasks.js` 组合 `PlanTab` + `TaskFlowPipelineView` / `TaskFlowCanvasView` 对外呈现统一的「任务」总页) → `components/Panel.js` (L6 主面板顶栏齿轮「设置」入口、正交三态切换、5 大页签与 8 插槽外壳) → `entry.js` (L7 `createClientPlugin()` 入口)。
 - **构建与禁忌**：由零依赖拓扑排序打包器 [build-client.mjs](file:///D:/Agents%20WorkSpace/DSH-Data/WorkShop/notebook-panel/pkg/scripts/build-client.mjs) 输出单文件 `pkg/client.js`（`window.__ModuleLoader__.load({ id: 'dsh-chief' })`）；严禁新增跨模块 `export let` 重新赋值，严禁跳过 `npm run build:client`。
-- **界面版本徽章与控制交互**：参谋长面板标题栏（`components/Panel.js` `.dnb-ver-chip`）常驻显示 `v1.5.0`；顶部正交运行模式切换为 `⏸ 关停 | 🛡 巡检 | 🤖 托管`；档案页常驻置顶认知桌面进度条与三层可折叠纸质卷宗卡（折叠态仅显标题+关键词钩子+谁在看徽章，点击展开）；参谋回复卡右上显示思考挡位角标，驾驶舱与模型选择器搭载 `180°` 扇形思考强度表盘与团队思考强度「自动 / 手动」切换；流光毛玻璃舞台支持鼠标单击立即收起遮罩恢复面板操作，并保持彩色流光外框提示后台仍在运作；`package.json`、`board-schema.js`（`BACKEND_BUILD`）与 `src/client/constants.js`（`EXPECTED_BACKEND_BUILD`）三端强制同源为 `1.5.0`。
+- **界面版本徽章与控制交互**：参谋长面板标题栏（`components/Panel.js` `.dnb-ver-chip`）常驻显示 `v1.6.0`，其左侧紧邻旋转齿轮「设置」按钮（点击旋转 `180°` 并切换包含 3 档预设 / 通知 / LLM 预算账本 / 双语切换的设置页面）；顶部收口为 **5 大页签**（`参谋 / 任务 / 协同 / 档案 / 边界`，原「规划」已合并入「任务」，布局自上而下严格为：**核心目标 → 任务拓扑（流程画布 / 组织树）→ 合并任务板（步骤与列表任务树合一）→ 跨会话接力部署**）；顶部正交运行模式切换为 `⏸ 关停 | 🛡 巡检 | 🤖 托管`；档案页常驻置顶认知桌面进度条与三层可折叠纸质卷宗卡（折叠态仅显标题+关键词钩子+谁在看徽章，点击展开）；参谋回复卡右上显示思考挡位角标，驾驶舱与模型选择器搭载 `180°` 扇形思考强度表盘与团队思考强度「自动 / 手动」切换；流光毛玻璃舞台支持鼠标单击立即收起遮罩恢复面板操作，并保持彩色流光外框提示后台仍在运作；`package.json`、`board-schema.js`（`BACKEND_BUILD`）与 `src/client/constants.js`（`EXPECTED_BACKEND_BUILD`）三端强制同源为 `1.6.0`。

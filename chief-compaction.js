@@ -546,6 +546,7 @@ export async function recommendAndSetCompactThreshold(deps, { sessionId = '' } =
 
     const llmRes = await callChiefLlm(deps, {
       sessionId: rootId,
+      reasonKind: 'recommend_compact',
       system: COMPACT_ADVISOR_SYSTEM,
       prompt: advisorPrompt,
       maxTokens: 320,

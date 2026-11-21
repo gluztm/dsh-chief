@@ -1189,6 +1189,7 @@ export async function consolidateBoundsWithChief(deps, {
 
       const llmRes = await callChiefLlm(deps, {
         sessionId: rootId,
+        reasonKind: 'consolidate_bounds',
         system: CONSOLIDATE_BOUNDS_SYSTEM,
         prompt,
         maxTokens: SUMMARY_MAX_TOKENS,
@@ -3205,6 +3206,7 @@ export async function suggestCoreObjectiveWithChief(deps, {
   try {
     const llmRes = await callChiefLlm(deps, {
       sessionId: rootId,
+      reasonKind: 'suggest_objective',
       system: OBJECTIVE_SUGGEST_SYSTEM,
       prompt: promptLines.join('\n'),
       maxTokens: 320,

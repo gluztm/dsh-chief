@@ -33,6 +33,7 @@ import {
   mutateChiefFact,
   handleApprovalDecision,
   handleElevationDecision,
+  scheduleChiefTurnReview,
 } from './chief.js'
 import {
   getChiefActiveWork,
@@ -41,6 +42,7 @@ import {
   queueChiefApproval,
   normalizeSuggestion,
   hasValidChiefRiskAck,
+  summarizeLlmLedger,
   SUGGESTIONS_CAP,
   CHAT_CAP,
   nextId,
@@ -282,6 +284,13 @@ export function createApiRoutes(deps) {
                 paceMode: effCfg.paceMode || 'manual',
                 runMode: effCfg.runMode || 'off',
                 managedIdleTimeoutMs: effCfg.managedIdleTimeoutMs || 15 * 60 * 1000,
+                notifyEnabled: effCfg.notifyEnabled !== false,
+                notifySound: Boolean(effCfg.notifySound),
+                uiLang: effCfg.uiLang || 'auto',
+                managedBudgetMaxCalls: effCfg.managedBudgetMaxCalls ?? 30,
+                managedBudgetMaxTokens: effCfg.managedBudgetMaxTokens ?? 300000,
+                llmLedgerSummary: summarizeLlmLedger(rootWs && rootWs.llmLedger, effCfg),
+                alertEvents: ((rootWs && Array.isArray(rootWs.alertEvents)) ? rootWs.alertEvents : []).slice(-10),
                 thinkingEffort: effCfg.thinkingEffort || 'auto',
                 teamEffortMode: effCfg.teamEffortMode || 'auto',
                 lockedModelEfforts: effCfg.lockedModelEfforts || {},
@@ -796,6 +805,36 @@ export function createApiRoutes(deps) {
                   })
                   immediateKickoff = { triggered: false, queuedSuggestion: true, mode: effectivePerm }
                 }
+              }
+            }
+            const cfgActive = updated && updated.config ? updated.config : null
+            const switchedToActiveRunOrIntv = Boolean(
+              wantsInterventionOn
+              || body?.runMode === 'managed'
+              || body?.runMode === 'patrol'
+              || body?.paceMode === 'auto'
+              || body?.paceMode === 'smart'
+              || body?.autoPilot === true,
+            )
+            if (
+              updated
+              && updated.ok !== false
+              && targetSessionForBoard
+              && !(immediateKickoff && immediateKickoff.triggered)
+              && cfgActive
+              && !cfgActive.stopped
+              && cfgActive.tacticalModes
+              && cfgActive.tacticalModes.intervention === true
+              && switchedToActiveRunOrIntv
+            ) {
+              const agentsSvcNow = runtime && typeof runtime.get === 'function' ? runtime.get('agents') : null
+              const leadAgNow = agentsSvcNow && typeof agentsSvcNow.get === 'function' ? agentsSvcNow.get(targetSessionForBoard) : null
+              if (leadAgNow && leadAgNow.status !== 'running') {
+                scheduleChiefTurnReview(makeChiefDeps(runtime), {
+                  agent: leadAgNow,
+                  sessionId: targetSessionForBoard,
+                  abnormalTrigger: 'config_activated',
+                })
               }
             }
             const view = await getChiefView(makeChiefDeps(runtime), sessionId, { autoSummarize: false })

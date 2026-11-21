@@ -16,6 +16,7 @@ import {
   RUN_MODE_OPTIONS,
   THINKING_EFFORT_OPTIONS,
 } from '../constants.js'
+import { bi, tabLabel, runModeMeta, effortMeta } from '../i18n.js'
 import {
   store,
   patch,
@@ -67,13 +68,14 @@ import {
   OperationApprovalModal,
   ElevationRequestModal,
   AuditLogModal,
+  AwayPresetConfirmModal,
 } from './modals.js'
 import { TasksTab } from '../tabs/tasks.js'
-import { PlanTab } from '../tabs/plan.js'
 import { ArchiveTab } from '../tabs/archives.js'
 import { BoundariesTab } from '../tabs/boundaries.js'
 import { ChiefTab, ChiefComposerBar } from '../tabs/chief.js'
 import { PeersTab } from '../tabs/peers.js'
+import { HandoffTab } from '../tabs/plan.js'
 
 function ChiefWorkStageOverlay({ fx }) {
   const fxKey = fx && fx.label ? String(fx.token || fx.id || (fx.tone || 'neon') + ':' + String(fx.label)) : ''
@@ -131,7 +133,7 @@ function ChiefWorkStageOverlay({ fx }) {
           h(
             'div',
             { className: 'dnb-chief-fx-hint' },
-            '点击任意处收起遮罩继续操作 · 外框流光表示仍在运作',
+            bi('点击任意处收起遮罩继续操作 · 外框流光表示仍在运作', 'Click anywhere to dismiss blur · glowing border stays active'),
           ),
         )
       : null,
@@ -140,6 +142,7 @@ function ChiefWorkStageOverlay({ fx }) {
 
 function PanelInner(props) {
   const view = useStore()
+  const [gearDeg, setGearDeg] = React.useState(0)
   const isPage = !!(props && props.variant === 'main')
   const isDock = !!(props && props.variant === 'dock')
   const selfRef = React.useRef(null)
@@ -187,12 +190,35 @@ function PanelInner(props) {
   const archMeta = view.archiveMeta || {}
   const archiveBadge = archMeta.takenOutCount || 0
 
-  const body = view.tab === 'chief'
-    ? h(ChiefTab, { board, view })
-    : view.tab === 'peers'
-      ? h(PeersTab, { view })
-      : view.tab === 'plan'
-        ? h(PlanTab, { board })
+  const body = view.settingsOpen
+    ? h(
+        'div',
+        { className: 'dnb-view' },
+        h(
+          'div',
+          { className: 'dnb-settings-bar' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } },
+            h(Icon, { name: 'settings', size: 13.5, style: { color: 'var(--dnb-accent)' } }),
+            bi('设置', 'Settings'),
+          ),
+          h('button', {
+            type: 'button',
+            className: 'dnb-pill',
+            style: { height: 22, padding: '0 8px', fontSize: 11 },
+            onClick: () => {
+              setGearDeg(d => d + 180)
+              patch({ settingsOpen: false })
+            },
+          }, bi('← 返回', '← Back')),
+        ),
+        h(HandoffTab, { view }),
+      )
+    : view.tab === 'chief'
+      ? h(ChiefTab, { board, view })
+      : view.tab === 'peers'
+        ? h(PeersTab, { view })
         : view.tab === 'archive'
           ? h(ArchiveTab, { board, view })
           : view.tab === 'boundaries'
@@ -225,24 +251,41 @@ function PanelInner(props) {
         h('span', {
           className: 'dnb-title',
           style: { display: 'inline-flex', alignItems: 'center', gap: 5 },
-          title: `${BRAND_NAME} v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? (view.staleBackendDetected ? `（宿主内存后端仍为 v${meta.backendBuild}，重载后同步）` : '（前后端已同步）') : ''}${view.sessionId ? ` · 会话 ${shortSession(view.sessionId)}` : ''}`,
+          title: `${bi(BRAND_NAME, 'DSH Chief')} v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? (view.staleBackendDetected ? bi(`（宿主内存后端仍为 v${meta.backendBuild}，重载后同步）`, ` (backend in RAM v${meta.backendBuild}; reload to sync)`) : bi('（前后端已同步）', ' (synced)')) : ''}${view.sessionId ? ` · ${bi('会话', 'Session')} ${shortSession(view.sessionId)}` : ''}`,
         },
           h(Icon, { name: 'sparkles', size: 14, style: { color: 'var(--dnb-accent)' } }),
-          BRAND_NAME,
+          bi(BRAND_NAME, 'DSH Chief'),
         ),
+        h('button', {
+          type: 'button',
+          className: 'dnb-gear-btn',
+          'data-active': view.settingsOpen ? '1' : '0',
+          'aria-label': bi('设置', 'Settings'),
+          'aria-pressed': view.settingsOpen ? 'true' : 'false',
+          title: bi('设置（情景预设 / 通知 / 预算账本 / 语言）', 'Settings (Presets / Alerts / Budget / Language)'),
+          onClick: () => {
+            setGearDeg(d => d + 180)
+            patch({
+              settingsOpen: !view.settingsOpen,
+              secModelMenuOpen: false,
+              secPaceMenuOpen: false,
+              secPermMenuOpen: false,
+            })
+          },
+        }, h(Icon, { name: 'settings', size: 13.5, style: { transform: `rotate(${gearDeg}deg)` } })),
         h('span', {
           className: 'dnb-ver-chip',
           'data-stale': view.staleBackendDetected ? '1' : '0',
           title: view.staleBackendDetected
-            ? `前端面板 v${EXPECTED_BACKEND_BUILD} · 宿主内存后端仍为 v${meta.backendBuild || '旧版'}（重载插件或重启客户端后同步）`
-            : `DSH 参谋长版本：v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? '（前后端已同步）' : ''}`,
-        }, view.staleBackendDetected ? `旧后端 · v${EXPECTED_BACKEND_BUILD}` : ('v' + EXPECTED_BACKEND_BUILD)),
+            ? bi(`前端面板 v${EXPECTED_BACKEND_BUILD} · 宿主内存后端仍为 v${meta.backendBuild || '旧版'}（重载插件或重启客户端后同步）`, `UI v${EXPECTED_BACKEND_BUILD} · Host backend v${meta.backendBuild || 'older'} (restart DSH to sync)`)
+            : bi(`DSH 参谋长版本：v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? '（前后端已同步）' : ''}`, `DSH Chief v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? ' (synced)' : ''}`),
+        }, view.staleBackendDetected ? `${bi('旧后端', 'Stale')} · v${EXPECTED_BACKEND_BUILD}` : ('v' + EXPECTED_BACKEND_BUILD)),
         meta.linkedPeersCount > 0
           ? h('button', {
               className: 'dnb-head-pill',
               style: { height: 21, padding: '0 6px', fontSize: 10.5, color: 'var(--dnb-accent)' },
-              title: '已串联跨窗口会话，点击查看协同网络',
-              onClick: () => patch({ tab: 'peers' }),
+              title: bi('已串联跨窗口会话，点击查看协同网络', 'Linked peer sessions; click to view'),
+              onClick: () => patch({ tab: 'peers', settingsOpen: false }),
             }, h(Icon, { name: 'link', size: 10.5 }), String(meta.linkedPeersCount))
           : null,
         h(
@@ -255,9 +298,9 @@ function PanelInner(props) {
               const eff = meta.modelRef || meta.resolvedModelRef || meta.followModelRef || ''
               const label = fullModelWithChannel(eff, cat)
               if (!meta.modelRef) {
-                return '正在自动跟随主对话模型' + (label ? '：' + label + ' [' + eff + ']' : '') + '（点击可切换专职参谋长模型）'
+                return bi('正在自动跟随主对话模型', 'Following lead session model') + (label ? ': ' + label + ' [' + eff + ']' : '') + bi('（点击可切换专职参谋长模型）', ' (click to pin Chief model)')
               }
-              return '已固定参谋长专职模型：' + (label || eff) + ' [' + eff + ']（点击可切回跟随主对话）'
+              return bi('已固定参谋长专职模型：', 'Pinned Chief model: ') + (label || eff) + ' [' + eff + ']' + bi('（点击可切回跟随主对话）', ' (click to unpin)')
             })(),
             onClick: () => {
               const nextOpen = !view.secModelMenuOpen
@@ -268,9 +311,9 @@ function PanelInner(props) {
             const cat = view.secModelsCatalog || (view.secView && view.secView.models) || null
             const eff = meta.modelRef || meta.resolvedModelRef || meta.followModelRef || ''
             const effortKey = meta.thinkingEffort || 'auto'
-            const effortOpt = THINKING_EFFORT_OPTIONS.find(x => x.key === effortKey)
-            const effBadge = effortOpt ? effortOpt.shortLabel : '🪄 自动'
-            const tag = eff ? clampTitle(shortModelName(eff, cat, true), 14) : '自动'
+            const effortOpt = effortMeta(effortKey) || THINKING_EFFORT_OPTIONS.find(x => x.key === effortKey)
+            const effBadge = effortOpt ? effortOpt.shortLabel : bi('🪄 自动', '🪄 Auto')
+            const tag = eff ? clampTitle(shortModelName(eff, cat, true), 14) : bi('自动', 'Auto')
             return `${tag} · ${effBadge}`
           })()),
           (() => {
@@ -281,15 +324,16 @@ function PanelInner(props) {
                   : (meta.paceMode === 'auto' ? 'managed' : (meta.paceMode === 'smart' ? 'patrol' : 'off')))
             return h(
               'div',
-              { className: 'dnb-run-mode-pill', role: 'group', 'aria-label': '参谋运行模式' },
-              RUN_MODE_OPTIONS.map(opt =>
-                h('button', {
+              { className: 'dnb-run-mode-pill', role: 'group', 'aria-label': bi('参谋运行模式', 'Chief run mode') },
+              RUN_MODE_OPTIONS.map(opt => {
+                const rm = runModeMeta(opt.key)
+                return h('button', {
                   key: opt.key,
                   type: 'button',
                   className: 'dnb-run-mode-btn',
                   'data-active': curRunMode === opt.key ? '1' : '0',
                   'data-rm': opt.key,
-                  title: opt.hint,
+                  title: rm.hint || opt.hint,
                   onClick: () => {
                     if (opt.key === 'managed' && curRunMode !== 'managed') {
                       patch({ autoPilotConfirmOpen: true, secPaceMenuOpen: false })
@@ -301,19 +345,19 @@ function PanelInner(props) {
                       ...(opt.key === 'off' ? { paceMode: 'manual', autoPilot: false } : {}),
                     })
                   },
-                }, opt.shortLabel),
-              ),
+                }, rm.shortLabel || opt.shortLabel)
+              }),
             )
           })(),
           h('button', {
             className: 'dnb-icon-btn',
             'data-active': view.searchOpen ? '1' : '0',
-            title: '搜索与问参谋长',
+            title: bi('搜索与问参谋长', 'Search & Ask Chief'),
             onClick: () => patch({ searchOpen: !view.searchOpen, askHits: null }),
           }, h(Icon, { name: 'search', size: 15 })),
           h('button', {
             className: 'dnb-icon-btn',
-            title: '同步刷新',
+            title: bi('同步刷新', 'Refresh'),
             onClick: () => {
               void refresh()
               if (view.tab === 'archive') void loadArchives(true)
@@ -322,7 +366,7 @@ function PanelInner(props) {
           }, h(Icon, { name: 'refresh', size: 15, style: view.busy ? { animation: 'dnb-spin 0.9s linear infinite' } : undefined })),
           h('button', {
             className: 'dnb-icon-btn',
-            title: isPage ? '返回会话' : '收起',
+            title: isPage ? bi('返回会话', 'Back to Session') : bi('收起', 'Collapse'),
             onClick: () => {
               if (closeChief()) return
               if (isPage) {
@@ -363,7 +407,7 @@ function PanelInner(props) {
                   const targetTask = (board.cursor.expectedTaskId && tasks.find(t => t && t.id === board.cursor.expectedTaskId))
                     || tasks.find(t => t && (board.cursor.blocked ? t.status === 'blocked' : t.status === 'doing'))
                   if (targetTask) focusObjectiveInPyramid(targetTask.id)
-                  else patch({ tab: 'tasks', taskViewMode: 'graph' })
+                  else patch({ tab: 'tasks', taskViewMode: 'graph', topoSectionCollapsed: false, settingsOpen: false })
                 },
               },
               board.cursor.blocked
@@ -396,15 +440,15 @@ function PanelInner(props) {
                   : tab.key === 'archive'
                     ? archiveBadge
                     : 0
-            return h(
+              return h(
               'button',
               {
                 key: tab.key,
                 className: 'dnb-seg-btn',
-                'data-active': view.tab === tab.key ? '1' : '0',
-                onClick: () => patch({ tab: tab.key }),
+                'data-active': !view.settingsOpen && (view.tab === tab.key || (tab.key === 'tasks' && view.tab === 'plan')) ? '1' : '0',
+                onClick: () => patch({ tab: tab.key, settingsOpen: false }),
               },
-              tab.label,
+              tabLabel(tab.key) || tab.label,
               count
                 ? h('span', {
                     className: 'dnb-seg-dot',
@@ -513,6 +557,7 @@ function PanelInner(props) {
       h(HazardHaltModal, { view }),
       h(UnlimitedTurnsConfirmModal, { view }),
       h(AutoPilotConfirmModal, { view }),
+      h(AwayPresetConfirmModal, { view }),
       h(ArchiveRelayModal, { view }),
       h(DistillToGlobalModal, { view }),
       h(ChiefAdviceModal, { view }),
@@ -628,15 +673,15 @@ function TriggerButton(props) {
     {
       className: 'dnb-btn',
       'data-active': showing || view.open ? '1' : '0',
-      title: (showing || view.open) ? ('收起 ' + BRAND_NAME) : ('打开 ' + BRAND_NAME),
-      'aria-label': BRAND_NAME,
+      title: (showing || view.open) ? (bi('收起 ', 'Collapse ') + bi(BRAND_NAME, 'DSH Chief')) : (bi('打开 ', 'Open ') + bi(BRAND_NAME, 'DSH Chief')),
+      'aria-label': bi(BRAND_NAME, 'DSH Chief'),
       'aria-expanded': showing || view.open ? 'true' : 'false',
       onClick: () => {
         toggleChief()
       },
     },
     h(ChiefIcon, { size: 16, active: showing || view.open }),
-    compact ? null : h('span', null, BRAND_NAME),
+    compact ? null : h('span', null, bi(BRAND_NAME, 'DSH Chief')),
     badgeCount ? h('span', { className: 'dnb-count' }, String(badgeCount)) : null,
   )
 }

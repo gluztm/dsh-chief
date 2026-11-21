@@ -2,5 +2,76 @@
   "meta": {
     "title": "DSH 参谋长",
     "description": "AI 管 AI，你当甩手掌柜 —— 它自己盯流程，跑崩了先拦住。不用守着屏幕，也不用反复确认；你不在的时候它照样跑，越权改工作区会先问你。"
+  },
+  "ui": {
+    "brandName": "DSH 参谋长",
+    "tabs": {
+      "chief": "参谋",
+      "tasks": "任务",
+      "peers": "协同",
+      "archive": "档案",
+      "boundaries": "边界"
+    },
+    "runModes": {
+      "off": "⏸ 关停",
+      "patrol": "🛡 巡检",
+      "managed": "🤖 托管"
+    },
+    "perms": {
+      "advisor": "L0 · 顾问模式",
+      "assistant": "L1 · 助手模式",
+      "strategist": "L2 · 参谋模式",
+      "chief": "L3 · 参谋长模式"
+    },
+    "presets": {
+      "title": "🚀 一键开箱场景预设",
+      "observer": {
+        "title": "👁 只读旁观",
+        "tag": "L0 · ⏸ 关停",
+        "desc": "零打扰零介入，低强度总结摘要，纯看护不改文件与工作流。"
+      },
+      "collab": {
+        "title": "🤝 日常协作",
+        "tag": "L2 · 🛡 巡检",
+        "desc": "平时 0 后台消耗，报错/撞墙自动唤醒，重要写改逐项弹窗审批。"
+      },
+      "away": {
+        "title": "🚀 离桌托管",
+        "tag": "L3 · 🤖 托管",
+        "desc": "持续督导 + 80% 自动压缩 + 30次/300K 硬预算熔断 + 关键节点通知。"
+      }
+    },
+    "notify": {
+      "title": "🔔 离桌通知与轻提示音",
+      "desktopToggle": "关键节点桌面通知",
+      "soundToggle": "轻柔提示音（默认关）",
+      "testBtn": "试响 / 测试提醒",
+      "permGranted": "已授权桌面通知",
+      "permDefault": "待点击授权",
+      "permDenied": "浏览器已拦截通知",
+      "permUnsupported": "面板 Toast 提醒"
+    },
+    "ledger": {
+      "title": "📊 参谋长 LLM 账本与托管硬预算",
+      "totalCalls": "累计调用",
+      "totalTokens": "累计 Token",
+      "catChat": "问答",
+      "catReview": "巡检",
+      "catDream": "梦境漫游",
+      "managedCallsCap": "单次托管次数上限",
+      "managedTokensCap": "单次托管 Token 上限",
+      "resetManaged": "重置本轮托管计数",
+      "tripped": "🛑 已触及硬预算上限并自动熔断停机"
+    },
+    "report": {
+      "exportMd": "📄 导出复盘战报 (.md)",
+      "copyMd": "📋 复制战报 Markdown"
+    },
+    "lang": {
+      "title": "🌐 界面语言 / Language",
+      "auto": "自动 Auto",
+      "zh": "简体中文",
+      "en": "English"
+    }
   }
 }

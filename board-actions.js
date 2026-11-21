@@ -62,6 +62,7 @@ import {
   normalizeTags,
   normalizeTask,
   reconcileTaskDependencies,
+  resolveActivePlanStepId,
   normalizeNote,
   BOUND_FIELDS,
   normalizeBoundFieldName,
@@ -280,6 +281,19 @@ export function createBoardActions(deps) {
 
     const board = loadBoard(file)
 
+    const resolveStepRef = (rawRef, fallbackId = '') => {
+      const ref = str(rawRef, '').trim()
+      if (!ref) return fallbackId
+      const plan = Array.isArray(board && board.plan) ? board.plan : []
+      if (plan.some(s => s && s.id === ref)) return ref
+      const m = ref.match(/^(?:step[-_]?|#)?(\d{1,3})$/i)
+      if (m) {
+        const idx = Number(m[1]) - 1
+        if (idx >= 0 && idx < plan.length && plan[idx] && plan[idx].id) return plan[idx].id
+      }
+      return ref.slice(0, 120)
+    }
+
     if (action === 'task.reset') {
       const mode = str(args.mode, 'clear').trim().toLowerCase()
       const hadCount = Array.isArray(board.tasks) ? board.tasks.length : 0
@@ -308,6 +322,15 @@ export function createBoardActions(deps) {
       if (!title) return { ok: false, error: 'title required' }
       const clips = []
       const ownerVal = str(args.subagent || args.target || args.owner, by)
+      const parentIdVal = str(args.parentId, '').slice(0, 200)
+      const parentTask = parentIdVal ? board.tasks.find(t => t && t.id === parentIdVal) : null
+      const autoStepId = (parentTask && parentTask.planStepId) || resolveActivePlanStepId(board)
+      const planStepIdVal = args.planStepId !== undefined
+        ? resolveStepRef(args.planStepId, '')
+        : autoStepId
+      const targetPlanStepIdVal = args.targetPlanStepId !== undefined
+        ? resolveStepRef(args.targetPlanStepId, '')
+        : ''
       const task = normalizeTask({
         id: str(args.id, '') ? str(args.id, '').slice(0, 64) : newId('t'),
         title: clipInto(clips, 'task.title', title, CAP_TASK_TITLE),
@@ -321,7 +344,9 @@ export function createBoardActions(deps) {
         intent: clipInto(clips, 'task.intent', str(args.intent, ''), CAP_TASK_INTENT),
         evidence: clipInto(clips, 'task.evidence', str(args.evidence, ''), CAP_TASK_EVIDENCE),
         blockedBy: Array.isArray(args.blockedBy) ? args.blockedBy : (typeof args.blockedBy === 'string' && args.blockedBy ? args.blockedBy.split(',').map(s => s.trim()) : []),
-        parentId: str(args.parentId, '').slice(0, 200),
+        parentId: parentIdVal,
+        planStepId: planStepIdVal,
+        targetPlanStepId: targetPlanStepIdVal,
         assumptions: str(args.assumption, '') ? [{ text: str(args.assumption, '').slice(0, CAP_ASSUMPTION), verified: false, verifiedAt: 0, note: '' }] : [],
         createdAt: nowMs(),
         updatedAt: nowMs(),
@@ -385,6 +410,10 @@ export function createBoardActions(deps) {
 
         const ownerVal = str(item.subagent || item.target || item.owner, existing ? existing.owner : '')
         const subagentVal = str(item.subagent || item.target || (ownerVal && ownerVal !== 'agent' && ownerVal !== 'operator' ? ownerVal : ''), existing ? existing.subagent : '')
+        const parentForStep = resolvedParent ? board.tasks.find(t => t && t.id === resolvedParent) : null
+        const defaultStepForNew = (parentForStep && parentForStep.planStepId) || resolveActivePlanStepId(board)
+        const itemStepId = item.planStepId !== undefined ? resolveStepRef(item.planStepId, '') : undefined
+        const itemTargetStepId = item.targetPlanStepId !== undefined ? resolveStepRef(item.targetPlanStepId, '') : undefined
 
         if (existing) {
           existing.title = clipInto(clips, 'task.title', title, CAP_TASK_TITLE)
@@ -395,6 +424,8 @@ export function createBoardActions(deps) {
           if (subagentVal) existing.subagent = subagentVal.slice(0, 120)
           if (typeof item.preset === 'string') existing.preset = item.preset.slice(0, 80)
           if (rawParent || item.parentId === '') existing.parentId = resolvedParent.slice(0, 200)
+          if (itemStepId !== undefined) existing.planStepId = itemStepId
+          if (itemTargetStepId !== undefined) existing.targetPlanStepId = itemTargetStepId
           if (item.blockedBy !== undefined) existing.blockedBy = resolvedDeps
           if (STATUSES.includes(item.status)) existing.status = item.status
           if (PRIORITIES.includes(item.priority)) existing.priority = item.priority
@@ -415,6 +446,8 @@ export function createBoardActions(deps) {
             evidence: clipInto(clips, 'task.evidence', str(item.evidence, ''), CAP_TASK_EVIDENCE),
             blockedBy: resolvedDeps,
             parentId: resolvedParent,
+            planStepId: itemStepId !== undefined ? itemStepId : defaultStepForNew,
+            targetPlanStepId: itemTargetStepId !== undefined ? itemTargetStepId : '',
             assumptions: str(item.assumption, '') ? [{ text: str(item.assumption, '').slice(0, CAP_ASSUMPTION), verified: false, verifiedAt: 0, note: '' }] : [],
             createdAt: nowMs(),
             updatedAt: nowMs(),
@@ -427,11 +460,29 @@ export function createBoardActions(deps) {
       reconcileTaskDependencies(board, by, session)
       if (!board.plan.length && board.tasks.length) {
         const roots = board.tasks.filter(t => !t.parentId)
-        board.plan = (roots.length ? roots : board.tasks).slice(0, 12).map(t => ({
-          id: 's-' + t.id,
-          text: t.title + (t.owner ? ' (@' + t.owner + ')' : ''),
-          done: t.status === 'done',
-        }))
+        const stageSeeds = (roots.length ? roots : board.tasks).slice(0, 12)
+        board.plan = stageSeeds.map(t => {
+          const sid = 's-' + t.id
+          if (!t.planStepId) t.planStepId = sid
+          return {
+            id: sid,
+            text: t.title + (t.owner ? ' (@' + t.owner + ')' : ''),
+            done: t.status === 'done',
+          }
+        })
+        const byTaskId = new Map(board.tasks.map(t => [t.id, t]))
+        const resolveRootStep = (task, seen = new Set()) => {
+          if (!task) return ''
+          if (task.planStepId) return task.planStepId
+          if (task.parentId && byTaskId.has(task.parentId) && !seen.has(task.id)) {
+            seen.add(task.id)
+            const inherited = resolveRootStep(byTaskId.get(task.parentId), seen)
+            if (inherited) task.planStepId = inherited
+            return inherited
+          }
+          return ''
+        }
+        for (const t of board.tasks) resolveRootStep(t)
       }
       pushLog(board, '规划任务图：共更新/新增 ' + touchedTasks.length + ' 个任务节点', by, session)
       return clipped({ ok: true, tasks: touchedTasks, board: saveBoard(board, file) }, clips)
@@ -491,6 +542,8 @@ export function createBoardActions(deps) {
         task.assumptions.push({ text: clipInto(clips, 'task.assumption', args.assumption.trim(), CAP_ASSUMPTION), verified: false, verifiedAt: 0, note: '' })
       }
       if (typeof args.parentId === 'string') task.parentId = args.parentId.trim().slice(0, 200)
+      if (typeof args.planStepId === 'string') task.planStepId = resolveStepRef(args.planStepId, '')
+      if (typeof args.targetPlanStepId === 'string') task.targetPlanStepId = resolveStepRef(args.targetPlanStepId, '')
       if (typeof args.owner === 'string') task.owner = str(args.owner, '').slice(0, 200)
       if (typeof args.target === 'string') {
         task.owner = str(args.target, '').slice(0, 200)
@@ -558,10 +611,12 @@ export function createBoardActions(deps) {
             // A bare string in a flattened list is one step, not a step with no
             // text: the old shape filtered it out and wiped the plan.
             const step = typeof raw === 'string' ? { text: raw } : (raw && typeof raw === 'object' ? raw : {})
+            const cleanSummary = typeof step.summary === 'string' ? step.summary.trim().slice(0, 240) : ''
             return {
               id: str(step.id, newId('s')),
               text: clipInto(clips, 'plan.step', str(step.text, ''), CAP_PLAN_STEP),
               done: asBool(step.done) === true,
+              ...(cleanSummary ? { summary: cleanSummary } : {}),
             }
           })
           .filter(step => step.text !== '')
