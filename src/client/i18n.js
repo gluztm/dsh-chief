@@ -292,21 +292,21 @@ export function presetList() {
       icon: '👁',
       title: bi('只读旁观', 'Observer'),
       tag: bi('L0 · 关停 · 低思考', 'L0 · Off · Low'),
-      desc: bi('零打扰零介入，只提供按需摘要与顾问建议，绝不触碰工作区。', 'Read-only observation with zero autonomous actions or edits.'),
+      desc: bi('只看不改：不自动执行任何操作，需要时给摘要和建议。', 'Read-only: no automatic actions or edits; gives summaries and advice when asked.'),
     },
     {
       id: 'collab',
       icon: '🤝',
       title: bi('日常协作', 'Co-Pilot'),
       tag: bi('L2 · 巡检 · 红线哨兵', 'L2 · Patrol · Sentinel'),
-      desc: bi('平时 0 Token 耗电，报错/撞墙再唤醒；重大操作逐项弹窗审批。', '0 idle cost; wakes on failures & walls with explicit approvals.'),
+      desc: bi('平时不在后台调用模型，报错或撞墙时才介入；重要改动逐项弹窗问你。', 'No background model calls while idle; steps in on errors or blocked walls and asks before important changes.'),
     },
     {
       id: 'away',
       icon: '🚀',
       title: bi('离桌托管', 'Away Mode'),
       tag: bi('L3 · 托管 · 30次/300K 熔断', 'L3 · Managed · Budget Cap'),
-      desc: bi('高自主监督 + 80% 自动压缩 + 30次/300K 硬预算熔断 + 关键节点通知。', 'Supervised autopilot + 80% compact + 30-call/300K cap + alerts.'),
+      desc: bi('持续盯进度，上下文到 80% 自动压缩，30 次调用或 300K Token 后自动停，关键节点发通知。', 'Keeps watching progress, auto-compacts at 80%, stops after 30 calls or 300K tokens, and sends alerts at key points.'),
     },
   ]
 }
