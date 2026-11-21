@@ -43,10 +43,16 @@ import {
   normalizeSuggestion,
   hasValidChiefRiskAck,
   summarizeLlmLedger,
+  setBubbleHarnessMembership,
+  setBubbleManualLock,
+  appendChiefAuditLog,
+  clamp,
   SUGGESTIONS_CAP,
   CHAT_CAP,
+  MAIL_CAP,
   nextId,
 } from './chief-state.js'
+import { listPeerDirectory, computeBubbleState } from './chief-network.js'
 import {
   resolveProjectKey,
   getArchiveMeta,
@@ -931,8 +937,289 @@ export function createApiRoutes(deps) {
           try {
             const body = await readBody(req)
             const sessionId = typeof body.session === 'string' ? body.session : ''
-            const peerSession = typeof body.peerSession === 'string' ? body.peerSession : ''
             const rootA = resolveRootSessionId(sessionId) || sessionId
+            const op = typeof body.op === 'string' ? body.op.trim() : ''
+            const chiefDeps = makeChiefDeps(runtime)
+            const dirNow = await listPeerDirectory(chiefDeps, rootA).catch(() => ({ targets: [], cluster: [] }))
+            const bState = computeBubbleState(chiefDeps, rootA, loadChiefState(), dirNow)
+            const LOCK_ERR = '🔒 协同水泡工作中已锁死结构，不允许中途拆解或改动编队；请等待全员收工或点击「⏹ 急停解体」'
+
+            if (op === 'bubble_emergency_stop') {
+              const subagents = runtime && typeof runtime.get === 'function' ? runtime.get('subagents') : null
+              let stoppedCount = 0
+              if (deps.hostState.activeBubbleRuns instanceof Map) {
+                for (const [rKey, run] of [...deps.hostState.activeBubbleRuns.entries()]) {
+                  if (!run || (run.rootId && run.rootId !== rootA)) continue
+                  try { run.abortController?.abort() } catch {}
+                  try {
+                    if (run.childId && subagents && typeof subagents.interrupt === 'function') {
+                      subagents.interrupt(run.childId, { kind: 'user' })
+                    }
+                  } catch {}
+                  deps.hostState.activeBubbleRuns.delete(rKey)
+                  stoppedCount += 1
+                }
+              }
+              if (subagents && typeof subagents.interrupt === 'function') {
+                for (const peer of (dirNow.targets || [])) {
+                  if (peer && peer.status === 'running' && peer.id && (peer.kind === 'subagent' || peer.kind === 'peer-session')) {
+                    try {
+                      subagents.interrupt(peer.id, { kind: 'user' })
+                      stoppedCount += 1
+                    } catch {}
+                  }
+                }
+              }
+              try {
+                deps.hostState.activeAutoContinue?.cancelSession?.(rootA, 'bubble emergency stop')
+              } catch {}
+              try {
+                updateChiefConfig(chiefDeps, {
+                  session: rootA,
+                  tacticalModes: { intervention: false },
+                  byUser: true,
+                })
+              } catch {}
+              setBubbleManualLock(rootA, { locked: false, reason: 'emergency_stop' })
+              appendChiefAuditLog(rootA, {
+                kind: 'bubble_emergency_stop',
+                decision: 'allowed',
+                tool: 'bubble_emergency_stop',
+                reason: `触发水泡急停解体，终止 ${stoppedCount} 个在途成员并释放结构锁`,
+              })
+              mutateChiefState((st) => {
+                const ws = ensureWorkspace(st, rootA)
+                ws.chat.push({
+                  id: nextId('chat'),
+                  role: 'chief',
+                  kind: 'receipt',
+                  text: `- 【⏹ 水泡急停解体】已中断 ${stoppedCount} 个在途执行并解除协同编队锁死。`,
+                  actions: ['🔓 结构已解锁'],
+                  at: Date.now(),
+                })
+                if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+              })
+              const view = await getChiefView(chiefDeps, rootA, { autoSummarize: false })
+              sendJson(res, 200, { ok: true, stoppedCount, view })
+              return
+            }
+
+            if (op === 'bubble_lock') {
+              const wantLock = Boolean(body.locked)
+              if (!wantLock && bState.autoLocked) {
+                sendJson(res, 409, {
+                  ok: false,
+                  locked: true,
+                  error: '🔒 仍有成员或外部 Harness 运行中，无法直接解锁；请等待完结或点击「⏹ 急停解体」',
+                  bubble: bState,
+                })
+                return
+              }
+              const lockRes = setBubbleManualLock(rootA, {
+                locked: wantLock,
+                reason: typeof body.reason === 'string' ? body.reason : '',
+              })
+              if (!lockRes.ok) {
+                sendJson(res, 400, lockRes)
+                return
+              }
+              const view = await getChiefView(chiefDeps, rootA, { autoSummarize: false })
+              sendJson(res, 200, { ...lockRes, view })
+              return
+            }
+
+            if (op === 'harness_toggle') {
+              if (bState.locked && body.force !== true) {
+                sendJson(res, 409, { ok: false, locked: true, error: LOCK_ERR, bubble: bState })
+                return
+              }
+              const hRes = setBubbleHarnessMembership(rootA, {
+                provider: body.provider,
+                label: body.label,
+                role: body.role,
+                joined: Boolean(body.joined),
+              })
+              if (!hRes.ok) {
+                sendJson(res, 400, hRes)
+                return
+              }
+              const view = await getChiefView(chiefDeps, rootA, { autoSummarize: false })
+              sendJson(res, 200, { ...hRes, view })
+              return
+            }
+
+            if (op === 'harness_dispatch') {
+              const provider = clamp(String(body.provider || '').trim(), 64)
+              const taskText = typeof body.text === 'string' ? body.text.trim() : ''
+              const taskLabel = clamp(String(body.label || taskText || provider).trim(), 48)
+              if (!provider || !taskText) {
+                sendJson(res, 400, { ok: false, error: '需要指定目标 Harness provider 与任务内容' })
+                return
+              }
+              const stNow = loadChiefState()
+              const wsNow = ensureWorkspace(stNow, rootA)
+              const isEnrolled = Array.isArray(wsNow.bubbleHarnesses) && wsNow.bubbleHarnesses.some(h => h && h.provider === provider)
+              if (!isEnrolled) {
+                sendJson(res, 400, { ok: false, error: `外部 Harness「${provider}」尚未拖入当前协同水泡` })
+                return
+              }
+              const subagents = runtime && typeof runtime.get === 'function' ? runtime.get('subagents') : null
+              const agentsSvc = runtime && typeof runtime.get === 'function' ? runtime.get('agents') : null
+              const prov = subagents && typeof subagents.getProvider === 'function' ? subagents.getProvider(provider) : null
+              if (!subagents || typeof subagents.startActivation !== 'function' || !prov) {
+                sendJson(res, 400, {
+                  ok: false,
+                  error: `当前宿主未安装或未激活「${provider}」外部 Harness（可运行 dsh plugin --profile desktop add @deepseek-ai/dsh-subagent-${provider}）`,
+                })
+                return
+              }
+              const liveCaller = (agentsSvc && typeof agentsSvc.get === 'function' ? agentsSvc.get(rootA) : null)
+                || (typeof deps.findLiveCallerAgent === 'function' ? deps.findLiveCallerAgent(runtime, rootA, null) : null)
+              if (!liveCaller) {
+                sendJson(res, 400, { ok: false, error: '当前主对话会话未激活，请先在主窗口发一条消息激活会话' })
+                return
+              }
+
+              let actionCwd = process.cwd()
+              try { actionCwd = archiveTarget(runtime, rootA, { vaultScope: 'session' }).cwd || actionCwd } catch {}
+              const boardNow = rootA ? boardForSession(boardFileFor(rootA)) : emptyBoard()
+              const forbiddenList = (boardNow && boardNow.bounds && Array.isArray(boardNow.bounds.forbidden))
+                ? boardNow.bounds.forbidden.filter(Boolean).slice(0, 8)
+                : []
+              const activeWalls = listGuardWalls({ cwd: actionCwd }).filter(w => w && w.activeNow).slice(0, 8)
+              const constraintLines = []
+              if (forbiddenList.length) {
+                constraintLines.push('禁止红线: ' + forbiddenList.join('；'))
+              }
+              if (activeWalls.length) {
+                constraintLines.push('物理驻墙保护: ' + activeWalls.map(w => `${w.title}(${(w.patterns || []).join(', ')})`).join('；'))
+              }
+              const safePrompt = constraintLines.length
+                ? `[DSH 参谋长协同水泡派单 · 外部独立进程需严格遵守以下边界]\n${constraintLines.join('\n')}\n\n[任务内容]\n${taskText}`
+                : taskText
+
+              const ac = new AbortController()
+              const runKey = nextId('brun')
+              const activation = await subagents.startActivation({
+                provider,
+                label: taskLabel,
+                prompt: [{ type: 'text', text: safePrompt }],
+                parent: liveCaller,
+                signal: ac.signal,
+                delivery: 'parent',
+              })
+              const childId = String((activation && activation.childId) || '')
+              deps.hostState.activeBubbleRuns.set(runKey, {
+                id: runKey,
+                rootId: rootA,
+                provider,
+                label: taskLabel,
+                childId,
+                startedAt: Date.now(),
+                abortController: ac,
+              })
+              appendChiefAuditLog(rootA, {
+                kind: 'bubble_harness_dispatch',
+                decision: 'allowed',
+                tool: provider,
+                reason: `向水泡外部 Harness「${provider}」派发任务并自动锁死编队：${taskLabel}`,
+              })
+              mutateChiefState((st) => {
+                const ws = ensureWorkspace(st, rootA)
+                ws.mailbox.push({
+                  id: nextId('mail'),
+                  from: 'DSH 参谋长',
+                  fromSession: rootA,
+                  fromRootId: rootA,
+                  to: provider,
+                  toSession: childId || provider,
+                  toRootId: rootA,
+                  subject: `外部 Harness 派单 · ${provider}`,
+                  text: taskText.slice(0, 1200),
+                  mode: 'followup',
+                  channelType: 'internal',
+                  readBy: [rootA],
+                  at: Date.now(),
+                })
+                if (ws.mailbox.length > MAIL_CAP) ws.mailbox = ws.mailbox.slice(-MAIL_CAP)
+                ws.chat.push({
+                  id: nextId('chat'),
+                  role: 'chief',
+                  kind: 'receipt',
+                  text: `- 【⚡ 水泡派单 · ${provider}】已启动外部 Harness 执行「${taskLabel}」，编队已自动锁定保护。`,
+                  actions: ['🔒 编队工作中已锁死'],
+                  at: Date.now(),
+                })
+                if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+              })
+
+              if (activation && activation.result && typeof activation.result.then === 'function') {
+                Promise.resolve(activation.result)
+                  .then((resVal) => {
+                    const outText = clamp(
+                      (resVal && (resVal.text || resVal.output || resVal.summary))
+                      || (typeof resVal === 'string' ? resVal : '外部 Harness 任务已完成'),
+                      1400,
+                    )
+                    mutateChiefState((st) => {
+                      const ws = ensureWorkspace(st, rootA)
+                      ws.mailbox.push({
+                        id: nextId('mail'),
+                        from: `@${provider}`,
+                        fromSession: childId || provider,
+                        fromRootId: rootA,
+                        to: 'lead',
+                        toSession: rootA,
+                        toRootId: rootA,
+                        subject: `外部 Harness 回执 · ${provider}`,
+                        text: outText,
+                        mode: 'followup',
+                        channelType: 'internal',
+                        readBy: [],
+                        at: Date.now(),
+                      })
+                      if (ws.mailbox.length > MAIL_CAP) ws.mailbox = ws.mailbox.slice(-MAIL_CAP)
+                      ws.chat.push({
+                        id: nextId('chat'),
+                        role: 'chief',
+                        kind: 'receipt',
+                        text: `- 【✅ @${provider} 交卷】${outText.slice(0, 320)}`,
+                        actions: ['解开对应执行锁'],
+                        at: Date.now(),
+                      })
+                      if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+                    })
+                  })
+                  .catch((err) => {
+                    const errTxt = clamp(String((err && err.message) || err || '执行失败'), 360)
+                    mutateChiefState((st) => {
+                      const ws = ensureWorkspace(st, rootA)
+                      ws.chat.push({
+                        id: nextId('chat'),
+                        role: 'chief',
+                        kind: 'receipt',
+                        text: `- 【⚠️ @${provider} 异常中断】${errTxt}`,
+                        actions: ['🔓 已释放执行锁'],
+                        at: Date.now(),
+                      })
+                      if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+                    })
+                  })
+                  .finally(() => {
+                    deps.hostState.activeBubbleRuns.delete(runKey)
+                  })
+              }
+
+              const view = await getChiefView(chiefDeps, rootA, { autoSummarize: false })
+              sendJson(res, 200, { ok: true, runId: runKey, childId, view })
+              return
+            }
+
+            if (bState.locked && body.force !== true) {
+              sendJson(res, 409, { ok: false, locked: true, error: LOCK_ERR, bubble: bState })
+              return
+            }
+            const peerSession = typeof body.peerSession === 'string' ? body.peerSession : ''
             const rootB = resolveRootSessionId(peerSession) || peerSession
             const linked = Boolean(body.linked)
             const out = setPeerLink(rootA, rootB, linked)
@@ -940,7 +1227,7 @@ export function createApiRoutes(deps) {
               sendJson(res, 400, out)
               return
             }
-            const view = await getChiefView(makeChiefDeps(runtime), rootA, { autoSummarize: false })
+            const view = await getChiefView(chiefDeps, rootA, { autoSummarize: false })
             sendJson(res, 200, { ...out, view })
           } catch (error) {
             sendJson(res, 400, { ok: false, error: String(error && error.message ? error.message : error) })

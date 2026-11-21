@@ -920,6 +920,7 @@ export function createSubagentRuntime(deps) {
     const rt = runtime || deps.hostState.activeRuntime
     return {
       runtime: rt,
+      hostState: deps.hostState,
       getLlm: () => deps.hostState.activeLlm || (rt ? rt.get('llm') : null),
       getAttachments: () => safe(() => (rt ? rt.get('attachments') : null), null),
       getSessionCwd: (sid) => getSessionCwd(rt, sid),

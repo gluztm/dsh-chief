@@ -997,7 +997,7 @@ export function createRuntimeHooks(deps) {
       }
     })
 
-    // Runtime capability probe for DSH >= 0.2.2-rc.2 named subagent APIs
+    // Runtime capability probe for DSH >= 0.2.2-rc.2 named subagent APIs & external Harness provider tracking
     ctx.inject(['subagents'], () => {
       const compat = probeSubagentSupport(runtime)
       if (compat.present && !compat.namedSubagentsSupported) {
@@ -1005,7 +1005,37 @@ export function createRuntimeHooks(deps) {
           console.warn('[dsh-chief] ' + compat.warning)
         } catch {}
       }
+      try {
+        const sub = runtime && typeof runtime.get === 'function' ? runtime.get('subagents') : null
+        if (sub && sub.providers instanceof Map) {
+          for (const [pname, prov] of sub.providers.entries()) {
+            if (pname && pname !== 'spawn' && pname !== 'fork') {
+              deps.hostState.detectedHarnessProviders.set(pname, prov || { name: pname })
+            }
+          }
+        }
+      } catch {}
     })
+    try {
+      ctx.on?.('subagent/provider-added', (prov) => {
+        const pname = String((prov && prov.name) || '').trim()
+        if (!pname || pname === 'spawn' || pname === 'fork') return
+        if (typeof prov?.prepareContinuable === 'function') return
+        deps.hostState.detectedHarnessProviders.set(pname, prov)
+      })
+      ctx.on?.('subagent/provider-removed', (pname) => {
+        if (pname) deps.hostState.detectedHarnessProviders.delete(String(pname))
+      })
+      ctx.on?.('subagent/end', (info) => {
+        const cid = String((info && info.id) || '').trim()
+        if (!cid) return
+        for (const [k, run] of deps.hostState.activeBubbleRuns.entries()) {
+          if (run && String(run.childId || '') === cid) {
+            deps.hostState.activeBubbleRuns.delete(k)
+          }
+        }
+      })
+    } catch {}
 
     // Cold-start safety reconciliation for persistent TaskLedger (stale running/resuming -> interrupted; past TTL -> expired)
     try {

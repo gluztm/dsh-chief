@@ -22,6 +22,8 @@ import {
   answerChiefInquiry,
   getLinkedCluster,
   ensureWorkspace,
+  resolveWorkspaceConfig,
+  OFFICIAL_HARNESS_CATALOG,
   clusterView,
   stripCheckpointNoise,
   isInternalCheckpointNoise,
@@ -866,4 +868,144 @@ export function readMailboxForAgent(deps, { sessionId, callerAgent, unreadOnly =
     }
   })
   return out.slice(-25)
+}
+
+const PROBE_EXTERNAL_PROVIDER_NAMES = [
+  'codex',
+  'claude-code',
+  'acp',
+  'dsh-sdk',
+  'opencode',
+  'antigravity',
+  'gemini',
+]
+
+/** Discover registered out-of-process external Harness backends (`ctx.subagents` + Cordis lifecycle cache). */
+export function discoverHarnessProviders(runtime, hostState = null) {
+  const sub = runtime && typeof runtime.get === 'function' ? runtime.get('subagents') : null
+  const foundMap = new Map()
+  const addProv = (pname, prov) => {
+    const clean = String(pname || '').trim()
+    if (!clean || clean === 'spawn' || clean === 'fork') return
+    if (prov && typeof prov.prepareContinuable === 'function') return
+    if (!foundMap.has(clean)) foundMap.set(clean, prov || { name: clean })
+  }
+
+  if (sub && sub.providers instanceof Map) {
+    for (const [pname, prov] of sub.providers.entries()) addProv(pname, prov)
+  }
+  if (sub && typeof sub.getProvider === 'function') {
+    for (const candidate of PROBE_EXTERNAL_PROVIDER_NAMES) {
+      try {
+        const prov = sub.getProvider(candidate)
+        if (prov) addProv(prov.name || candidate, prov)
+      } catch {}
+    }
+  }
+  if (hostState && hostState.detectedHarnessProviders instanceof Map) {
+    for (const [pname, prov] of hostState.detectedHarnessProviders.entries()) addProv(pname, prov)
+  }
+
+  const available = []
+  for (const [pname, prov] of foundMap.entries()) {
+    const official = OFFICIAL_HARNESS_CATALOG.find(item => item.provider === pname)
+    const caps = (prov && prov.capabilities && typeof prov.capabilities === 'object') ? prov.capabilities : {}
+    available.push({
+      provider: pname,
+      label: (official && official.label) || String((prov && prov.label) || pname),
+      packageName: (official && official.packageName) || '',
+      accent: (official && official.accent) || '#38bdf8',
+      roleHint: (official && official.roleHint) || '外部 Harness 执行进程',
+      mode: 'one-shot',
+      installed: true,
+      capabilities: {
+        agentPreset: Boolean(caps.agentPreset),
+        outputSchema: Boolean(caps.outputSchema),
+        depthLimit: Boolean(caps.depthLimit),
+      },
+    })
+  }
+
+  const availableNames = new Set(available.map(x => x.provider))
+  const catalog = OFFICIAL_HARNESS_CATALOG
+    .filter(item => !availableNames.has(item.provider))
+    .map(item => ({
+      ...item,
+      mode: 'one-shot',
+      installed: false,
+      installCmd: `dsh plugin --profile desktop add ${item.packageName}`,
+    }))
+
+  return { available, catalog }
+}
+
+/** Compute live Bubble squad membership, available Harnesses, and hard structural lock state. */
+export function computeBubbleState(deps, rootId, state, directory = null) {
+  const rid = String(rootId || 'global').trim() || 'global'
+  const st = state || loadChiefState()
+  const ws = ensureWorkspace(st, rid)
+  const cfg = resolveWorkspaceConfig(st, rid)
+  const cluster = (directory && Array.isArray(directory.cluster)) ? directory.cluster : getLinkedCluster(st, rid)
+  const enrolledHarnesses = Array.isArray(ws.bubbleHarnesses) ? ws.bubbleHarnesses.slice() : []
+  const enrolledSet = new Set(enrolledHarnesses.map(h => h && h.provider).filter(Boolean))
+  const targets = (directory && Array.isArray(directory.targets)) ? directory.targets : []
+  const disc = discoverHarnessProviders(deps && deps.runtime, deps && deps.hostState)
+
+  const activeRunners = targets
+    .filter(t => t && t.status === 'running')
+    .map(t => ({ key: t.key, id: t.id, name: t.name, kind: t.kind }))
+
+  const activeExternalRuns = []
+  const runsMap = deps && deps.hostState && deps.hostState.activeBubbleRuns
+  if (runsMap instanceof Map) {
+    for (const run of runsMap.values()) {
+      if (run && (!run.rootId || run.rootId === rid)) {
+        activeExternalRuns.push({
+          runId: run.id,
+          provider: run.provider,
+          label: run.label,
+          childId: run.childId || '',
+          startedAt: run.startedAt || 0,
+        })
+      }
+    }
+  }
+
+  const hasCrossSquad = cluster.length > 1 || enrolledHarnesses.length > 0
+  const interventionActive = Boolean(cfg && cfg.tacticalModes && cfg.tacticalModes.intervention && !cfg.stopped)
+  const autoLocked = activeExternalRuns.length > 0
+    || (hasCrossSquad && (activeRunners.length > 0 || interventionActive))
+  const manualLocked = Boolean(ws.bubbleLock && ws.bubbleLock.manualLocked)
+  const locked = manualLocked || autoLocked
+
+  const reasons = []
+  if (activeExternalRuns.length > 0) reasons.push(`${activeExternalRuns.length} 个外部 Harness 执行中`)
+  if (hasCrossSquad && activeRunners.length > 0) reasons.push(`${activeRunners.length} 个会话/子代理运行中`)
+  if (hasCrossSquad && interventionActive) reasons.push('主动强介入督导进行中')
+  if (manualLocked && ws.bubbleLock && ws.bubbleLock.reason) reasons.push(ws.bubbleLock.reason)
+  else if (manualLocked) reasons.push('已手动锁定编队结构')
+
+  return {
+    locked,
+    autoLocked,
+    manualLocked,
+    lockReason: reasons.join(' · '),
+    hasCrossSquad,
+    activeRunners,
+    activeExternalRuns,
+    enrolledHarnesses: enrolledHarnesses.map(h => {
+      const avail = disc.available.find(a => a.provider === h.provider)
+      const official = OFFICIAL_HARNESS_CATALOG.find(item => item.provider === h.provider)
+      const roleHint = (avail && avail.roleHint) || (official && official.roleHint) || '外部 Harness 执行进程'
+      return {
+        ...h,
+        role: h.role || roleHint,
+        roleHint,
+        installed: Boolean(avail),
+        running: activeExternalRuns.some(r => r.provider === h.provider),
+      }
+    }),
+    availableHarnesses: disc.available.filter(a => !enrolledSet.has(a.provider)),
+    catalogHarnesses: disc.catalog,
+  }
 }

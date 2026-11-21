@@ -1013,6 +1013,8 @@ function emptyWorkspace() {
     flippedPrecipitatedIds: [],
     llmLedger: emptyLlmLedger(),
     alertEvents: [],
+    bubbleHarnesses: [],
+    bubbleLock: { manualLocked: false, lockedAt: 0, reason: '' },
   }
 }
 
@@ -1288,6 +1290,22 @@ function normalizeWorkspace(raw) {
     .map(normalizeAlertEvent)
     .filter(Boolean)
     .slice(-ALERT_EVENTS_CAP)
+  const rawHarnesses = Array.isArray(src.bubbleHarnesses) ? src.bubbleHarnesses : []
+  const seenHarnesses = new Set()
+  base.bubbleHarnesses = []
+  for (const hItem of rawHarnesses) {
+    const normH = normalizeBubbleHarness(hItem)
+    if (!normH || seenHarnesses.has(normH.provider)) continue
+    seenHarnesses.add(normH.provider)
+    base.bubbleHarnesses.push(normH)
+    if (base.bubbleHarnesses.length >= 12) break
+  }
+  const rawBl = src.bubbleLock && typeof src.bubbleLock === 'object' ? src.bubbleLock : {}
+  base.bubbleLock = {
+    manualLocked: Boolean(rawBl.manualLocked),
+    lockedAt: Math.max(0, Number(rawBl.lockedAt) || 0),
+    reason: clamp(rawBl.reason || '', 120),
+  }
   return base
 }
 
@@ -3074,5 +3092,104 @@ export function recordChiefLlmUsage(rootSessionId, {
       trippedReason,
       ledger: summarizeLlmLedger(ws.llmLedger, resolveWorkspaceConfig(state, rootId)),
     }
+  })
+}
+
+export const OFFICIAL_HARNESS_CATALOG = [
+  {
+    provider: 'codex',
+    label: 'Codex',
+    packageName: '@deepseek-ai/dsh-subagent-codex',
+    accent: '#10b981',
+    roleHint: '独立代码实现 / 重构 / 单测',
+  },
+  {
+    provider: 'claude-code',
+    label: 'Claude Code',
+    packageName: '@deepseek-ai/dsh-subagent-claude-code',
+    accent: '#f59e0b',
+    roleHint: '架构审查 / 深度排障 / 代码评审',
+  },
+  {
+    provider: 'acp',
+    label: 'ACP Agent',
+    packageName: '@deepseek-ai/dsh-subagent-acp',
+    accent: '#a855f7',
+    roleHint: '通用 ACP 外部 Harness 进程',
+  },
+  {
+    provider: 'dsh-sdk',
+    label: 'DSH Sub-Instance',
+    packageName: '@deepseek-ai/dsh-subagent-dsh-sdk',
+    accent: '#38bdf8',
+    roleHint: '独立 Profile / 模型 DSH 子实例',
+  },
+]
+
+export function normalizeBubbleHarness(raw) {
+  if (!raw || typeof raw !== 'object') return null
+  const provider = clamp(String(raw.provider || '').trim(), 64)
+  if (!provider || provider === 'spawn' || provider === 'fork') return null
+  const meta = OFFICIAL_HARNESS_CATALOG.find(item => item.provider === provider)
+  return {
+    provider,
+    label: clamp(raw.label || (meta ? meta.label : provider), 48),
+    role: clamp(raw.role || (meta ? meta.roleHint : '外部 Harness 协同成员'), 90),
+    accent: (meta && meta.accent) || '#38bdf8',
+    joinedAt: Math.max(0, Number(raw.joinedAt) || Date.now()),
+  }
+}
+
+export function setBubbleHarnessMembership(rootId, { provider, label = '', role = '', joined = true } = {}) {
+  const rid = String(rootId || '').trim()
+  const pName = clamp(String(provider || '').trim(), 64)
+  if (!rid) return { ok: false, error: '当前会话尚未绑定，无法调整协同水泡' }
+  if (!pName || pName === 'spawn' || pName === 'fork') {
+    return { ok: false, error: '无效的外部 Harness Provider 名称' }
+  }
+  return mutateChiefState((state) => {
+    const ws = ensureWorkspace(state, rid)
+    const cur = Array.isArray(ws.bubbleHarnesses) ? ws.bubbleHarnesses : []
+    if (joined) {
+      const entry = normalizeBubbleHarness({ provider: pName, label, role, joinedAt: Date.now() })
+      const next = cur.filter(item => item && item.provider !== pName)
+      next.push(entry)
+      ws.bubbleHarnesses = next.slice(-12)
+      pushAuditToWs(ws, {
+        kind: 'bubble_harness_join',
+        decision: 'allowed',
+        tool: pName,
+        reason: `将外部 Harness「${entry.label}」拖入协同作战水泡`,
+      }, rid)
+    } else {
+      ws.bubbleHarnesses = cur.filter(item => item && item.provider !== pName)
+      pushAuditToWs(ws, {
+        kind: 'bubble_harness_leave',
+        decision: 'allowed',
+        tool: pName,
+        reason: `将外部 Harness「${pName}」移出协同作战水泡`,
+      }, rid)
+    }
+    return { ok: true, bubbleHarnesses: ws.bubbleHarnesses.slice() }
+  })
+}
+
+export function setBubbleManualLock(rootId, { locked = false, reason = '' } = {}) {
+  const rid = String(rootId || '').trim()
+  if (!rid) return { ok: false, error: '当前会话尚未绑定' }
+  return mutateChiefState((state) => {
+    const ws = ensureWorkspace(state, rid)
+    ws.bubbleLock = {
+      manualLocked: Boolean(locked),
+      lockedAt: locked ? Date.now() : 0,
+      reason: locked ? clamp(reason || '手动锁定编队结构，防止工作中拆散', 120) : '',
+    }
+    pushAuditToWs(ws, {
+      kind: 'bubble_lock_set',
+      decision: 'allowed',
+      tool: 'bubble_lock',
+      reason: locked ? `锁定协同水泡结构：${ws.bubbleLock.reason}` : '解除协同水泡手动结构锁',
+    }, rid)
+    return { ok: true, bubbleLock: { ...ws.bubbleLock } }
   })
 }

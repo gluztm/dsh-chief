@@ -610,6 +610,110 @@ export async function togglePeerSessionLink(peerId, linked) {
     return value
   } catch (error) {
     patch({ error: String((error && error.message) || error) })
+    void loadChiefView(false)
+    return null
+  }
+}
+
+export async function toggleBubbleHarness(provider, joined, meta = {}) {
+  try {
+    const value = await call('chief/link', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId,
+        op: 'harness_toggle',
+        provider,
+        label: meta.label || '',
+        role: meta.role || '',
+        joined: Boolean(joined),
+      }),
+    })
+    patch({
+      notice: joined
+        ? bi(`🫧 已将 ${meta.label || provider} 拖入协同水泡`, `🫧 Added ${meta.label || provider} to Bubble`)
+        : bi(`🫧 已将 ${meta.label || provider} 移出协同水泡`, `🫧 Removed ${meta.label || provider} from Bubble`),
+    })
+    return value
+  } catch (error) {
+    patch({ error: String((error && error.message) || error) })
+    void loadChiefView(false)
+    return null
+  }
+}
+
+export async function toggleBubbleLock(locked, reason = '') {
+  try {
+    const value = await call('chief/link', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId,
+        op: 'bubble_lock',
+        locked: Boolean(locked),
+        reason,
+      }),
+    })
+    patch({
+      notice: locked
+        ? bi('🔒 协同水泡结构已锁死，禁止工作期间拆解成员', '🔒 Bubble structure locked while active')
+        : bi('🔓 已解除协同水泡结构锁定', '🔓 Bubble structure unlocked'),
+    })
+    return value
+  } catch (error) {
+    patch({ error: String((error && error.message) || error) })
+    void loadChiefView(false)
+    return null
+  }
+}
+
+export async function emergencyStopBubble() {
+  try {
+    const value = await call('chief/link', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId,
+        op: 'bubble_emergency_stop',
+      }),
+    })
+    patch({
+      notice: bi(
+        `⏹ 已急停解体并停止 ${(value && value.stoppedCount) || 0} 个在途执行，水泡结构已解锁`,
+        `⏹ Stopped ${(value && value.stoppedCount) || 0} active run(s) & unlocked Bubble`,
+      ),
+    })
+    return value
+  } catch (error) {
+    patch({ error: String((error && error.message) || error) })
+    void loadChiefView(false)
+    return null
+  }
+}
+
+export async function dispatchBubbleHarness(provider, text, label = '') {
+  try {
+    const value = await call('chief/link', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId,
+        op: 'harness_dispatch',
+        provider,
+        text,
+        label,
+      }),
+    })
+    patch({
+      notice: bi(
+        `⚡ 已向 @${provider} 派发外部协同任务，水泡已自动锁死保护`,
+        `⚡ Dispatched to @${provider}; Bubble structure auto-locked`,
+      ),
+    })
+    return value
+  } catch (error) {
+    patch({ error: String((error && error.message) || error) })
+    void loadChiefView(false)
     return null
   }
 }

@@ -36,6 +36,10 @@ const hostState = {
   subagentRootMap: new Map(),
   // Cached subagent roster rows keyed by root session id
   subagentTreeCache: new Map(),
+  // Dynamically discovered external Harness providers (codex / claude-code / acp / dsh-sdk)
+  detectedHarnessProviders: new Map(),
+  // In-flight external Harness activations tracked per root session for structural lock & emergency stop
+  activeBubbleRuns: new Map(),
   // Monotonic sequence counter for injected handover message envelopes
   handoffSeq: 0,
 }

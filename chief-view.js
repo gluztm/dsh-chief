@@ -28,7 +28,7 @@ import {
   summarizeLlmLedger,
 } from './chief-state.js'
 import { listChiefModels, callChiefLlm } from './chief-models.js'
-import { collectClusterPeerProgress, listPeerDirectory } from './chief-network.js'
+import { collectClusterPeerProgress, listPeerDirectory, computeBubbleState } from './chief-network.js'
 
 let idleAutoPilotHook = null
 
@@ -569,6 +569,7 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
     activeWork: getChiefActiveWork(rootId),
     llmLedger: summarizeLlmLedger(ownWs.llmLedger, effectiveConfig),
     alertEvents: (Array.isArray(ownWs.alertEvents) ? ownWs.alertEvents : []).slice(-12),
+    bubble: computeBubbleState(deps, rootId, finalState, directory),
     auditLog: (Array.isArray(ownWs.auditLog) ? ownWs.auditLog : []).slice(-50).reverse(),
   }
 }
