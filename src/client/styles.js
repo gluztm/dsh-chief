@@ -4670,19 +4670,21 @@ const CSS = `
     border-color: rgba(37, 99, 235, 0.34);
     color: #2563eb;
   }
-  @keyframes dnb-bubble-breathe {
-    0%, 100% { border-radius: 28px 34px 30px 32px / 24px 28px 26px 30px; }
-    50% { border-radius: 34px 26px 34px 28px / 30px 24px 32px 26px; }
-  }
   @keyframes dnb-bubble-shake {
     0%, 100% { transform: translateX(0); }
-    25% { transform: translateX(-4px); }
-    75% { transform: translateX(4px); }
+    20% { transform: translateX(-5px); }
+    45% { transform: translateX(5px); }
+    70% { transform: translateX(-3px); }
+    90% { transform: translateX(2px); }
+  }
+  @keyframes dnb-orb-pulse {
+    0%, 100% { opacity: 0.72; transform: scale(1); }
+    50% { opacity: 0.22; transform: scale(1.13); }
   }
   .dnb-bubble-stage {
     display: flex;
     flex-direction: column;
-    gap: 10px;
+    gap: 8px;
   }
   .dnb-bubble-bar {
     display: flex;
@@ -4728,110 +4730,209 @@ const CSS = `
     border-color: #ef4444 !important;
     color: #fee2e2 !important;
   }
-  .dnb-bubble-arena {
+  .dnb-bubble-tank {
     position: relative;
-    padding: 14px 12px 12px;
-    border-radius: 26px;
+    width: 100%;
+    border-radius: 18px;
+    overflow: hidden;
+    touch-action: none;
+    user-select: none;
     background:
-      radial-gradient(circle at 20% 20%, rgba(56, 189, 248, 0.10), transparent 55%),
-      radial-gradient(circle at 82% 80%, rgba(16, 185, 129, 0.08), transparent 52%),
-      rgba(15, 23, 42, 0.46);
-    border: 1.5px solid rgba(56, 189, 248, 0.32);
-    box-shadow: inset 0 0 24px rgba(56, 189, 248, 0.06);
+      radial-gradient(circle at 38% 48%, rgba(56, 189, 248, 0.11), transparent 62%),
+      radial-gradient(circle at 80% 78%, rgba(16, 185, 129, 0.07), transparent 55%),
+      rgba(9, 14, 26, 0.72);
+    border: 1.5px solid rgba(56, 189, 248, 0.28);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.08), inset 0 0 28px rgba(15, 23, 42, 0.65);
+    transition: border-color 0.2s ease, box-shadow 0.2s ease;
+  }
+  .dnb-bubble-tank[data-locked="1"] {
+    border-color: rgba(245, 158, 11, 0.54);
+    background:
+      radial-gradient(circle at 38% 48%, rgba(245, 158, 11, 0.10), transparent 62%),
+      rgba(15, 18, 28, 0.78);
+    box-shadow: inset 0 0 24px rgba(245, 158, 11, 0.10);
+  }
+  .dnb-bubble-tank[data-shake="1"] {
+    animation: dnb-bubble-shake 0.36s ease;
+  }
+  .dnb-bubble-fx {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 1;
+  }
+  .dnb-bubble-center-hub {
+    position: absolute;
+    left: 0;
+    top: 0;
+    width: 50px;
+    height: 50px;
+    border-radius: 50%;
+    z-index: 3;
+    pointer-events: none;
     display: flex;
     flex-direction: column;
-    gap: 10px;
-    transition: border-color 0.2s ease, box-shadow 0.2s ease, background-color 0.2s ease;
+    align-items: center;
+    justify-content: center;
+    gap: 1px;
+    background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.36), rgba(56, 189, 248, 0.26) 55%, rgba(14, 165, 233, 0.16) 100%);
+    border: 1.5px solid rgba(125, 211, 252, 0.62);
+    box-shadow: 0 0 16px rgba(56, 189, 248, 0.28), inset 0 1px 4px rgba(255, 255, 255, 0.35);
+    color: #e0f2fe;
   }
-  .dnb-bubble-membrane {
-    pointer-events: none;
+  .dnb-bubble-center-hub[data-locked="1"] {
+    background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.32), rgba(245, 158, 11, 0.26) 55%, rgba(217, 119, 6, 0.18) 100%);
+    border-color: rgba(251, 191, 36, 0.72);
+    box-shadow: 0 0 16px rgba(245, 158, 11, 0.28), inset 0 1px 4px rgba(255, 255, 255, 0.3);
+    color: #fef3c7;
+  }
+  .dnb-bubble-center-icon {
+    font-size: 13px;
+    line-height: 1;
+    font-weight: 800;
+  }
+  .dnb-bubble-center-count {
+    font-size: 9.5px;
+    line-height: 1;
+    font-weight: 700;
+    opacity: 0.92;
+  }
+  .dnb-orb {
     position: absolute;
-    inset: -3px;
-    border: 1px dashed rgba(56, 189, 248, 0.28);
-    border-radius: 28px;
-    animation: dnb-bubble-breathe 7s ease-in-out infinite;
-  }
-  .dnb-bubble-arena[data-locked="1"] {
-    border-color: rgba(245, 158, 11, 0.52);
+    left: 0;
+    top: 0;
+    border-radius: 50%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    padding: 5px 4px 4px;
+    text-align: center;
+    cursor: grab;
+    user-select: none;
+    touch-action: none;
+    will-change: transform;
     background:
-      radial-gradient(circle at 20% 20%, rgba(245, 158, 11, 0.08), transparent 55%),
-      rgba(15, 23, 42, 0.56);
-    box-shadow: inset 0 0 22px rgba(245, 158, 11, 0.08);
+      radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.38) 0%, rgba(255, 255, 255, 0.10) 24%, var(--orb-bg, rgba(56, 189, 248, 0.22)) 66%, rgba(255, 255, 255, 0.18) 100%);
+    border: 1.5px solid var(--orb-border, rgba(125, 211, 252, 0.6));
+    box-shadow:
+      inset 0 2px 6px rgba(255, 255, 255, 0.26),
+      inset 0 -4px 10px rgba(0, 0, 0, 0.28),
+      0 6px 16px rgba(0, 0, 0, 0.30);
+    backdrop-filter: blur(4px);
+    -webkit-backdrop-filter: blur(4px);
   }
-  .dnb-bubble-arena[data-locked="1"] .dnb-bubble-membrane {
-    animation: none;
-    border-style: solid;
-    border-width: 1.5px;
-    border-color: rgba(245, 158, 11, 0.38);
-    border-radius: 26px;
+  .dnb-orb:active {
+    cursor: grabbing;
   }
-  .dnb-bubble-arena[data-drop="1"] {
-    border-color: #38bdf8;
-    box-shadow: 0 0 0 3px rgba(56, 189, 248, 0.22), inset 0 0 28px rgba(56, 189, 248, 0.14);
+  .dnb-orb::before {
+    content: "";
+    position: absolute;
+    top: 12%;
+    left: 19%;
+    width: 28%;
+    height: 15%;
+    border-radius: 50%;
+    background: rgba(255, 255, 255, 0.42);
+    transform: rotate(-32deg);
+    pointer-events: none;
   }
-  .dnb-bubble-arena[data-shake="1"] {
-    animation: dnb-bubble-shake 0.34s ease;
+  .dnb-orb[data-kind="harness"],
+  .dnb-orb[data-kind="standby-harness"] {
+    border-style: dashed;
   }
-  .dnb-bubble-core {
-    position: relative;
-    z-index: 1;
+  .dnb-orb[data-running="1"]::after {
+    content: "";
+    position: absolute;
+    inset: -5px;
+    border-radius: 50%;
+    border: 1.5px solid var(--orb-dot, #38bdf8);
+    pointer-events: none;
+    animation: dnb-orb-pulse 1.8s ease-in-out infinite;
+  }
+  .dnb-orb[data-selected="1"] {
+    box-shadow:
+      0 0 0 2.5px var(--orb-dot, #38bdf8),
+      inset 0 2px 7px rgba(255, 255, 255, 0.32),
+      0 8px 20px rgba(0, 0, 0, 0.42);
+  }
+  .dnb-orb-top {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    height: 10px;
+    margin-bottom: 1px;
+  }
+  .dnb-orb-dot {
+    width: 6.5px;
+    height: 6.5px;
+    border-radius: 50%;
+    box-shadow: 0 0 6px currentColor;
+  }
+  .dnb-orb-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    line-height: 1.12;
+    color: var(--dnb-text);
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.45);
+    max-width: 100%;
+    overflow: hidden;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    word-break: break-all;
+  }
+  .dnb-orb-badge {
+    margin-top: 2px;
+    font-size: 8.5px;
+    font-weight: 700;
+    line-height: 1.1;
+    padding: 1px 5px;
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.56);
+    color: var(--orb-text, #e2e8f0);
+    border: 1px solid var(--orb-border, rgba(255, 255, 255, 0.22));
+    max-width: 92%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dnb-bubble-inspector {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 8px;
-    padding: 6px 10px;
-    border-radius: 999px;
-    background: rgba(56, 189, 248, 0.10);
-    border: 1px solid rgba(56, 189, 248, 0.26);
+    flex-wrap: wrap;
+    padding: 7px 10px;
+    border-radius: 12px;
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--dnb-border);
   }
-  .dnb-bubble-core-orb {
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    width: 18px;
-    height: 18px;
-    border-radius: 50%;
-    background: rgba(56, 189, 248, 0.22);
-    color: #7dd3fc;
-    font-size: 11px;
-    font-weight: 800;
+  .dnb-bubble-inspector[data-empty="0"] {
+    background: rgba(56, 189, 248, 0.06);
+    border-color: rgba(56, 189, 248, 0.26);
   }
-  .dnb-bubble-members {
-    position: relative;
-    z-index: 1;
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
-    gap: 8px;
-  }
-  .dnb-droplet {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    padding: 8px 10px;
-    border-radius: 16px;
-    background: var(--drop-bg, rgba(255, 255, 255, 0.05));
-    border: 1px solid var(--drop-border, var(--dnb-border));
-    box-shadow: 0 4px 12px rgba(0, 0, 0, 0.16);
-    transition: transform 0.15s ease, box-shadow 0.15s ease;
-  }
-  .dnb-droplet[draggable="true"] {
-    cursor: grab;
-  }
-  .dnb-droplet[draggable="true"]:hover {
-    transform: translateY(-1px);
-    box-shadow: 0 6px 16px rgba(0, 0, 0, 0.24);
-  }
-  .dnb-droplet[data-kind="harness"] {
-    border-style: dashed;
-  }
-  .dnb-droplet[data-running="1"] {
-    box-shadow: 0 0 0 1.5px var(--drop-dot, #38bdf8), 0 6px 16px rgba(56, 189, 248, 0.16);
-  }
-  .dnb-droplet-main {
+  .dnb-bubble-inspector-info {
     display: flex;
     align-items: center;
     gap: 6px;
+    flex: 1;
     min-width: 0;
+  }
+  .dnb-bubble-inspector-sub {
+    font-size: 11px;
+    color: var(--dnb-text-3);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .dnb-bubble-inspector-acts {
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+    flex-wrap: wrap;
   }
   .dnb-droplet-dot {
     width: 8px;
@@ -4839,86 +4940,24 @@ const CSS = `
     border-radius: 50%;
     flex-shrink: 0;
   }
-  .dnb-droplet-name {
-    font-size: 12px;
-    font-weight: 700;
-    color: var(--dnb-text);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-    flex: 1;
-  }
   .dnb-droplet-kind {
     font-size: 9.5px;
     font-weight: 700;
     padding: 1px 6px;
     border-radius: 999px;
     background: rgba(255, 255, 255, 0.07);
-    color: var(--drop-text, var(--dnb-text-2));
-    border: 1px solid var(--drop-border, var(--dnb-border));
+    color: var(--dnb-text-2);
+    border: 1px solid var(--dnb-border);
     flex-shrink: 0;
   }
-  .dnb-droplet-sub {
-    font-size: 10.5px;
-    color: var(--dnb-text-2);
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .dnb-droplet-acts {
-    display: flex;
-    align-items: center;
-    gap: 5px;
-    margin-top: 2px;
-    flex-wrap: wrap;
-  }
   .dnb-bubble-dispatch-bar {
-    position: relative;
-    z-index: 2;
     display: flex;
     align-items: center;
     gap: 6px;
-    padding-top: 4px;
-  }
-  .dnb-bubble-pool {
-    padding: 9px 10px;
-    border-radius: 12px;
-    border: 1px dashed var(--dnb-border);
-    background: rgba(255, 255, 255, 0.025);
-    display: flex;
-    flex-direction: column;
-    gap: 7px;
-  }
-  .dnb-bubble-pool[data-drop="1"] {
-    border-color: rgba(245, 158, 11, 0.65);
-    background: rgba(245, 158, 11, 0.07);
-  }
-  .dnb-bubble-pool-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    font-size: 11px;
-    font-weight: 600;
-    color: var(--dnb-text-2);
-  }
-  .dnb-bubble-pool-list {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 7px;
-  }
-  .dnb-droplet-standby {
-    flex-direction: row;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 5px 8px;
-    border-radius: 999px;
   }
   .dnb-bubble-catalog {
-    margin-top: 2px;
     padding: 7px 9px;
-    border-radius: 9px;
+    border-radius: 10px;
     background: rgba(0, 0, 0, 0.22);
     border: 1px solid var(--dnb-border);
     display: flex;
@@ -4930,21 +4969,48 @@ const CSS = `
     align-items: center;
     gap: 8px;
   }
-  html[data-ds-theme-source="light"] .dnb-bubble-arena,
-  html[data-ds-theme="light"] .dnb-bubble-arena,
-  [data-ds-theme-source="light"] .dnb-bubble-arena {
-    background: radial-gradient(circle at 20% 20%, rgba(14, 165, 233, 0.08), transparent 60%), #f0f9ff;
+  html[data-ds-theme-source="light"] .dnb-bubble-tank,
+  html[data-ds-theme="light"] .dnb-bubble-tank,
+  [data-ds-theme-source="light"] .dnb-bubble-tank {
+    background:
+      radial-gradient(circle at 38% 48%, rgba(14, 165, 233, 0.11), transparent 62%),
+      linear-gradient(180deg, #f0f9ff 0%, #f8fafc 100%);
     border-color: rgba(2, 132, 199, 0.36);
+    box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.8), inset 0 0 24px rgba(14, 165, 233, 0.08);
   }
-  html[data-ds-theme-source="light"] .dnb-bubble-arena[data-locked="1"],
-  html[data-ds-theme="light"] .dnb-bubble-arena[data-locked="1"],
-  [data-ds-theme-source="light"] .dnb-bubble-arena[data-locked="1"] {
-    background: radial-gradient(circle at 20% 20%, rgba(217, 119, 6, 0.08), transparent 60%), #fffbeb;
+  html[data-ds-theme-source="light"] .dnb-bubble-tank[data-locked="1"],
+  html[data-ds-theme="light"] .dnb-bubble-tank[data-locked="1"],
+  [data-ds-theme-source="light"] .dnb-bubble-tank[data-locked="1"] {
+    background: radial-gradient(circle at 38% 48%, rgba(217, 119, 6, 0.09), transparent 62%), #fffbeb;
     border-color: rgba(217, 119, 6, 0.48);
   }
-  html[data-ds-theme-source="light"] .dnb-bubble-pool,
-  html[data-ds-theme="light"] .dnb-bubble-pool,
-  [data-ds-theme-source="light"] .dnb-bubble-pool {
+  html[data-ds-theme-source="light"] .dnb-bubble-center-hub,
+  html[data-ds-theme="light"] .dnb-bubble-center-hub,
+  [data-ds-theme-source="light"] .dnb-bubble-center-hub {
+    color: #0369a1;
+  }
+  html[data-ds-theme-source="light"] .dnb-orb,
+  html[data-ds-theme="light"] .dnb-orb,
+  [data-ds-theme-source="light"] .dnb-orb {
+    box-shadow:
+      inset 0 2px 6px rgba(255, 255, 255, 0.85),
+      inset 0 -3px 8px rgba(15, 23, 42, 0.10),
+      0 5px 14px rgba(15, 23, 42, 0.12);
+  }
+  html[data-ds-theme-source="light"] .dnb-orb-label,
+  html[data-ds-theme="light"] .dnb-orb-label,
+  [data-ds-theme-source="light"] .dnb-orb-label {
+    color: #0f172a;
+    text-shadow: 0 1px 1px rgba(255, 255, 255, 0.85);
+  }
+  html[data-ds-theme-source="light"] .dnb-orb-badge,
+  html[data-ds-theme="light"] .dnb-orb-badge,
+  [data-ds-theme-source="light"] .dnb-orb-badge {
+    background: rgba(255, 255, 255, 0.86);
+  }
+  html[data-ds-theme-source="light"] .dnb-bubble-inspector,
+  html[data-ds-theme="light"] .dnb-bubble-inspector,
+  [data-ds-theme-source="light"] .dnb-bubble-inspector {
     background: rgba(15, 23, 42, 0.03);
   }
   html[data-ds-theme-source="light"] .dnb-bubble-catalog,

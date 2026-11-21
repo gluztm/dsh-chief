@@ -26,6 +26,618 @@ import {
 } from '../api.js'
 import { Icon, Switch, AccCard } from '../components/common.js'
 
+function hashStrSeed(str) {
+  let hVal = 2166136261
+  const s = String(str || '')
+  for (let i = 0; i < s.length; i += 1) {
+    hVal ^= s.charCodeAt(i)
+    hVal = Math.imul(hVal, 16777619)
+  }
+  return (hVal >>> 0) % 10000
+}
+
+function clampNum(v, lo, hi) {
+  return v < lo ? lo : (v > hi ? hi : v)
+}
+
+function computeTankGeometry(width, height, hasOutside) {
+  const W = Math.max(280, Number(width) || 540)
+  const H = Math.max(280, Number(height) || 336)
+  const cx = hasOutside ? Math.round(W * 0.39) : Math.round(W * 0.5)
+  const cy = Math.round(H * 0.5)
+  const R = hasOutside
+    ? Math.max(92, Math.min(H * 0.43, W * 0.34))
+    : Math.max(106, Math.min(H * 0.44, W * 0.40))
+  return { W, H, cx, cy, R, hubR: 25, hasOutside }
+}
+
+function shortOrbLabel(name, kind) {
+  const raw = String(name || '').trim()
+  if (!raw) return kind === 'lead' ? '主对话' : '会话'
+  if (raw.length <= 7) return raw
+  return raw.slice(0, 6) + '…'
+}
+
+function buildBubbleOrbs({
+  peers,
+  enrolledHarnesses,
+  standbySessions,
+  availableHarnesses,
+  selfRootId,
+  otherSessions,
+  bubbleLocked,
+}) {
+  const list = []
+  for (const peer of peers) {
+    if (!peer) continue
+    const isLinkedPeer = peer.kind === 'peer-session'
+    const peerRootId = isLinkedPeer ? (peer.id || peer.rootSessionId) : (peer.rootSessionId || selfRootId)
+    const col = colorForRootSession(peerRootId, selfRootId)
+    const linkedSessObj = isLinkedPeer ? otherSessions.find(s => s && s.id === peerRootId) : null
+    const subText = peer.taskTitle || peer.progressSummary || (peer.kind === 'lead' ? '当前主指挥核心会话' : '泡内协同成员')
+    const r = peer.kind === 'lead' ? 35 : (isLinkedPeer ? 31 : 27)
+    const tagText = peer.kind === 'lead' ? '主' : (isLinkedPeer ? '窗' : '子')
+    list.push({
+      uid: 'peer:' + peer.key,
+      zone: 'inside',
+      kind: peer.kind,
+      label: peer.name || (peer.kind === 'lead' ? '主对话' : shortSession(peer.id)),
+      shortLabel: shortOrbLabel(peer.name, peer.kind),
+      badge: tagText,
+      kindName: peer.kind === 'lead' ? bi('主对话', 'Lead') : (isLinkedPeer ? bi('联动窗口', 'Linked') : bi('子代理', 'Subagent')),
+      subText,
+      r,
+      running: peer.status === 'running',
+      canLeave: isLinkedPeer,
+      canJoin: false,
+      draggable: !bubbleLocked || isLinkedPeer,
+      accent: col,
+      raw: peer,
+      linkedSessObj,
+      peerRootId,
+    })
+  }
+  for (const hItem of enrolledHarnesses) {
+    if (!hItem || !hItem.provider) continue
+    const acc = hItem.accent || '#38bdf8'
+    const roleText = hItem.role || hItem.roleHint || bi('外部独立执行进程', 'External Harness')
+    list.push({
+      uid: 'harness:' + hItem.provider,
+      zone: 'inside',
+      kind: 'harness',
+      label: hItem.label || hItem.provider,
+      shortLabel: shortOrbLabel(hItem.label || hItem.provider, 'harness'),
+      badge: hItem.provider.length <= 7 ? hItem.provider : '外挂',
+      kindName: hItem.installed ? 'Harness' : bi('未安装后端', 'Not Installed'),
+      subText: `${hItem.provider} · ${roleText}`,
+      r: 32,
+      running: Boolean(hItem.running),
+      canLeave: true,
+      canJoin: false,
+      draggable: true,
+      accent: {
+        dot: acc,
+        bg: `${acc}26`,
+        border: `${acc}7a`,
+        text: acc,
+      },
+      raw: hItem,
+    })
+  }
+  for (const sess of standbySessions) {
+    if (!sess || !sess.id) continue
+    const col = colorForRootSession(sess.id, selfRootId)
+    list.push({
+      uid: 'standby-sess:' + sess.id,
+      zone: 'outside',
+      kind: 'standby-session',
+      label: sess.name || shortSession(sess.id),
+      shortLabel: shortOrbLabel(sess.name || shortSession(sess.id), 'peer-session'),
+      badge: '待命',
+      kindName: bi('独立会话', 'Session'),
+      subText: sess.objective || sess.progressSummary || bi('未加入水泡的独立会话，可直接抓入水泡', 'Standalone session ready to drag into Bubble'),
+      r: 29,
+      running: sess.status === 'running',
+      canLeave: false,
+      canJoin: true,
+      draggable: true,
+      accent: col,
+      raw: sess,
+    })
+  }
+  for (const hItem of availableHarnesses) {
+    if (!hItem || !hItem.provider) continue
+    const acc = hItem.accent || '#38bdf8'
+    const roleText = hItem.roleHint || hItem.role || bi('外部独立执行进程', 'External Harness')
+    list.push({
+      uid: 'standby-harness:' + hItem.provider,
+      zone: 'outside',
+      kind: 'standby-harness',
+      label: hItem.label || hItem.provider,
+      shortLabel: shortOrbLabel(hItem.label || hItem.provider, 'harness'),
+      badge: hItem.provider.length <= 7 ? hItem.provider : '外挂',
+      kindName: 'Harness',
+      subText: `${hItem.provider} · ${roleText}`,
+      r: 30,
+      running: false,
+      canLeave: false,
+      canJoin: true,
+      draggable: true,
+      accent: {
+        dot: acc,
+        bg: `${acc}24`,
+        border: `${acc}75`,
+        text: acc,
+      },
+      raw: hItem,
+    })
+  }
+  return list
+}
+
+function initialBodyPos(orb, idxInZone, countInZone, geo) {
+  const seed = hashStrSeed(orb.uid)
+  const baseAngle = ((idxInZone + 0.5) / Math.max(1, countInZone)) * Math.PI * 2 + (seed % 100) * 0.01
+  const velAngle = baseAngle + 1.1
+  const spd = orb.running ? 44 : 28
+  if (orb.zone === 'inside') {
+    const orbit = clampNum(geo.R * 0.54, geo.hubR + orb.r + 6, Math.max(geo.hubR + orb.r + 8, geo.R - orb.r - 6))
+    return {
+      x: geo.cx + Math.cos(baseAngle) * orbit,
+      y: geo.cy + Math.sin(baseAngle) * orbit,
+      vx: Math.cos(velAngle) * spd,
+      vy: Math.sin(velAngle) * spd,
+      seed,
+    }
+  }
+  const minX = geo.cx + geo.R + orb.r + 16
+  const maxX = Math.max(minX + 10, geo.W - orb.r - 12)
+  const colSpan = Math.max(12, maxX - minX)
+  const rx = minX + ((idxInZone % 2 === 0 ? 0.35 : 0.72) * colSpan)
+  const ry = clampNum(((idxInZone + 0.5) / Math.max(1, countInZone)) * (geo.H - 40) + 20, orb.r + 12, geo.H - orb.r - 12)
+  return {
+    x: clampNum(rx, orb.r + 10, geo.W - orb.r - 10),
+    y: ry,
+    vx: Math.cos(velAngle) * spd,
+    vy: Math.sin(velAngle) * spd,
+    seed,
+  }
+}
+
+function pushRipple(ripples, x, y, maxR, color) {
+  if (ripples.length > 26) ripples.shift()
+  ripples.push({ x, y, r: 4, maxR: maxR || 36, alpha: 0.65, color: color || '#38bdf8' })
+}
+
+function syncPhysicsBodies(bodiesMap, orbs, geo, ripples) {
+  const activeUids = new Set(orbs.map(o => o.uid))
+  for (const key of bodiesMap.keys()) {
+    if (!activeUids.has(key)) bodiesMap.delete(key)
+  }
+  const insideOrbs = orbs.filter(o => o.zone === 'inside')
+  const outsideOrbs = orbs.filter(o => o.zone === 'outside')
+  orbs.forEach((orb) => {
+    const prev = bodiesMap.get(orb.uid)
+    if (!prev) {
+      const idx = orb.zone === 'inside'
+        ? insideOrbs.findIndex(o => o.uid === orb.uid)
+        : outsideOrbs.findIndex(o => o.uid === orb.uid)
+      const cnt = orb.zone === 'inside' ? insideOrbs.length : outsideOrbs.length
+      const init = initialBodyPos(orb, idx, cnt, geo)
+      bodiesMap.set(orb.uid, {
+        ...init,
+        uid: orb.uid,
+        zone: orb.zone,
+        r: orb.r,
+        sx: 1,
+        sy: 1,
+        hovered: false,
+        running: orb.running,
+        color: orb.accent.dot,
+      })
+      return
+    }
+    if (prev.zone !== orb.zone) {
+      pushRipple(ripples, prev.x, prev.y, orb.r + 28, orb.accent.dot)
+    }
+    prev.zone = orb.zone
+    prev.r = orb.r
+    prev.running = orb.running
+    prev.color = orb.accent.dot
+  })
+}
+
+function applySquash(body, nx, ny, impact) {
+  const k = clampNum(impact / 75, 0.05, 0.16)
+  if (Math.abs(nx) >= Math.abs(ny)) {
+    body.sx = 1 - k
+    body.sy = 1 + k
+  } else {
+    body.sx = 1 + k
+    body.sy = 1 - k
+  }
+}
+
+function stepBubblePhysics(bodiesMap, orbs, geo, { dt, tNow, drag, paused, locked, ripples }) {
+  for (let i = ripples.length - 1; i >= 0; i -= 1) {
+    const rp = ripples[i]
+    rp.r += 58 * dt
+    rp.alpha -= 1.05 * dt
+    if (rp.alpha <= 0.01 || rp.r >= rp.maxR) ripples.splice(i, 1)
+  }
+
+  const bodies = orbs.map(o => bodiesMap.get(o.uid)).filter(Boolean)
+  if (paused) {
+    for (const b of bodies) {
+      b.sx += (1 - b.sx) * Math.min(1, dt * 14)
+      b.sy += (1 - b.sy) * Math.min(1, dt * 14)
+    }
+    return
+  }
+
+  const orbByUid = new Map(orbs.map(o => [o.uid, o]))
+  for (const b of bodies) {
+    const isDragged = drag && drag.uid === b.uid && drag.moved
+    if (isDragged) {
+      const orbMeta = orbByUid.get(b.uid)
+      let nx = drag.x
+      let ny = drag.y
+      // Elastic lock barrier while locked: stretch slightly against rim but prevent escape/breach
+      if (locked && orbMeta) {
+        const dx = nx - geo.cx
+        const dy = ny - geo.cy
+        const dist = Math.hypot(dx, dy) || 0.001
+        if (b.zone === 'inside') {
+          const maxD = Math.max(8, geo.R - b.r - 2)
+          if (dist > maxD) {
+            const extra = (dist - maxD) * 0.18
+            nx = geo.cx + (dx / dist) * (maxD + Math.min(8, extra))
+            ny = geo.cy + (dy / dist) * (maxD + Math.min(8, extra))
+          }
+        } else {
+          const minD = geo.R + b.r + 4
+          if (dist < minD) {
+            const extra = (minD - dist) * 0.18
+            nx = geo.cx + (dx / dist) * Math.max(8, minD - Math.min(8, extra))
+            ny = geo.cy + (dy / dist) * Math.max(8, minD - Math.min(8, extra))
+          }
+        }
+      }
+      b.x = clampNum(nx, b.r + 4, geo.W - b.r - 4)
+      b.y = clampNum(ny, b.r + 4, geo.H - b.r - 4)
+      b.sx = 1.07
+      b.sy = 0.94
+      continue
+    }
+
+    if (b.hovered) {
+      b.vx *= Math.pow(0.08, dt)
+      b.vy *= Math.pow(0.08, dt)
+    } else {
+      const swirlX = Math.sin(tNow * 0.95 + b.seed) * 16
+      const swirlY = Math.cos(tNow * 0.82 + b.seed * 1.37) * 16
+      b.vx += swirlX * dt
+      b.vy += swirlY * dt
+      const spd = Math.hypot(b.vx, b.vy) || 0.001
+      const minSpd = b.running ? 30 : 18
+      const maxSpd = b.running ? 66 : 46
+      if (spd > maxSpd * 1.6) {
+        const damp = Math.pow(0.18, dt)
+        b.vx *= damp
+        b.vy *= damp
+      } else if (spd > maxSpd) {
+        const s = maxSpd / spd
+        b.vx *= s
+        b.vy *= s
+      } else if (spd < minSpd) {
+        const s = minSpd / spd
+        b.vx *= s
+        b.vy *= s
+      }
+    }
+
+    b.x += b.vx * dt
+    b.y += b.vy * dt
+
+    if (b.zone === 'inside') {
+      // Keep clear of central DSH Chief hub
+      const hdx = b.x - geo.cx
+      const hdy = b.y - geo.cy
+      const hDist = Math.hypot(hdx, hdy) || 0.001
+      const minHubDist = geo.hubR + b.r + 5
+      if (hDist < minHubDist) {
+        const nx = hdx / hDist
+        const ny = hdy / hDist
+        b.x = geo.cx + nx * minHubDist
+        b.y = geo.cy + ny * minHubDist
+        const vn = b.vx * nx + b.vy * ny
+        if (vn < 0) {
+          b.vx -= 1.88 * vn * nx
+          b.vy -= 1.88 * vn * ny
+          applySquash(b, nx, ny, Math.abs(vn))
+        }
+      }
+
+      // Bounce off inner membrane of big Bubble
+      const dx = b.x - geo.cx
+      const dy = b.y - geo.cy
+      const dist = Math.hypot(dx, dy) || 0.001
+      const maxDist = Math.max(8, geo.R - b.r - 4)
+      if (dist > maxDist) {
+        const nx = dx / dist
+        const ny = dy / dist
+        b.x = geo.cx + nx * maxDist
+        b.y = geo.cy + ny * maxDist
+        const vn = b.vx * nx + b.vy * ny
+        if (vn > 0) {
+          b.vx -= 1.9 * vn * nx
+          b.vy -= 1.9 * vn * ny
+          if (vn > 15) {
+            applySquash(b, nx, ny, vn)
+            pushRipple(ripples, geo.cx + nx * (geo.R - 3), geo.cy + ny * (geo.R - 3), 26, locked ? '#f59e0b' : b.color)
+          }
+        }
+      }
+    } else {
+      // Outer tank wall reflection
+      const minX = b.r + 8
+      const maxX = Math.max(minX + 4, geo.W - b.r - 8)
+      const minY = b.r + 8
+      const maxY = Math.max(minY + 4, geo.H - b.r - 8)
+      if (b.x < minX) {
+        b.x = minX
+        if (b.vx < 0) {
+          const imp = -b.vx
+          b.vx = imp * 0.92
+          if (imp > 15) { applySquash(b, 1, 0, imp); pushRipple(ripples, 8, b.y, 24, b.color) }
+        }
+      } else if (b.x > maxX) {
+        b.x = maxX
+        if (b.vx > 0) {
+          const imp = b.vx
+          b.vx = -imp * 0.92
+          if (imp > 15) { applySquash(b, 1, 0, imp); pushRipple(ripples, geo.W - 8, b.y, 24, b.color) }
+        }
+      }
+      if (b.y < minY) {
+        b.y = minY
+        if (b.vy < 0) {
+          const imp = -b.vy
+          b.vy = imp * 0.92
+          if (imp > 15) { applySquash(b, 0, 1, imp); pushRipple(ripples, b.x, 8, 24, b.color) }
+        }
+      } else if (b.y > maxY) {
+        b.y = maxY
+        if (b.vy > 0) {
+          const imp = b.vy
+          b.vy = -imp * 0.92
+          if (imp > 15) { applySquash(b, 0, 1, imp); pushRipple(ripples, b.x, geo.H - 8, 24, b.color) }
+        }
+      }
+
+      // Bounce off exterior membrane of big Bubble
+      const dx = b.x - geo.cx
+      const dy = b.y - geo.cy
+      const dist = Math.hypot(dx, dy) || 0.001
+      const minOuter = geo.R + b.r + 8
+      if (dist < minOuter) {
+        const nx = dx / dist
+        const ny = dy / dist
+        b.x = geo.cx + nx * minOuter
+        b.y = geo.cy + ny * minOuter
+        const vn = b.vx * nx + b.vy * ny
+        if (vn < 0) {
+          b.vx -= 1.9 * vn * nx
+          b.vy -= 1.9 * vn * ny
+          if (-vn > 14) {
+            applySquash(b, nx, ny, -vn)
+            pushRipple(ripples, geo.cx + nx * (geo.R + 2), geo.cy + ny * (geo.R + 2), 26, locked ? '#f59e0b' : b.color)
+          }
+        }
+      }
+    }
+
+    b.sx += (1 - b.sx) * Math.min(1, dt * 11)
+    b.sy += (1 - b.sy) * Math.min(1, dt * 11)
+  }
+
+  // Pairwise elastic orb-to-orb collisions within each zone
+  for (let i = 0; i < bodies.length; i += 1) {
+    const a = bodies[i]
+    for (let j = i + 1; j < bodies.length; j += 1) {
+      const b = bodies[j]
+      if (a.zone !== b.zone) continue
+      const aDragged = drag && drag.uid === a.uid && drag.moved
+      const bDragged = drag && drag.uid === b.uid && drag.moved
+      const dx = b.x - a.x
+      const dy = b.y - a.y
+      const dist = Math.hypot(dx, dy) || 0.001
+      const minD = a.r + b.r + 4
+      if (dist < minD) {
+        const nx = dx / dist
+        const ny = dy / dist
+        const overlap = minD - dist
+        if (aDragged && !bDragged) {
+          b.x += nx * overlap
+          b.y += ny * overlap
+        } else if (bDragged && !aDragged) {
+          a.x -= nx * overlap
+          a.y -= ny * overlap
+        } else {
+          a.x -= nx * overlap * 0.5
+          a.y -= ny * overlap * 0.5
+          b.x += nx * overlap * 0.5
+          b.y += ny * overlap * 0.5
+        }
+        const rvx = b.vx - a.vx
+        const rvy = b.vy - a.vy
+        const relVel = rvx * nx + rvy * ny
+        if (relVel < 0) {
+          const impulse = -0.92 * relVel
+          if (!aDragged) {
+            a.vx -= impulse * nx
+            a.vy -= impulse * ny
+          }
+          if (!bDragged) {
+            b.vx += impulse * nx
+            b.vy += impulse * ny
+          }
+          if (-relVel > 16) {
+            applySquash(a, nx, ny, -relVel)
+            applySquash(b, nx, ny, -relVel)
+            pushRipple(ripples, a.x + nx * a.r, a.y + ny * a.r, 20, b.color)
+          }
+        }
+      }
+    }
+  }
+}
+
+function drawBubbleTankCanvas(ctx, dpr, geo, bodiesMap, orbs, { tNow, locked, drag, paused, ripples, isLight }) {
+  if (!ctx) return
+  ctx.save()
+  ctx.scale(dpr, dpr)
+  ctx.clearRect(0, 0, geo.W, geo.H)
+
+  // Subtle ambient tank micro-particles
+  for (let i = 0; i < 12; i += 1) {
+    const px = ((i * 97 + tNow * (paused ? 0 : (5 + (i % 3) * 2))) % (geo.W - 20)) + 10
+    const py = ((i * 53 + Math.sin(tNow * 0.7 + i) * 14 + geo.H) % (geo.H - 20)) + 10
+    ctx.beginPath()
+    ctx.arc(px, py, (i % 3) + 1.1, 0, Math.PI * 2)
+    ctx.fillStyle = isLight ? 'rgba(2, 132, 199, 0.12)' : 'rgba(125, 211, 252, 0.12)'
+    ctx.fill()
+  }
+
+  // Standby zone watermark label when outside pool exists
+  if (geo.hasOutside) {
+    ctx.save()
+    ctx.font = '600 10.5px "Microsoft YaHei UI", sans-serif'
+    ctx.fillStyle = isLight ? 'rgba(71, 85, 105, 0.6)' : 'rgba(148, 163, 184, 0.52)'
+    ctx.textAlign = 'right'
+    ctx.fillText('外围待命域 · 直接拖入左泡', geo.W - 14, 22)
+    ctx.restore()
+  }
+
+  // Big organic soap bubble or amber crystallization lock shell
+  const grad = ctx.createRadialGradient(
+    geo.cx - geo.R * 0.28,
+    geo.cy - geo.R * 0.30,
+    geo.R * 0.08,
+    geo.cx,
+    geo.cy,
+    geo.R,
+  )
+  if (locked) {
+    grad.addColorStop(0, isLight ? 'rgba(251, 191, 36, 0.14)' : 'rgba(245, 158, 11, 0.13)')
+    grad.addColorStop(0.72, isLight ? 'rgba(245, 158, 11, 0.06)' : 'rgba(217, 119, 6, 0.07)')
+    grad.addColorStop(1, isLight ? 'rgba(217, 119, 6, 0.20)' : 'rgba(245, 158, 11, 0.24)')
+  } else {
+    grad.addColorStop(0, isLight ? 'rgba(56, 189, 248, 0.12)' : 'rgba(56, 189, 248, 0.15)')
+    grad.addColorStop(0.68, isLight ? 'rgba(14, 165, 233, 0.05)' : 'rgba(14, 165, 233, 0.06)')
+    grad.addColorStop(1, isLight ? 'rgba(16, 185, 129, 0.16)' : 'rgba(56, 189, 248, 0.22)')
+  }
+
+  const steps = 72
+  ctx.beginPath()
+  for (let i = 0; i <= steps; i += 1) {
+    const a = (i / steps) * Math.PI * 2
+    const wobble = (locked || paused)
+      ? 0
+      : (Math.sin(a * 3 + tNow * 1.55) * 2.1 + Math.cos(a * 5 - tNow * 2.05) * 1.3)
+    const r = geo.R + wobble
+    const px = geo.cx + Math.cos(a) * r
+    const py = geo.cy + Math.sin(a) * r
+    if (i === 0) ctx.moveTo(px, py)
+    else ctx.lineTo(px, py)
+  }
+  ctx.closePath()
+  ctx.fillStyle = grad
+  ctx.fill()
+
+  ctx.lineWidth = locked ? 2.4 : 1.8
+  ctx.strokeStyle = locked
+    ? (isLight ? 'rgba(217, 119, 6, 0.72)' : 'rgba(251, 191, 36, 0.72)')
+    : (isLight ? 'rgba(2, 132, 199, 0.56)' : 'rgba(103, 232, 249, 0.56)')
+  ctx.stroke()
+
+  if (locked) {
+    // Secondary dashed outer lock-shield ring
+    ctx.save()
+    ctx.setLineDash([7, 5])
+    ctx.lineWidth = 1.2
+    ctx.strokeStyle = isLight ? 'rgba(217, 119, 6, 0.44)' : 'rgba(245, 158, 11, 0.45)'
+    ctx.beginPath()
+    ctx.arc(geo.cx, geo.cy, geo.R + 5, 0, Math.PI * 2)
+    ctx.stroke()
+    ctx.restore()
+  } else {
+    // Specular soap-film highlight arc
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(geo.cx, geo.cy, geo.R - 6, -Math.PI * 0.82, -Math.PI * 0.48)
+    ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.75)' : 'rgba(224, 242, 254, 0.42)'
+    ctx.lineWidth = 2.6
+    ctx.lineCap = 'round'
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  // Active energy streams connecting working inside orbs to Chief center hub
+  for (const orb of orbs) {
+    if (orb.zone !== 'inside' || !orb.running) continue
+    const b = bodiesMap.get(orb.uid)
+    if (!b) continue
+    ctx.save()
+    ctx.setLineDash([4, 4])
+    ctx.lineDashOffset = -(tNow * 30)
+    ctx.lineWidth = 1.4
+    ctx.strokeStyle = orb.accent.dot
+    ctx.globalAlpha = 0.55
+    ctx.beginPath()
+    ctx.moveTo(geo.cx, geo.cy)
+    ctx.lineTo(b.x, b.y)
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  // Boundary magnetic fuse / lock block halo when dragging an orb near Bubble rim
+  if (drag && drag.moved && drag.uid) {
+    const b = bodiesMap.get(drag.uid)
+    const meta = orbs.find(o => o.uid === drag.uid)
+    if (b && meta && (meta.canJoin || meta.canLeave)) {
+      const dx = b.x - geo.cx
+      const dy = b.y - geo.cy
+      const dist = Math.hypot(dx, dy) || 0.001
+      if (Math.abs(dist - geo.R) < 48) {
+        const angle = Math.atan2(dy, dx)
+        ctx.save()
+        ctx.beginPath()
+        ctx.arc(geo.cx, geo.cy, geo.R + 1, angle - 0.36, angle + 0.36)
+        ctx.lineWidth = 4
+        ctx.lineCap = 'round'
+        ctx.strokeStyle = locked ? '#ef4444' : '#38bdf8'
+        ctx.stroke()
+        ctx.restore()
+      }
+    }
+  }
+
+  // Expanding bounce/splash ripples
+  for (const rp of ripples) {
+    ctx.save()
+    ctx.beginPath()
+    ctx.arc(rp.x, rp.y, rp.r, 0, Math.PI * 2)
+    ctx.strokeStyle = rp.color
+    ctx.globalAlpha = Math.max(0, rp.alpha)
+    ctx.lineWidth = 1.6
+    ctx.stroke()
+    ctx.restore()
+  }
+
+  ctx.restore()
+}
+
 export function PeersTab({ view }) {
   React.useEffect(() => {
     void loadChiefView(false)
@@ -148,13 +760,28 @@ export function PeersTab({ view }) {
   const standbySessions = otherSessions.filter(s => s && !s.linked)
   const totalInBubble = peers.length + enrolledHarnesses.length
 
-  const [dragPayload, setDragPayload] = React.useState(null)
-  const [dropActive, setDropActive] = React.useState('')
   const [confirmStop, setConfirmStop] = React.useState(false)
   const [dispatchTarget, setDispatchTarget] = React.useState('')
   const [dispatchText, setDispatchText] = React.useState('')
   const [showCatalog, setShowCatalog] = React.useState(false)
   const [lockShake, setLockShake] = React.useState(false)
+  const [selectedUid, setSelectedUid] = React.useState('')
+  const [physicsPaused, setPhysicsPaused] = React.useState(() => {
+    try {
+      return Boolean(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
+    } catch {
+      return false
+    }
+  })
+
+  const tankRef = React.useRef(null)
+  const canvasRef = React.useRef(null)
+  const bodiesRef = React.useRef(new Map())
+  const nodeElsRef = React.useRef(new Map())
+  const ripplesRef = React.useRef([])
+  const dragRef = React.useRef(null)
+  const tankSizeRef = React.useRef({ w: 540, h: 338 })
+  const latestSimRef = React.useRef({ orbs: [], locked: false, paused: false, hasOutside: false, tankHeight: 338 })
 
   React.useEffect(() => {
     if (!confirmStop) return undefined
@@ -168,8 +795,121 @@ export function PeersTab({ view }) {
     return () => clearTimeout(timer)
   }, [lockShake])
 
+  const hasOutside = standbySessions.length > 0 || availableHarnesses.length > 0
+  const orbs = buildBubbleOrbs({
+    peers,
+    enrolledHarnesses,
+    standbySessions,
+    availableHarnesses,
+    selfRootId,
+    otherSessions,
+    bubbleLocked,
+  })
+  const tankHeight = orbs.length > 6 ? 372 : 338
+  const curW = (tankRef.current && tankRef.current.clientWidth) || tankSizeRef.current.w || 540
+  const geoNow = computeTankGeometry(curW, tankHeight, hasOutside)
+  syncPhysicsBodies(bodiesRef.current, orbs, geoNow, ripplesRef.current)
+  latestSimRef.current = {
+    orbs,
+    locked: bubbleLocked,
+    paused: physicsPaused,
+    hasOutside,
+    tankHeight,
+  }
+
+  React.useEffect(() => {
+    if (selectedUid && !orbs.some(o => o.uid === selectedUid)) {
+      setSelectedUid('')
+    }
+  }, [selectedUid, orbs.length])
+
+  React.useEffect(() => {
+    const tankEl = tankRef.current
+    if (!tankEl) return undefined
+    let ro = null
+    if (typeof ResizeObserver !== 'undefined') {
+      ro = new ResizeObserver((entries) => {
+        for (const ent of entries) {
+          const nw = Math.round(ent.contentRect.width || tankEl.clientWidth || 540)
+          if (nw > 120) tankSizeRef.current.w = nw
+        }
+      })
+      ro.observe(tankEl)
+    }
+
+    let rafId = 0
+    let lastTs = performance.now()
+    const startTs = lastTs
+
+    const frame = (now) => {
+      const dt = Math.min(0.032, Math.max(0.004, (now - lastTs) / 1000))
+      lastTs = now
+      const tNow = (now - startTs) / 1000
+      const sim = latestSimRef.current
+      const w = Math.max(280, tankEl.clientWidth || tankSizeRef.current.w || 540)
+      tankSizeRef.current.w = w
+      const geo = computeTankGeometry(w, sim.tankHeight, sim.hasOutside)
+
+      syncPhysicsBodies(bodiesRef.current, sim.orbs, geo, ripplesRef.current)
+      stepBubblePhysics(bodiesRef.current, sim.orbs, geo, {
+        dt,
+        tNow,
+        drag: dragRef.current,
+        paused: sim.paused,
+        locked: sim.locked,
+        ripples: ripplesRef.current,
+      })
+
+      for (const orb of sim.orbs) {
+        const b = bodiesRef.current.get(orb.uid)
+        const el = nodeElsRef.current.get(orb.uid)
+        if (!b || !el) continue
+        const x0 = b.x - b.r
+        const y0 = b.y - b.r
+        const isDragging = Boolean(dragRef.current && dragRef.current.uid === orb.uid && dragRef.current.moved)
+        el.style.transform = `translate3d(${x0.toFixed(2)}px, ${y0.toFixed(2)}px, 0) scale(${b.sx.toFixed(3)}, ${b.sy.toFixed(3)})`
+        el.style.zIndex = isDragging ? '12' : (b.hovered ? '8' : (orb.zone === 'inside' ? '4' : '3'))
+      }
+
+      const canvas = canvasRef.current
+      if (canvas) {
+        const dpr = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1)
+        const tw = Math.round(geo.W * dpr)
+        const th = Math.round(geo.H * dpr)
+        if (canvas.width !== tw || canvas.height !== th) {
+          canvas.width = tw
+          canvas.height = th
+          canvas.style.width = geo.W + 'px'
+          canvas.style.height = geo.H + 'px'
+        }
+        const ctx2d = canvas.getContext('2d')
+        const rootEl = typeof document !== 'undefined' ? document.documentElement : null
+        const themeAttr = rootEl && (rootEl.getAttribute('data-ds-theme-source') || rootEl.getAttribute('data-ds-theme'))
+        const isLight = themeAttr === 'light'
+        drawBubbleTankCanvas(ctx2d, dpr, geo, bodiesRef.current, sim.orbs, {
+          tNow,
+          locked: sim.locked,
+          drag: dragRef.current,
+          paused: sim.paused,
+          ripples: ripplesRef.current,
+          isLight,
+        })
+      }
+
+      rafId = requestAnimationFrame(frame)
+    }
+
+    rafId = requestAnimationFrame(frame)
+    return () => {
+      if (rafId) cancelAnimationFrame(rafId)
+      if (ro) ro.disconnect()
+    }
+  }, [view.peersNetCollapsed])
+
   const triggerLockedReject = (reasonHint) => {
     setLockShake(true)
+    const geo = computeTankGeometry(tankSizeRef.current.w, tankHeight, hasOutside)
+    pushRipple(ripplesRef.current, geo.cx, geo.cy, geo.R + 18, '#ef4444')
     patch({
       notice: reasonHint || bi(
         '🔒 协同水泡工作中已锁死结构，禁止拆解成员；请等待全员收工或点击「⏹ 急停解体」',
@@ -178,51 +918,153 @@ export function PeersTab({ view }) {
     })
   }
 
-  const readDropData = (e) => {
-    if (dragPayload) return dragPayload
-    try {
-      const raw = e && e.dataTransfer ? e.dataTransfer.getData('application/x-dsh-bubble') : ''
-      if (raw) return JSON.parse(raw)
-    } catch {}
-    return null
-  }
-
-  const handleDropIntoBubble = (e) => {
-    e.preventDefault()
-    setDropActive('')
-    const payload = readDropData(e)
-    setDragPayload(null)
-    if (!payload) return
+  const performOrbJoin = (orb) => {
     if (bubbleLocked) {
       triggerLockedReject()
       return
     }
-    if (payload.kind === 'session' && payload.sess) {
-      if (!payload.sess.linked) requestTogglePeerLink(payload.sess, true)
-    } else if (payload.kind === 'harness' && payload.harness && payload.source === 'outside') {
-      void toggleBubbleHarness(payload.harness.provider, true, {
-        label: payload.harness.label,
-        role: payload.harness.roleHint || payload.harness.role,
+    if (orb.kind === 'standby-session' && orb.raw) {
+      requestTogglePeerLink(orb.raw, true)
+    } else if (orb.kind === 'standby-harness' && orb.raw) {
+      void toggleBubbleHarness(orb.raw.provider, true, {
+        label: orb.raw.label,
+        role: orb.raw.roleHint || orb.raw.role,
       })
     }
   }
 
-  const handleDropOutToPool = (e) => {
-    e.preventDefault()
-    setDropActive('')
-    const payload = readDropData(e)
-    setDragPayload(null)
-    if (!payload) return
+  const performOrbLeave = (orb) => {
     if (bubbleLocked) {
       triggerLockedReject()
       return
     }
-    if (payload.kind === 'session' && payload.sess && payload.sess.linked) {
-      requestTogglePeerLink(payload.sess, false)
-    } else if (payload.kind === 'harness' && payload.harness && payload.source === 'inside') {
-      void toggleBubbleHarness(payload.harness.provider, false, { label: payload.harness.label })
+    if (orb.kind === 'peer-session') {
+      requestTogglePeerLink(orb.linkedSessObj || { id: orb.peerRootId, name: orb.label, linked: true }, false)
+    } else if (orb.kind === 'harness' && orb.raw) {
+      if (dispatchTarget === orb.raw.provider) setDispatchTarget('')
+      void toggleBubbleHarness(orb.raw.provider, false, { label: orb.raw.label })
     }
   }
+
+  const handleOrbPointerDown = (e, orb) => {
+    if (e.button !== 0) return
+    if (e.target && e.target.closest && e.target.closest('button')) return
+    const tankEl = tankRef.current
+    if (!tankEl) return
+    const b = bodiesRef.current.get(orb.uid)
+    if (!b) return
+    const rect = tankEl.getBoundingClientRect()
+    const px = e.clientX - rect.left
+    const py = e.clientY - rect.top
+    try { e.currentTarget.setPointerCapture?.(e.pointerId) } catch {}
+    dragRef.current = {
+      uid: orb.uid,
+      pointerId: e.pointerId,
+      startX: e.clientX,
+      startY: e.clientY,
+      x: b.x,
+      y: b.y,
+      ox: b.x - px,
+      oy: b.y - py,
+      lastX: px,
+      lastY: py,
+      lastT: performance.now(),
+      vx: 0,
+      vy: 0,
+      moved: false,
+    }
+  }
+
+  const handleOrbPointerMove = (e, orb) => {
+    const d = dragRef.current
+    if (!d || d.uid !== orb.uid || d.pointerId !== e.pointerId) return
+    const tankEl = tankRef.current
+    if (!tankEl) return
+    const rect = tankEl.getBoundingClientRect()
+    const px = e.clientX - rect.left
+    const py = e.clientY - rect.top
+    if (!d.moved && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) >= 6) {
+      d.moved = true
+    }
+    if (!d.moved) return
+    const nowT = performance.now()
+    const dt = Math.max(0.008, (nowT - d.lastT) / 1000)
+    const rawVx = clampNum((px - d.lastX) / dt, -220, 220)
+    const rawVy = clampNum((py - d.lastY) / dt, -220, 220)
+    d.vx = d.vx * 0.45 + rawVx * 0.55
+    d.vy = d.vy * 0.45 + rawVy * 0.55
+    d.lastX = px
+    d.lastY = py
+    d.lastT = nowT
+    d.x = px + d.ox
+    d.y = py + d.oy
+  }
+
+  const handleOrbPointerEnd = (e, orb) => {
+    const d = dragRef.current
+    if (!d || d.uid !== orb.uid || d.pointerId !== e.pointerId) return
+    try { e.currentTarget.releasePointerCapture?.(e.pointerId) } catch {}
+    dragRef.current = null
+    const b = bodiesRef.current.get(orb.uid)
+    if (!d.moved) {
+      setSelectedUid(cur => (cur === orb.uid ? '' : orb.uid))
+      if (b) {
+        applySquash(b, 1, 0, 52)
+        pushRipple(ripplesRef.current, b.x, b.y, b.r + 22, orb.accent.dot)
+      }
+      return
+    }
+    if (!b) return
+    const w = (tankRef.current && tankRef.current.clientWidth) || tankSizeRef.current.w || 540
+    const geo = computeTankGeometry(w, tankHeight, hasOutside)
+    const dx = b.x - geo.cx
+    const dy = b.y - geo.cy
+    const dist = Math.hypot(dx, dy) || 0.001
+
+    if (orb.zone === 'outside' && orb.canJoin && dist < geo.R + b.r * 0.2) {
+      if (bubbleLocked) {
+        const nx = dx / dist
+        const ny = dy / dist
+        b.x = geo.cx + nx * (geo.R + b.r + 12)
+        b.y = geo.cy + ny * (geo.R + b.r + 12)
+        b.vx = nx * 95
+        b.vy = ny * 95
+        applySquash(b, nx, ny, 75)
+        pushRipple(ripplesRef.current, geo.cx + nx * geo.R, geo.cy + ny * geo.R, 38, '#ef4444')
+        triggerLockedReject()
+        return
+      }
+      pushRipple(ripplesRef.current, b.x, b.y, b.r + 36, '#38bdf8')
+      performOrbJoin(orb)
+      return
+    }
+
+    if (orb.zone === 'inside' && orb.canLeave && dist > geo.R + b.r * 0.35) {
+      if (bubbleLocked) {
+        const nx = dx / dist
+        const ny = dy / dist
+        const pullD = Math.max(geo.hubR + b.r + 6, geo.R - b.r - 8)
+        b.x = geo.cx + nx * pullD
+        b.y = geo.cy + ny * pullD
+        b.vx = -nx * 95
+        b.vy = -ny * 95
+        applySquash(b, nx, ny, 75)
+        pushRipple(ripplesRef.current, geo.cx + nx * geo.R, geo.cy + ny * geo.R, 38, '#ef4444')
+        triggerLockedReject()
+        return
+      }
+      pushRipple(ripplesRef.current, b.x, b.y, b.r + 34, orb.accent.dot)
+      performOrbLeave(orb)
+      return
+    }
+
+    // Same-zone playful sling
+    b.vx = clampNum(d.vx * 0.65, -135, 135)
+    b.vy = clampNum(d.vy * 0.65, -135, 135)
+    pushRipple(ripplesRef.current, b.x, b.y, b.r + 18, orb.accent.dot)
+  }
+
+  const selectedOrb = selectedUid ? orbs.find(o => o.uid === selectedUid) || null : null
 
   const fedOpen = (view.peersFedCollapsed === null || view.peersFedCollapsed === undefined)
     ? otherSessions.length > 0
@@ -231,7 +1073,7 @@ export function PeersTab({ view }) {
   return h(
     'div',
     { className: 'dnb-view' },
-    // Section 1: Dynamic Water Bubble Squad & External Harness Arena (Experimental)
+    // Section 1: Real-Time 2D Physics Water Bubble Arena & External Harness Tank (Experimental)
     h(
       AccCard,
       {
@@ -240,7 +1082,7 @@ export function PeersTab({ view }) {
         title: bi('🫧 协同作战水泡（实验）', '🫧 Collab Bubble Squad (Exp)'),
         headTitle: bubbleLocked
           ? bi('编队已锁定：运行期间禁止拆散会话或外部 Harness，仅可通过急停安全解体', 'Locked during work: member removal blocked until done or emergency stop')
-          : bi('将待命独立会话或外部 Harness 拖入大水泡，即可交由参谋长统一调度协同', 'Drag standby sessions or external Harnesses into the Bubble for unified orchestration'),
+          : bi('直接按住水泡中的任意成员泡泡拖入或拖出大水泡，自由漂浮碰撞协同', 'Grab and drag any bubble orb directly into or out of the main Bubble'),
         count: totalInBubble ? String(totalInBubble) : '',
         preview: bubbleLocked
           ? `🔒 ${bubbleLockReason || bi('工作中已锁死', 'Locked while active')}`
@@ -273,7 +1115,7 @@ export function PeersTab({ view }) {
       h(
         'div',
         { className: 'dnb-bubble-stage' },
-        // Status & Structural Lock Control Strip
+        // Status, Physics Motion & Structural Lock Control Strip
         h(
           'div',
           { className: 'dnb-bubble-bar' },
@@ -286,12 +1128,20 @@ export function PeersTab({ view }) {
               { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
               bubbleLocked
                 ? bi(`🔒 工作中已锁死${bubbleLockReason ? ' · ' + bubbleLockReason : ''}`, `🔒 Locked${bubbleLockReason ? ' · ' + bubbleLockReason : ''}`)
-                : bi('🫧 整备态 · 拖入/点选成员入泡', '🫧 Staging · Drag or + to join'),
+                : bi('🫧 物理水泡域 · 抓泡泡拖入/拖出', '🫧 Physics Tank · Grab & drag orbs'),
             ),
           ),
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              'data-active': physicsPaused ? '0' : '1',
+              style: { height: 22, padding: '0 7px', fontSize: 10.5 },
+              title: physicsPaused ? bi('恢复泡泡自由漂浮与弹性碰撞', 'Resume bubble floating physics') : bi('暂停漂浮方便逐个静态点选', 'Pause floating motion'),
+              onClick: () => setPhysicsPaused(v => !v),
+            }, physicsPaused ? bi('⏸ 静止', '⏸ Paused') : bi('🫧 漂浮中', '🫧 Floating')),
             h('button', {
               type: 'button',
               className: 'dnb-pill',
@@ -332,387 +1182,244 @@ export function PeersTab({ view }) {
           ),
         ),
 
-        // Big Organic Water Bubble Arena (Drop target IN)
+        // 2D Real-Time Physics Soap Bubble Tank
         h(
           'div',
           {
-            className: 'dnb-bubble-arena',
+            ref: tankRef,
+            className: 'dnb-bubble-tank dnb-bubble-arena',
             'data-locked': bubbleLocked ? '1' : '0',
-            'data-drop': dropActive === 'bubble' ? '1' : '0',
             'data-shake': lockShake ? '1' : '0',
-            onDragOver: (e) => {
-              e.preventDefault()
-              if (dropActive !== 'bubble') setDropActive('bubble')
-            },
-            onDragLeave: (e) => {
-              if (!e.currentTarget.contains(e.relatedTarget)) setDropActive('')
-            },
-            onDrop: handleDropIntoBubble,
+            style: { height: tankHeight + 'px' },
           },
-          h('div', { className: 'dnb-bubble-membrane', 'aria-hidden': 'true' }),
-          // Central Coordinator Anchor
+          h('canvas', {
+            ref: canvasRef,
+            className: 'dnb-bubble-fx',
+            'aria-hidden': 'true',
+          }),
+          // Central Coordinator Micro-Hub pinned at (geoNow.cx, geoNow.cy)
           h(
             'div',
-            { className: 'dnb-bubble-core' },
-            h(
-              'div',
-              { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
-              h('span', { className: 'dnb-bubble-core-orb' }, '✦'),
-              h('span', { style: { fontWeight: 700, fontSize: 12.5 } }, bi('DSH 参谋长 · 调度水泡核心', 'DSH Chief · Bubble Core')),
-            ),
-            h('span', { className: 'dnb-tag', style: { fontSize: 10 } }, `${totalInBubble} ${bi('在线成员', 'members')}`),
+            {
+              className: 'dnb-bubble-center-hub',
+              'data-locked': bubbleLocked ? '1' : '0',
+              style: {
+                transform: `translate3d(${(geoNow.cx - 25).toFixed(1)}px, ${(geoNow.cy - 25).toFixed(1)}px, 0)`,
+              },
+              title: bi('DSH 参谋长核心调度枢纽', 'DSH Chief Core Hub'),
+            },
+            h('span', { className: 'dnb-bubble-center-icon' }, '✦'),
+            h('span', { className: 'dnb-bubble-center-count' }, String(totalInBubble)),
           ),
 
-          // Enrolled Members Inside the Bubble
-          h(
-            'div',
-            { className: 'dnb-bubble-members' },
-            peers.map(peer => {
-              const isRunning = peer.status === 'running'
-              const isLinkedPeer = peer.kind === 'peer-session'
-              const kindBadge = peer.kind === 'lead'
-                ? bi('主对话', 'Lead')
-                : (isLinkedPeer ? bi('联动窗口', 'Linked') : bi('子代理', 'Subagent'))
-              const isSelected = view.secTarget === peer.key
-              const peerRootId = isLinkedPeer ? (peer.id || peer.rootSessionId) : (peer.rootSessionId || selfRootId)
-              const col = colorForRootSession(peerRootId, selfRootId)
-              const linkedSessObj = isLinkedPeer ? otherSessions.find(s => s && s.id === peerRootId) : null
-              const subText = peer.taskTitle || peer.progressSummary || ''
-              return h(
-                'div',
-                {
-                  key: peer.key,
-                  className: 'dnb-droplet',
-                  'data-kind': peer.kind,
-                  'data-running': isRunning ? '1' : '0',
-                  draggable: isLinkedPeer && !bubbleLocked,
-                  style: {
-                    '--drop-dot': col.dot,
-                    '--drop-bg': col.bg,
-                    '--drop-border': col.border,
-                    '--drop-text': col.text,
-                  },
-                  onDragStart: (e) => {
-                    if (!isLinkedPeer || bubbleLocked) {
-                      e.preventDefault()
-                      if (bubbleLocked) triggerLockedReject()
-                      return
-                    }
-                    const payload = { kind: 'session', source: 'inside', sess: linkedSessObj || { id: peerRootId, name: peer.name, linked: true } }
-                    setDragPayload(payload)
-                    try { e.dataTransfer.setData('application/x-dsh-bubble', JSON.stringify(payload)) } catch {}
-                  },
-                  onDragEnd: () => { setDragPayload(null); setDropActive('') },
+          // Live Drifting & Bouncing Spherical Member Orbs
+          orbs.map((orb) => {
+            const body = bodiesRef.current.get(orb.uid)
+            const x0 = body ? (body.x - orb.r) : (geoNow.cx - orb.r)
+            const y0 = body ? (body.y - orb.r) : (geoNow.cy - orb.r)
+            const isSel = selectedUid === orb.uid
+            const showLockTag = bubbleLocked && (orb.canJoin || orb.canLeave)
+            return h(
+              'div',
+              {
+                key: orb.uid,
+                ref: (el) => {
+                  if (el) nodeElsRef.current.set(orb.uid, el)
+                  else nodeElsRef.current.delete(orb.uid)
                 },
+                className: 'dnb-orb',
+                'data-uid': orb.uid,
+                'data-zone': orb.zone,
+                'data-kind': orb.kind,
+                'data-running': orb.running ? '1' : '0',
+                'data-selected': isSel ? '1' : '0',
+                title: `${orb.label}（${orb.kindName}）\n${orb.subText}`,
+                style: {
+                  width: (orb.r * 2) + 'px',
+                  height: (orb.r * 2) + 'px',
+                  transform: `translate3d(${x0.toFixed(2)}px, ${y0.toFixed(2)}px, 0)`,
+                  '--orb-dot': orb.accent.dot,
+                  '--orb-bg': orb.accent.bg,
+                  '--orb-border': orb.accent.border,
+                  '--orb-text': orb.accent.text,
+                },
+                onPointerEnter: () => {
+                  const b = bodiesRef.current.get(orb.uid)
+                  if (b) b.hovered = true
+                },
+                onPointerLeave: () => {
+                  const b = bodiesRef.current.get(orb.uid)
+                  if (b) b.hovered = false
+                },
+                onPointerDown: e => handleOrbPointerDown(e, orb),
+                onPointerMove: e => handleOrbPointerMove(e, orb),
+                onPointerUp: e => handleOrbPointerEnd(e, orb),
+                onPointerCancel: e => handleOrbPointerEnd(e, orb),
+              },
+              h(
+                'div',
+                { className: 'dnb-orb-top' },
+                orb.running
+                  ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: orb.accent.dot } })
+                  : h('span', { className: 'dnb-orb-dot', style: { background: orb.accent.dot } }),
+              ),
+              h('div', { className: 'dnb-orb-label' }, orb.shortLabel),
+              h('div', { className: 'dnb-orb-badge' }, showLockTag ? `🔒 ${orb.badge}` : orb.badge),
+            )
+          }),
+        ),
+
+        // Inline External Harness Dispatch Input Bar (when ⚡ 派活 clicked)
+        dispatchTarget
+          ? h(
+              'form',
+              {
+                className: 'dnb-bubble-dispatch-bar',
+                onSubmit: async (e) => {
+                  e.preventDefault()
+                  const txt = dispatchText.trim()
+                  if (!txt) return
+                  const p = dispatchTarget
+                  setDispatchText('')
+                  setDispatchTarget('')
+                  await dispatchBubbleHarness(p, txt)
+                },
+              },
+              h('input', {
+                type: 'text',
+                className: 'dnb-input',
+                style: { flex: 1, height: 28, fontSize: 11.5 },
+                value: dispatchText,
+                placeholder: bi(`向 @${dispatchTarget} 下达自包含任务（自动带当前红线与物理墙约束）…`, `Task for @${dispatchTarget} (constraints auto-prepended)…`),
+                onChange: e => setDispatchText(e.target.value),
+              }),
+              h('button', {
+                type: 'submit',
+                className: 'dnb-pill dnb-pill-accent',
+                style: { height: 28, padding: '0 10px', fontSize: 11 },
+              }, bi('执行并锁定', 'Run & Lock')),
+              h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 28, padding: '0 8px', fontSize: 11 },
+                onClick: () => setDispatchTarget(''),
+              }, bi('取消', 'Cancel')),
+            )
+          : null,
+
+        // Selected Orb Action Inspector Strip + Official Harness Install Toggle
+        h(
+          'div',
+          { className: 'dnb-bubble-inspector', 'data-empty': selectedOrb ? '0' : '1' },
+          selectedOrb
+            ? h(
+                React.Fragment,
+                null,
                 h(
                   'div',
-                  { className: 'dnb-droplet-main' },
-                  isRunning
-                    ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9px', color: col.dot } })
-                    : h('span', { className: 'dnb-droplet-dot', style: { background: col.dot } }),
-                  h('span', { className: 'dnb-droplet-name', title: subText || peer.name }, peer.name),
-                  h('span', { className: 'dnb-droplet-kind' }, kindBadge),
+                  { className: 'dnb-bubble-inspector-info' },
+                  h('span', { className: 'dnb-droplet-dot', style: { background: selectedOrb.accent.dot } }),
+                  h('span', { style: { fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' } }, selectedOrb.label),
+                  h('span', { className: 'dnb-droplet-kind', style: { color: selectedOrb.accent.text, borderColor: selectedOrb.accent.border } }, selectedOrb.kindName),
+                  h('span', { className: 'dnb-bubble-inspector-sub', title: selectedOrb.subText }, selectedOrb.subText),
                 ),
-                subText ? h('div', { className: 'dnb-droplet-sub', title: subText }, subText) : null,
                 h(
                   'div',
-                  { className: 'dnb-droplet-acts' },
-                  peer.kind === 'subagent' && peer.id
+                  { className: 'dnb-bubble-inspector-acts' },
+                  (selectedOrb.kind === 'subagent' && selectedOrb.raw && selectedOrb.raw.id)
                     ? h('button', {
                         type: 'button',
                         className: 'dnb-pill',
-                        style: { height: 20, padding: '0 6px', fontSize: 10 },
-                        title: bi('在分栏打开子代理实时流', 'Open subagent live stream in split pane'),
+                        style: { height: 21, padding: '0 7px', fontSize: 10.5 },
                         onClick: () => {
-                          if (!openSubagentChat(peer)) patch({ notice: bi('该子代理暂无独立面板视图', 'No dedicated pane view for this subagent') })
+                          if (!openSubagentChat(selectedOrb.raw)) patch({ notice: bi('该子代理暂无独立面板视图', 'No dedicated pane view for this subagent') })
                         },
                       }, h(Icon, { name: 'chat', size: 10 }), bi('分屏', 'Split'))
                     : null,
-                  h('button', {
-                    type: 'button',
-                    className: 'dnb-pill',
-                    'data-active': isSelected ? '1' : '0',
-                    style: { height: 20, padding: '0 6px', fontSize: 10 },
-                    onClick: () => {
-                      patch({
-                        secTarget: peer.key,
-                        secMode: isRunning ? 'steer' : 'followup',
-                        notice: bi('已在下方锁定 @', 'Locked target @') + peer.name,
-                      })
-                      focusSecInput()
-                    },
-                  }, bi('@递话', '@Relay')),
-                  isLinkedPeer
+                  (selectedOrb.zone === 'inside' && selectedOrb.kind !== 'harness' && selectedOrb.raw)
                     ? h('button', {
                         type: 'button',
                         className: 'dnb-pill',
-                        style: { height: 20, padding: '0 5px', fontSize: 10 },
-                        title: bubbleLocked
-                          ? bi('🔒 工作中禁止拆出联动窗口', '🔒 Locked while working')
-                          : bi('拖出或点此脱离联动窗口', 'Eject linked session from Bubble'),
+                        style: { height: 21, padding: '0 7px', fontSize: 10.5 },
                         onClick: () => {
-                          if (bubbleLocked) { triggerLockedReject(); return }
-                          requestTogglePeerLink(linkedSessObj || { id: peerRootId, name: peer.name }, false)
+                          patch({
+                            secTarget: selectedOrb.raw.key,
+                            secMode: selectedOrb.running ? 'steer' : 'followup',
+                            notice: bi('已在下方锁定 @', 'Locked target @') + selectedOrb.label,
+                          })
+                          focusSecInput()
                         },
-                      }, bubbleLocked ? '🔒' : '×')
+                      }, bi('@递话', '@Relay'))
+                    : null,
+                  (selectedOrb.kind === 'harness' && selectedOrb.raw)
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-pill dnb-pill-accent',
+                        'data-active': dispatchTarget === selectedOrb.raw.provider ? '1' : '0',
+                        style: { height: 21, padding: '0 7px', fontSize: 10.5 },
+                        onClick: () => setDispatchTarget(d => (d === selectedOrb.raw.provider ? '' : selectedOrb.raw.provider)),
+                      }, bi('⚡ 派活', '⚡ Run'))
+                    : null,
+                  selectedOrb.canJoin
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-pill dnb-pill-accent',
+                        style: { height: 21, padding: '0 8px', fontSize: 10.5 },
+                        onClick: () => performOrbJoin(selectedOrb),
+                      }, bubbleLocked ? '🔒' : bi('+ 入泡', '+ Join'))
+                    : null,
+                  selectedOrb.canLeave
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-pill',
+                        style: { height: 21, padding: '0 7px', fontSize: 10.5 },
+                        onClick: () => performOrbLeave(selectedOrb),
+                      }, bubbleLocked ? '🔒' : bi('× 移出', '× Eject'))
                     : null,
                 ),
               )
-            }),
-
-            enrolledHarnesses.map(hItem => {
-              const isRunning = Boolean(hItem.running)
-              const acc = hItem.accent || '#38bdf8'
-              const isDisp = dispatchTarget === hItem.provider
-              const harnessRoleText = hItem.role || hItem.roleHint || bi('外部独立执行进程', 'External Harness')
-              return h(
+            : h(
                 'div',
-                {
-                  key: 'harness:' + hItem.provider,
-                  className: 'dnb-droplet',
-                  'data-kind': 'harness',
-                  'data-running': isRunning ? '1' : '0',
-                  draggable: !bubbleLocked,
-                  style: {
-                    '--drop-dot': acc,
-                    '--drop-bg': `${acc}1e`,
-                    '--drop-border': `${acc}58`,
-                    '--drop-text': acc,
-                  },
-                  onDragStart: (e) => {
-                    if (bubbleLocked) {
-                      e.preventDefault()
-                      triggerLockedReject()
-                      return
-                    }
-                    const payload = { kind: 'harness', source: 'inside', harness: hItem }
-                    setDragPayload(payload)
-                    try { e.dataTransfer.setData('application/x-dsh-bubble', JSON.stringify(payload)) } catch {}
-                  },
-                  onDragEnd: () => { setDragPayload(null); setDropActive('') },
-                },
+                { style: { fontSize: 11, color: 'var(--dnb-text-3)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                hasOutside
+                  ? bi('💡 悬停泡泡即刹停，按住直接拖入/拖出大水泡，轻点泡泡可展开专属操作', '💡 Hover to pause orb, drag across membrane to join/eject, tap to inspect')
+                  : bi('💡 悬停或按住甩动泡泡体验碰撞，再开 DSH 窗口或安装外部 Harness 即可跨端组泡', '💡 Drag orbs to play or open another DSH window / Harness to form a cross-tool squad'),
+              ),
+          catalogHarnesses.length > 0
+            ? h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 21, padding: '0 8px', fontSize: 10.5, flexShrink: 0 },
+                onClick: () => setShowCatalog(v => !v),
+              }, showCatalog ? bi('收起安装目录', 'Hide Catalog') : bi(`官方外部 Harness (${catalogHarnesses.length})`, `Official Harnesses (${catalogHarnesses.length})`))
+            : null,
+        ),
+
+        showCatalog && catalogHarnesses.length > 0
+          ? h(
+              'div',
+              { className: 'dnb-bubble-catalog' },
+              h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginBottom: 4 } },
+                bi('⚠️ 外部 Harness 运行在独立进程中（不经过主进程物理墙），派单前会自动附带当前禁止红线，并锁死水泡防误拆：', '⚠️ External Harnesses run out-of-process (active redlines are prepended to each dispatch while Bubble locks):')),
+              catalogHarnesses.map(item =>
                 h(
                   'div',
-                  { className: 'dnb-droplet-main' },
-                  isRunning
-                    ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9px', color: acc } })
-                    : h('span', { className: 'dnb-droplet-dot', style: { background: acc } }),
-                  h('span', { className: 'dnb-droplet-name' }, hItem.label),
-                  h('span', { className: 'dnb-droplet-kind' }, hItem.installed ? 'Harness' : bi('未安装后端', 'Not Installed')),
-                ),
-                h('div', { className: 'dnb-droplet-sub', title: harnessRoleText }, `${hItem.provider} · ${harnessRoleText}`),
-                h(
-                  'div',
-                  { className: 'dnb-droplet-acts' },
+                  { key: item.provider, className: 'dnb-bubble-catalog-row' },
+                  h('span', { style: { fontWeight: 600, fontSize: 11 } }, `${item.label} (${item.provider})`),
+                  h('code', { className: 'dnb-mono', style: { fontSize: 10, color: 'var(--dnb-text-2)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.installCmd),
                   h('button', {
                     type: 'button',
                     className: 'dnb-pill',
-                    'data-active': isDisp ? '1' : '0',
                     style: { height: 20, padding: '0 6px', fontSize: 10 },
-                    title: bi('向该外部 Harness 派发一条独立任务（自动加结构锁）', 'Dispatch one-shot task to external Harness (auto-locks Bubble)'),
-                    onClick: () => setDispatchTarget(isDisp ? '' : hItem.provider),
-                  }, bi('⚡ 派活', '⚡ Run')),
-                  h('button', {
-                    type: 'button',
-                    className: 'dnb-pill',
-                    style: { height: 20, padding: '0 5px', fontSize: 10 },
-                    title: bubbleLocked
-                      ? bi('🔒 工作中禁止移出外部 Harness', '🔒 Locked while working')
-                      : bi('从协同水泡移出该 Harness', 'Remove Harness from Bubble'),
                     onClick: () => {
-                      if (bubbleLocked) { triggerLockedReject(); return }
-                      if (isDisp) setDispatchTarget('')
-                      void toggleBubbleHarness(hItem.provider, false, { label: hItem.label })
+                      try { navigator.clipboard?.writeText(item.installCmd) } catch {}
+                      patch({ notice: bi('已复制安装命令：', 'Copied install command: ') + item.installCmd })
                     },
-                  }, bubbleLocked ? '🔒' : '×'),
+                  }, bi('复制命令', 'Copy')),
                 ),
-              )
-            }),
-          ),
-
-          // Inline External Harness Dispatch Input Bar (when ⚡ 派活 clicked)
-          dispatchTarget
-            ? h(
-                'form',
-                {
-                  className: 'dnb-bubble-dispatch-bar',
-                  onSubmit: async (e) => {
-                    e.preventDefault()
-                    const txt = dispatchText.trim()
-                    if (!txt) return
-                    const p = dispatchTarget
-                    setDispatchText('')
-                    setDispatchTarget('')
-                    await dispatchBubbleHarness(p, txt)
-                  },
-                },
-                h('input', {
-                  type: 'text',
-                  className: 'dnb-input',
-                  style: { flex: 1, height: 28, fontSize: 11.5 },
-                  value: dispatchText,
-                  placeholder: bi(`向 @${dispatchTarget} 下达自包含任务（自动带当前红线与物理墙约束）…`, `Task for @${dispatchTarget} (constraints auto-prepended)…`),
-                  onChange: e => setDispatchText(e.target.value),
-                }),
-                h('button', {
-                  type: 'submit',
-                  className: 'dnb-pill dnb-pill-accent',
-                  style: { height: 28, padding: '0 10px', fontSize: 11 },
-                }, bi('执行并锁定', 'Run & Lock')),
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-pill',
-                  style: { height: 28, padding: '0 8px', fontSize: 11 },
-                  onClick: () => setDispatchTarget(''),
-                }, bi('取消', 'Cancel')),
-              )
-            : null,
-        ),
-
-        // Outer Standby Pool (Drop target OUT to eject when unlocked; Drag/Click IN to join)
-        h(
-          'div',
-          {
-            className: 'dnb-bubble-pool',
-            'data-locked': bubbleLocked ? '1' : '0',
-            'data-drop': dropActive === 'pool' ? '1' : '0',
-            onDragOver: (e) => {
-              e.preventDefault()
-              if (dropActive !== 'pool') setDropActive('pool')
-            },
-            onDragLeave: (e) => {
-              if (!e.currentTarget.contains(e.relatedTarget)) setDropActive('')
-            },
-            onDrop: handleDropOutToPool,
-          },
-          h(
-            'div',
-            { className: 'dnb-bubble-pool-head' },
-            h('span', null, bi('外围待命池（拖入或点 + 加入大水泡）', 'Standby Pool (Drag or + into Bubble)')),
-            catalogHarnesses.length > 0
-              ? h('button', {
-                  type: 'button',
-                  className: 'dnb-pill',
-                  style: { height: 20, padding: '0 7px', fontSize: 10 },
-                  onClick: () => setShowCatalog(v => !v),
-                }, showCatalog ? bi('收起安装目录', 'Hide Catalog') : bi(`官方外部 Harness (${catalogHarnesses.length})`, `Official Harnesses (${catalogHarnesses.length})`))
-              : null,
-          ),
-          (standbySessions.length > 0 || availableHarnesses.length > 0)
-            ? h(
-                'div',
-                { className: 'dnb-bubble-pool-list' },
-                standbySessions.map(sess => {
-                  const col = colorForRootSession(sess.id, selfRootId)
-                  return h(
-                    'div',
-                    {
-                      key: 'pool-sess:' + sess.id,
-                      className: 'dnb-droplet dnb-droplet-standby',
-                      draggable: !bubbleLocked,
-                      style: {
-                        '--drop-dot': col.dot,
-                        '--drop-bg': col.bg,
-                        '--drop-border': col.border,
-                        '--drop-text': col.text,
-                      },
-                      onDragStart: (e) => {
-                        if (bubbleLocked) { e.preventDefault(); triggerLockedReject(); return }
-                        const payload = { kind: 'session', source: 'outside', sess }
-                        setDragPayload(payload)
-                        try { e.dataTransfer.setData('application/x-dsh-bubble', JSON.stringify(payload)) } catch {}
-                      },
-                      onDragEnd: () => { setDragPayload(null); setDropActive('') },
-                    },
-                    h(
-                      'div',
-                      { className: 'dnb-droplet-main' },
-                      h('span', { className: 'dnb-droplet-dot', style: { background: col.dot } }),
-                      h('span', { className: 'dnb-droplet-name' }, sess.name),
-                      h('span', { className: 'dnb-droplet-kind' }, bi('独立会话', 'Session')),
-                    ),
-                    h('button', {
-                      type: 'button',
-                      className: 'dnb-pill',
-                      style: { height: 20, padding: '0 7px', fontSize: 10 },
-                      onClick: () => {
-                        if (bubbleLocked) { triggerLockedReject(); return }
-                        requestTogglePeerLink(sess, true)
-                      },
-                    }, bubbleLocked ? '🔒' : bi('+ 入泡', '+ Join')),
-                  )
-                }),
-                availableHarnesses.map(hItem => {
-                  const acc = hItem.accent || '#38bdf8'
-                  return h(
-                    'div',
-                    {
-                      key: 'pool-harness:' + hItem.provider,
-                      className: 'dnb-droplet dnb-droplet-standby',
-                      'data-kind': 'harness',
-                      draggable: !bubbleLocked,
-                      style: {
-                        '--drop-dot': acc,
-                        '--drop-bg': `${acc}1c`,
-                        '--drop-border': `${acc}52`,
-                        '--drop-text': acc,
-                      },
-                      onDragStart: (e) => {
-                        if (bubbleLocked) { e.preventDefault(); triggerLockedReject(); return }
-                        const payload = { kind: 'harness', source: 'outside', harness: hItem }
-                        setDragPayload(payload)
-                        try { e.dataTransfer.setData('application/x-dsh-bubble', JSON.stringify(payload)) } catch {}
-                      },
-                      onDragEnd: () => { setDragPayload(null); setDropActive('') },
-                    },
-                    h(
-                      'div',
-                      { className: 'dnb-droplet-main' },
-                      h('span', { className: 'dnb-droplet-dot', style: { background: acc } }),
-                      h('span', { className: 'dnb-droplet-name' }, hItem.label),
-                      h('span', { className: 'dnb-droplet-kind' }, hItem.provider),
-                    ),
-                    h('button', {
-                      type: 'button',
-                      className: 'dnb-pill',
-                      style: { height: 20, padding: '0 7px', fontSize: 10 },
-                      onClick: () => {
-                        if (bubbleLocked) { triggerLockedReject(); return }
-                        void toggleBubbleHarness(hItem.provider, true, { label: hItem.label, role: hItem.roleHint })
-                      },
-                    }, bubbleLocked ? '🔒' : bi('+ 入泡', '+ Join')),
-                  )
-                }),
-              )
-            : h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', padding: '2px 0' } },
-                bi('再打开一个 DSH 主窗口，或安装 Codex / Claude Code / ACP Harness 包，即可出现在此拖入大水泡。', 'Open another DSH window or install an external Harness plugin to drag into the Bubble.')),
-
-          showCatalog && catalogHarnesses.length > 0
-            ? h(
-                'div',
-                { className: 'dnb-bubble-catalog' },
-                h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginBottom: 4 } },
-                  bi('⚠️ 外部 Harness 运行在独立进程中（不经过主进程物理墙），派单前会自动附带当前禁止红线，并锁死水泡防误拆：', '⚠️ External Harnesses run out-of-process (active redlines are prepended to each dispatch while Bubble locks):')),
-                catalogHarnesses.map(item =>
-                  h(
-                    'div',
-                    { key: item.provider, className: 'dnb-bubble-catalog-row' },
-                    h('span', { style: { fontWeight: 600, fontSize: 11 } }, `${item.label} (${item.provider})`),
-                    h('code', { className: 'dnb-mono', style: { fontSize: 10, color: 'var(--dnb-text-2)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.installCmd),
-                    h('button', {
-                      type: 'button',
-                      className: 'dnb-pill',
-                      style: { height: 20, padding: '0 6px', fontSize: 10 },
-                      onClick: () => {
-                        try { navigator.clipboard?.writeText(item.installCmd) } catch {}
-                        patch({ notice: bi('已复制安装命令：', 'Copied install command: ') + item.installCmd })
-                      },
-                    }, bi('复制命令', 'Copy')),
-                  ),
-                ),
-              )
-            : null,
-        ),
+              ),
+            )
+          : null,
       ),
     ),
 
