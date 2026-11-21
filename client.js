@@ -2028,6 +2028,8 @@ window.__ModuleLoader__.load({
         ...(Array.isArray(viewData.guardWalls) ? { guardWalls: viewData.guardWalls } : {}),
         chiefMeta: {
           ...prevMeta,
+          sessionEnabled: typeof cfg.sessionEnabled === 'boolean' ? cfg.sessionEnabled : prevMeta.sessionEnabled,
+          defaultAutoEnableSessions: typeof cfg.defaultAutoEnableSessions === 'boolean' ? cfg.defaultAutoEnableSessions : Boolean(prevMeta.defaultAutoEnableSessions),
           runMode: cfg.runMode || (cfg.stopped ? 'off' : (cfg.paceMode === 'auto' ? 'managed' : (cfg.paceMode === 'smart' ? 'patrol' : 'off'))),
           managedIdleTimeoutMs: Number(cfg.managedIdleTimeoutMs) || prevMeta.managedIdleTimeoutMs || (15 * 60 * 1000),
           notifyEnabled: nextNotifyEnabled,
@@ -3620,6 +3622,26 @@ window.__ModuleLoader__.load({
           : ((value.view && value.view.config && typeof value.view.config.teamEffortMode === 'string')
               ? value.view.config.teamEffortMode
               : null)
+        const resolvedSessionEnabled = (value.config && typeof value.config.sessionEnabled === 'boolean')
+          ? value.config.sessionEnabled
+          : ((value.view && value.view.config && typeof value.view.config.sessionEnabled === 'boolean')
+              ? value.view.config.sessionEnabled
+              : null)
+        const resolvedDefaultAutoEnable = (value.config && typeof value.config.defaultAutoEnableSessions === 'boolean')
+          ? value.config.defaultAutoEnableSessions
+          : ((value.view && value.view.config && typeof value.view.config.defaultAutoEnableSessions === 'boolean')
+              ? value.view.config.defaultAutoEnableSessions
+              : null)
+        const resolvedRunMode = (value.config && typeof value.config.runMode === 'string')
+          ? value.config.runMode
+          : ((value.view && value.view.config && typeof value.view.config.runMode === 'string')
+              ? value.view.config.runMode
+              : null)
+        const resolvedPaceMode = (value.config && typeof value.config.paceMode === 'string')
+          ? value.config.paceMode
+          : ((value.view && value.view.config && typeof value.view.config.paceMode === 'string')
+              ? value.view.config.paceMode
+              : null)
         const updatedSubagents = resolvedLocks && Array.isArray(store.subagents)
           ? store.subagents.map(ag => {
               if (!ag || typeof ag !== 'object') return ag
@@ -3636,12 +3658,16 @@ window.__ModuleLoader__.load({
         patch({
           compactInputDraft: null,
           compactLowWarning: value.compactLowWarning || '',
-          ...((resolvedLocks || resolvedTeamEffortMode)
+          ...((resolvedLocks || resolvedTeamEffortMode || resolvedSessionEnabled !== null || resolvedDefaultAutoEnable !== null || resolvedRunMode !== null || resolvedPaceMode !== null)
             ? {
                 chiefMeta: {
                   ...store.chiefMeta,
                   ...(resolvedLocks ? { lockedModelEfforts: resolvedLocks } : {}),
                   ...(resolvedTeamEffortMode ? { teamEffortMode: resolvedTeamEffortMode === 'manual' ? 'manual' : 'auto' } : {}),
+                  ...(resolvedSessionEnabled !== null ? { sessionEnabled: resolvedSessionEnabled } : {}),
+                  ...(resolvedDefaultAutoEnable !== null ? { defaultAutoEnableSessions: resolvedDefaultAutoEnable } : {}),
+                  ...(resolvedRunMode !== null ? { runMode: resolvedRunMode } : {}),
+                  ...(resolvedPaceMode !== null ? { paceMode: resolvedPaceMode, stopped: resolvedPaceMode === 'stopped' } : {}),
                 },
               }
             : {}),
@@ -3731,6 +3757,21 @@ window.__ModuleLoader__.load({
           patch({ notice: nextCfg.notifyEnabled ? bi('🔔 已开启桌面通知提醒', '🔔 Desktop alerts on') : bi('🔕 已关闭桌面通知提醒', '🔕 Desktop alerts off') })
         } else if (typeof nextCfg.notifySound === 'boolean') {
           patch({ notice: nextCfg.notifySound ? bi('🔊 已开启提示音', '🔊 Sound on') : bi('🔇 已关闭提示音', '🔇 Sound off') })
+        } else if (typeof nextCfg.sessionEnabled === 'boolean') {
+          patch({
+            notice: nextCfg.sessionEnabled
+              ? bi('✅ 已在本会话启用参谋长（提示词、看板与安全卫兵已生效）', '✅ Chief enabled for this session (prompt, board & safety guard active)')
+              : bi('⏸ 已退出本会话参谋长（本会话恢复普通零侵入模式）', '⏸ Chief disabled for this session (zero-intrusion mode)'),
+          })
+          void refresh()
+          void loadChiefView(false)
+        } else if (typeof nextCfg.defaultAutoEnableSessions === 'boolean') {
+          patch({
+            notice: nextCfg.defaultAutoEnableSessions
+              ? bi('⚡ 新会话将默认自动启用参谋长', '⚡ New sessions will auto-enable Chief by default')
+              : bi('🛡 新会话已恢复默认按需启用（普通窗口零侵入）', '🛡 New sessions stay opt-in by default (zero intrusion)'),
+          })
+          void refresh()
         } else if (nextCfg.managedBudgetMaxCalls !== undefined || nextCfg.managedBudgetMaxTokens !== undefined) {
           patch({ notice: bi('💰 已更新托管费用上限', '💰 Spending limits updated') })
         } else if (typeof nextCfg.paceMode === 'string') {
@@ -4915,6 +4956,7 @@ window.__ModuleLoader__.load({
 
       @media (min-width: 820px) {
         .dnb-panel.dnb-main .dnb-seg-wrap > .dnb-seg,
+        .dnb-panel.dnb-main .dnb-session-optin-wrap > .dnb-session-optin-banner,
         .dnb-panel.dnb-main .dnb-body > .dnb-view,
         .dnb-panel.dnb-main .dnb-sec-bar > .dnb-sec-targets,
         .dnb-panel.dnb-main .dnb-sec-bar > .dnb-sec-img-strip,
@@ -5803,6 +5845,59 @@ window.__ModuleLoader__.load({
       }
       .dnb-acc-body > .dnb-qa-stream > .dnb-qa-turn-box:first-child {
         margin-top: 2px;
+      }
+
+      .dnb-session-optin-wrap {
+        padding: 0 12px 8px;
+        flex-shrink: 0;
+      }
+      .dnb-session-optin-banner {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 10px;
+        flex-wrap: wrap;
+        padding: 8px 11px;
+        border-radius: 10px;
+        border: 1px solid rgba(56, 189, 248, 0.28);
+        background: linear-gradient(135deg, rgba(56, 189, 248, 0.11), rgba(37, 99, 235, 0.06));
+        color: var(--dnb-text);
+        font-size: 11.5px;
+        line-height: 1.45;
+      }
+      .dnb-session-optin-text {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        min-width: 0;
+        flex: 1 1 220px;
+        color: var(--dnb-text-2);
+      }
+      .dnb-session-optin-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 99px;
+        background: #38bdf8;
+        flex-shrink: 0;
+        opacity: 0.9;
+      }
+      .dnb-session-optin-btn {
+        flex-shrink: 0;
+        height: 25px;
+        padding: 0 10px;
+        font-size: 11.5px;
+        border-radius: 7px;
+      }
+      html[data-dnb-theme="light"] .dnb-session-optin-banner,
+      html[data-ds-theme-source="light"] .dnb-session-optin-banner,
+      html[data-ds-theme="light"] .dnb-session-optin-banner {
+        border-color: rgba(2, 132, 199, 0.28);
+        background: linear-gradient(135deg, rgba(2, 132, 199, 0.08), rgba(37, 99, 235, 0.04));
+      }
+      html[data-dnb-theme="light"] .dnb-session-optin-dot,
+      html[data-ds-theme-source="light"] .dnb-session-optin-dot,
+      html[data-ds-theme="light"] .dnb-session-optin-dot {
+        background: #0284c7;
       }
 
     `
@@ -18417,6 +18512,34 @@ window.__ModuleLoader__.load({
               ),
             ),
           ),
+          view && view.sessionId
+            ? h(
+                'div',
+                { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '7px 2px', gap: 8 } },
+                h('div', { style: { minWidth: 0 } },
+                  h('div', { style: { fontSize: 12 } }, bi('本会话启用参谋长', 'Enable Chief for this session')),
+                  h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
+                    bi('关闭后本会话恢复普通聊天窗口，不注入看板也不触发安全卫兵', 'When off, this chat runs clean with zero prompt injection or safety guard checks')),
+                ),
+                h(Switch, {
+                  checked: meta.sessionEnabled !== false,
+                  onChange: on => void updateSecConfig({ sessionEnabled: on }),
+                }),
+              )
+            : null,
+          h(
+            'div',
+            { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '7px 2px', gap: 8 } },
+            h('div', { style: { minWidth: 0 } },
+              h('div', { style: { fontSize: 12 } }, bi('新会话默认自动启用参谋长', 'Auto-enable Chief in new sessions')),
+              h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
+                bi('默认关闭：只有主动开启或操作过参谋长的会话才会加载提示词与安全卫兵', 'Off by default: Chief only activates in sessions where you enable or use it')),
+            ),
+            h(Switch, {
+              checked: Boolean(meta.defaultAutoEnableSessions),
+              onChange: on => void updateSecConfig({ defaultAutoEnableSessions: on }),
+            }),
+          ),
           h(
             'div',
             { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', lineHeight: 1.45, marginTop: 4 } },
@@ -27890,11 +28013,14 @@ window.__ModuleLoader__.load({
       const archMeta = view.archiveMeta || {}
       const archiveBadge = archMeta.takenOutCount || 0
       const panelWorking = Boolean(
-        view.chiefWorkFx
-        || (meta && meta.activeWork)
-        || view.secBusy
-        || view.secRegenerating
-        || (Array.isArray(view.subagents) && view.subagents.some(a => a && a.status === 'running')),
+        meta.sessionEnabled !== false
+        && (
+          view.chiefWorkFx
+          || (meta && meta.activeWork)
+          || view.secBusy
+          || view.secRegenerating
+          || (Array.isArray(view.subagents) && view.subagents.some(a => a && a.status === 'running'))
+        ),
       )
 
       const body = view.settingsOpen
@@ -28148,6 +28274,32 @@ window.__ModuleLoader__.load({
           h(SuggestionBanner, { view }),
 
           h(SearchDrawer, { view }),
+
+          // Opt-in Banner when Chief has not been activated for this session yet
+          view.sessionId && meta.sessionEnabled === false
+            ? h(
+                'div',
+                { className: 'dnb-session-optin-wrap' },
+                h(
+                  'div',
+                  { className: 'dnb-session-optin-banner', role: 'status' },
+                  h(
+                    'div',
+                    { className: 'dnb-session-optin-text' },
+                    h('span', { className: 'dnb-session-optin-dot', 'aria-hidden': 'true' }),
+                    h('span', null, bi(
+                      '本会话未启用参谋长（普通模式：不注入提示词，也不触发安全卫兵拦截）',
+                      'Chief is inactive in this session (no prompt injection or safety guard interception)',
+                    )),
+                  ),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-primary-btn dnb-session-optin-btn',
+                    onClick: () => void updateSecConfig({ sessionEnabled: true }),
+                  }, bi('在本会话启用', 'Enable for This Session')),
+                ),
+              )
+            : null,
 
           // iOS Segmented Tab Strip (5 Clean Two-Char Tabs)
           h(

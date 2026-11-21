@@ -378,7 +378,10 @@ try {
   // -------------------------------------------------------------------------
   // C6. Whole-Session `tools/pre-execute` Physical Hook Defense (Lead & Subagents)
   // -------------------------------------------------------------------------
-  const c6Deps = makeTestDeps(path.join(tmpHome, 'boards-c6'))
+  const c6Deps = {
+    ...makeTestDeps(path.join(tmpHome, 'boards-c6')),
+    resolveRootSessionId: sid => (String(sid || '').includes('sub') ? 'c6-lead' : (String(sid || '').trim() || 'global')),
+  }
   const preExecHandlers = []
   const mockCordisCtx = {
     get: name => (name === 'agents' ? new Map() : null),
@@ -400,6 +403,20 @@ try {
   hooksMod.createRuntimeHooks(c6Deps).apply(mockCordisCtx)
   assert.equal(preExecHandlers.length, 1, 'tools/pre-execute hook must be registered')
   const preExecHook = preExecHandlers[0]
+
+  // Unactivated normal session must bypass Chief pre-execute defense completely (zero intrusion)
+  const c6UninitializedWriteAllow = await preExecHook(
+    { name: 'write_file', arguments: { path: path.join(tmpOutside, 'uninit.txt'), content: 'ok' }, agent: { id: 'c6-uninitialized' } },
+    async () => ({ kind: 'allow' }),
+  )
+  assert.equal(c6UninitializedWriteAllow.kind, 'allow', 'Unactivated session must bypass tools/pre-execute outside-workspace write blocking')
+  const c6UninitializedShellAllow = await preExecHook(
+    { name: 'bash', arguments: { command: 'head -n 3 /etc/hosts', cwd: tmpOutside }, agent: { id: 'c6-uninitialized' } },
+    async () => ({ kind: 'allow' }),
+  )
+  assert.equal(c6UninitializedShellAllow.kind, 'allow', 'Unactivated session must bypass tools/pre-execute outside-workspace shell blocking')
+
+  stateMod.updateChiefConfig({ sessionId: 'c6-lead', sessionEnabled: true, byUser: true, _fromUiPanel: true })
 
   const c6DenyCmd = await preExecHook(
     { name: 'run_command', arguments: { command: 'rm -rf /' }, agent: { id: 'c6-lead' } },

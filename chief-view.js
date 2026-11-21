@@ -17,6 +17,7 @@ import {
   loadChiefState,
   mutateChiefState,
   computeClusterSig,
+  emptyWorkspace,
   ensureWorkspace,
   clusterView,
   shortAgentBriefName,
@@ -405,7 +406,7 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
   const isFresh = !rawInput || (hasSaved && view.narrative.hash === inputHash)
   const cooledForAuto = Date.now() - lastSummaryAt >= AUTO_SUMMARY_COOLDOWN_MS
   const cooledForChat = Date.now() - lastSummaryAt >= CHAT_OPPORTUNISTIC_SUMMARY_COOLDOWN_MS
-  const allowBackgroundSummary = runMode === 'managed' && autoSummarize && !isFresh && cooledForAuto
+  const allowBackgroundSummary = Boolean(effCfgBefore.sessionEnabled) && runMode === 'managed' && autoSummarize && !isFresh && cooledForAuto
   const allowChatSummary = Boolean(chatTriggered) && !isFresh && cooledForChat
 
   // Opportunistically refresh stale narrative in background after Chief chats (60s debounce),
@@ -498,12 +499,13 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
     }
   }
 
-  const ownWsBeforeStop = ensureWorkspace(latestState, rootId)
+  const ownWsBeforeStop = (latestState.workspaces && latestState.workspaces[rootId]) || emptyWorkspace()
   const effectiveConfigBeforeStop = resolveWorkspaceConfig(latestState, rootId)
   if (
     !_skipAutoPilotCheck
     && rootId
     && rootId !== 'global'
+    && effectiveConfigBeforeStop.sessionEnabled
     && (effectiveConfigBeforeStop.autoPilot || effectiveConfigBeforeStop.runMode === 'managed')
     && effectiveConfigBeforeStop.runMode === 'managed'
     && !effectiveConfigBeforeStop.stopped
@@ -520,7 +522,7 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
 
   const finalState = loadChiefState()
   const finalView = clusterView(finalState, rootId)
-  const ownWs = ensureWorkspace(finalState, rootId)
+  const ownWs = (finalState.workspaces && finalState.workspaces[rootId]) || emptyWorkspace()
   const effectiveConfig = resolveWorkspaceConfig(finalState, rootId)
   const narrativeAt = hasLatestSaved
     ? (latestView.narrative.at || 0)

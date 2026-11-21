@@ -80,6 +80,7 @@ import {
   formatCompactTokenShort,
   parseCompactTokensInput,
   resolveWorkspaceConfig,
+  isChiefSessionEnabled,
   normalizeTacticalModes,
   normalizeState,
   normalizeBubbleHarness,
@@ -187,6 +188,8 @@ export {
   formatCompactTokenShort,
   parseCompactTokensInput,
   resolveWorkspaceConfig,
+  isChiefSessionEnabled,
+  emptyWorkspace,
   normalizeTacticalModes,
   shortAgentBriefName,
   stripCheckpointNoise,
@@ -210,10 +213,52 @@ export function touchWorkspaceActivity(sessionId) {
   const sid = String(sessionId || '').trim()
   if (!sid || sid === 'global') return false
   try {
+    if (!isChiefSessionEnabled(loadChiefState(), sid)) return false
     mutateChiefState((state) => {
       const ws = ensureWorkspace(state, sid)
       if (!ws.runtimeGuard || typeof ws.runtimeGuard !== 'object') ws.runtimeGuard = {}
       ws.runtimeGuard.lastActivityAt = Date.now()
+    })
+    return true
+  } catch {
+    return false
+  }
+}
+
+export function activateChiefSession(sessionId, { force = false } = {}) {
+  const sid = String(sessionId || '').trim()
+  if (!sid || sid === 'global') return false
+  try {
+    const st0 = loadChiefState()
+    const explicit = st0 && st0.workspaces && st0.workspaces[sid] && st0.workspaces[sid].config
+      ? st0.workspaces[sid].config.sessionEnabled
+      : undefined
+    if (explicit === true) return true
+    if (!force && explicit === false) return false
+    mutateChiefState((state) => {
+      const effBefore = resolveWorkspaceConfig(state, sid)
+      const ws = ensureWorkspace(state, sid)
+      if (!ws.config || typeof ws.config !== 'object') {
+        ws.config = {
+          modelRef: effBefore.modelRef || '',
+          paceMode: effBefore.paceMode || 'manual',
+          runMode: effBefore.runMode || 'off',
+          thinkingEffort: effBefore.thinkingEffort || 'auto',
+          teamEffortMode: effBefore.teamEffortMode || 'auto',
+          managedIdleTimeoutMs: effBefore.managedIdleTimeoutMs || DEFAULT_MANAGED_IDLE_TIMEOUT_MS,
+          notifyEnabled: effBefore.notifyEnabled !== false,
+          notifySound: Boolean(effBefore.notifySound),
+          uiLang: effBefore.uiLang || 'auto',
+          managedBudgetMaxCalls: effBefore.managedBudgetMaxCalls ?? DEFAULT_MANAGED_BUDGET_MAX_CALLS,
+          managedBudgetMaxTokens: effBefore.managedBudgetMaxTokens ?? DEFAULT_MANAGED_BUDGET_MAX_TOKENS,
+          lockedModelEfforts: { ...(effBefore.lockedModelEfforts || {}) },
+          permissionMode: effBefore.permissionMode || DEFAULT_CHIEF_PERMISSION_MODE,
+          tacticalModes: { ...effBefore.tacticalModes },
+          sessionEnabled: true,
+        }
+      } else {
+        ws.config.sessionEnabled = true
+      }
     })
     return true
   } catch {
@@ -1070,7 +1115,33 @@ export function updateChiefConfig(patch) {
       }
     : rawInput
   const sid = String(safePatch.sessionId || safePatch.session || '').trim() || 'global'
+  const GLOBAL_ONLY_CFG_KEYS = new Set(['defaultAutoEnableSessions', 'uiLang', 'notifyEnabled', 'notifySound'])
+  const META_CFG_KEYS = new Set(['sessionId', 'session', 'by', 'byUser', '_fromUiPanel'])
+  const payloadKeys = Object.keys(safePatch).filter(k => !META_CFG_KEYS.has(k) && safePatch[k] !== undefined)
+  const isGlobalPrefOnly = payloadKeys.length > 0 && payloadKeys.every(k => GLOBAL_ONLY_CFG_KEYS.has(k))
+  const isDefaultAutoOnly = payloadKeys.length === 1 && payloadKeys[0] === 'defaultAutoEnableSessions'
   return mutateChiefState((state) => {
+    const existingWs = state.workspaces && state.workspaces[sid] ? state.workspaces[sid] : null
+    if (isDefaultAutoOnly || (isGlobalPrefOnly && !(existingWs && existingWs.config))) {
+      if (typeof safePatch.defaultAutoEnableSessions === 'boolean') {
+        state.config.defaultAutoEnableSessions = safePatch.defaultAutoEnableSessions
+      }
+      if (typeof safePatch.uiLang === 'string') {
+        state.config.uiLang = normalizeUiLang(safePatch.uiLang)
+      }
+      if (typeof safePatch.notifyEnabled === 'boolean') {
+        state.config.notifyEnabled = safePatch.notifyEnabled
+      }
+      if (typeof safePatch.notifySound === 'boolean') {
+        state.config.notifySound = safePatch.notifySound
+      }
+      const nextCfg = resolveWorkspaceConfig(state, sid)
+      return {
+        ok: true,
+        config: { ...nextCfg, tacticalModes: { ...nextCfg.tacticalModes } },
+        llmLedger: summarizeLlmLedger(existingWs && existingWs.llmLedger, nextCfg),
+      }
+    }
     const ws = ensureWorkspace(state, sid)
     const effBefore = resolveWorkspaceConfig(state, sid)
     const prevTactical = normalizeTacticalModes(effBefore.tacticalModes)
@@ -1440,6 +1511,22 @@ export function updateChiefConfig(patch) {
       }
     }
     applyPatchTo(ws.config, true, true, true, isHumanLockCaller)
+    if (typeof safePatch.defaultAutoEnableSessions === 'boolean') {
+      state.config.defaultAutoEnableSessions = safePatch.defaultAutoEnableSessions
+    }
+    if (typeof safePatch.sessionEnabled === 'boolean') {
+      ws.config.sessionEnabled = safePatch.sessionEnabled
+      if (!safePatch.sessionEnabled) {
+        ws.config.runMode = 'off'
+        ws.config.paceMode = 'manual'
+        ws.config.stopped = false
+        ws.config.autoPilot = false
+        ws.config.autoReview = false
+        ws.config.tacticalModes = { ...normalizeTacticalModes(ws.config.tacticalModes), intervention: false }
+      }
+    } else if (!isGlobalPrefOnly && sid !== 'global') {
+      ws.config.sessionEnabled = true
+    }
     if (validatedPlugins !== null) {
       if (safePatch.policyPluginsScope === 'global') {
         state.config.policyPlugins = validatedPlugins

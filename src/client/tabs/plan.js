@@ -1473,6 +1473,34 @@ export function HandoffTab({ view }) {
           ),
         ),
       ),
+      view && view.sessionId
+        ? h(
+            'div',
+            { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '7px 2px', gap: 8 } },
+            h('div', { style: { minWidth: 0 } },
+              h('div', { style: { fontSize: 12 } }, bi('本会话启用参谋长', 'Enable Chief for this session')),
+              h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
+                bi('关闭后本会话恢复普通聊天窗口，不注入看板也不触发安全卫兵', 'When off, this chat runs clean with zero prompt injection or safety guard checks')),
+            ),
+            h(Switch, {
+              checked: meta.sessionEnabled !== false,
+              onChange: on => void updateSecConfig({ sessionEnabled: on }),
+            }),
+          )
+        : null,
+      h(
+        'div',
+        { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '7px 2px', gap: 8 } },
+        h('div', { style: { minWidth: 0 } },
+          h('div', { style: { fontSize: 12 } }, bi('新会话默认自动启用参谋长', 'Auto-enable Chief in new sessions')),
+          h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
+            bi('默认关闭：只有主动开启或操作过参谋长的会话才会加载提示词与安全卫兵', 'Off by default: Chief only activates in sessions where you enable or use it')),
+        ),
+        h(Switch, {
+          checked: Boolean(meta.defaultAutoEnableSessions),
+          onChange: on => void updateSecConfig({ defaultAutoEnableSessions: on }),
+        }),
+      ),
       h(
         'div',
         { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', lineHeight: 1.45, marginTop: 4 } },

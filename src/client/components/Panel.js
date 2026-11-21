@@ -47,6 +47,7 @@ import {
 import {
   loadChiefView,
   loadChiefModels,
+  updateSecConfig,
   loadArchives,
   refresh,
   adoptSession,
@@ -194,11 +195,14 @@ function PanelInner(props) {
   const archMeta = view.archiveMeta || {}
   const archiveBadge = archMeta.takenOutCount || 0
   const panelWorking = Boolean(
-    view.chiefWorkFx
-    || (meta && meta.activeWork)
-    || view.secBusy
-    || view.secRegenerating
-    || (Array.isArray(view.subagents) && view.subagents.some(a => a && a.status === 'running')),
+    meta.sessionEnabled !== false
+    && (
+      view.chiefWorkFx
+      || (meta && meta.activeWork)
+      || view.secBusy
+      || view.secRegenerating
+      || (Array.isArray(view.subagents) && view.subagents.some(a => a && a.status === 'running'))
+    ),
   )
 
   const body = view.settingsOpen
@@ -452,6 +456,32 @@ function PanelInner(props) {
       h(SuggestionBanner, { view }),
 
       h(SearchDrawer, { view }),
+
+      // Opt-in Banner when Chief has not been activated for this session yet
+      view.sessionId && meta.sessionEnabled === false
+        ? h(
+            'div',
+            { className: 'dnb-session-optin-wrap' },
+            h(
+              'div',
+              { className: 'dnb-session-optin-banner', role: 'status' },
+              h(
+                'div',
+                { className: 'dnb-session-optin-text' },
+                h('span', { className: 'dnb-session-optin-dot', 'aria-hidden': 'true' }),
+                h('span', null, bi(
+                  '本会话未启用参谋长（普通模式：不注入提示词，也不触发安全卫兵拦截）',
+                  'Chief is inactive in this session (no prompt injection or safety guard interception)',
+                )),
+              ),
+              h('button', {
+                type: 'button',
+                className: 'dnb-primary-btn dnb-session-optin-btn',
+                onClick: () => void updateSecConfig({ sessionEnabled: true }),
+              }, bi('在本会话启用', 'Enable for This Session')),
+            ),
+          )
+        : null,
 
       // iOS Segmented Tab Strip (5 Clean Two-Char Tabs)
       h(

@@ -42,6 +42,8 @@ import {
   normalizeSuggestion,
   ensureWorkspace,
   recordWorkspaceAlertEvent,
+  isChiefSessionEnabled,
+  activateChiefSession,
   SUGGESTIONS_CAP,
   CHAT_CAP,
   nextId,
@@ -198,6 +200,17 @@ export function createRuntimeHooks(deps) {
         const rk = resolveRootSessionId(rootKey || sid) || rootKey || sid
         const cfg = resolveWorkspaceConfig(st, rk)
         return Boolean(cfg.stopped || cfg.paceMode === 'stopped' || (cfg.runMode === 'off' && !(cfg.tacticalModes && cfg.tacticalModes.intervention)))
+      } catch {
+        return false
+      }
+    }
+
+    const isSessionActive = (sid, agentObj = null) => {
+      try {
+        const raw = String(sid || (agentObj && agentObj.id) || '').trim()
+        const rk = resolveRootSessionId(raw, agentObj) || raw
+        if (!rk || rk === 'global') return false
+        return isChiefSessionEnabled(loadChiefState(), rk)
       } catch {
         return false
       }
@@ -392,6 +405,7 @@ export function createRuntimeHooks(deps) {
         if (!decision || decision.kind === 'reject' || signal?.aborted || !Array.isArray(decision.messages)) {
           return decision
         }
+        if (!isSessionActive(agent && agent.id, agent)) return decision
         const deltaMsg = await consumePreStepDelta(makeChiefDeps(runtime), agent)
         if (!deltaMsg) return decision
         return { ...decision, messages: [deltaMsg, ...decision.messages] }
@@ -419,6 +433,7 @@ export function createRuntimeHooks(deps) {
           const liveAgent = (promptCtx && promptCtx.agent) || (spCtx && spCtx.agent) || null
           const curId = liveAgent && liveAgent.id ? String(liveAgent.id) : fallbackAgentId
           const rootId = resolveRootSessionId(curId, liveAgent) || curId
+          if (!isSessionActive(rootId, liveAgent)) return ''
           let teamTasks
           try {
             const svc = runtime.get('agentTeams')
@@ -456,6 +471,7 @@ export function createRuntimeHooks(deps) {
         const caller = exec.agent || null
         const sessionId = caller && caller.id ? String(caller.id) : ''
         const rootId = resolveRootSessionId(sessionId, caller) || sessionId
+        if (!isSessionActive(rootId, caller)) return
         if (exec.name === 'todo_write') syncPlanFromTodos(exec.arguments, rootId)
         else if (exec.name === 'create_goal' || exec.name === 'update_goal') syncObjective(exec.name, exec.arguments, rootId)
         else if (exec.name === 'subagent' || exec.name === 'subagent_fork' || exec.name === 'send_message' || exec.name === 'interrupt_agent') {
@@ -474,6 +490,7 @@ export function createRuntimeHooks(deps) {
         const pendingDeploy = readPendingDeploy()
         if (pendingDeploy && pendingDeploy.fromSessionId && pendingDeploy.fromSessionId !== id) {
           clearPendingDeploy()
+          activateChiefSession(id, { force: true })
           try {
             deployStateToTargetChief(runtime, {
               fromSessionId: pendingDeploy.fromSessionId,
@@ -488,6 +505,7 @@ export function createRuntimeHooks(deps) {
 
         const pending = readPending()
         if (!pending) return
+        activateChiefSession(id, { force: true })
         const delivered = await injectInto(agent, pending.text)
         if (delivered.ok) clearPending()
         const file = boardFileFor(id)
@@ -649,6 +667,7 @@ export function createRuntimeHooks(deps) {
         if (!event || !session || !session.id) return
         const id = String(session.id)
         const rootIdForAct = resolveRootSessionId(id) || id
+        if (!isSessionActive(rootIdForAct)) return
         if (event.type === 'turn/start' || event.type === 'message/user' || event.type === 'tool/call' || event.type === 'turn/end') {
           touchWorkspaceActivity(rootIdForAct)
         }
@@ -709,6 +728,8 @@ export function createRuntimeHooks(deps) {
         const agent = payload && payload.agent
         id = agent && agent.id ? String(agent.id) : ''
         if (!id) return
+        const turnRootId = resolveRootSessionId(id, agent) || id
+        if (!isSessionActive(turnRootId, agent)) return
 
         const turn = Number(payload && payload.turn)
         const file = boardFileFor(id)
@@ -893,6 +914,7 @@ export function createRuntimeHooks(deps) {
             const caller = exec.agent || null
             const sid = caller && caller.id ? String(caller.id) : ''
             const rootId = resolveRootSessionId(sid, caller) || sid || 'global'
+            if (!isSessionActive(rootId, caller)) return next()
             const cwd = (sid && getSessionCwd(runtime, sid)) || (rootId !== 'global' && getSessionCwd(runtime, rootId)) || process.cwd()
             const board = rootId && rootId !== 'global' ? boardForSession(boardFileFor(rootId)) : loadBoard(boardFile())
             const verdict = evaluatePreExecuteDefense({
@@ -1069,6 +1091,7 @@ export function createRuntimeHooks(deps) {
           if (!agId) continue
           const rootId = resolveRootSessionId(agId, ag) || agId
           if (rootId !== agId) continue
+          if (!isChiefSessionEnabled(state, rootId)) continue
           const effCfg = resolveWorkspaceConfig(state, rootId)
           if (effCfg.stopped || effCfg.paceMode === 'stopped') continue
           if (!(effCfg.tacticalModes && effCfg.tacticalModes.intervention)) continue

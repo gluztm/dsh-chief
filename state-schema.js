@@ -961,6 +961,7 @@ export function normalizeWorkspace(raw) {
       : DEFAULT_MANAGED_IDLE_TIMEOUT_MS
     base.config = {
       ...(typeof src.config.modelRef === 'string' ? { modelRef: src.config.modelRef.trim() } : {}),
+      ...(typeof src.config.sessionEnabled === 'boolean' ? { sessionEnabled: src.config.sessionEnabled } : {}),
       permissionMode: rawPerm,
       runMode: rm,
       managedIdleTimeoutMs,
@@ -1062,6 +1063,41 @@ export function parseCompactTokensInput(rawInput) {
   }
 }
 
+/**
+ * Determine whether DSH Chief is active for a specific root session.
+ * Priority: explicit per-session flag > legacy configured/populated workspace > global defaultAutoEnableSessions (default false).
+ */
+export function isChiefSessionEnabled(state, sessionId = '') {
+  const safeState = state && typeof state === 'object' ? state : {}
+  const base = safeState.config && typeof safeState.config === 'object' ? safeState.config : {}
+  const sid = String(sessionId || '').trim()
+  if (!sid || sid === 'global') return Boolean(base.defaultAutoEnableSessions === true)
+  const ws = safeState.workspaces && safeState.workspaces[sid] ? safeState.workspaces[sid] : null
+  const wsCfg = ws && ws.config && typeof ws.config === 'object' ? ws.config : null
+  if (wsCfg && typeof wsCfg.sessionEnabled === 'boolean') {
+    return wsCfg.sessionEnabled
+  }
+  if (wsCfg) return true
+  if (
+    ws
+    && (
+      (Array.isArray(ws.chat) && ws.chat.length > 0)
+      || (Array.isArray(ws.facts) && ws.facts.length > 0)
+      || (Array.isArray(ws.mailbox) && ws.mailbox.length > 0)
+      || (Array.isArray(ws.bubbleHarnesses) && ws.bubbleHarnesses.length > 0)
+    )
+  ) {
+    return true
+  }
+  if (safeState.links && typeof safeState.links === 'object') {
+    if (Array.isArray(safeState.links[sid]) && safeState.links[sid].length > 0) return true
+    for (const arr of Object.values(safeState.links)) {
+      if (Array.isArray(arr) && arr.includes(sid)) return true
+    }
+  }
+  return Boolean(base.defaultAutoEnableSessions === true)
+}
+
 /** Resolve effective Chief config for a specific root session (isolates `intervention` and `permissionMode` per session). */
 export function resolveWorkspaceConfig(state, sessionId = '') {
   const safeState = state && typeof state === 'object' ? state : {}
@@ -1148,6 +1184,8 @@ export function resolveWorkspaceConfig(state, sessionId = '') {
         : DEFAULT_MANAGED_BUDGET_MAX_TOKENS)
   return {
     modelRef,
+    sessionEnabled: isChiefSessionEnabled(safeState, sid),
+    defaultAutoEnableSessions: Boolean(base.defaultAutoEnableSessions === true),
     paceMode,
     runMode,
     managedIdleTimeoutMs,
@@ -1241,6 +1279,7 @@ export function normalizeState(raw) {
     version: STATE_VERSION,
     config: {
       modelRef: typeof cfg.modelRef === 'string' ? cfg.modelRef.trim() : '',
+      defaultAutoEnableSessions: Boolean(cfg.defaultAutoEnableSessions),
       paceMode,
       runMode: stopped ? 'off' : normalizeRunMode(cfg.runMode, { stopped, paceMode }),
       managedIdleTimeoutMs: Number.isFinite(Number(cfg.managedIdleTimeoutMs)) && Number(cfg.managedIdleTimeoutMs) >= 50

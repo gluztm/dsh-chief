@@ -101,6 +101,8 @@ export function applySecView(viewData) {
     ...(Array.isArray(viewData.guardWalls) ? { guardWalls: viewData.guardWalls } : {}),
     chiefMeta: {
       ...prevMeta,
+      sessionEnabled: typeof cfg.sessionEnabled === 'boolean' ? cfg.sessionEnabled : prevMeta.sessionEnabled,
+      defaultAutoEnableSessions: typeof cfg.defaultAutoEnableSessions === 'boolean' ? cfg.defaultAutoEnableSessions : Boolean(prevMeta.defaultAutoEnableSessions),
       runMode: cfg.runMode || (cfg.stopped ? 'off' : (cfg.paceMode === 'auto' ? 'managed' : (cfg.paceMode === 'smart' ? 'patrol' : 'off'))),
       managedIdleTimeoutMs: Number(cfg.managedIdleTimeoutMs) || prevMeta.managedIdleTimeoutMs || (15 * 60 * 1000),
       notifyEnabled: nextNotifyEnabled,

@@ -39,6 +39,7 @@ import {
   getChiefActiveWork,
   mutateChiefState,
   ensureWorkspace,
+  activateChiefSession,
   queueChiefApproval,
   normalizeSuggestion,
   hasValidChiefRiskAck,
@@ -160,6 +161,11 @@ export function createApiRoutes(deps) {
     if (!raw || raw === 'global') return ''
     const root = String(resolveRootSessionId(raw) || raw).trim()
     return (!root || root === 'global') ? '' : root
+  }
+
+  function markSessionActivated(sessionId = '') {
+    const root = resolveBoundRootSid(sessionId)
+    if (root) activateChiefSession(root, { force: true })
   }
 
   function collectDeskItemsForUi(runtime, rootId, cabinetId = '') {
@@ -286,6 +292,8 @@ export function createApiRoutes(deps) {
               chiefMeta: {
                 backendBuild: BACKEND_BUILD,
                 hostCompat,
+                sessionEnabled: Boolean(effCfg.sessionEnabled),
+                defaultAutoEnableSessions: Boolean(effCfg.defaultAutoEnableSessions),
                 paceMode: effCfg.paceMode || 'manual',
                 runMode: effCfg.runMode || 'off',
                 managedIdleTimeoutMs: effCfg.managedIdleTimeoutMs || 15 * 60 * 1000,
@@ -487,6 +495,7 @@ export function createApiRoutes(deps) {
             const body = await readBody(req)
             const sessionId = body && typeof body.session === 'string' ? body.session : ''
             const actName = body && typeof body.action === 'string' ? body.action : ''
+            if (actName && actName !== 'snapshot') markSessionActivated(sessionId)
             if (actName === 'bounds.propose') {
               const propRes = proposeBoundToChief(makeChiefDeps(runtime), {
                 sessionId,
@@ -553,6 +562,7 @@ export function createApiRoutes(deps) {
               if (body.regenerate === true) regenerate = true
               if (typeof body.syncHandoff === 'boolean') syncHandoff = body.syncHandoff
             }
+            if (regenerate) markSessionActivated(sessionId)
             const view = await getChiefView(makeChiefDeps(runtime), sessionId, { regenerate, autoSummarize: !regenerate, syncHandoff })
             if (view && view.handoffSyncResult && view.handoffSyncResult.synced && sessionId) {
               sendJson(res, 200, { ...view, board: boardForSession(boardFileFor(sessionId)) })
@@ -571,6 +581,7 @@ export function createApiRoutes(deps) {
           try {
             const body = await readBody(req)
             const sessionId = typeof body.session === 'string' ? body.session : ''
+            markSessionActivated(sessionId)
             const out = await askOrCommandChief(makeChiefDeps(runtime), {
               sessionId,
               text: typeof body.text === 'string' ? body.text : '',
@@ -594,6 +605,7 @@ export function createApiRoutes(deps) {
             const body = await readBody(req)
             const sessionId = typeof body?.session === 'string' ? body.session : ''
             const rootSid = resolveRootSessionId(sessionId) || sessionId || 'global'
+            markSessionActivated(rootSid)
             const out = await relayArchivesWithChief(makeChiefDeps(runtime), {
               sessionId: rootSid,
               items: Array.isArray(body?.items) ? body.items : [],
@@ -615,6 +627,7 @@ export function createApiRoutes(deps) {
           try {
             const body = await readBody(req)
             const sessionId = typeof body.session === 'string' ? body.session : ''
+            markSessionActivated(sessionId)
             const out = await deliverCrossMessage(makeChiefDeps(runtime), {
               fromSession: sessionId,
               fromLabel: typeof body.by === 'string' && body.by ? body.by : 'DSH 参谋长',
@@ -863,6 +876,7 @@ export function createApiRoutes(deps) {
           try {
             const body = await readBody(req)
             const sessionId = typeof body?.session === 'string' ? body.session : ''
+            markSessionActivated(sessionId)
             const out = await handleApprovalDecision(makeChiefDeps(runtime), {
               sessionId,
               approvalId: typeof body?.id === 'string' ? body.id : '',
@@ -882,6 +896,7 @@ export function createApiRoutes(deps) {
           try {
             const body = await readBody(req)
             const sessionId = typeof body?.session === 'string' ? body.session : ''
+            markSessionActivated(sessionId)
             const out = await handleElevationDecision(makeChiefDeps(runtime), {
               sessionId,
               elevationId: typeof body?.id === 'string' ? body.id : '',
@@ -903,6 +918,7 @@ export function createApiRoutes(deps) {
           try {
             const body = await readBody(req).catch(() => ({}))
             const sessionId = typeof body?.session === 'string' ? body.session : ''
+            markSessionActivated(sessionId)
             const out = await suggestCoreObjectiveWithChief(makeChiefDeps(runtime), {
               sessionId,
               draft: typeof body?.draft === 'string' ? body.draft : '',
@@ -922,6 +938,7 @@ export function createApiRoutes(deps) {
           try {
             const body = await readBody(req).catch(() => ({}))
             const sessionId = typeof body?.session === 'string' ? body.session : ''
+            markSessionActivated(sessionId)
             const out = await recommendAndSetCompactThreshold(makeChiefDeps(runtime), { sessionId })
             sendJson(res, out && out.ok === false ? 400 : 200, out)
           } catch (error) {
@@ -959,6 +976,7 @@ export function createApiRoutes(deps) {
               return
             }
 
+            markSessionActivated(rootA)
             const dirNow = await listPeerDirectory(chiefDeps, rootA).catch(() => ({ targets: [], cluster: [] }))
             const bState = computeBubbleState(chiefDeps, rootA, loadChiefState(), dirNow)
             const LOCK_ERR = '🔒 协同水泡工作中已锁死结构，不允许中途拆解或改动编队；请等待全员收工或点击「⏹ 急停解体」'
@@ -1117,6 +1135,7 @@ export function createApiRoutes(deps) {
           try {
             const body = await readBody(req)
             const sessionId = typeof body.session === 'string' ? body.session : ''
+            markSessionActivated(sessionId)
             const isBatch = body.decision === 'execute_batch' || body.batch === true
             const out = isBatch
               ? await executeBatchSuggestions(makeChiefDeps(runtime), {
@@ -1149,6 +1168,7 @@ export function createApiRoutes(deps) {
           try {
             const body = await readBody(req)
             const sessionId = typeof body.session === 'string' ? body.session : ''
+            markSessionActivated(sessionId)
             const out = await consolidateBoundsWithChief(makeChiefDeps(runtime), {
               sessionId,
               field: typeof body.field === 'string' ? body.field : '',
@@ -1169,6 +1189,7 @@ export function createApiRoutes(deps) {
           try {
             const body = await readBody(req)
             const sessionId = typeof body.session === 'string' ? body.session : ''
+            markSessionActivated(sessionId)
             const out = mutateChiefFact(makeChiefDeps(runtime), {
               sessionId,
               op: typeof body.op === 'string' ? body.op : 'add',
@@ -1229,6 +1250,7 @@ export function createApiRoutes(deps) {
             const body = await readBody(req)
             const sessionId = typeof body.session === 'string' ? body.session : ''
             const rootSid = resolveBoundRootSid(sessionId)
+            markSessionActivated(rootSid || sessionId)
             const op = typeof body.op === 'string' ? body.op : 'save'
             const reqScope = resolveArchiveHttpScope(body.vaultScope || body.scope || '')
             const workingScope = reqScope === 'global' ? 'global' : 'session'
@@ -1511,6 +1533,7 @@ export function createApiRoutes(deps) {
             const body = await readBody(req)
             const sessionId = typeof body.session === 'string' ? body.session : ''
             const rootSid = resolveBoundRootSid(sessionId)
+            markSessionActivated(rootSid || sessionId)
             const vaultScope = resolveArchiveHttpScope(body.vaultScope || body.scope) === 'global' ? 'global' : 'session'
             const cabinetId = vaultScope === 'global' ? '' : (typeof body.cabinetId === 'string' ? body.cabinetId : '')
             const targetOpt = archiveTarget(runtime, rootSid, { cabinetId, vaultScope })
@@ -1549,6 +1572,7 @@ export function createApiRoutes(deps) {
               sendJson(res, 400, { ok: false, error: '当前未绑定具体会话，无法从本会话档案柜提炼' })
               return
             }
+            markSessionActivated(rootSid)
             const cabinetId = typeof body.cabinetId === 'string' ? body.cabinetId : ''
             const targetOpt = archiveTarget(runtime, rootSid, { cabinetId, vaultScope: 'session' })
             const out = await distillSessionArchivesToGlobal(makeChiefDeps(runtime), {
@@ -1581,6 +1605,7 @@ export function createApiRoutes(deps) {
             const body = await readBody(req)
             const sessionId = typeof body.session === 'string' ? body.session : ''
             const rootSid = resolveBoundRootSid(sessionId)
+            markSessionActivated(rootSid || sessionId)
             const cabinetId = typeof body.cabinetId === 'string' ? body.cabinetId : ''
             const vaultScope = 'session'
             const targetOpt = archiveTarget(runtime, rootSid, { cabinetId, vaultScope })
@@ -1612,6 +1637,7 @@ export function createApiRoutes(deps) {
             const body = await readBody(req)
             const sessionId = typeof body.session === 'string' ? body.session : ''
             const rootSid = resolveRootSessionId(sessionId) || sessionId
+            markSessionActivated(rootSid)
             const cabinetId = typeof body.cabinetId === 'string' ? body.cabinetId : ''
             const vaultScope = resolveArchiveHttpScope(body.vaultScope || body.scope) === 'global' ? 'global' : 'session'
             if (vaultScope !== 'global') {

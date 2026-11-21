@@ -137,6 +137,26 @@ export async function updateSecConfig(nextCfg) {
       : ((value.view && value.view.config && typeof value.view.config.teamEffortMode === 'string')
           ? value.view.config.teamEffortMode
           : null)
+    const resolvedSessionEnabled = (value.config && typeof value.config.sessionEnabled === 'boolean')
+      ? value.config.sessionEnabled
+      : ((value.view && value.view.config && typeof value.view.config.sessionEnabled === 'boolean')
+          ? value.view.config.sessionEnabled
+          : null)
+    const resolvedDefaultAutoEnable = (value.config && typeof value.config.defaultAutoEnableSessions === 'boolean')
+      ? value.config.defaultAutoEnableSessions
+      : ((value.view && value.view.config && typeof value.view.config.defaultAutoEnableSessions === 'boolean')
+          ? value.view.config.defaultAutoEnableSessions
+          : null)
+    const resolvedRunMode = (value.config && typeof value.config.runMode === 'string')
+      ? value.config.runMode
+      : ((value.view && value.view.config && typeof value.view.config.runMode === 'string')
+          ? value.view.config.runMode
+          : null)
+    const resolvedPaceMode = (value.config && typeof value.config.paceMode === 'string')
+      ? value.config.paceMode
+      : ((value.view && value.view.config && typeof value.view.config.paceMode === 'string')
+          ? value.view.config.paceMode
+          : null)
     const updatedSubagents = resolvedLocks && Array.isArray(store.subagents)
       ? store.subagents.map(ag => {
           if (!ag || typeof ag !== 'object') return ag
@@ -153,12 +173,16 @@ export async function updateSecConfig(nextCfg) {
     patch({
       compactInputDraft: null,
       compactLowWarning: value.compactLowWarning || '',
-      ...((resolvedLocks || resolvedTeamEffortMode)
+      ...((resolvedLocks || resolvedTeamEffortMode || resolvedSessionEnabled !== null || resolvedDefaultAutoEnable !== null || resolvedRunMode !== null || resolvedPaceMode !== null)
         ? {
             chiefMeta: {
               ...store.chiefMeta,
               ...(resolvedLocks ? { lockedModelEfforts: resolvedLocks } : {}),
               ...(resolvedTeamEffortMode ? { teamEffortMode: resolvedTeamEffortMode === 'manual' ? 'manual' : 'auto' } : {}),
+              ...(resolvedSessionEnabled !== null ? { sessionEnabled: resolvedSessionEnabled } : {}),
+              ...(resolvedDefaultAutoEnable !== null ? { defaultAutoEnableSessions: resolvedDefaultAutoEnable } : {}),
+              ...(resolvedRunMode !== null ? { runMode: resolvedRunMode } : {}),
+              ...(resolvedPaceMode !== null ? { paceMode: resolvedPaceMode, stopped: resolvedPaceMode === 'stopped' } : {}),
             },
           }
         : {}),
@@ -248,6 +272,21 @@ export async function updateSecConfig(nextCfg) {
       patch({ notice: nextCfg.notifyEnabled ? bi('🔔 已开启桌面通知提醒', '🔔 Desktop alerts on') : bi('🔕 已关闭桌面通知提醒', '🔕 Desktop alerts off') })
     } else if (typeof nextCfg.notifySound === 'boolean') {
       patch({ notice: nextCfg.notifySound ? bi('🔊 已开启提示音', '🔊 Sound on') : bi('🔇 已关闭提示音', '🔇 Sound off') })
+    } else if (typeof nextCfg.sessionEnabled === 'boolean') {
+      patch({
+        notice: nextCfg.sessionEnabled
+          ? bi('✅ 已在本会话启用参谋长（提示词、看板与安全卫兵已生效）', '✅ Chief enabled for this session (prompt, board & safety guard active)')
+          : bi('⏸ 已退出本会话参谋长（本会话恢复普通零侵入模式）', '⏸ Chief disabled for this session (zero-intrusion mode)'),
+      })
+      void refresh()
+      void loadChiefView(false)
+    } else if (typeof nextCfg.defaultAutoEnableSessions === 'boolean') {
+      patch({
+        notice: nextCfg.defaultAutoEnableSessions
+          ? bi('⚡ 新会话将默认自动启用参谋长', '⚡ New sessions will auto-enable Chief by default')
+          : bi('🛡 新会话已恢复默认按需启用（普通窗口零侵入）', '🛡 New sessions stay opt-in by default (zero intrusion)'),
+      })
+      void refresh()
     } else if (nextCfg.managedBudgetMaxCalls !== undefined || nextCfg.managedBudgetMaxTokens !== undefined) {
       patch({ notice: bi('💰 已更新托管费用上限', '💰 Spending limits updated') })
     } else if (typeof nextCfg.paceMode === 'string') {
