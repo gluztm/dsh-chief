@@ -1810,13 +1810,30 @@ window.__ModuleLoader__.load({
       patch({ seenAlertEventIds: {} })
     }
 
-    // === [module: src/client/api.js] ===
+    // === [module: src/client/api/transport.js] ===
     /**
-     * api.js
+     * src/client/api/transport.js — 底层 HTTP 通信、响应状态同步与参谋工作态动效协调器
      *
-     * HTTP client, Chief/Board state actions, archive/memory/handoff mutations, and session binding.
+     * 【核心职责】
+     *   1. `call(path, init)`：统一封装后端请求、版本漂移探测（`EXPECTED_BACKEND_BUILD`）、
+     *      响应体内 `board` / `secView` / `archives` 元数据自动同步与错误提取。
+     *   2. `syncBackendActiveWork` / `applySecView`：把后端参谋元信息与实时提醒写入前端 `store`。
+     *   3. `classifyChiefWorkFx` / `resolveChiefSuggestionWorkFx` / `withChiefWorkFx`：
+     *      管理底部参谋条调用时的流光/气泡状态指示与请求时序收敛。
+     *
+     * 【边界与无环约定】
+     *   - 处于 `src/client/api/*` DAG 最底层，不直接 import `board.js` / `archives.js` / `chief.js`。
+     *   - 跨模块异步唤醒通过 `apiBridge` 完成，确保 `verify-client-modular-build.mjs` 零环引用。
      */
 
+
+    /** Late-bound callbacks populated by upper API domain modules without creating import cycles. */
+    const apiBridge = {
+      applyArchiveHeaders: null,
+      loadArchives: null,
+      loadChiefView: null,
+      refresh: null,
+    }
 
     function syncBackendActiveWork(activeWork) {
       const cleanWork = activeWork && activeWork.id ? activeWork : null
@@ -1829,7 +1846,7 @@ window.__ModuleLoader__.load({
             ...(cleanWork.boundSubTab ? { boundSubTab: cleanWork.boundSubTab } : {}),
             seenBackendWorkIds: { ...seen, [cleanWork.id]: true },
           })
-          if (cleanWork.tab === 'archive' && !store.archiveLoaded) void loadArchives(false)
+          if (cleanWork.tab === 'archive' && !store.archiveLoaded && apiBridge.loadArchives) void apiBridge.loadArchives(false)
         } else if (cleanWork.id && !seen[cleanWork.id]) {
           patch({ seenBackendWorkIds: { ...seen, [cleanWork.id]: true } })
         }
@@ -1837,7 +1854,7 @@ window.__ModuleLoader__.load({
           runtimeRefs.fastWorkPollTimer = setTimeout(() => {
             runtimeRefs.fastWorkPollTimer = null
             if (store.chiefMeta && store.chiefMeta.activeWork) {
-              void refresh()
+              if (apiBridge.refresh) void apiBridge.refresh()
             }
           }, 1200)
         }
@@ -1846,8 +1863,8 @@ window.__ModuleLoader__.load({
           clearTimeout(runtimeRefs.fastWorkPollTimer)
           runtimeRefs.fastWorkPollTimer = null
         }
-        if (prevWork.tab === 'archive') void loadArchives(true)
-        void loadChiefView(false)
+        if (prevWork.tab === 'archive' && apiBridge.loadArchives) void apiBridge.loadArchives(true)
+        if (apiBridge.loadChiefView) void apiBridge.loadChiefView(false)
       }
     }
 
@@ -1948,6 +1965,7 @@ window.__ModuleLoader__.load({
       }
     }
 
+
     async function call(path, init) {
       const response = await fetch(API + '/' + path, {
         cache: 'no-store',
@@ -2021,7 +2039,7 @@ window.__ModuleLoader__.load({
       if (value && Array.isArray(value.deskItems)) {
         patch({ archiveDeskItems: value.deskItems, archiveDeskLoaded: true })
       }
-      if (value && value.archives && Array.isArray(value.archives.items)) applyArchiveHeaders(value.archives)
+      if (value && value.archives && Array.isArray(value.archives.items) && apiBridge.applyArchiveHeaders) apiBridge.applyArchiveHeaders(value.archives)
       if (value && value.view) applySecView(value.view)
       if (!response.ok || (value && value.ok === false)) {
         const err = new Error((value && value.error) || ('HTTP ' + response.status))
@@ -2031,6 +2049,1402 @@ window.__ModuleLoader__.load({
       }
       return value
     }
+
+    function classifyChiefWorkFx(text, quickTag = '') {
+      if (quickTag === 'consult_chief') {
+        return { tone: 'neon', tab: 'chief', label: '💡 参谋长正在看情况、想建议…' }
+      }
+      if (quickTag === 'dream_roam') {
+        return { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游，帮你整理档案…' }
+      }
+      if (quickTag === 'craft_wall') {
+        return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在写物理驻墙规则…' }
+      }
+      if (quickTag === 'extract_bounds') {
+        return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在整理边界规则…' }
+      }
+      const clean = String(text || '').trim()
+      const hits = []
+      if (/梦境漫游|dream.?roam/i.test(clean)) {
+        hits.push({ tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游，帮你整理档案…' })
+      }
+      if (/思考强度|思考挡位|推理强度|调挡|reasoningEffort|effortOps/i.test(clean)) {
+        hits.push({ tone: 'neon', tab: store.tab || 'chief', label: '🧠 参谋长正在调整思考深度…' })
+      }
+      if (/置顶桌面|认知桌面|递送.*档案|拉阅.*钩子|archiveOps/i.test(clean)) {
+        hits.push({ tone: 'archive', tab: 'archive', label: '📌 参谋长正在整理认知桌面资料…' })
+      }
+      if (/手搓|驻墙|筑墙|物理墙|guard_?wall|wallProposals/i.test(clean)) {
+        hits.push({ tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在写物理驻墙规则…' })
+      }
+      if (/提炼.{0,4}边界|工作边界|红线|必做项|注意事项|boundProposals/i.test(clean)) {
+        hits.push({ tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在整理红线规则…' })
+      }
+      if (/整理档案|档案柜|卷宗|归档|收纳入柜|桌面档案|抽屉|archive/i.test(clean)) {
+        hits.push({ tone: 'archive', tab: 'archive', label: '参谋长正在整理档案…' })
+      }
+      if (/任务看板|拆解任务|金字塔|子任务|graph\.plan/i.test(clean)) {
+        hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在整理任务列表…' })
+      }
+      if (/执行计划|规划步骤|交接单|handoff/i.test(clean)) {
+        hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在拟定执行计划…' })
+      }
+      if (/协同网络|跨窗|关联会话|子代理|广播/i.test(clean)) {
+        hits.push({ tone: 'peers', tab: 'peers', label: '参谋长正在协调各窗口对话…' })
+      }
+      if (hits.length === 1) return hits[0]
+      if (hits.length >= 2) {
+        const allBoundaries = hits.every(x => x.tab === 'boundaries')
+        return {
+          tone: 'neon',
+          tab: allBoundaries ? 'boundaries' : (store.tab || 'chief'),
+          ...(allBoundaries ? { boundSubTab: 'rules' } : {}),
+          label: allBoundaries ? '参谋长正在整理规则和物理驻墙…' : '参谋长正在批量处理中…',
+        }
+      }
+      return {
+        tone: 'neon',
+        tab: store.tab || 'chief',
+        label: '参谋长正在思考…',
+      }
+    }
+
+    function resolveChiefSuggestionWorkFx(suggestions = []) {
+      const list = Array.isArray(suggestions) ? suggestions.filter(Boolean) : []
+      if (!list.length) {
+        return { tone: 'neon', tab: store.tab || 'chief', label: '参谋长正在执行你选的建议…' }
+      }
+      const kinds = new Set(list.map(s => String(s.kind || '').trim()))
+      if (kinds.size === 1 && kinds.has('guard_wall')) {
+        return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在启用物理驻墙…' }
+      }
+      if (kinds.size === 1 && kinds.has('wall_removal')) {
+        return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '⚠️ 正在按你的确认调整物理驻墙…' }
+      }
+      if (kinds.size === 1 && kinds.has('bound')) {
+        return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在添加边界规则…' }
+      }
+      if (kinds.size === 1 && kinds.has('archive_op')) {
+        return { tone: 'archive', tab: 'archive', label: '📌 参谋长正在整理认知桌面资料…' }
+      }
+      if (kinds.size === 1 && kinds.has('model_effort')) {
+        return { tone: 'neon', tab: 'chief', label: '🧠 参谋长正在调整思考深度…' }
+      }
+      const allBoundsPage = [...kinds].every(k => k === 'guard_wall' || k === 'bound')
+      return {
+        tone: 'neon',
+        tab: allBoundsPage ? 'boundaries' : (store.tab || 'chief'),
+        ...(allBoundsPage ? { boundSubTab: 'rules' } : {}),
+        label: allBoundsPage ? '参谋长正在保存规则和物理驻墙…' : '🏁 参谋长正在依次执行建议…',
+      }
+    }
+
+    async function withChiefWorkFx(fxSpec = {}, fn) {
+      const spec = fxSpec && typeof fxSpec === 'object' ? fxSpec : {}
+      const token = 'fx-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)
+      const targetTab = spec.tab || store.tab || 'chief'
+      const minMs = Number(spec.minMs) || 0
+      const startedAt = Date.now()
+      patch({
+        ...(spec.tab ? { tab: spec.tab } : {}),
+        ...(spec.boundSubTab ? { boundSubTab: spec.boundSubTab } : {}),
+        chiefWorkFx: {
+          token,
+          tone: spec.tone || 'neon',
+          tab: targetTab,
+          label: spec.label || '参谋长正在处理…',
+        },
+      })
+      if (targetTab === 'archive' && !store.archiveLoaded) {
+        void loadArchives(false)
+      }
+      let hadError = false
+      try {
+        return await fn()
+      } catch (err) {
+        hadError = true
+        throw err
+      } finally {
+        if (!hadError && minMs > 0 && typeof window !== 'undefined') {
+          const waitMs = minMs - (Date.now() - startedAt)
+          if (waitMs > 24) {
+            await new Promise(resolve => setTimeout(resolve, waitMs))
+          }
+        }
+        if (store.chiefWorkFx && store.chiefWorkFx.token === token) {
+          patch({ chiefWorkFx: null })
+        }
+      }
+    }
+
+    // === [module: src/client/api/board.js] ===
+    /**
+     * src/client/api/board.js — 任务板、工作流操作、边界红线、记忆搜索与交接单 API
+     *
+     * 【核心职责】
+     *   承载主面板任务增删改查（`refresh` / `act`）、跨窗口交接（`loadTargets` / `loadHandoff` / `transfer`）、
+     *   记忆问答、红线规则（Bounds）与物理驻墙（Guard Walls）增删合并，以及任务编辑器预填动作。
+     *
+     * 【边界约定】
+     *   - 仅依赖 `./transport.js`，不导入上层 `archives.js` 或 `chief.js`。
+     *   - 模块加载时向 `apiBridge.refresh` 注册回调供底层状态同步使用。
+     */
+
+
+    async function refresh() {
+      const fromUrl = sessionIdFromUrl()
+      if (!store.sessionId && fromUrl) {
+        patch({ sessionId: fromUrl })
+      }
+      try {
+        await call('snapshot' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
+        const panelActive = Boolean(store.dock || store.panel === SIDE_ID || store.open)
+        if (panelActive && (!store.secView || store.tab === 'chief' || store.tab === 'peers' || (store.chiefMeta && store.chiefMeta.pendingSuggestions > 0))) {
+          if (apiBridge.loadChiefView) void apiBridge.loadChiefView(false)
+        }
+        if (store.error) patch({ error: '' })
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+      }
+    }
+
+    async function act(action) {
+      patch({ busy: true, error: '' })
+      try {
+        const effSession = (action && action.session !== undefined)
+          ? action.session
+          : (store.sessionId || sessionIdFromUrl())
+        const result = await call('action', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ ...action, session: effSession, by: (action && action.by) || 'user' }),
+        })
+        let notice = truncationNotice(result)
+        if (!notice && result && result.dispatched) {
+          notice = '已派发 @' + result.dispatched.agent
+        } else if (!notice && result && result.interrupted) {
+          notice = '已停止 @' + result.interrupted
+        } else if (!notice && result && result.messageId && result.agent) {
+          notice = '已发送给 @' + result.agent
+        }
+        if (notice) patch({ notice })
+        return result
+      } catch (error) {
+        const msg = String((error && error.message) || error)
+        if (/unknown action:/i.test(msg)) {
+          patch({
+            staleBackendDetected: true,
+            staleBackendDismissed: false,
+            error: '后台还在跑旧版本，新功能还没加载进来。请完全关闭再重新打开 DeepSeek Harness 客户端。',
+          })
+        } else {
+          patch({ error: msg })
+        }
+        return null
+      } finally {
+        patch({ busy: false })
+      }
+    }
+
+    async function loadTargets() {
+      try {
+        const value = await call('sessions' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
+        patch({
+          targets: (value && Array.isArray(value.sessions)) ? value.sessions : [],
+          pending: (value && value.pending) || null,
+          autoInject: !!(value && value.autoInject),
+          guardIdle: !(value && value.guardIdle === false),
+          guardMaxPerSession: Number.isFinite(Number(value && value.guardMaxPerSession))
+            ? Number(value.guardMaxPerSession)
+            : 3,
+          guardShortAnswer: Number.isFinite(Number(value && value.guardShortAnswer))
+            ? Number(value.guardShortAnswer)
+            : 600,
+        })
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+      }
+    }
+
+    async function loadHandoff() {
+      patch({ handoffBusy: true, error: '' })
+      try {
+        const value = await call('handoff' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
+        const text = value && value.text ? value.text : ''
+        const nextMeta = {
+          source: (value && value.source) || 'auto',
+          isCustom: Boolean(value && value.isCustom),
+          pinned: Boolean(value && value.pinned),
+          syncOnDigest: Boolean(value && value.syncOnDigest),
+          isIncomplete: Boolean(value && value.isIncomplete),
+          isStale: Boolean(value && value.isStale),
+          hasNarrativeUpdate: Boolean(value && value.hasNarrativeUpdate),
+          autoText: (value && value.autoText) || '',
+          updatedAt: Number(value && (value.updatedAt || value.handoffAt)) || 0,
+        }
+        patch({
+          handoffText: text,
+          handoffMeta: nextMeta,
+          ...(store.handoffEditing ? {} : { handoffDraft: text }),
+        })
+        return value || { ok: true, text, ...nextMeta }
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ handoffBusy: false })
+      }
+    }
+
+    async function saveHandoffCustom(text, pinAfter = false) {
+      const cleanText = String(text || '')
+      const res = await act({ action: 'handoff.save', text: cleanText, source: 'human', by: 'user' })
+      if (res && res.ok) {
+        if (pinAfter) {
+          await act({ action: 'handoff.pin', pinned: true, by: 'user' })
+        }
+        patch({ handoffEditing: false, notice: pinAfter ? '✏️ 已保存交接单，并设好定住防改' : '✏️ 已保存你改的交接单' })
+        await loadHandoff()
+      }
+      return res
+    }
+
+    async function toggleHandoffPin(nextPinned, snapshotOverride = '') {
+      let snapshotText = String(
+        snapshotOverride
+        || store.handoffText
+        || (store.handoffMeta && store.handoffMeta.autoText)
+        || '',
+      )
+      if (nextPinned && !snapshotText) {
+        const loaded = await loadHandoff()
+        snapshotText = String((loaded && loaded.text) || store.handoffText || '')
+      }
+      const res = await act({
+        action: 'handoff.pin',
+        pinned: Boolean(nextPinned),
+        ...(nextPinned && snapshotText ? { snapshotText } : {}),
+        by: 'user',
+      })
+      if (res && res.ok) {
+        patch({ notice: nextPinned ? '📌 已定住防改：参谋长不会再自动覆盖这份交接单' : '🔓 已解除锁定，交接单可以重新自动更新了' })
+        await loadHandoff()
+      }
+      return res
+    }
+
+    async function resetHandoffAuto() {
+      const res = await act({ action: 'handoff.reset', by: 'user' })
+      if (res && res.ok) {
+        patch({ handoffEditing: false, notice: '↺ 已改回由系统自动更新交接单' })
+        await loadHandoff()
+      }
+      return res
+    }
+
+    async function toggleSyncHandoffOnDigest(enabled) {
+      if (store.board && store.board.handoff && store.board.handoff.pinned) {
+        patch({ notice: '🔒 交接单已定住防改，先解锁才能开启自动同步' })
+        return null
+      }
+      const res = await act({ action: 'handoff.setSyncOnDigest', enabled: Boolean(enabled), by: 'user' })
+      if (res && res.ok) {
+        patch({ notice: enabled ? '✦ 以后提炼摘要时会自动更新交接单' : '已关闭自动同步，之后只按你的修改为准' })
+        await loadHandoff()
+      }
+      return res
+    }
+
+    async function requestTransferWithGuard(target, opts = {}) {
+      const info = await loadHandoff()
+      const hMeta = (info && typeof info === 'object') ? info : (store.handoffMeta || {})
+      const pinned = Boolean(hMeta.pinned || (store.board && store.board.handoff && store.board.handoff.pinned))
+      const staleOrIncomplete = !pinned && Boolean(hMeta.isIncomplete || hMeta.isStale || hMeta.hasNarrativeUpdate)
+      if (staleOrIncomplete) {
+        const reason = hMeta.isIncomplete
+          ? '交接单还缺目标、步骤或最新摘要，直接交接会让新对话接不上。'
+          : '摘要已经更新了，但交接单还没同步。直接交接会让新窗口看到旧进度，建议先更新一下。'
+        patch({
+          handoffWarnModal: {
+            target,
+            opts,
+            reason,
+            isIncomplete: Boolean(hMeta.isIncomplete),
+          },
+        })
+        return null
+      }
+      return transfer(target, opts)
+    }
+
+    async function transfer(target, opts = {}) {
+      patch({ transferNote: '正在交接…', error: '' })
+      try {
+        const value = await call('transfer', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            target,
+            session: store.sessionId,
+            by: 'user',
+            deployChief: opts.deployChief !== false,
+            archiveTransferPolicy: opts.archiveTransferPolicy || store.deployArchivePolicy || 'none',
+            ...(opts.archiveDrawer || store.deployDrawer ? { archiveDrawer: opts.archiveDrawer || store.deployDrawer } : {}),
+            ...(opts.toCabinetId ? { toCabinetId: opts.toCabinetId } : {}),
+            ...(opts.customNote ? { customNote: opts.customNote } : {}),
+          }),
+        })
+        const created = value && value.mode === 'created' && value.sessionId ? String(value.sessionId) : ''
+        let note = '已放入待领取队列（含参谋预部署）'
+        if (value && value.mode === 'injected') note = '已交接到目标对话，并开启了参谋'
+        if (created) {
+          patch({ transferred: true })
+          setTimeout(() => patch({ transferred: false }), 2000)
+          note = '已创建新会话 ' + shortSession(created) + ' 并部署参谋'
+          const sessionsSvc = service('sessions') || (runtimeRefs.navigation && runtimeRefs.navigation.sessions) || null
+          if (sessionsSvc && typeof sessionsSvc.open === 'function') {
+            try {
+              sessionsSvc.open(created)
+            } catch {}
+          } else if (runtimeRefs.navigation && typeof runtimeRefs.navigation.openSession === 'function') {
+            try {
+              runtimeRefs.navigation.openSession(created)
+            } catch {}
+          }
+        }
+        patch({
+          transferNote: note,
+          notice: note,
+          handoffText: value && value.text ? value.text : store.handoffText,
+        })
+        void loadTargets()
+        return value
+      } catch (error) {
+        patch({ transferNote: '失败：' + String((error && error.message) || error) })
+        return null
+      }
+    }
+
+    async function loadMemory() {
+      patch({ memBusy: true, error: '' })
+      try {
+        const value = await call('memory' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
+        patch({
+          memSections: (value && Array.isArray(value.sections)) ? value.sections : [],
+          memCount: Number(value && value.count) || 0,
+          memDigest: (value && value.digest) || '',
+        })
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+      } finally {
+        patch({ memBusy: false })
+      }
+    }
+
+    async function askMemory(question) {
+      const text = String(question || '').trim()
+      if (!text) return
+      patch({ memBusy: true, memNote: '' })
+      try {
+        const value = await call('action', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({ action: 'memory.ask', question: text, session: store.sessionId, by: 'user' }),
+        })
+        patch({
+          memReply: (value && value.reply) || '',
+          memHits: (value && value.hits) || [],
+          memNote: value && value.terms && value.terms.length ? value.terms.join(' · ') : '',
+        })
+      } catch (error) {
+        patch({ memNote: String((error && error.message) || error) })
+      } finally {
+        patch({ memBusy: false })
+      }
+    }
+
+    async function addMemory() {
+      const text = store.memText.trim()
+      const title = store.memTitle.trim()
+      const section = store.memSection
+      if (!text) return
+      patch({ memText: '', memTitle: '', memComposerOpen: false, notice: '已记下来' })
+      await act({ action: 'memory.add', text, title, section })
+      void loadMemory()
+    }
+
+    async function removeMemory(id) {
+      await act({ action: 'memory.remove', id })
+      void loadMemory()
+    }
+
+    function searchBoard(term) {
+      const needle = String(term || '').trim().toLowerCase()
+      if (!needle) return []
+      const board = store.board || {}
+      const sec = store.secView || {}
+      const hits = []
+      const hit = text => String(text || '').toLowerCase().includes(needle)
+      for (const fact of sec.facts || []) {
+        if (hit(fact.text)) {
+          hits.push({ kind: '纪律/记忆', tab: 'chief', subTab: 'facts', id: fact.id, title: FACT_CAT_LABEL[fact.category] || '记忆条目', snippet: snippetOf(fact.text, needle, 36) })
+        }
+      }
+      for (const task of board.tasks || []) {
+        if (hit(task.title) || hit(task.note) || hit(task.intent) || hit(task.evidence)) {
+          hits.push({ kind: '任务', tab: 'tasks', id: task.id, title: task.title, snippet: snippetOf(task.note || task.evidence || task.title, needle, 34) })
+        }
+      }
+      for (const mail of sec.mailbox || []) {
+        if (hit(mail.text) || hit(mail.subject) || hit(mail.from) || hit(mail.to)) {
+          hits.push({ kind: '协同信箱', tab: 'peers', id: mail.id, title: (mail.from || '参谋长') + ' → ' + (mail.to || '成员'), snippet: snippetOf(mail.text, needle, 34) })
+        }
+      }
+      for (const note of board.notes || []) {
+        if (hit(note.title) || hit(note.body) || (note.tags || []).some(hit)) {
+          hits.push({ kind: '临时便签', tab: 'archive', id: note.id, title: note.title || '无标题', snippet: snippetOf(note.body || note.title, needle, 36) })
+        }
+      }
+      if (store.archiveLoaded && Array.isArray(store.archiveItems)) {
+        for (const arch of store.archiveItems) {
+          if (hit(arch.title) || hit(arch.summary) || (arch.tags || []).some(hit) || (arch.pointPreviews || []).some(hit)) {
+            hits.push({
+              kind: '工程档案',
+              tab: 'archive',
+              folderId: arch.folder,
+              archiveId: arch.id,
+              id: arch.id,
+              title: (arch.paperclip === 'gold' ? '📎 ' : '') + (arch.title || '无标题'),
+              snippet: snippetOf(arch.summary || (arch.pointPreviews || []).join(' · '), needle, 36),
+            })
+          }
+        }
+      }
+      for (const step of board.plan || []) {
+        if (hit(step.text)) hits.push({ kind: '规划', tab: 'tasks', id: step.id, title: step.text, snippet: '' })
+      }
+      if (hit(board.objective)) hits.push({ kind: '目标', tab: 'tasks', id: 'objective', title: '当前目标', snippet: snippetOf(board.objective, needle, 36) })
+      for (const item of board.memory || []) {
+        if (hit(item.title) || hit(item.text)) {
+          hits.push({ kind: '回合记录', tab: 'chief', subTab: 'facts', showRawTurns: true, id: item.id, title: item.title || SECTION_LABEL[item.section] || '记忆', snippet: snippetOf(item.text || item.title, needle, 36) })
+        }
+      }
+      return hits
+    }
+
+    function sendToComposer(text) {
+      const actions = store.inputActions
+      if (!actions || typeof actions !== 'object') return null
+      const setters = ['setDraft', 'setText', 'replaceText', 'updateText', 'appendText', 'insertText']
+      for (const name of setters) {
+        const fn = actions[name]
+        if (typeof fn !== 'function') continue
+        try {
+          if (fn(text) === false) continue
+        } catch {
+          continue
+        }
+        const submit = typeof actions.submit === 'function' ? actions.submit : (typeof actions.send === 'function' ? actions.send : null)
+        if (submit) {
+          try {
+            submit()
+            return '已发到对话'
+          } catch {}
+        }
+        return '已填入输入框'
+      }
+      return null
+    }
+
+    async function askLeadModel(promptText, subject = '步骤咨询') {
+      const clean = String(promptText || '').trim()
+      if (!clean) return
+      const sent = sendToComposer(clean)
+      if (sent) {
+        patch({ notice: sent + '，等主对话回复' })
+        return
+      }
+      try {
+        await call('chief/relay', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId,
+            by: '用户咨询',
+            target: 'lead',
+            subject,
+            text: clean,
+            mode: 'followup',
+          }),
+        })
+        patch({ notice: '已发给主对话' })
+      } catch (error) {
+        copyText(clean, '已复制，去对话框粘贴就能提问')
+      }
+    }
+
+    function copyText(text, label = '已复制') {
+      if (!text) return
+      try {
+        if (navigator.clipboard && navigator.clipboard.writeText) {
+          navigator.clipboard.writeText(String(text)).then(
+            () => patch({ copied: true, notice: label }),
+            () => {},
+          )
+          setTimeout(() => patch({ copied: false }), 1400)
+        }
+      } catch {}
+    }
+
+    /* ----------------------------------------------------------- Icons (SVG) */
+
+    async function addBoundRule(field, item, pinned = false) {
+      const res = await act({ action: 'bounds.add', field, item, pinned: Boolean(pinned) })
+      if (!res || store.error) return
+      patch({
+        boundDraft: { ...store.boundDraft, [field]: '' },
+        notice: pinned ? '📌 已添加为所有任务通用的边界' : '已添加到当前对话边界（点前面图钉可设为通用）',
+      })
+    }
+
+    async function toggleBoundPin(field, item, nextPinned) {
+      const res = await act({ action: 'bounds.pin', field, item, pinned: Boolean(nextPinned) })
+      if (!res || store.error) return
+      patch({
+        notice: nextPinned
+          ? '📌 已固定为所有任务通用的边界'
+          : '已取消通用固定，只在当前对话生效',
+      })
+    }
+
+    async function removeBoundRule(field, item) {
+      const nextSel = { ...(store.boundSelected || { allowed: [], forbidden: [], notes: [] }) }
+      if (Array.isArray(nextSel[field])) {
+        nextSel[field] = nextSel[field].filter(x => x !== item)
+        patch({ boundSelected: nextSel })
+      }
+      await act({ action: 'bounds.remove', field, item })
+    }
+
+    async function editBoundRule(field, oldItem, nextItem) {
+      const trimmed = String(nextItem || '').trim()
+      if (!trimmed || trimmed === oldItem) return
+      const res = await act({ action: 'bounds.edit', field, oldItem, item: trimmed })
+      if (res && !store.error) patch({ notice: '已更新边界规则' })
+    }
+
+    function toggleBoundSelect(field, item) {
+      const curMap = store.boundSelected || { allowed: [], forbidden: [], notes: [] }
+      const cur = Array.isArray(curMap[field]) ? curMap[field] : []
+      const next = cur.includes(item) ? cur.filter(x => x !== item) : cur.concat(item)
+      patch({ boundSelected: { ...curMap, [field]: next } })
+    }
+
+    async function saveGuardWallApi({ title, ruleType = 'forbid_cmd', pattern = '', patterns = null, scope = 'global', reason = '', writeOnly = false }) {
+      const cleanTitle = String(title || '').trim()
+      const cleanPattern = String(pattern || '').trim()
+      const patList = Array.isArray(patterns) && patterns.length > 0
+        ? patterns
+        : (cleanPattern ? cleanPattern.split(/[\r\n,;，；]+/).map(s => s.trim()).filter(Boolean) : [])
+      if (!cleanTitle || !patList.length) {
+        patch({ error: '请给物理驻墙起个名字，并至少写 1 条拦截条件' })
+        return null
+      }
+      const res = await act({
+        action: 'wall.save',
+        wall: {
+          title: cleanTitle,
+          ruleType,
+          patterns: patList,
+          scope,
+          reason: String(reason || '').trim(),
+          writeOnly: Boolean(writeOnly),
+          source: 'manual',
+        },
+      })
+      if (res && res.ok) {
+        patch({
+          wallFormOpen: false,
+          wallDraftTitle: '',
+          wallDraftPattern: '',
+          notice: `🧱 已启用物理驻墙「${cleanTitle}」（${scope === 'workspace' ? '只管当前项目' : '🌐 所有项目通用'}）`,
+        })
+      }
+      return res
+    }
+
+    async function setGuardWallScopeApi(wallId, scope) {
+      if (!wallId || !scope) return null
+      const res = await act({ action: 'wall.setScope', wallId, scope })
+      if (res && res.ok) {
+        const labelMap = { global: '🌐 所有项目通用', workspace: '📁 只管当前项目', paused: '⏸ 暂停使用' }
+        patch({ notice: `🧱 物理驻墙范围已改为：${labelMap[scope] || scope}` })
+      }
+      return res
+    }
+
+    async function removeGuardWallApi(wallId) {
+      if (!wallId) return null
+      const res = await act({ action: 'wall.remove', wallId })
+      if (res && res.ok) {
+        const curSel = Array.isArray(store.wallSelectedIds) ? store.wallSelectedIds : []
+        patch({
+          wallSelectedIds: curSel.filter(id => id !== wallId),
+          wallMergeError: '',
+          notice: '🧱 已删除这条物理驻墙',
+        })
+      }
+      return res
+    }
+
+    function toggleGuardWallSelect(wallId) {
+      const id = String(wallId || '').trim()
+      if (!id) return
+      const prev = Array.isArray(store.wallSelectedIds) ? store.wallSelectedIds : []
+      const next = prev.includes(id) ? prev.filter(x => x !== id) : prev.concat(id)
+      patch({ wallSelectedIds: next, wallMergeError: '', error: '' })
+    }
+
+    async function mergeGuardWallsApi({ wallIds = [], autoGroup = false } = {}) {
+      const walls = Array.isArray(store.guardWalls) ? store.guardWalls : []
+      if (!autoGroup) {
+        const cleanIds = [...new Set((Array.isArray(wallIds) ? wallIds : []).filter(id => walls.some(w => w && w.id === id)))]
+        if (cleanIds.length < 2) {
+          const msg = '请至少选 2 条同类型的物理驻墙再合并'
+          patch({ wallMergeError: msg, error: msg })
+          return { ok: false, code: 'MERGE_MIN_TWO', error: msg }
+        }
+        const picked = walls.filter(w => cleanIds.includes(w.id))
+        const ruleTypes = new Set(picked.map(w => w.ruleType))
+        if (ruleTypes.size > 1) {
+          const msg = '⛔ 不同类型的物理驻墙不能混在一起合并，比如「禁碰路径」只能和「禁碰路径」合。请取消选错的那条。'
+          patch({ wallMergeError: msg, error: msg })
+          return { ok: false, code: 'CROSS_TYPE_MERGE_FORBIDDEN', error: msg }
+        }
+      }
+      patch({ wallMergeError: '', error: '' })
+      return await withChiefWorkFx(
+        { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '正在合并同类物理驻墙…', minMs: 520 },
+        async () => {
+          const res = await act({
+            action: 'wall.merge',
+            wallIds: Array.isArray(wallIds) ? wallIds : [],
+            autoGroup: Boolean(autoGroup),
+          })
+          if (!res || !res.ok) {
+            const msg = (res && res.error) || store.error || '合并失败'
+            patch({ wallMergeError: msg, error: msg })
+            return res || { ok: false, error: msg }
+          }
+          patch({
+            wallSelectedIds: [],
+            wallMergeError: '',
+            notice: `🧱 已把 ${res.mergedCount || 2} 条同类物理驻墙合并成 ${res.createdCount || 1} 条`,
+          })
+          return res
+        },
+      )
+    }
+
+    function openTaskEditor(task) {
+      if (!task) return
+      patch({
+        selectedTaskId: task.id,
+        editTaskId: task.id,
+        editTaskTitle: task.title || '',
+        editTaskNote: task.note || '',
+        editTaskIntent: task.intent || '',
+        editTaskEvidence: task.evidence || '',
+        editTaskParentId: task.parentId || '',
+        editTaskPlanStepId: task.planStepId || '',
+        editTaskTargetPlanStepId: task.targetPlanStepId || '',
+        editTaskBlockedBy: Array.isArray(task.blockedBy) ? [...task.blockedBy] : [],
+      })
+    }
+
+    apiBridge.refresh = refresh
+
+    // === [module: src/client/api/archives.js] ===
+    /**
+     * src/client/api/archives.js — 工程记忆档案柜、沉淀/整理/蒸馏与接力转送 API
+     *
+     * 【核心职责】
+     *   承载档案列表加载与详情缓存（`loadArchives` / `loadArchiveDetail`）、归档变更与 AI 自动整理、
+     *   每轮经验收割与沉淀至全局冷库（`harvestArchivesApi` / `precipitateArchivesApi`）、
+     *   档案跨窗口接力转送、冷库检索，以及目标变更审批/驳回接口。
+     *
+     * 【边界约定】
+     *   - 依赖 `./transport.js` 与 `./board.js`；模块加载时向 `apiBridge` 注册档案头同步与刷新钩子。
+     */
+
+
+    function applyArchiveHeaders(payload, invalidateIds = null, requestedScope = '') {
+      if (!payload || typeof payload !== 'object') return
+      const isSystemGlobalResp = payload.isSystemGlobalVault === true
+      const targetScope = String(
+        requestedScope
+        || payload.requestedScope
+        || payload.vaultScope
+        || payload.scope
+        || ''
+      ).toLowerCase()
+
+      // Hard anti-bleed guard: if Global vault was requested but running host lacks `isSystemGlobalVault: true` (stale memory module),
+      // block writing into `globalVaultItems` or `archiveItems` so local items NEVER bleed into Global!
+      if (targetScope === 'global' && !isSystemGlobalResp) {
+        patch({
+          globalVaultLoaded: false,
+          globalVaultItems: [],
+          globalVaultStaleBlocked: true,
+          staleBackendDetected: true,
+        })
+        return
+      }
+
+      const items = Array.isArray(payload.items) ? payload.items : []
+      const folders = Array.isArray(payload.folders)
+        ? payload.folders
+        : (isSystemGlobalResp ? store.globalVaultFolders : store.archiveFolders)
+      const precipitated = Array.isArray(payload.precipitated) ? payload.precipitated : store.archivePrecipitated
+      const flippedPrecipitatedIds = Array.isArray(payload.flippedPrecipitatedIds)
+        ? payload.flippedPrecipitatedIds
+        : store.flippedPrecipitatedIds
+      const nextCounts = (payload.counts && typeof payload.counts === 'object')
+        ? { ...(store.archiveCounts || {}), ...payload.counts }
+        : (store.archiveCounts || {})
+      const nextDiffSummary = (payload.diffSummary && typeof payload.diffSummary === 'object')
+        ? payload.diffSummary
+        : store.archiveDiffSummary
+
+      let nextDetails = store.archiveDetails || {}
+      if (Array.isArray(invalidateIds) && invalidateIds.length) {
+        nextDetails = { ...nextDetails }
+        for (const id of invalidateIds) delete nextDetails[id]
+      }
+      if (Object.keys(nextDetails).length > 0 && items.length > 0) {
+        let touched = false
+        const headerMap = new Map(items.map(it => [it.id, it]))
+        const synced = { ...nextDetails }
+        for (const [id, det] of Object.entries(synced)) {
+          const hdr = headerMap.get(id)
+          if (!hdr) continue
+          if (
+            det.takenOut !== hdr.takenOut
+            || det.chiefMounted !== hdr.chiefMounted
+            || det.paperclip !== hdr.paperclip
+            || det.folder !== hdr.folder
+            || det.updatedAt !== hdr.updatedAt
+          ) {
+            if (det.updatedAt !== hdr.updatedAt) {
+              delete synced[id]
+            } else {
+              synced[id] = {
+                ...det,
+                takenOut: hdr.takenOut,
+                chiefMounted: hdr.chiefMounted,
+                paperclip: hdr.paperclip,
+                folder: hdr.folder,
+              }
+            }
+            touched = true
+          }
+        }
+        if (touched) nextDetails = synced
+      }
+
+      if (isSystemGlobalResp) {
+        patch({
+          archiveLoaded: true,
+          globalVaultLoaded: true,
+          globalVaultStaleBlocked: false,
+          globalVaultFolders: folders,
+          globalVaultItems: items,
+          archivePrecipitated: precipitated,
+          ...(Array.isArray(payload.precipitatedFolders) ? { precipitatedFolders: payload.precipitatedFolders } : {}),
+          ...(payload.precipitatedViewerSummary ? { precipitatedViewerSummary: payload.precipitatedViewerSummary } : {}),
+          ...(payload.desktop && typeof payload.desktop === 'object' ? { archiveDesktop: payload.desktop } : {}),
+          ...(payload.viewerSummary && typeof payload.viewerSummary === 'object' ? { archiveViewerSummary: payload.viewerSummary } : {}),
+          flippedPrecipitatedIds,
+          archiveCounts: nextCounts,
+          archiveDiffSummary: nextDiffSummary,
+          archiveDetails: nextDetails,
+          ...(Array.isArray(payload.deskItems) ? { archiveDeskItems: payload.deskItems, archiveDeskLoaded: true } : {}),
+        })
+        return
+      }
+
+      const cabinets = Array.isArray(payload.cabinets) ? payload.cabinets : store.archiveCabinets
+      const activeCabinetId = payload.activeCabinetId !== undefined
+        ? String(payload.activeCabinetId || '')
+        : (store.archiveCabinetId || '')
+      const projectKey = payload.projectKey !== undefined ? String(payload.projectKey || '') : (store.archiveProjectKey || '')
+      const unboundSession = typeof payload.unboundSession === 'boolean'
+        ? payload.unboundSession
+        : Boolean(nextCounts && nextCounts.unboundSession)
+      const openFolders = { ...(store.archiveOpenFolders || {}) }
+      if (!store.archiveSessionLoaded && Object.keys(openFolders).length === 0) {
+        const firstNonEmpty = folders.find(f => f && f.count > 0)
+        if (firstNonEmpty) openFolders[firstNonEmpty.id] = true
+      }
+
+      patch({
+        archiveLoaded: true,
+        archiveSessionLoaded: true,
+        archiveProjectKey: projectKey,
+        archiveCabinetId: activeCabinetId,
+        archiveCabinets: cabinets,
+        archiveFolders: folders,
+        archiveItems: items,
+        archivePrecipitated: precipitated,
+        ...(Array.isArray(payload.precipitatedFolders) ? { precipitatedFolders: payload.precipitatedFolders } : {}),
+        ...(payload.precipitatedViewerSummary ? { precipitatedViewerSummary: payload.precipitatedViewerSummary } : {}),
+        ...(payload.desktop && typeof payload.desktop === 'object' ? { archiveDesktop: payload.desktop } : {}),
+        ...(payload.viewerSummary && typeof payload.viewerSummary === 'object' ? { archiveViewerSummary: payload.viewerSummary } : {}),
+        flippedPrecipitatedIds,
+        archiveCounts: nextCounts,
+        archiveDiffSummary: nextDiffSummary,
+        archiveUnboundSession: unboundSession,
+        archiveOpenFolders: openFolders,
+        archiveDetails: nextDetails,
+        ...(Array.isArray(payload.deskItems) ? { archiveDeskItems: payload.deskItems, archiveDeskLoaded: true } : {}),
+      })
+    }
+
+    /** Tier-1 Lazy Load: called ONLY when the user opens or switches scope in the `档案` tab */
+    async function loadArchives(force = false, cabinetIdOverride = '', scopeOverride = '') {
+      if (store.archiveLoading) return null
+      const rawScope = scopeOverride || store.archiveTabScope || 'desktop'
+      const activeScope = rawScope === 'desktop' ? 'session' : rawScope
+      const alreadyLoaded = activeScope === 'global'
+        ? store.globalVaultLoaded
+        : (activeScope === 'precipitated' ? store.archiveLoaded : store.archiveSessionLoaded)
+      if (alreadyLoaded && !force && !cabinetIdOverride && !scopeOverride) return null
+      patch({ archiveLoading: true, error: '' })
+      try {
+        const qs = new URLSearchParams()
+        if (store.sessionId) qs.set('session', store.sessionId)
+        qs.set('scope', activeScope)
+        const cid = (activeScope === 'precipitated' || activeScope === 'global')
+          ? ''
+          : (cabinetIdOverride || store.archiveCabinetId || '')
+        if (cid && cid !== 'cab-global') {
+          qs.set('cabinetId', cid)
+        }
+        const value = await call('archives' + (qs.toString() ? '?' + qs.toString() : ''))
+        if (value && value.ok) {
+          applyArchiveHeaders(value, [], activeScope)
+          const openIds = Object.keys(store.archiveOpenFiles || {}).filter(id => store.archiveOpenFiles[id] && !store.archiveDetails[id])
+          for (const id of openIds) {
+            void loadArchiveDetail(id, true, { scope: activeScope })
+          }
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        patch({ archiveLoading: false })
+      }
+    }
+
+    /** Tier-2 Lazy Load: called ONLY when the user clicks a paperclipped dossier card to unfold its points */
+    async function loadArchiveDetail(archiveId, force = false, opts = {}) {
+      const id = String(archiveId || '').trim()
+      if (!id) return null
+      if (!force && store.archiveDetails && store.archiveDetails[id]) {
+        return store.archiveDetails[id]
+      }
+      if (store.archiveDetailLoading && store.archiveDetailLoading[id]) return null
+      patch({ archiveDetailLoading: { ...(store.archiveDetailLoading || {}), [id]: true } })
+      try {
+        const rawScope = (opts && (opts.scope || opts.vaultScope)) || store.archiveTabScope || 'session'
+        const activeScope = rawScope === 'desktop' ? 'session' : rawScope
+        const qs = new URLSearchParams({ id })
+        if (store.sessionId) qs.set('session', store.sessionId)
+        if (activeScope === 'global') qs.set('scope', 'global')
+        if (store.archiveCabinetId && activeScope === 'session') qs.set('cabinetId', store.archiveCabinetId)
+        if (opts && opts.precipitated) qs.set('precipitated', '1')
+        const value = await call('archives/detail?' + qs.toString())
+        if (value && value.ok && value.item) {
+          patch({
+            archiveDetails: {
+              ...(store.archiveDetails || {}),
+              [value.item.id]: value.item,
+            },
+          })
+          return value.item
+        }
+        return null
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      } finally {
+        const nextLoad = { ...(store.archiveDetailLoading || {}) }
+        delete nextLoad[id]
+        patch({ archiveDetailLoading: nextLoad })
+      }
+    }
+
+    async function mutateArchiveApi(payload, toastLabel = '') {
+      try {
+        const vaultScope = (payload && (payload.vaultScope || payload.scope))
+          || (store.archiveTabScope === 'global' ? 'global' : 'session')
+        const cabinetId = vaultScope === 'global'
+          ? ''
+          : ((payload && payload.cabinetId !== undefined) ? payload.cabinetId : (store.archiveCabinetId || ''))
+        const value = await call('archives', {
+          method: 'POST',
+          headers: { 'content-type': 'application/json' },
+          body: JSON.stringify({
+            session: store.sessionId || sessionIdFromUrl(),
+            vaultScope,
+            cabinetId,
+            ...payload,
+          }),
+        })
+        if (value && value.ok) {
+          if (payload.op === 'switchCabinet' || payload.op === 'createCabinet' || payload.op === 'deleteCabinet') {
+            patch({ archiveDetails: {}, archiveOpenFolders: {}, archiveOpenFiles: {} })
+          }
+          if (value.item && value.item.id) {
+            patch({
+              archiveDetails: {
+                ...(store.archiveDetails || {}),
+                [value.item.id]: value.item,
+              },
+            })
+          }
+          if (payload.op === 'delete' && (payload.archiveId || payload.id)) {
+            const delId = payload.archiveId || payload.id
+            const nextOpen = { ...(store.archiveOpenFiles || {}) }
+            const nextDet = { ...(store.archiveDetails || {}) }
+            delete nextOpen[delId]
+            delete nextDet[delId]
+            patch({ archiveOpenFiles: nextOpen, archiveDetails: nextDet })
+          }
+          if (value.archives && typeof value.archives === 'object') {
+            const targetScopeForHeaders = payload.op === 'pullPrecipitated'
+              ? (payload.targetScope === 'global' ? 'global' : 'session')
+              : (vaultScope === 'global' ? 'global' : 'session')
+            applyArchiveHeaders({
+              ...value.archives,
+              ...(value.counts && typeof value.counts === 'object' ? { counts: value.counts } : {}),
+              ...(Array.isArray(value.flippedPrecipitatedIds) ? { flippedPrecipitatedIds: value.flippedPrecipitatedIds } : {}),
+              ...(Array.isArray(value.deskItems) ? { deskItems: value.deskItems } : {}),
+            }, [], targetScopeForHeaders)
+          }
+          const extraPatch = {}
+          if (value.board && typeof value.board === 'object') {
+            extraPatch.board = value.board
+          }
+          if (value.archiveMeta && typeof value.archiveMeta === 'object') {
+            extraPatch.archiveMeta = value.archiveMeta
+          }
+          if (value.diffSummary && typeof value.diffSummary === 'object') {
+            extraPatch.archiveDiffSummary = value.diffSummary
+          }
+          if (value.counts && typeof value.counts === 'object') {
+            extraPatch.archiveCounts = { ...(store.archiveCounts || {}), ...value.counts }
+          }
+          if (Array.isArray(value.deskItems)) {
+            extraPatch.archiveDeskItems = value.deskItems
+            extraPatch.archiveDeskLoaded = true
+          }
+          if (payload.op === 'copyToGlobal') {
+            extraPatch.globalVaultLoaded = false
+          } else if (payload.op === 'copyToSession') {
+            extraPatch.archiveSessionLoaded = false
+          } else if (payload.op === 'pullPrecipitated') {
+            if (payload.targetScope === 'global') extraPatch.globalVaultLoaded = false
+            else extraPatch.archiveSessionLoaded = false
+          }
+          if (payload.op === 'precipitateNotes') {
+            const swept = Number(value.sweptCount || 0)
+            if (swept > 0) {
+              const opened = {}
+              const folders = Array.isArray(value.savedFolders) && value.savedFolders.length
+                ? value.savedFolders
+                : ['inbox']
+              for (const fId of folders) {
+                if (fId) opened[fId] = true
+              }
+              extraPatch.archiveOpenFolders = { ...(store.archiveOpenFolders || {}), ...opened }
+              extraPatch.notice = `已将 ${swept} 篇临时便签封存入本会话档案柜`
+            } else {
+              extraPatch.notice = '当前暂无可收纳的临时便签'
+            }
+          } else if (toastLabel) {
+            extraPatch.notice = toastLabel
+          }
+          if (Object.keys(extraPatch).length) patch(extraPatch)
+          if (payload.op === 'copyToGlobal' && store.archiveTabScope === 'global') {
+            void loadArchives(true, '', 'global')
+          } else if (payload.op === 'pullPrecipitated' && store.archiveTabScope === payload.targetScope) {
+            void loadArchives(true, '', payload.targetScope)
+          }
+        }
+        return value
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+        return null
+      }
+    }
+
+    async function requestOrganizeArchives(opts = {}) {
+      if (store.archiveOrganizing) return null
+      const isDream = Boolean(opts.dream || opts.reasonKind === 'dream_roam')
+      return await withChiefWorkFx(
+        isDream
+          ? { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游，帮你整理档案…' }
+          : { tone: 'archive', tab: 'archive', label: '参谋长正在整理档案…' },
+        async () => {
+          patch({ archiveOrganizing: true, error: '' })
+          try {
+            const vaultScope = opts.vaultScope || (store.archiveTabScope === 'global' ? 'global' : 'session')
+            const value = await call('archives/organize', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                session: store.sessionId || sessionIdFromUrl(),
+                vaultScope,
+                cabinetId: vaultScope === 'global' ? '' : (opts.cabinetId !== undefined ? opts.cabinetId : (store.archiveCabinetId || '')),
+                ids: Array.isArray(opts.ids) ? opts.ids : [],
+                folder: opts.folder || '',
+                scope: opts.scope || store.archiveOrganizeScope || 'unorganized',
+                instruction: opts.instruction !== undefined ? opts.instruction : (store.archiveOrganizePrompt || ''),
+                ...(isDream ? { reasonKind: 'dream_roam' } : {}),
+              }),
+            })
+            if (value && value.ok) {
+              const openIds = Object.keys(store.archiveOpenFiles || {}).filter(k => store.archiveOpenFiles[k])
+              const nextDetails = { ...(store.archiveDetails || {}) }
+              for (const k of openIds) delete nextDetails[k]
+              patch({
+                archiveDetails: nextDetails,
+                archiveOrganizeOpen: false,
+                archiveOrganizePrompt: '',
+                notice: value.updatedCount > 0
+                  ? `✦ 已帮你把 ${value.updatedCount} 份档案分类整理好，原文完整保留`
+                  : '✦ 这些档案已经分类好了，不用重整',
+              })
+              void loadArchives(true, '', vaultScope)
+              for (const k of openIds) {
+                void loadArchiveDetail(k, true, { scope: vaultScope })
+              }
+            }
+            return value
+          } catch (error) {
+            patch({ error: String((error && error.message) || error) })
+            return null
+          } finally {
+            patch({ archiveOrganizing: false })
+          }
+        },
+      )
+    }
+
+    async function harvestArchivesApi(focusHint = '', opts = {}) {
+      if (store.archiveHarvesting) return null
+      return await withChiefWorkFx(
+        { tone: 'archive', tab: 'archive', label: '正在从对话里提取关键记录…' },
+        async () => {
+          patch({ archiveHarvesting: true, error: '' })
+          try {
+            const vaultScope = (opts && opts.vaultScope) || (store.archiveTabScope === 'global' ? 'global' : 'session')
+            const value = await call('archives/harvest', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                session: store.sessionId || sessionIdFromUrl(),
+                vaultScope,
+                cabinetId: (opts && opts.cabinetId !== undefined) ? opts.cabinetId : (store.archiveCabinetId || ''),
+                focusHint,
+              }),
+            })
+            if (value && value.ok) {
+              patch({
+                notice: value.count > 0
+                  ? `📥 已保存 ${value.count} 份重要记录，避免长对话压缩后忘掉`
+                  : '📥 这轮对话没有新的重要细节要保存',
+              })
+              void loadArchives(true)
+            }
+            return value
+          } catch (error) {
+            patch({ error: String((error && error.message) || error) })
+            return null
+          } finally {
+            patch({ archiveHarvesting: false })
+          }
+        },
+      )
+    }
+
+    async function precipitateArchivesApi(opts = {}) {
+      if (store.archivePrecipitating) return null
+      return await withChiefWorkFx(
+        { tone: 'archive', tab: 'archive', label: '正在把经验存进长期冷库…' },
+        async () => {
+          patch({ archivePrecipitating: true, error: '' })
+          try {
+            const vaultScope = opts.vaultScope || 'global'
+            const value = await call('archives/precipitate', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                session: store.sessionId || sessionIdFromUrl(),
+                vaultScope,
+                op: opts.op || 'cabinet',
+                cabinetId: '',
+                folder: opts.folder || '',
+                ...(Array.isArray(opts.ids) && opts.ids.length > 0 ? { ids: opts.ids } : {}),
+                clearSource: Boolean(opts.clearSource),
+              }),
+            })
+            if (value && value.ok) {
+              patch({
+                precipitateModal: null,
+                notice: value.count > 0
+                  ? `⏬ 已把 ${value.count} 条常用经验存进冷库（平时占 0 Token）`
+                  : '⏬ 暂时没有可以存进冷库的经验',
+              })
+              void loadArchives(true, '', vaultScope)
+            }
+            return value
+          } catch (error) {
+            patch({ error: String((error && error.message) || error) })
+            return null
+          } finally {
+            patch({ archivePrecipitating: false })
+          }
+        },
+      )
+    }
+
+    function toggleSelectArchive(id, vaultScope = 'session', title = '') {
+      const aid = String(id || '').trim()
+      if (!aid) return
+      const vs = vaultScope === 'global' ? 'global' : (vaultScope === 'precipitated' ? 'precipitated' : 'session')
+      const key = vs + ':' + aid
+      const prev = { ...(store.selectedArchiveMap || {}) }
+      if (prev[key]) delete prev[key]
+      else prev[key] = { id: aid, vaultScope: vs, title: String(title || aid) }
+      patch({ selectedArchiveMap: prev })
+    }
+
+    function clearSelectedArchives() {
+      patch({ selectedArchiveMap: {} })
+    }
+
+    function openArchiveRelayModal(items) {
+      const list = Array.isArray(items) ? items.filter(x => x && x.id) : []
+      if (!list.length) return
+      patch({
+        archiveRelayModal: {
+          items: list.map(x => ({
+            id: String(x.id),
+            vaultScope: x.vaultScope === 'global' ? 'global' : (x.vaultScope === 'precipitated' ? 'precipitated' : 'session'),
+            title: String(x.title || x.id),
+          })),
+          instruction: '',
+          target: 'lead',
+          mode: 'followup',
+        },
+      })
+    }
+
+    async function relayArchivesWithChiefApi(modalState) {
+      if (store.relayArchivesBusy) return null
+      const items = Array.isArray(modalState && modalState.items) ? modalState.items : []
+      if (!items.length) return null
+      return await withChiefWorkFx(
+        { tone: 'archive', tab: 'archive', label: '正在整理档案并准备发送…' },
+        async () => {
+          patch({ relayArchivesBusy: true, error: '' })
+          try {
+            const value = await call('chief/relay-archives', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                session: store.sessionId || sessionIdFromUrl(),
+                cabinetId: store.archiveCabinetId || '',
+                items: items.map(it => ({
+                  id: it.id,
+                  scope: it.vaultScope || it.scope || 'session',
+                  vaultScope: it.vaultScope || it.scope || 'session',
+                  title: it.title || it.id,
+                })),
+                instruction: String((modalState && modalState.instruction) || '').trim(),
+                target: (modalState && modalState.target) || 'lead',
+                mode: (modalState && modalState.mode) || 'followup',
+              }),
+            })
+            if (value && value.ok) {
+              patch({
+                archiveRelayModal: null,
+                selectedArchiveMap: {},
+                notice: `📨 已把 ${items.length} 份档案和你的要求一起发给 @${modalState.target === 'lead' || !modalState.target ? '主对话' : shortAgentName(modalState.target, true)}`,
+              })
+              void refresh()
+            }
+            return value
+          } catch (error) {
+            patch({ error: String((error && error.message) || error) })
+            return null
+          } finally {
+            patch({ relayArchivesBusy: false })
+          }
+        },
+      )
+    }
+
+    async function distillToGlobalApi(modalState) {
+      if (store.distillBusy) return null
+      return await withChiefWorkFx(
+        { tone: 'archive', tab: 'archive', label: '正在整理要存入全局档案的经验…' },
+        async () => {
+          patch({ distillBusy: true, error: '' })
+          try {
+            const ids = Array.isArray(modalState && modalState.ids) && modalState.ids.length > 0
+              ? modalState.ids
+              : null
+            const value = await call('archives/distill-to-global', {
+              method: 'POST',
+              headers: { 'content-type': 'application/json' },
+              body: JSON.stringify({
+                session: store.sessionId || sessionIdFromUrl(),
+                cabinetId: store.archiveCabinetId || '',
+                ids,
+                clearSource: Boolean(modalState && modalState.clearSource),
+                instruction: String((modalState && modalState.instruction) || '').trim(),
+              }),
+            })
+            if (value && value.ok) {
+              const nextPatch = {
+                distillGlobalModal: null,
+                selectedArchiveMap: {},
+                globalVaultLoaded: false,
+                notice: value.createdCount > 0
+                  ? `✦ 已提取 ${value.createdCount} 份通用经验，存进「🌐 全局档案柜」`
+                  : '✦ 这轮对话暂时没有新的通用经验',
+              }
+              if (value.globalArchives && Array.isArray(value.globalArchives.items)) {
+                nextPatch.globalVaultItems = value.globalArchives.items
+                nextPatch.globalVaultLoaded = true
+              }
+              if (Array.isArray(value.deskItems)) {
+                nextPatch.archiveDeskItems = value.deskItems
+                nextPatch.archiveDeskLoaded = true
+              }
+              patch(nextPatch)
+              if (ids && modalState && modalState.clearSource) void loadArchives(true, '', 'session')
+            }
+            return value
+          } catch (error) {
+            patch({ error: String((error && error.message) || error) })
+            return null
+          } finally {
+            patch({ distillBusy: false })
+          }
+        },
+      )
+    }
+
+    async function approveGoalApi() {
+      const value = await act({ action: 'goal.approve' })
+      if (value && value.ok) patch({ notice: '✅ 已确认目标完成，切回普通计划模式' })
+      return value
+    }
+
+    async function rejectGoalApi(reason) {
+      const text = String(reason || '').trim()
+      if (!text) {
+        patch({ error: '请简单写一下没通过的原因，或要补什么' })
+        return null
+      }
+      const value = await act({ action: 'goal.reject', reason: text })
+      if (value && value.ok) patch({ notice: '↩ 已退回重做，参谋长会继续盯着推进' })
+      return value
+    }
+
+    async function deliverArchiveToChat(headerOrDetail, point = null) {
+      let detail = headerOrDetail
+      if (!point && (!detail || !Array.isArray(detail.points))) {
+        const loaded = await loadArchiveDetail(headerOrDetail && headerOrDetail.id)
+        if (loaded) detail = loaded
+      }
+      if (!detail) return
+      const lines = []
+      if (point) {
+        lines.push(`📎 调阅工程档案《${detail.title}》→ 记忆点「${point.title}」：`)
+        lines.push(point.detail || point.cue || point.title)
+      } else {
+        lines.push(`📎 调阅工程档案《${detail.title}》：`)
+        if (detail.summary) lines.push(`提要：${detail.summary}`)
+        const pts = Array.isArray(detail.points) ? detail.points : []
+        if (pts.length) {
+          pts.slice(0, 8).forEach((p, idx) => {
+            lines.push(`${idx + 1}. 【${p.title}】${p.detail || p.cue || ''}`)
+          })
+        } else if (detail.body) {
+          lines.push(detail.body.slice(0, 1500))
+        }
+      }
+      await askLeadModel(lines.join('\n'), '调阅工程档案')
+    }
+
+    async function searchColdArchives(queryText) {
+      const q = String(queryText || '').trim()
+      if (!q || store.archiveSearchBusy) return
+      patch({ archiveSearchBusy: true })
+      try {
+        const qs = new URLSearchParams({ q })
+        const sid = store.sessionId || sessionIdFromUrl()
+        if (sid) qs.set('session', sid)
+        if (store.archiveTabScope === 'global') qs.set('scope', 'global')
+        const value = await call('archives?' + qs.toString())
+        if (value && value.ok && Array.isArray(value.items)) {
+          const folderMap = new Map((value.folders || []).map(f => [f.id, f.label]))
+          const archHits = value.items.slice(0, 12).map(it => ({
+            kind: '封存档案',
+            tab: 'archive',
+            folderId: it.folder,
+            archiveId: it.id,
+            id: it.id,
+            title: `${it.paperclip === 'gold' ? '📎 ' : ''}${it.title}`,
+            snippet: `[${folderMap.get(it.folder) || it.folder}] ${it.summary || ''}`,
+          }))
+          const localHits = searchBoard(q).filter(hItem => hItem.tab !== 'archive')
+          patch({
+            askHits: [...archHits, ...localHits],
+            notice: archHits.length ? `在档案库里找到 ${archHits.length} 份相关记录` : '档案库里没找到相关内容',
+          })
+        }
+      } catch (error) {
+        patch({ error: String((error && error.message) || error) })
+      } finally {
+        patch({ archiveSearchBusy: false })
+      }
+    }
+
+
+    apiBridge.applyArchiveHeaders = applyArchiveHeaders
+    apiBridge.loadArchives = loadArchives
+
+    // === [module: src/client/api/chief.js] ===
+    /**
+     * src/client/api/chief.js — 参谋长视图、模型目录、协同水泡联动、审批/提权与许愿盒对话 API
+     *
+     * 【核心职责】
+     *   承载 `loadChiefView` / `loadChiefModels` / `updateSecConfig` / 场景预设一键套用、
+     *   操作审批（`decideApproval`）与权限提权（`decideElevation`）、
+     *   协同水泡加退队/外协调用/锁死急停/待命池刷新扫描（`refreshBubbleDiscovery`）、
+     *   以及建议条采纳、红线合并、图片附件摄入与底部许愿盒提交（`submitChiefBar`）。
+     *
+     * 【边界约定】
+     *   - 处于 `src/client/api/*` 业务上层，单向依赖 `transport.js`、`board.js` 与 `archives.js`。
+     */
+
 
     async function loadChiefView(regenerate = false, opts = {}) {
       if (regenerate) patch({ secRegenerating: true, error: '' })
@@ -2772,132 +4186,6 @@ window.__ModuleLoader__.load({
       }
     }
 
-    function classifyChiefWorkFx(text, quickTag = '') {
-      if (quickTag === 'consult_chief') {
-        return { tone: 'neon', tab: 'chief', label: '💡 参谋长正在看情况、想建议…' }
-      }
-      if (quickTag === 'dream_roam') {
-        return { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游，帮你整理档案…' }
-      }
-      if (quickTag === 'craft_wall') {
-        return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在写物理驻墙规则…' }
-      }
-      if (quickTag === 'extract_bounds') {
-        return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在整理边界规则…' }
-      }
-      const clean = String(text || '').trim()
-      const hits = []
-      if (/梦境漫游|dream.?roam/i.test(clean)) {
-        hits.push({ tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游，帮你整理档案…' })
-      }
-      if (/思考强度|思考挡位|推理强度|调挡|reasoningEffort|effortOps/i.test(clean)) {
-        hits.push({ tone: 'neon', tab: store.tab || 'chief', label: '🧠 参谋长正在调整思考深度…' })
-      }
-      if (/置顶桌面|认知桌面|递送.*档案|拉阅.*钩子|archiveOps/i.test(clean)) {
-        hits.push({ tone: 'archive', tab: 'archive', label: '📌 参谋长正在整理认知桌面资料…' })
-      }
-      if (/手搓|驻墙|筑墙|物理墙|guard_?wall|wallProposals/i.test(clean)) {
-        hits.push({ tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在写物理驻墙规则…' })
-      }
-      if (/提炼.{0,4}边界|工作边界|红线|必做项|注意事项|boundProposals/i.test(clean)) {
-        hits.push({ tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在整理红线规则…' })
-      }
-      if (/整理档案|档案柜|卷宗|归档|收纳入柜|桌面档案|抽屉|archive/i.test(clean)) {
-        hits.push({ tone: 'archive', tab: 'archive', label: '参谋长正在整理档案…' })
-      }
-      if (/任务看板|拆解任务|金字塔|子任务|graph\.plan/i.test(clean)) {
-        hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在整理任务列表…' })
-      }
-      if (/执行计划|规划步骤|交接单|handoff/i.test(clean)) {
-        hits.push({ tone: 'tasks', tab: 'tasks', label: '参谋长正在拟定执行计划…' })
-      }
-      if (/协同网络|跨窗|关联会话|子代理|广播/i.test(clean)) {
-        hits.push({ tone: 'peers', tab: 'peers', label: '参谋长正在协调各窗口对话…' })
-      }
-      if (hits.length === 1) return hits[0]
-      if (hits.length >= 2) {
-        const allBoundaries = hits.every(x => x.tab === 'boundaries')
-        return {
-          tone: 'neon',
-          tab: allBoundaries ? 'boundaries' : (store.tab || 'chief'),
-          ...(allBoundaries ? { boundSubTab: 'rules' } : {}),
-          label: allBoundaries ? '参谋长正在整理规则和物理驻墙…' : '参谋长正在批量处理中…',
-        }
-      }
-      return {
-        tone: 'neon',
-        tab: store.tab || 'chief',
-        label: '参谋长正在思考…',
-      }
-    }
-
-    function resolveChiefSuggestionWorkFx(suggestions = []) {
-      const list = Array.isArray(suggestions) ? suggestions.filter(Boolean) : []
-      if (!list.length) {
-        return { tone: 'neon', tab: store.tab || 'chief', label: '参谋长正在执行你选的建议…' }
-      }
-      const kinds = new Set(list.map(s => String(s.kind || '').trim()))
-      if (kinds.size === 1 && kinds.has('guard_wall')) {
-        return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在启用物理驻墙…' }
-      }
-      if (kinds.size === 1 && kinds.has('wall_removal')) {
-        return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '⚠️ 正在按你的确认调整物理驻墙…' }
-      }
-      if (kinds.size === 1 && kinds.has('bound')) {
-        return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在添加边界规则…' }
-      }
-      if (kinds.size === 1 && kinds.has('archive_op')) {
-        return { tone: 'archive', tab: 'archive', label: '📌 参谋长正在整理认知桌面资料…' }
-      }
-      if (kinds.size === 1 && kinds.has('model_effort')) {
-        return { tone: 'neon', tab: 'chief', label: '🧠 参谋长正在调整思考深度…' }
-      }
-      const allBoundsPage = [...kinds].every(k => k === 'guard_wall' || k === 'bound')
-      return {
-        tone: 'neon',
-        tab: allBoundsPage ? 'boundaries' : (store.tab || 'chief'),
-        ...(allBoundsPage ? { boundSubTab: 'rules' } : {}),
-        label: allBoundsPage ? '参谋长正在保存规则和物理驻墙…' : '🏁 参谋长正在依次执行建议…',
-      }
-    }
-
-    async function withChiefWorkFx(fxSpec = {}, fn) {
-      const spec = fxSpec && typeof fxSpec === 'object' ? fxSpec : {}
-      const token = 'fx-' + Date.now() + '-' + Math.random().toString(36).slice(2, 6)
-      const targetTab = spec.tab || store.tab || 'chief'
-      const minMs = Number(spec.minMs) || 0
-      const startedAt = Date.now()
-      patch({
-        ...(spec.tab ? { tab: spec.tab } : {}),
-        ...(spec.boundSubTab ? { boundSubTab: spec.boundSubTab } : {}),
-        chiefWorkFx: {
-          token,
-          tone: spec.tone || 'neon',
-          tab: targetTab,
-          label: spec.label || '参谋长正在处理…',
-        },
-      })
-      if (targetTab === 'archive' && !store.archiveLoaded) {
-        void loadArchives(false)
-      }
-      let hadError = false
-      try {
-        return await fn()
-      } catch (err) {
-        hadError = true
-        throw err
-      } finally {
-        if (!hadError && minMs > 0 && typeof window !== 'undefined') {
-          const waitMs = minMs - (Date.now() - startedAt)
-          if (waitMs > 24) {
-            await new Promise(resolve => setTimeout(resolve, waitMs))
-          }
-        }
-        if (store.chiefWorkFx && store.chiefWorkFx.token === token) {
-          patch({ chiefWorkFx: null })
-        }
-      }
-    }
 
     async function submitChiefBar(overrideText = '', quickTag = '') {
       const text = String(overrideText || store.secInput || '').trim()
@@ -3005,1225 +4293,25 @@ window.__ModuleLoader__.load({
       })
     }
 
-    function applyArchiveHeaders(payload, invalidateIds = null, requestedScope = '') {
-      if (!payload || typeof payload !== 'object') return
-      const isSystemGlobalResp = payload.isSystemGlobalVault === true
-      const targetScope = String(
-        requestedScope
-        || payload.requestedScope
-        || payload.vaultScope
-        || payload.scope
-        || ''
-      ).toLowerCase()
 
-      // Hard anti-bleed guard: if Global vault was requested but running host lacks `isSystemGlobalVault: true` (stale memory module),
-      // block writing into `globalVaultItems` or `archiveItems` so local items NEVER bleed into Global!
-      if (targetScope === 'global' && !isSystemGlobalResp) {
-        patch({
-          globalVaultLoaded: false,
-          globalVaultItems: [],
-          globalVaultStaleBlocked: true,
-          staleBackendDetected: true,
-        })
-        return
-      }
+    apiBridge.loadChiefView = loadChiefView
 
-      const items = Array.isArray(payload.items) ? payload.items : []
-      const folders = Array.isArray(payload.folders)
-        ? payload.folders
-        : (isSystemGlobalResp ? store.globalVaultFolders : store.archiveFolders)
-      const precipitated = Array.isArray(payload.precipitated) ? payload.precipitated : store.archivePrecipitated
-      const flippedPrecipitatedIds = Array.isArray(payload.flippedPrecipitatedIds)
-        ? payload.flippedPrecipitatedIds
-        : store.flippedPrecipitatedIds
-      const nextCounts = (payload.counts && typeof payload.counts === 'object')
-        ? { ...(store.archiveCounts || {}), ...payload.counts }
-        : (store.archiveCounts || {})
-      const nextDiffSummary = (payload.diffSummary && typeof payload.diffSummary === 'object')
-        ? payload.diffSummary
-        : store.archiveDiffSummary
+    // === [module: src/client/api.js] ===
+    /**
+     * src/client/api.js — 客户端 API 总入口门面与会话绑定协调器（`adoptSession`）
+     *
+     * 【核心职责】
+     *   1. 对外部组件统一暴露原本来自单一巨石 `api.js` 的全部动作与请求函数（零改动外部导入路径）。
+     *   2. 持有 `clearBoundSessionToBlank` 与 `adoptSession`，负责多宿主入口切换会话时的防抖清理与状态重置。
+     *
+     * 【模块拆分布局（`src/client/api/`）】
+     *   - `api/transport.js` 底层 HTTP `call`、`applySecView`、工作态流光动效与 `apiBridge`
+     *   - `api/board.js`     任务板 `act` / `refresh`、交接单、记忆检索、边界红线与物理驻墙
+     *   - `api/archives.js`  档案柜加载、收割/沉淀/蒸馏、跨窗口接力与目标审批
+     *   - `api/chief.js`     参谋视图、模型目录、协同水泡控制与许愿盒对话提交
+     */
 
-      let nextDetails = store.archiveDetails || {}
-      if (Array.isArray(invalidateIds) && invalidateIds.length) {
-        nextDetails = { ...nextDetails }
-        for (const id of invalidateIds) delete nextDetails[id]
-      }
-      if (Object.keys(nextDetails).length > 0 && items.length > 0) {
-        let touched = false
-        const headerMap = new Map(items.map(it => [it.id, it]))
-        const synced = { ...nextDetails }
-        for (const [id, det] of Object.entries(synced)) {
-          const hdr = headerMap.get(id)
-          if (!hdr) continue
-          if (
-            det.takenOut !== hdr.takenOut
-            || det.chiefMounted !== hdr.chiefMounted
-            || det.paperclip !== hdr.paperclip
-            || det.folder !== hdr.folder
-            || det.updatedAt !== hdr.updatedAt
-          ) {
-            if (det.updatedAt !== hdr.updatedAt) {
-              delete synced[id]
-            } else {
-              synced[id] = {
-                ...det,
-                takenOut: hdr.takenOut,
-                chiefMounted: hdr.chiefMounted,
-                paperclip: hdr.paperclip,
-                folder: hdr.folder,
-              }
-            }
-            touched = true
-          }
-        }
-        if (touched) nextDetails = synced
-      }
 
-      if (isSystemGlobalResp) {
-        patch({
-          archiveLoaded: true,
-          globalVaultLoaded: true,
-          globalVaultStaleBlocked: false,
-          globalVaultFolders: folders,
-          globalVaultItems: items,
-          archivePrecipitated: precipitated,
-          ...(Array.isArray(payload.precipitatedFolders) ? { precipitatedFolders: payload.precipitatedFolders } : {}),
-          ...(payload.precipitatedViewerSummary ? { precipitatedViewerSummary: payload.precipitatedViewerSummary } : {}),
-          ...(payload.desktop && typeof payload.desktop === 'object' ? { archiveDesktop: payload.desktop } : {}),
-          ...(payload.viewerSummary && typeof payload.viewerSummary === 'object' ? { archiveViewerSummary: payload.viewerSummary } : {}),
-          flippedPrecipitatedIds,
-          archiveCounts: nextCounts,
-          archiveDiffSummary: nextDiffSummary,
-          archiveDetails: nextDetails,
-          ...(Array.isArray(payload.deskItems) ? { archiveDeskItems: payload.deskItems, archiveDeskLoaded: true } : {}),
-        })
-        return
-      }
-
-      const cabinets = Array.isArray(payload.cabinets) ? payload.cabinets : store.archiveCabinets
-      const activeCabinetId = payload.activeCabinetId !== undefined
-        ? String(payload.activeCabinetId || '')
-        : (store.archiveCabinetId || '')
-      const projectKey = payload.projectKey !== undefined ? String(payload.projectKey || '') : (store.archiveProjectKey || '')
-      const unboundSession = typeof payload.unboundSession === 'boolean'
-        ? payload.unboundSession
-        : Boolean(nextCounts && nextCounts.unboundSession)
-      const openFolders = { ...(store.archiveOpenFolders || {}) }
-      if (!store.archiveSessionLoaded && Object.keys(openFolders).length === 0) {
-        const firstNonEmpty = folders.find(f => f && f.count > 0)
-        if (firstNonEmpty) openFolders[firstNonEmpty.id] = true
-      }
-
-      patch({
-        archiveLoaded: true,
-        archiveSessionLoaded: true,
-        archiveProjectKey: projectKey,
-        archiveCabinetId: activeCabinetId,
-        archiveCabinets: cabinets,
-        archiveFolders: folders,
-        archiveItems: items,
-        archivePrecipitated: precipitated,
-        ...(Array.isArray(payload.precipitatedFolders) ? { precipitatedFolders: payload.precipitatedFolders } : {}),
-        ...(payload.precipitatedViewerSummary ? { precipitatedViewerSummary: payload.precipitatedViewerSummary } : {}),
-        ...(payload.desktop && typeof payload.desktop === 'object' ? { archiveDesktop: payload.desktop } : {}),
-        ...(payload.viewerSummary && typeof payload.viewerSummary === 'object' ? { archiveViewerSummary: payload.viewerSummary } : {}),
-        flippedPrecipitatedIds,
-        archiveCounts: nextCounts,
-        archiveDiffSummary: nextDiffSummary,
-        archiveUnboundSession: unboundSession,
-        archiveOpenFolders: openFolders,
-        archiveDetails: nextDetails,
-        ...(Array.isArray(payload.deskItems) ? { archiveDeskItems: payload.deskItems, archiveDeskLoaded: true } : {}),
-      })
-    }
-
-    /** Tier-1 Lazy Load: called ONLY when the user opens or switches scope in the `档案` tab */
-    async function loadArchives(force = false, cabinetIdOverride = '', scopeOverride = '') {
-      if (store.archiveLoading) return null
-      const rawScope = scopeOverride || store.archiveTabScope || 'desktop'
-      const activeScope = rawScope === 'desktop' ? 'session' : rawScope
-      const alreadyLoaded = activeScope === 'global'
-        ? store.globalVaultLoaded
-        : (activeScope === 'precipitated' ? store.archiveLoaded : store.archiveSessionLoaded)
-      if (alreadyLoaded && !force && !cabinetIdOverride && !scopeOverride) return null
-      patch({ archiveLoading: true, error: '' })
-      try {
-        const qs = new URLSearchParams()
-        if (store.sessionId) qs.set('session', store.sessionId)
-        qs.set('scope', activeScope)
-        const cid = (activeScope === 'precipitated' || activeScope === 'global')
-          ? ''
-          : (cabinetIdOverride || store.archiveCabinetId || '')
-        if (cid && cid !== 'cab-global') {
-          qs.set('cabinetId', cid)
-        }
-        const value = await call('archives' + (qs.toString() ? '?' + qs.toString() : ''))
-        if (value && value.ok) {
-          applyArchiveHeaders(value, [], activeScope)
-          const openIds = Object.keys(store.archiveOpenFiles || {}).filter(id => store.archiveOpenFiles[id] && !store.archiveDetails[id])
-          for (const id of openIds) {
-            void loadArchiveDetail(id, true, { scope: activeScope })
-          }
-        }
-        return value
-      } catch (error) {
-        patch({ error: String((error && error.message) || error) })
-        return null
-      } finally {
-        patch({ archiveLoading: false })
-      }
-    }
-
-    /** Tier-2 Lazy Load: called ONLY when the user clicks a paperclipped dossier card to unfold its points */
-    async function loadArchiveDetail(archiveId, force = false, opts = {}) {
-      const id = String(archiveId || '').trim()
-      if (!id) return null
-      if (!force && store.archiveDetails && store.archiveDetails[id]) {
-        return store.archiveDetails[id]
-      }
-      if (store.archiveDetailLoading && store.archiveDetailLoading[id]) return null
-      patch({ archiveDetailLoading: { ...(store.archiveDetailLoading || {}), [id]: true } })
-      try {
-        const rawScope = (opts && (opts.scope || opts.vaultScope)) || store.archiveTabScope || 'session'
-        const activeScope = rawScope === 'desktop' ? 'session' : rawScope
-        const qs = new URLSearchParams({ id })
-        if (store.sessionId) qs.set('session', store.sessionId)
-        if (activeScope === 'global') qs.set('scope', 'global')
-        if (store.archiveCabinetId && activeScope === 'session') qs.set('cabinetId', store.archiveCabinetId)
-        if (opts && opts.precipitated) qs.set('precipitated', '1')
-        const value = await call('archives/detail?' + qs.toString())
-        if (value && value.ok && value.item) {
-          patch({
-            archiveDetails: {
-              ...(store.archiveDetails || {}),
-              [value.item.id]: value.item,
-            },
-          })
-          return value.item
-        }
-        return null
-      } catch (error) {
-        patch({ error: String((error && error.message) || error) })
-        return null
-      } finally {
-        const nextLoad = { ...(store.archiveDetailLoading || {}) }
-        delete nextLoad[id]
-        patch({ archiveDetailLoading: nextLoad })
-      }
-    }
-
-    async function mutateArchiveApi(payload, toastLabel = '') {
-      try {
-        const vaultScope = (payload && (payload.vaultScope || payload.scope))
-          || (store.archiveTabScope === 'global' ? 'global' : 'session')
-        const cabinetId = vaultScope === 'global'
-          ? ''
-          : ((payload && payload.cabinetId !== undefined) ? payload.cabinetId : (store.archiveCabinetId || ''))
-        const value = await call('archives', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            session: store.sessionId || sessionIdFromUrl(),
-            vaultScope,
-            cabinetId,
-            ...payload,
-          }),
-        })
-        if (value && value.ok) {
-          if (payload.op === 'switchCabinet' || payload.op === 'createCabinet' || payload.op === 'deleteCabinet') {
-            patch({ archiveDetails: {}, archiveOpenFolders: {}, archiveOpenFiles: {} })
-          }
-          if (value.item && value.item.id) {
-            patch({
-              archiveDetails: {
-                ...(store.archiveDetails || {}),
-                [value.item.id]: value.item,
-              },
-            })
-          }
-          if (payload.op === 'delete' && (payload.archiveId || payload.id)) {
-            const delId = payload.archiveId || payload.id
-            const nextOpen = { ...(store.archiveOpenFiles || {}) }
-            const nextDet = { ...(store.archiveDetails || {}) }
-            delete nextOpen[delId]
-            delete nextDet[delId]
-            patch({ archiveOpenFiles: nextOpen, archiveDetails: nextDet })
-          }
-          if (value.archives && typeof value.archives === 'object') {
-            const targetScopeForHeaders = payload.op === 'pullPrecipitated'
-              ? (payload.targetScope === 'global' ? 'global' : 'session')
-              : (vaultScope === 'global' ? 'global' : 'session')
-            applyArchiveHeaders({
-              ...value.archives,
-              ...(value.counts && typeof value.counts === 'object' ? { counts: value.counts } : {}),
-              ...(Array.isArray(value.flippedPrecipitatedIds) ? { flippedPrecipitatedIds: value.flippedPrecipitatedIds } : {}),
-              ...(Array.isArray(value.deskItems) ? { deskItems: value.deskItems } : {}),
-            }, [], targetScopeForHeaders)
-          }
-          const extraPatch = {}
-          if (value.board && typeof value.board === 'object') {
-            extraPatch.board = value.board
-          }
-          if (value.archiveMeta && typeof value.archiveMeta === 'object') {
-            extraPatch.archiveMeta = value.archiveMeta
-          }
-          if (value.diffSummary && typeof value.diffSummary === 'object') {
-            extraPatch.archiveDiffSummary = value.diffSummary
-          }
-          if (value.counts && typeof value.counts === 'object') {
-            extraPatch.archiveCounts = { ...(store.archiveCounts || {}), ...value.counts }
-          }
-          if (Array.isArray(value.deskItems)) {
-            extraPatch.archiveDeskItems = value.deskItems
-            extraPatch.archiveDeskLoaded = true
-          }
-          if (payload.op === 'copyToGlobal') {
-            extraPatch.globalVaultLoaded = false
-          } else if (payload.op === 'copyToSession') {
-            extraPatch.archiveSessionLoaded = false
-          } else if (payload.op === 'pullPrecipitated') {
-            if (payload.targetScope === 'global') extraPatch.globalVaultLoaded = false
-            else extraPatch.archiveSessionLoaded = false
-          }
-          if (payload.op === 'precipitateNotes') {
-            const swept = Number(value.sweptCount || 0)
-            if (swept > 0) {
-              const opened = {}
-              const folders = Array.isArray(value.savedFolders) && value.savedFolders.length
-                ? value.savedFolders
-                : ['inbox']
-              for (const fId of folders) {
-                if (fId) opened[fId] = true
-              }
-              extraPatch.archiveOpenFolders = { ...(store.archiveOpenFolders || {}), ...opened }
-              extraPatch.notice = `已将 ${swept} 篇临时便签封存入本会话档案柜`
-            } else {
-              extraPatch.notice = '当前暂无可收纳的临时便签'
-            }
-          } else if (toastLabel) {
-            extraPatch.notice = toastLabel
-          }
-          if (Object.keys(extraPatch).length) patch(extraPatch)
-          if (payload.op === 'copyToGlobal' && store.archiveTabScope === 'global') {
-            void loadArchives(true, '', 'global')
-          } else if (payload.op === 'pullPrecipitated' && store.archiveTabScope === payload.targetScope) {
-            void loadArchives(true, '', payload.targetScope)
-          }
-        }
-        return value
-      } catch (error) {
-        patch({ error: String((error && error.message) || error) })
-        return null
-      }
-    }
-
-    async function requestOrganizeArchives(opts = {}) {
-      if (store.archiveOrganizing) return null
-      const isDream = Boolean(opts.dream || opts.reasonKind === 'dream_roam')
-      return await withChiefWorkFx(
-        isDream
-          ? { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游，帮你整理档案…' }
-          : { tone: 'archive', tab: 'archive', label: '参谋长正在整理档案…' },
-        async () => {
-          patch({ archiveOrganizing: true, error: '' })
-          try {
-            const vaultScope = opts.vaultScope || (store.archiveTabScope === 'global' ? 'global' : 'session')
-            const value = await call('archives/organize', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                session: store.sessionId || sessionIdFromUrl(),
-                vaultScope,
-                cabinetId: vaultScope === 'global' ? '' : (opts.cabinetId !== undefined ? opts.cabinetId : (store.archiveCabinetId || '')),
-                ids: Array.isArray(opts.ids) ? opts.ids : [],
-                folder: opts.folder || '',
-                scope: opts.scope || store.archiveOrganizeScope || 'unorganized',
-                instruction: opts.instruction !== undefined ? opts.instruction : (store.archiveOrganizePrompt || ''),
-                ...(isDream ? { reasonKind: 'dream_roam' } : {}),
-              }),
-            })
-            if (value && value.ok) {
-              const openIds = Object.keys(store.archiveOpenFiles || {}).filter(k => store.archiveOpenFiles[k])
-              const nextDetails = { ...(store.archiveDetails || {}) }
-              for (const k of openIds) delete nextDetails[k]
-              patch({
-                archiveDetails: nextDetails,
-                archiveOrganizeOpen: false,
-                archiveOrganizePrompt: '',
-                notice: value.updatedCount > 0
-                  ? `✦ 已帮你把 ${value.updatedCount} 份档案分类整理好，原文完整保留`
-                  : '✦ 这些档案已经分类好了，不用重整',
-              })
-              void loadArchives(true, '', vaultScope)
-              for (const k of openIds) {
-                void loadArchiveDetail(k, true, { scope: vaultScope })
-              }
-            }
-            return value
-          } catch (error) {
-            patch({ error: String((error && error.message) || error) })
-            return null
-          } finally {
-            patch({ archiveOrganizing: false })
-          }
-        },
-      )
-    }
-
-    async function harvestArchivesApi(focusHint = '', opts = {}) {
-      if (store.archiveHarvesting) return null
-      return await withChiefWorkFx(
-        { tone: 'archive', tab: 'archive', label: '正在从对话里提取关键记录…' },
-        async () => {
-          patch({ archiveHarvesting: true, error: '' })
-          try {
-            const vaultScope = (opts && opts.vaultScope) || (store.archiveTabScope === 'global' ? 'global' : 'session')
-            const value = await call('archives/harvest', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                session: store.sessionId || sessionIdFromUrl(),
-                vaultScope,
-                cabinetId: (opts && opts.cabinetId !== undefined) ? opts.cabinetId : (store.archiveCabinetId || ''),
-                focusHint,
-              }),
-            })
-            if (value && value.ok) {
-              patch({
-                notice: value.count > 0
-                  ? `📥 已保存 ${value.count} 份重要记录，避免长对话压缩后忘掉`
-                  : '📥 这轮对话没有新的重要细节要保存',
-              })
-              void loadArchives(true)
-            }
-            return value
-          } catch (error) {
-            patch({ error: String((error && error.message) || error) })
-            return null
-          } finally {
-            patch({ archiveHarvesting: false })
-          }
-        },
-      )
-    }
-
-    async function precipitateArchivesApi(opts = {}) {
-      if (store.archivePrecipitating) return null
-      return await withChiefWorkFx(
-        { tone: 'archive', tab: 'archive', label: '正在把经验存进长期冷库…' },
-        async () => {
-          patch({ archivePrecipitating: true, error: '' })
-          try {
-            const vaultScope = opts.vaultScope || 'global'
-            const value = await call('archives/precipitate', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                session: store.sessionId || sessionIdFromUrl(),
-                vaultScope,
-                op: opts.op || 'cabinet',
-                cabinetId: '',
-                folder: opts.folder || '',
-                ...(Array.isArray(opts.ids) && opts.ids.length > 0 ? { ids: opts.ids } : {}),
-                clearSource: Boolean(opts.clearSource),
-              }),
-            })
-            if (value && value.ok) {
-              patch({
-                precipitateModal: null,
-                notice: value.count > 0
-                  ? `⏬ 已把 ${value.count} 条常用经验存进冷库（平时占 0 Token）`
-                  : '⏬ 暂时没有可以存进冷库的经验',
-              })
-              void loadArchives(true, '', vaultScope)
-            }
-            return value
-          } catch (error) {
-            patch({ error: String((error && error.message) || error) })
-            return null
-          } finally {
-            patch({ archivePrecipitating: false })
-          }
-        },
-      )
-    }
-
-    function toggleSelectArchive(id, vaultScope = 'session', title = '') {
-      const aid = String(id || '').trim()
-      if (!aid) return
-      const vs = vaultScope === 'global' ? 'global' : (vaultScope === 'precipitated' ? 'precipitated' : 'session')
-      const key = vs + ':' + aid
-      const prev = { ...(store.selectedArchiveMap || {}) }
-      if (prev[key]) delete prev[key]
-      else prev[key] = { id: aid, vaultScope: vs, title: String(title || aid) }
-      patch({ selectedArchiveMap: prev })
-    }
-
-    function clearSelectedArchives() {
-      patch({ selectedArchiveMap: {} })
-    }
-
-    function openArchiveRelayModal(items) {
-      const list = Array.isArray(items) ? items.filter(x => x && x.id) : []
-      if (!list.length) return
-      patch({
-        archiveRelayModal: {
-          items: list.map(x => ({
-            id: String(x.id),
-            vaultScope: x.vaultScope === 'global' ? 'global' : (x.vaultScope === 'precipitated' ? 'precipitated' : 'session'),
-            title: String(x.title || x.id),
-          })),
-          instruction: '',
-          target: 'lead',
-          mode: 'followup',
-        },
-      })
-    }
-
-    async function relayArchivesWithChiefApi(modalState) {
-      if (store.relayArchivesBusy) return null
-      const items = Array.isArray(modalState && modalState.items) ? modalState.items : []
-      if (!items.length) return null
-      return await withChiefWorkFx(
-        { tone: 'archive', tab: 'archive', label: '正在整理档案并准备发送…' },
-        async () => {
-          patch({ relayArchivesBusy: true, error: '' })
-          try {
-            const value = await call('chief/relay-archives', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                session: store.sessionId || sessionIdFromUrl(),
-                cabinetId: store.archiveCabinetId || '',
-                items: items.map(it => ({
-                  id: it.id,
-                  scope: it.vaultScope || it.scope || 'session',
-                  vaultScope: it.vaultScope || it.scope || 'session',
-                  title: it.title || it.id,
-                })),
-                instruction: String((modalState && modalState.instruction) || '').trim(),
-                target: (modalState && modalState.target) || 'lead',
-                mode: (modalState && modalState.mode) || 'followup',
-              }),
-            })
-            if (value && value.ok) {
-              patch({
-                archiveRelayModal: null,
-                selectedArchiveMap: {},
-                notice: `📨 已把 ${items.length} 份档案和你的要求一起发给 @${modalState.target === 'lead' || !modalState.target ? '主对话' : shortAgentName(modalState.target, true)}`,
-              })
-              void refresh()
-            }
-            return value
-          } catch (error) {
-            patch({ error: String((error && error.message) || error) })
-            return null
-          } finally {
-            patch({ relayArchivesBusy: false })
-          }
-        },
-      )
-    }
-
-    async function distillToGlobalApi(modalState) {
-      if (store.distillBusy) return null
-      return await withChiefWorkFx(
-        { tone: 'archive', tab: 'archive', label: '正在整理要存入全局档案的经验…' },
-        async () => {
-          patch({ distillBusy: true, error: '' })
-          try {
-            const ids = Array.isArray(modalState && modalState.ids) && modalState.ids.length > 0
-              ? modalState.ids
-              : null
-            const value = await call('archives/distill-to-global', {
-              method: 'POST',
-              headers: { 'content-type': 'application/json' },
-              body: JSON.stringify({
-                session: store.sessionId || sessionIdFromUrl(),
-                cabinetId: store.archiveCabinetId || '',
-                ids,
-                clearSource: Boolean(modalState && modalState.clearSource),
-                instruction: String((modalState && modalState.instruction) || '').trim(),
-              }),
-            })
-            if (value && value.ok) {
-              const nextPatch = {
-                distillGlobalModal: null,
-                selectedArchiveMap: {},
-                globalVaultLoaded: false,
-                notice: value.createdCount > 0
-                  ? `✦ 已提取 ${value.createdCount} 份通用经验，存进「🌐 全局档案柜」`
-                  : '✦ 这轮对话暂时没有新的通用经验',
-              }
-              if (value.globalArchives && Array.isArray(value.globalArchives.items)) {
-                nextPatch.globalVaultItems = value.globalArchives.items
-                nextPatch.globalVaultLoaded = true
-              }
-              if (Array.isArray(value.deskItems)) {
-                nextPatch.archiveDeskItems = value.deskItems
-                nextPatch.archiveDeskLoaded = true
-              }
-              patch(nextPatch)
-              if (ids && modalState && modalState.clearSource) void loadArchives(true, '', 'session')
-            }
-            return value
-          } catch (error) {
-            patch({ error: String((error && error.message) || error) })
-            return null
-          } finally {
-            patch({ distillBusy: false })
-          }
-        },
-      )
-    }
-
-    async function approveGoalApi() {
-      const value = await act({ action: 'goal.approve' })
-      if (value && value.ok) patch({ notice: '✅ 已确认目标完成，切回普通计划模式' })
-      return value
-    }
-
-    async function rejectGoalApi(reason) {
-      const text = String(reason || '').trim()
-      if (!text) {
-        patch({ error: '请简单写一下没通过的原因，或要补什么' })
-        return null
-      }
-      const value = await act({ action: 'goal.reject', reason: text })
-      if (value && value.ok) patch({ notice: '↩ 已退回重做，参谋长会继续盯着推进' })
-      return value
-    }
-
-    async function deliverArchiveToChat(headerOrDetail, point = null) {
-      let detail = headerOrDetail
-      if (!point && (!detail || !Array.isArray(detail.points))) {
-        const loaded = await loadArchiveDetail(headerOrDetail && headerOrDetail.id)
-        if (loaded) detail = loaded
-      }
-      if (!detail) return
-      const lines = []
-      if (point) {
-        lines.push(`📎 调阅工程档案《${detail.title}》→ 记忆点「${point.title}」：`)
-        lines.push(point.detail || point.cue || point.title)
-      } else {
-        lines.push(`📎 调阅工程档案《${detail.title}》：`)
-        if (detail.summary) lines.push(`提要：${detail.summary}`)
-        const pts = Array.isArray(detail.points) ? detail.points : []
-        if (pts.length) {
-          pts.slice(0, 8).forEach((p, idx) => {
-            lines.push(`${idx + 1}. 【${p.title}】${p.detail || p.cue || ''}`)
-          })
-        } else if (detail.body) {
-          lines.push(detail.body.slice(0, 1500))
-        }
-      }
-      await askLeadModel(lines.join('\n'), '调阅工程档案')
-    }
-
-    async function searchColdArchives(queryText) {
-      const q = String(queryText || '').trim()
-      if (!q || store.archiveSearchBusy) return
-      patch({ archiveSearchBusy: true })
-      try {
-        const qs = new URLSearchParams({ q })
-        const sid = store.sessionId || sessionIdFromUrl()
-        if (sid) qs.set('session', sid)
-        if (store.archiveTabScope === 'global') qs.set('scope', 'global')
-        const value = await call('archives?' + qs.toString())
-        if (value && value.ok && Array.isArray(value.items)) {
-          const folderMap = new Map((value.folders || []).map(f => [f.id, f.label]))
-          const archHits = value.items.slice(0, 12).map(it => ({
-            kind: '封存档案',
-            tab: 'archive',
-            folderId: it.folder,
-            archiveId: it.id,
-            id: it.id,
-            title: `${it.paperclip === 'gold' ? '📎 ' : ''}${it.title}`,
-            snippet: `[${folderMap.get(it.folder) || it.folder}] ${it.summary || ''}`,
-          }))
-          const localHits = searchBoard(q).filter(hItem => hItem.tab !== 'archive')
-          patch({
-            askHits: [...archHits, ...localHits],
-            notice: archHits.length ? `在档案库里找到 ${archHits.length} 份相关记录` : '档案库里没找到相关内容',
-          })
-        }
-      } catch (error) {
-        patch({ error: String((error && error.message) || error) })
-      } finally {
-        patch({ archiveSearchBusy: false })
-      }
-    }
-
-    async function refresh() {
-      const fromUrl = sessionIdFromUrl()
-      if (!store.sessionId && fromUrl) {
-        patch({ sessionId: fromUrl })
-      }
-      try {
-        await call('snapshot' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
-        const panelActive = Boolean(store.dock || store.panel === SIDE_ID || store.open)
-        if (panelActive && (!store.secView || store.tab === 'chief' || store.tab === 'peers' || (store.chiefMeta && store.chiefMeta.pendingSuggestions > 0))) {
-          void loadChiefView(false)
-        }
-        if (store.error) patch({ error: '' })
-      } catch (error) {
-        patch({ error: String((error && error.message) || error) })
-      }
-    }
-
-    async function act(action) {
-      patch({ busy: true, error: '' })
-      try {
-        const effSession = (action && action.session !== undefined)
-          ? action.session
-          : (store.sessionId || sessionIdFromUrl())
-        const result = await call('action', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ ...action, session: effSession, by: (action && action.by) || 'user' }),
-        })
-        let notice = truncationNotice(result)
-        if (!notice && result && result.dispatched) {
-          notice = '已派发 @' + result.dispatched.agent
-        } else if (!notice && result && result.interrupted) {
-          notice = '已停止 @' + result.interrupted
-        } else if (!notice && result && result.messageId && result.agent) {
-          notice = '已发送给 @' + result.agent
-        }
-        if (notice) patch({ notice })
-        return result
-      } catch (error) {
-        const msg = String((error && error.message) || error)
-        if (/unknown action:/i.test(msg)) {
-          patch({
-            staleBackendDetected: true,
-            staleBackendDismissed: false,
-            error: '后台还在跑旧版本，新功能还没加载进来。请完全关闭再重新打开 DeepSeek Harness 客户端。',
-          })
-        } else {
-          patch({ error: msg })
-        }
-        return null
-      } finally {
-        patch({ busy: false })
-      }
-    }
-
-    async function loadTargets() {
-      try {
-        const value = await call('sessions' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
-        patch({
-          targets: (value && Array.isArray(value.sessions)) ? value.sessions : [],
-          pending: (value && value.pending) || null,
-          autoInject: !!(value && value.autoInject),
-          guardIdle: !(value && value.guardIdle === false),
-          guardMaxPerSession: Number.isFinite(Number(value && value.guardMaxPerSession))
-            ? Number(value.guardMaxPerSession)
-            : 3,
-          guardShortAnswer: Number.isFinite(Number(value && value.guardShortAnswer))
-            ? Number(value.guardShortAnswer)
-            : 600,
-        })
-      } catch (error) {
-        patch({ error: String((error && error.message) || error) })
-      }
-    }
-
-    async function loadHandoff() {
-      patch({ handoffBusy: true, error: '' })
-      try {
-        const value = await call('handoff' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
-        const text = value && value.text ? value.text : ''
-        const nextMeta = {
-          source: (value && value.source) || 'auto',
-          isCustom: Boolean(value && value.isCustom),
-          pinned: Boolean(value && value.pinned),
-          syncOnDigest: Boolean(value && value.syncOnDigest),
-          isIncomplete: Boolean(value && value.isIncomplete),
-          isStale: Boolean(value && value.isStale),
-          hasNarrativeUpdate: Boolean(value && value.hasNarrativeUpdate),
-          autoText: (value && value.autoText) || '',
-          updatedAt: Number(value && (value.updatedAt || value.handoffAt)) || 0,
-        }
-        patch({
-          handoffText: text,
-          handoffMeta: nextMeta,
-          ...(store.handoffEditing ? {} : { handoffDraft: text }),
-        })
-        return value || { ok: true, text, ...nextMeta }
-      } catch (error) {
-        patch({ error: String((error && error.message) || error) })
-        return null
-      } finally {
-        patch({ handoffBusy: false })
-      }
-    }
-
-    async function saveHandoffCustom(text, pinAfter = false) {
-      const cleanText = String(text || '')
-      const res = await act({ action: 'handoff.save', text: cleanText, source: 'human', by: 'user' })
-      if (res && res.ok) {
-        if (pinAfter) {
-          await act({ action: 'handoff.pin', pinned: true, by: 'user' })
-        }
-        patch({ handoffEditing: false, notice: pinAfter ? '✏️ 已保存交接单，并设好定住防改' : '✏️ 已保存你改的交接单' })
-        await loadHandoff()
-      }
-      return res
-    }
-
-    async function toggleHandoffPin(nextPinned, snapshotOverride = '') {
-      let snapshotText = String(
-        snapshotOverride
-        || store.handoffText
-        || (store.handoffMeta && store.handoffMeta.autoText)
-        || '',
-      )
-      if (nextPinned && !snapshotText) {
-        const loaded = await loadHandoff()
-        snapshotText = String((loaded && loaded.text) || store.handoffText || '')
-      }
-      const res = await act({
-        action: 'handoff.pin',
-        pinned: Boolean(nextPinned),
-        ...(nextPinned && snapshotText ? { snapshotText } : {}),
-        by: 'user',
-      })
-      if (res && res.ok) {
-        patch({ notice: nextPinned ? '📌 已定住防改：参谋长不会再自动覆盖这份交接单' : '🔓 已解除锁定，交接单可以重新自动更新了' })
-        await loadHandoff()
-      }
-      return res
-    }
-
-    async function resetHandoffAuto() {
-      const res = await act({ action: 'handoff.reset', by: 'user' })
-      if (res && res.ok) {
-        patch({ handoffEditing: false, notice: '↺ 已改回由系统自动更新交接单' })
-        await loadHandoff()
-      }
-      return res
-    }
-
-    async function toggleSyncHandoffOnDigest(enabled) {
-      if (store.board && store.board.handoff && store.board.handoff.pinned) {
-        patch({ notice: '🔒 交接单已定住防改，先解锁才能开启自动同步' })
-        return null
-      }
-      const res = await act({ action: 'handoff.setSyncOnDigest', enabled: Boolean(enabled), by: 'user' })
-      if (res && res.ok) {
-        patch({ notice: enabled ? '✦ 以后提炼摘要时会自动更新交接单' : '已关闭自动同步，之后只按你的修改为准' })
-        await loadHandoff()
-      }
-      return res
-    }
-
-    async function requestTransferWithGuard(target, opts = {}) {
-      const info = await loadHandoff()
-      const hMeta = (info && typeof info === 'object') ? info : (store.handoffMeta || {})
-      const pinned = Boolean(hMeta.pinned || (store.board && store.board.handoff && store.board.handoff.pinned))
-      const staleOrIncomplete = !pinned && Boolean(hMeta.isIncomplete || hMeta.isStale || hMeta.hasNarrativeUpdate)
-      if (staleOrIncomplete) {
-        const reason = hMeta.isIncomplete
-          ? '交接单还缺目标、步骤或最新摘要，直接交接会让新对话接不上。'
-          : '摘要已经更新了，但交接单还没同步。直接交接会让新窗口看到旧进度，建议先更新一下。'
-        patch({
-          handoffWarnModal: {
-            target,
-            opts,
-            reason,
-            isIncomplete: Boolean(hMeta.isIncomplete),
-          },
-        })
-        return null
-      }
-      return transfer(target, opts)
-    }
-
-    async function transfer(target, opts = {}) {
-      patch({ transferNote: '正在交接…', error: '' })
-      try {
-        const value = await call('transfer', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            target,
-            session: store.sessionId,
-            by: 'user',
-            deployChief: opts.deployChief !== false,
-            archiveTransferPolicy: opts.archiveTransferPolicy || store.deployArchivePolicy || 'none',
-            ...(opts.archiveDrawer || store.deployDrawer ? { archiveDrawer: opts.archiveDrawer || store.deployDrawer } : {}),
-            ...(opts.toCabinetId ? { toCabinetId: opts.toCabinetId } : {}),
-            ...(opts.customNote ? { customNote: opts.customNote } : {}),
-          }),
-        })
-        const created = value && value.mode === 'created' && value.sessionId ? String(value.sessionId) : ''
-        let note = '已放入待领取队列（含参谋预部署）'
-        if (value && value.mode === 'injected') note = '已交接到目标对话，并开启了参谋'
-        if (created) {
-          patch({ transferred: true })
-          setTimeout(() => patch({ transferred: false }), 2000)
-          note = '已创建新会话 ' + shortSession(created) + ' 并部署参谋'
-          const sessionsSvc = service('sessions') || (runtimeRefs.navigation && runtimeRefs.navigation.sessions) || null
-          if (sessionsSvc && typeof sessionsSvc.open === 'function') {
-            try {
-              sessionsSvc.open(created)
-            } catch {}
-          } else if (runtimeRefs.navigation && typeof runtimeRefs.navigation.openSession === 'function') {
-            try {
-              runtimeRefs.navigation.openSession(created)
-            } catch {}
-          }
-        }
-        patch({
-          transferNote: note,
-          notice: note,
-          handoffText: value && value.text ? value.text : store.handoffText,
-        })
-        void loadTargets()
-        return value
-      } catch (error) {
-        patch({ transferNote: '失败：' + String((error && error.message) || error) })
-        return null
-      }
-    }
-
-    async function loadMemory() {
-      patch({ memBusy: true, error: '' })
-      try {
-        const value = await call('memory' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
-        patch({
-          memSections: (value && Array.isArray(value.sections)) ? value.sections : [],
-          memCount: Number(value && value.count) || 0,
-          memDigest: (value && value.digest) || '',
-        })
-      } catch (error) {
-        patch({ error: String((error && error.message) || error) })
-      } finally {
-        patch({ memBusy: false })
-      }
-    }
-
-    async function askMemory(question) {
-      const text = String(question || '').trim()
-      if (!text) return
-      patch({ memBusy: true, memNote: '' })
-      try {
-        const value = await call('action', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'memory.ask', question: text, session: store.sessionId, by: 'user' }),
-        })
-        patch({
-          memReply: (value && value.reply) || '',
-          memHits: (value && value.hits) || [],
-          memNote: value && value.terms && value.terms.length ? value.terms.join(' · ') : '',
-        })
-      } catch (error) {
-        patch({ memNote: String((error && error.message) || error) })
-      } finally {
-        patch({ memBusy: false })
-      }
-    }
-
-    async function addMemory() {
-      const text = store.memText.trim()
-      const title = store.memTitle.trim()
-      const section = store.memSection
-      if (!text) return
-      patch({ memText: '', memTitle: '', memComposerOpen: false, notice: '已记下来' })
-      await act({ action: 'memory.add', text, title, section })
-      void loadMemory()
-    }
-
-    async function removeMemory(id) {
-      await act({ action: 'memory.remove', id })
-      void loadMemory()
-    }
-
-    function searchBoard(term) {
-      const needle = String(term || '').trim().toLowerCase()
-      if (!needle) return []
-      const board = store.board || {}
-      const sec = store.secView || {}
-      const hits = []
-      const hit = text => String(text || '').toLowerCase().includes(needle)
-      for (const fact of sec.facts || []) {
-        if (hit(fact.text)) {
-          hits.push({ kind: '纪律/记忆', tab: 'chief', subTab: 'facts', id: fact.id, title: FACT_CAT_LABEL[fact.category] || '记忆条目', snippet: snippetOf(fact.text, needle, 36) })
-        }
-      }
-      for (const task of board.tasks || []) {
-        if (hit(task.title) || hit(task.note) || hit(task.intent) || hit(task.evidence)) {
-          hits.push({ kind: '任务', tab: 'tasks', id: task.id, title: task.title, snippet: snippetOf(task.note || task.evidence || task.title, needle, 34) })
-        }
-      }
-      for (const mail of sec.mailbox || []) {
-        if (hit(mail.text) || hit(mail.subject) || hit(mail.from) || hit(mail.to)) {
-          hits.push({ kind: '协同信箱', tab: 'peers', id: mail.id, title: (mail.from || '参谋长') + ' → ' + (mail.to || '成员'), snippet: snippetOf(mail.text, needle, 34) })
-        }
-      }
-      for (const note of board.notes || []) {
-        if (hit(note.title) || hit(note.body) || (note.tags || []).some(hit)) {
-          hits.push({ kind: '临时便签', tab: 'archive', id: note.id, title: note.title || '无标题', snippet: snippetOf(note.body || note.title, needle, 36) })
-        }
-      }
-      if (store.archiveLoaded && Array.isArray(store.archiveItems)) {
-        for (const arch of store.archiveItems) {
-          if (hit(arch.title) || hit(arch.summary) || (arch.tags || []).some(hit) || (arch.pointPreviews || []).some(hit)) {
-            hits.push({
-              kind: '工程档案',
-              tab: 'archive',
-              folderId: arch.folder,
-              archiveId: arch.id,
-              id: arch.id,
-              title: (arch.paperclip === 'gold' ? '📎 ' : '') + (arch.title || '无标题'),
-              snippet: snippetOf(arch.summary || (arch.pointPreviews || []).join(' · '), needle, 36),
-            })
-          }
-        }
-      }
-      for (const step of board.plan || []) {
-        if (hit(step.text)) hits.push({ kind: '规划', tab: 'tasks', id: step.id, title: step.text, snippet: '' })
-      }
-      if (hit(board.objective)) hits.push({ kind: '目标', tab: 'tasks', id: 'objective', title: '当前目标', snippet: snippetOf(board.objective, needle, 36) })
-      for (const item of board.memory || []) {
-        if (hit(item.title) || hit(item.text)) {
-          hits.push({ kind: '回合记录', tab: 'chief', subTab: 'facts', showRawTurns: true, id: item.id, title: item.title || SECTION_LABEL[item.section] || '记忆', snippet: snippetOf(item.text || item.title, needle, 36) })
-        }
-      }
-      return hits
-    }
-
-    function sendToComposer(text) {
-      const actions = store.inputActions
-      if (!actions || typeof actions !== 'object') return null
-      const setters = ['setDraft', 'setText', 'replaceText', 'updateText', 'appendText', 'insertText']
-      for (const name of setters) {
-        const fn = actions[name]
-        if (typeof fn !== 'function') continue
-        try {
-          if (fn(text) === false) continue
-        } catch {
-          continue
-        }
-        const submit = typeof actions.submit === 'function' ? actions.submit : (typeof actions.send === 'function' ? actions.send : null)
-        if (submit) {
-          try {
-            submit()
-            return '已发到对话'
-          } catch {}
-        }
-        return '已填入输入框'
-      }
-      return null
-    }
-
-    async function askLeadModel(promptText, subject = '步骤咨询') {
-      const clean = String(promptText || '').trim()
-      if (!clean) return
-      const sent = sendToComposer(clean)
-      if (sent) {
-        patch({ notice: sent + '，等主对话回复' })
-        return
-      }
-      try {
-        await call('chief/relay', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({
-            session: store.sessionId,
-            by: '用户咨询',
-            target: 'lead',
-            subject,
-            text: clean,
-            mode: 'followup',
-          }),
-        })
-        patch({ notice: '已发给主对话' })
-      } catch (error) {
-        copyText(clean, '已复制，去对话框粘贴就能提问')
-      }
-    }
-
-    function copyText(text, label = '已复制') {
-      if (!text) return
-      try {
-        if (navigator.clipboard && navigator.clipboard.writeText) {
-          navigator.clipboard.writeText(String(text)).then(
-            () => patch({ copied: true, notice: label }),
-            () => {},
-          )
-          setTimeout(() => patch({ copied: false }), 1400)
-        }
-      } catch {}
-    }
-
-    /* ----------------------------------------------------------- Icons (SVG) */
-
-    async function addBoundRule(field, item, pinned = false) {
-      const res = await act({ action: 'bounds.add', field, item, pinned: Boolean(pinned) })
-      if (!res || store.error) return
-      patch({
-        boundDraft: { ...store.boundDraft, [field]: '' },
-        notice: pinned ? '📌 已添加为所有任务通用的边界' : '已添加到当前对话边界（点前面图钉可设为通用）',
-      })
-    }
-
-    async function toggleBoundPin(field, item, nextPinned) {
-      const res = await act({ action: 'bounds.pin', field, item, pinned: Boolean(nextPinned) })
-      if (!res || store.error) return
-      patch({
-        notice: nextPinned
-          ? '📌 已固定为所有任务通用的边界'
-          : '已取消通用固定，只在当前对话生效',
-      })
-    }
-
-    async function removeBoundRule(field, item) {
-      const nextSel = { ...(store.boundSelected || { allowed: [], forbidden: [], notes: [] }) }
-      if (Array.isArray(nextSel[field])) {
-        nextSel[field] = nextSel[field].filter(x => x !== item)
-        patch({ boundSelected: nextSel })
-      }
-      await act({ action: 'bounds.remove', field, item })
-    }
-
-    async function editBoundRule(field, oldItem, nextItem) {
-      const trimmed = String(nextItem || '').trim()
-      if (!trimmed || trimmed === oldItem) return
-      const res = await act({ action: 'bounds.edit', field, oldItem, item: trimmed })
-      if (res && !store.error) patch({ notice: '已更新边界规则' })
-    }
-
-    function toggleBoundSelect(field, item) {
-      const curMap = store.boundSelected || { allowed: [], forbidden: [], notes: [] }
-      const cur = Array.isArray(curMap[field]) ? curMap[field] : []
-      const next = cur.includes(item) ? cur.filter(x => x !== item) : cur.concat(item)
-      patch({ boundSelected: { ...curMap, [field]: next } })
-    }
-
-    async function saveGuardWallApi({ title, ruleType = 'forbid_cmd', pattern = '', patterns = null, scope = 'global', reason = '', writeOnly = false }) {
-      const cleanTitle = String(title || '').trim()
-      const cleanPattern = String(pattern || '').trim()
-      const patList = Array.isArray(patterns) && patterns.length > 0
-        ? patterns
-        : (cleanPattern ? cleanPattern.split(/[\r\n,;，；]+/).map(s => s.trim()).filter(Boolean) : [])
-      if (!cleanTitle || !patList.length) {
-        patch({ error: '请给物理驻墙起个名字，并至少写 1 条拦截条件' })
-        return null
-      }
-      const res = await act({
-        action: 'wall.save',
-        wall: {
-          title: cleanTitle,
-          ruleType,
-          patterns: patList,
-          scope,
-          reason: String(reason || '').trim(),
-          writeOnly: Boolean(writeOnly),
-          source: 'manual',
-        },
-      })
-      if (res && res.ok) {
-        patch({
-          wallFormOpen: false,
-          wallDraftTitle: '',
-          wallDraftPattern: '',
-          notice: `🧱 已启用物理驻墙「${cleanTitle}」（${scope === 'workspace' ? '只管当前项目' : '🌐 所有项目通用'}）`,
-        })
-      }
-      return res
-    }
-
-    async function setGuardWallScopeApi(wallId, scope) {
-      if (!wallId || !scope) return null
-      const res = await act({ action: 'wall.setScope', wallId, scope })
-      if (res && res.ok) {
-        const labelMap = { global: '🌐 所有项目通用', workspace: '📁 只管当前项目', paused: '⏸ 暂停使用' }
-        patch({ notice: `🧱 物理驻墙范围已改为：${labelMap[scope] || scope}` })
-      }
-      return res
-    }
-
-    async function removeGuardWallApi(wallId) {
-      if (!wallId) return null
-      const res = await act({ action: 'wall.remove', wallId })
-      if (res && res.ok) {
-        const curSel = Array.isArray(store.wallSelectedIds) ? store.wallSelectedIds : []
-        patch({
-          wallSelectedIds: curSel.filter(id => id !== wallId),
-          wallMergeError: '',
-          notice: '🧱 已删除这条物理驻墙',
-        })
-      }
-      return res
-    }
-
-    function toggleGuardWallSelect(wallId) {
-      const id = String(wallId || '').trim()
-      if (!id) return
-      const prev = Array.isArray(store.wallSelectedIds) ? store.wallSelectedIds : []
-      const next = prev.includes(id) ? prev.filter(x => x !== id) : prev.concat(id)
-      patch({ wallSelectedIds: next, wallMergeError: '', error: '' })
-    }
-
-    async function mergeGuardWallsApi({ wallIds = [], autoGroup = false } = {}) {
-      const walls = Array.isArray(store.guardWalls) ? store.guardWalls : []
-      if (!autoGroup) {
-        const cleanIds = [...new Set((Array.isArray(wallIds) ? wallIds : []).filter(id => walls.some(w => w && w.id === id)))]
-        if (cleanIds.length < 2) {
-          const msg = '请至少选 2 条同类型的物理驻墙再合并'
-          patch({ wallMergeError: msg, error: msg })
-          return { ok: false, code: 'MERGE_MIN_TWO', error: msg }
-        }
-        const picked = walls.filter(w => cleanIds.includes(w.id))
-        const ruleTypes = new Set(picked.map(w => w.ruleType))
-        if (ruleTypes.size > 1) {
-          const msg = '⛔ 不同类型的物理驻墙不能混在一起合并，比如「禁碰路径」只能和「禁碰路径」合。请取消选错的那条。'
-          patch({ wallMergeError: msg, error: msg })
-          return { ok: false, code: 'CROSS_TYPE_MERGE_FORBIDDEN', error: msg }
-        }
-      }
-      patch({ wallMergeError: '', error: '' })
-      return await withChiefWorkFx(
-        { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '正在合并同类物理驻墙…', minMs: 520 },
-        async () => {
-          const res = await act({
-            action: 'wall.merge',
-            wallIds: Array.isArray(wallIds) ? wallIds : [],
-            autoGroup: Boolean(autoGroup),
-          })
-          if (!res || !res.ok) {
-            const msg = (res && res.error) || store.error || '合并失败'
-            patch({ wallMergeError: msg, error: msg })
-            return res || { ok: false, error: msg }
-          }
-          patch({
-            wallSelectedIds: [],
-            wallMergeError: '',
-            notice: `🧱 已把 ${res.mergedCount || 2} 条同类物理驻墙合并成 ${res.createdCount || 1} 条`,
-          })
-          return res
-        },
-      )
-    }
-
-    function openTaskEditor(task) {
-      if (!task) return
-      patch({
-        selectedTaskId: task.id,
-        editTaskId: task.id,
-        editTaskTitle: task.title || '',
-        editTaskNote: task.note || '',
-        editTaskIntent: task.intent || '',
-        editTaskEvidence: task.evidence || '',
-        editTaskParentId: task.parentId || '',
-        editTaskPlanStepId: task.planStepId || '',
-        editTaskTargetPlanStepId: task.targetPlanStepId || '',
-        editTaskBlockedBy: Array.isArray(task.blockedBy) ? [...task.blockedBy] : [],
-      })
-    }
 
     function clearBoundSessionToBlank() {
       runtimeRefs.sessionClearTimer = null
@@ -4443,15 +4531,21 @@ window.__ModuleLoader__.load({
       if (switchedConversation && store.tab === 'archive') void loadArchives(true)
     }
 
-    // === [module: src/client/styles.js] ===
+    // === [module: src/client/styles/theme.js] ===
     /**
-     * styles.js
+     * src/client/styles/theme.js — 宿主亮/暗主题探测与选择器自动展开引擎
      *
-     * Complete DSH Chief client stylesheet and <Style /> injector.
+     * 【核心职责】
+     *   1. `detectHostTheme()` / `isHostLightTheme()`：跨 DSH Desktop (`body[data-ds-dark-theme]`、computed luminance)
+     *      与 Web 宿主容器探测当前实际亮/暗主题，供 JS 逻辑与 SVG 画布颜色自适应使用。
+     *   2. `expandLightThemeSelectors(cssText)`：将所有 `html[data-ds-theme-source="light"] ...` 规则
+     *      自动展开为兼容 DSH Desktop 与插件自身 `data-dnb-theme="light"` 的多选择器集合。
+     *
+     * 【边界约定】
+     *   - 仅承载主题探测与 CSS 字符串预处理逻辑，不包含任何样式规则本体或 React 组件。
+     *   - 作为 `src/client/styles.js` 与 `src/client/styles/*.js` 的底层依赖（无环）。
      */
 
-
-    /** Resolve active host UI color scheme across DSH Desktop (`body[data-ds-dark-theme]`, `color-scheme`) and legacy html attributes. */
     function detectHostTheme() {
       if (typeof document === 'undefined' || !document.documentElement) return 'dark'
       const root = document.documentElement
@@ -4495,7 +4589,30 @@ window.__ModuleLoader__.load({
       return detectHostTheme() === 'light'
     }
 
-    const CSS = `
+    function expandLightThemeSelectors(cssText) {
+      return String(cssText || '').replace(
+        /^([ \t]*)html\[data-ds-theme-source="light"\]([^,{\n]+)(,|[ \t]*\{)/gm,
+        (_, indent, sel, tail) =>
+          `${indent}html[data-dnb-theme="light"]${sel},\n`
+          + `${indent}html:not([data-ds-theme="dark"]):not([data-ds-theme-source="dark"]):not([data-dnb-theme="dark"]) body:not([data-ds-dark-theme])${sel},\n`
+          + `${indent}html[data-ds-theme-source="light"]${sel}${tail}`,
+      )
+    }
+
+    // === [module: src/client/styles/base.js] ===
+    /**
+     * src/client/styles/base.js — 基础面板设计令牌、通用控件与全局浮层样式
+     *
+     * 【核心职责】
+     *   承载 `.dnb-panel` CSS 变量令牌、明暗基础覆盖、输入框入口按钮、顶栏与版本徽章（`.dnb-ver-chip`）、
+     *   分段导航、按钮/开关/进度条、底部抽屉、右键气泡、Toast 提示，以及 Attention-First 手风琴基础样式。
+     *
+     * 【边界与接入】
+     *   - 本模块排在 `styles.js` 中 `STYLE_SHEETS` 的首位，为后续所有页签提供公共变量与通用基础类。
+     *   - 未来新增页签若需新增独立 CSS，请勿写入本文件，请在 `src/client/styles/` 下新建对应页签样式文件。
+     */
+
+    const CSS_BASE = `
       .dnb-panel {
         --dnb-card: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1, rgba(128,128,136,0.08)));
         --dnb-card-hover: var(--dsw-alias-card-fill-hover, var(--dsw-alias-bg-layer-2, rgba(128,128,136,0.13)));
@@ -5119,6 +5236,292 @@ window.__ModuleLoader__.load({
         display: flex;
       }
 
+      /* Bottom Sheet Inspector */
+      .dnb-sheet {
+        background: var(--dnb-elevated);
+        border: 1px solid var(--dnb-border-strong);
+        border-radius: 16px;
+        padding: 10px 12px 12px;
+        margin-top: 10px;
+        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
+        animation: dnb-enter 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+      }
+      .dnb-sheet-handle {
+        width: 32px;
+        height: 3.5px;
+        border-radius: 99px;
+        background: var(--dnb-border-strong);
+        margin: 0 auto 8px;
+      }
+
+      /* Context Menu / Popover */
+      .dnb-menu {
+        position: fixed;
+        z-index: 9999;
+        min-width: 152px;
+        padding: 5px;
+        border-radius: 12px;
+        background-color: #1f2024;
+        background-image: linear-gradient(var(--dnb-popover), var(--dnb-popover));
+        border: 1px solid var(--dnb-border-strong, rgba(128,128,136,0.28));
+        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
+        backdrop-filter: blur(20px);
+        color: var(--dnb-text, #f2f2f7);
+        font-size: 12px;
+        animation: dnb-enter 0.14s ease-out;
+      }
+      .dnb-menu-item {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 10px;
+        border-radius: 8px;
+        cursor: pointer;
+        transition: background 0.12s ease;
+      }
+      .dnb-menu-item:hover {
+        background: var(--dnb-fill, rgba(128,128,136,0.18));
+      }
+
+      /* Toast Notice */
+      .dnb-toast {
+        position: absolute;
+        bottom: 82px;
+        left: 50%;
+        transform: translateX(-50%);
+        z-index: 90;
+        padding: 6px 14px;
+        border-radius: 99px;
+        background: var(--dnb-popover);
+        border: 1px solid var(--dnb-border-strong);
+        box-shadow: 0 6px 20px rgba(0,0,0,0.24);
+        font-size: 11.5px;
+        font-weight: 500;
+        color: var(--dnb-text);
+        pointer-events: none;
+        white-space: nowrap;
+        max-width: calc(100% - 32px);
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      /* Header Compact Pills (Model Picker & Auto-Pilot) */
+      .dnb-head-pill {
+        height: 24px;
+        padding: 0 8px;
+        border-radius: 99px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-card);
+        color: var(--dnb-text-2);
+        font: inherit;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        display: inline-flex;
+        align-items: center;
+        gap: 3.5px;
+        white-space: nowrap;
+        transition: all 0.16s ease;
+      }
+      .dnb-head-pill:hover {
+        background: var(--dnb-card-hover);
+        color: var(--dnb-text);
+        border-color: var(--dnb-border-strong);
+      }
+      .dnb-head-pill[data-pilot="1"] {
+        background: rgba(48, 209, 88, 0.14);
+        border-color: rgba(48, 209, 88, 0.42);
+        color: #30d158;
+      }
+
+      /* Attention-First Collapsible Accordion Cards & Unified Design System */
+      .dnb-acc-card {
+        margin-top: 8px;
+        border-radius: 12px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-card);
+        overflow: visible;
+        transition: border-color 0.15s ease;
+      }
+      .dnb-view > .dnb-acc-card:first-child {
+        margin-top: 0;
+      }
+      .dnb-acc-card:hover {
+        border-color: var(--dnb-border-strong);
+      }
+      .dnb-acc-card.dnb-wall-box {
+        margin-top: 8px;
+        margin-bottom: 0;
+        border-radius: 12px;
+        border: 1px solid var(--dnb-border);
+        border-left: 3.5px solid rgba(239, 68, 68, 0.78);
+        background: var(--dnb-card);
+      }
+      .dnb-fleet-card,
+      .dnb-acc-card.dnb-fleet-card {
+        border-left: 3.5px solid rgba(34, 211, 238, 0.85);
+        background: linear-gradient(135deg, rgba(6, 182, 212, 0.08) 0%, var(--dnb-card) 44%);
+      }
+      .dnb-acc-card.dnb-fleet-card > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(6, 182, 212, 0.12), rgba(6, 182, 212, 0.02) 55%, transparent);
+      }
+      .dnb-acc-card.dnb-obj-card {
+        border-left: 3.5px solid rgba(59, 130, 246, 0.88);
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.09) 0%, var(--dnb-card) 46%);
+      }
+      .dnb-acc-card.dnb-obj-card > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.025) 58%, transparent);
+      }
+      .dnb-acc-card.dnb-topo-card {
+        border-left: 3.5px solid rgba(16, 185, 129, 0.88);
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, var(--dnb-card) 44%);
+      }
+      .dnb-acc-card.dnb-topo-card > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(16, 185, 129, 0.12), rgba(16, 185, 129, 0.02) 55%, transparent);
+      }
+      .dnb-acc-card.dnb-board-card {
+        border-left: 3.5px solid rgba(139, 92, 246, 0.88);
+        background: linear-gradient(135deg, rgba(139, 92, 246, 0.08) 0%, var(--dnb-card) 40%);
+      }
+      .dnb-acc-card.dnb-board-card > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(139, 92, 246, 0.12), rgba(139, 92, 246, 0.02) 55%, transparent);
+      }
+      .dnb-acc-card.dnb-handoff-card {
+        border-left: 3.5px solid rgba(245, 158, 11, 0.88);
+        background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, var(--dnb-card) 44%);
+      }
+      .dnb-acc-card.dnb-handoff-card > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.02) 55%, transparent);
+      }
+      .dnb-acc-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        min-height: 36px;
+        padding: 7px 11px;
+        border-radius: 11px;
+        cursor: pointer;
+        user-select: none;
+        transition: background-color 0.14s ease;
+      }
+      .dnb-acc-card[data-open="1"] > .dnb-acc-head {
+        border-radius: 11px 11px 0 0;
+      }
+      .dnb-acc-head:hover {
+        background: var(--dnb-card-hover);
+      }
+      .dnb-acc-title-wrap {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex: 1 1 auto;
+        min-width: 0;
+        flex-wrap: wrap;
+      }
+      .dnb-acc-chevron {
+        color: var(--dnb-text-3);
+        flex-shrink: 0;
+        transform: rotate(0deg);
+        transition: transform 0.16s ease, color 0.14s ease;
+      }
+      .dnb-acc-card[data-open="1"] > .dnb-acc-head .dnb-acc-chevron {
+        transform: rotate(90deg);
+        color: var(--dnb-text-2);
+      }
+      .dnb-acc-title {
+        font-size: 12.5px;
+        font-weight: 600;
+        color: var(--dnb-text);
+        white-space: nowrap;
+      }
+      .dnb-acc-preview {
+        font-size: 11.5px;
+        color: var(--dnb-text-2);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+        min-width: 0;
+        flex: 1;
+      }
+      .dnb-acc-card.dnb-obj-card .dnb-acc-preview {
+        color: var(--dnb-text);
+        opacity: 0.9;
+      }
+      .dnb-acc-count {
+        font-size: 10.5px;
+        color: var(--dnb-text-2);
+        padding: 1px 6px;
+        border-radius: 99px;
+        background: var(--dnb-fill);
+        white-space: nowrap;
+      }
+      .dnb-acc-badge {
+        font-size: 10px;
+        font-weight: 600;
+        padding: 1px 6px;
+        border-radius: 99px;
+        background: var(--dnb-fill);
+        color: var(--dnb-text-2);
+        white-space: nowrap;
+      }
+      .dnb-acc-badge[data-tone="amber"] {
+        background: rgba(245, 158, 11, 0.16);
+        color: #fbbf24;
+      }
+      .dnb-acc-badge[data-tone="accent"] {
+        background: rgba(59, 130, 246, 0.16);
+        color: #60a5fa;
+      }
+      .dnb-acc-ops {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex-shrink: 0;
+      }
+      .dnb-acc-ops .dnb-seg .dnb-seg-btn {
+        flex: 0 0 auto;
+      }
+      .dnb-acc-pull-hint {
+        font-size: 10.5px;
+        font-weight: 500;
+        color: var(--dnb-text-3);
+        padding: 1px 7px;
+        border-radius: 99px;
+        background: var(--dnb-fill);
+        white-space: nowrap;
+        cursor: pointer;
+      }
+      .dnb-acc-head:hover .dnb-acc-pull-hint {
+        color: var(--dnb-text-2);
+      }
+      .dnb-acc-body {
+        border-top: 1px solid var(--dnb-border);
+        border-radius: 0 0 11px 11px;
+        padding: 8px 10px 10px;
+      }
+      .dnb-acc-body > .dnb-cell:first-child {
+        border-top: none;
+      }
+      .dnb-acc-body > .dnb-qa-stream > .dnb-qa-turn-box:first-child {
+        margin-top: 2px;
+      }
+
+    `
+
+    // === [module: src/client/styles/tasks-pyramid.js] ===
+    /**
+     * src/client/styles/tasks-pyramid.js — 任务金字塔树、竖脊线与可选 SVG 缩放画布样式
+     *
+     * 【核心职责】
+     *   承载全宽零拖拽任务金字塔树、Tier 2+ 竖向连接脊线、任务卡内联状态药丸、
+     *   全景 DAG 缩放画布（`.dnb-canvas-wrap`），以及目标状态徽章与焦点横幅样式。
+     *
+     * 【边界约定】
+     *   - 仅服务于任务页签中的金字塔/全景画布视图；顺序工作流拓扑与组织树见 `styles/tasks-flow.js`。
+     */
+
+    const CSS_TASKS_PYRAMID = `
       /* Grand Full-Width Zero-Drag Pyramid Tree (大气铺开金字塔树) */
       .dnb-pyr-root {
         display: flex;
@@ -5628,735 +6031,21 @@ window.__ModuleLoader__.load({
         background: rgba(255, 69, 58, 0.14);
       }
 
-      /* Pushpin Stamp (小图钉戳) for Global Shared Boundaries */
-      .dnb-pin-stamp {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 22px;
-        height: 22px;
-        padding: 0;
-        border-radius: 7px;
-        border: 1px dashed var(--dnb-border-strong);
-        background: transparent;
-        color: var(--dnb-text-3);
-        cursor: pointer;
-        flex-shrink: 0;
-        transition: transform 0.16s cubic-bezier(0.32, 0.72, 0, 1), background 0.16s ease, color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
-      }
-      .dnb-pin-stamp:hover {
-        color: #fbbf24;
-        border-style: solid;
-        border-color: rgba(245, 158, 11, 0.48);
-        background: rgba(245, 158, 11, 0.1);
-        transform: scale(1.06) rotate(-4deg);
-      }
-      .dnb-pin-stamp:active {
-        transform: scale(0.92);
-      }
-      .dnb-pin-stamp[data-pinned="1"] {
-        border-style: solid;
-        border-color: rgba(245, 158, 11, 0.58);
-        background: linear-gradient(135deg, rgba(245, 158, 11, 0.26) 0%, rgba(217, 119, 6, 0.16) 100%);
-        color: #fbbf24;
-        box-shadow: 0 2px 7px rgba(245, 158, 11, 0.22), inset 0 0.5px 0 rgba(255, 255, 255, 0.22);
-      }
-      .dnb-pin-badge {
-        display: inline-flex;
-        align-items: center;
-        height: 16px;
-        padding: 0 5px;
-        border-radius: 5px;
-        font-size: 9.5px;
-        font-weight: 700;
-        letter-spacing: 0.2px;
-        color: #fbbf24;
-        background: rgba(245, 158, 11, 0.15);
-        border: 1px solid rgba(245, 158, 11, 0.34);
-        flex-shrink: 0;
-      }
-      .dnb-bound-check {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 15px;
-        height: 15px;
-        padding: 0;
-        border-radius: 4px;
-        border: 1px solid var(--dnb-border-strong);
-        background: transparent;
-        color: transparent;
-        cursor: pointer;
-        flex-shrink: 0;
-        opacity: 0.22;
-        transition: opacity 0.14s ease, border-color 0.14s ease, background 0.14s ease;
-      }
-      .dnb-cell:hover .dnb-bound-check,
-      .dnb-wall-item:hover .dnb-bound-check,
-      .dnb-bound-check:hover {
-        opacity: 0.92;
-        border-color: var(--dnb-accent);
-      }
-      .dnb-bound-check[data-checked="1"] {
-        opacity: 1;
-        border-color: var(--dnb-primary-bg, #2563eb);
-        background: var(--dnb-primary-bg, #2563eb);
-        color: var(--dnb-primary-fg, #fff);
-      }
+    `
 
-      /* Bottom Sheet Inspector */
-      .dnb-sheet {
-        background: var(--dnb-elevated);
-        border: 1px solid var(--dnb-border-strong);
-        border-radius: 16px;
-        padding: 10px 12px 12px;
-        margin-top: 10px;
-        box-shadow: 0 8px 24px rgba(0, 0, 0, 0.16);
-        animation: dnb-enter 0.2s cubic-bezier(0.32, 0.72, 0, 1);
-      }
-      .dnb-sheet-handle {
-        width: 32px;
-        height: 3.5px;
-        border-radius: 99px;
-        background: var(--dnb-border-strong);
-        margin: 0 auto 8px;
-      }
+    // === [module: src/client/styles/modals.js] ===
+    /**
+     * src/client/styles/modals.js — 战术舱弹窗、目标审批、冷库检索与 v1.2.1 权限审批样式
+     *
+     * 【核心职责】
+     *   承载 vNext 微扁平战术舱与作用域弹窗、目标审批/冷库弹窗、
+     *   v1.2.1 四档权限选择卡片、命令拦截审批单、提权确认弹窗及风险确认弹窗样式。
+     *
+     * 【边界约定】
+     *   - 仅包含弹窗与权限确认卡片相关样式，不含参谋输入流光动效与状态徽章（见 `styles/chief.js`）。
+     */
 
-      /* Context Menu / Popover */
-      .dnb-menu {
-        position: fixed;
-        z-index: 9999;
-        min-width: 152px;
-        padding: 5px;
-        border-radius: 12px;
-        background-color: #1f2024;
-        background-image: linear-gradient(var(--dnb-popover), var(--dnb-popover));
-        border: 1px solid var(--dnb-border-strong, rgba(128,128,136,0.28));
-        box-shadow: 0 12px 32px rgba(0, 0, 0, 0.32);
-        backdrop-filter: blur(20px);
-        color: var(--dnb-text, #f2f2f7);
-        font-size: 12px;
-        animation: dnb-enter 0.14s ease-out;
-      }
-      .dnb-menu-item {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 7px 10px;
-        border-radius: 8px;
-        cursor: pointer;
-        transition: background 0.12s ease;
-      }
-      .dnb-menu-item:hover {
-        background: var(--dnb-fill, rgba(128,128,136,0.18));
-      }
-
-      /* Toast Notice */
-      .dnb-toast {
-        position: absolute;
-        bottom: 82px;
-        left: 50%;
-        transform: translateX(-50%);
-        z-index: 90;
-        padding: 6px 14px;
-        border-radius: 99px;
-        background: var(--dnb-popover);
-        border: 1px solid var(--dnb-border-strong);
-        box-shadow: 0 6px 20px rgba(0,0,0,0.24);
-        font-size: 11.5px;
-        font-weight: 500;
-        color: var(--dnb-text);
-        pointer-events: none;
-        white-space: nowrap;
-        max-width: calc(100% - 32px);
-        overflow: hidden;
-        text-overflow: ellipsis;
-      }
-
-      /* Header Compact Pills (Model Picker & Auto-Pilot) */
-      .dnb-head-pill {
-        height: 24px;
-        padding: 0 8px;
-        border-radius: 99px;
-        border: 1px solid var(--dnb-border);
-        background: var(--dnb-card);
-        color: var(--dnb-text-2);
-        font: inherit;
-        font-size: 11px;
-        font-weight: 500;
-        cursor: pointer;
-        display: inline-flex;
-        align-items: center;
-        gap: 3.5px;
-        white-space: nowrap;
-        transition: all 0.16s ease;
-      }
-      .dnb-head-pill:hover {
-        background: var(--dnb-card-hover);
-        color: var(--dnb-text);
-        border-color: var(--dnb-border-strong);
-      }
-      .dnb-head-pill[data-pilot="1"] {
-        background: rgba(48, 209, 88, 0.14);
-        border-color: rgba(48, 209, 88, 0.42);
-        color: #30d158;
-      }
-
-      /* DS-Bot Style Narrative Memory Card */
-      .dnb-prose-card {
-        background: var(--dnb-card);
-        border: 1px solid var(--dnb-border);
-        border-radius: 16px;
-        padding: 14px 16px 16px;
-        margin-bottom: 10px;
-      }
-      .dnb-prose-meta {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        padding-bottom: 10px;
-        margin-bottom: 12px;
-        border-bottom: 1px solid var(--dnb-border);
-      }
-      .dnb-prose-h2 {
-        font-size: 13.5px;
-        font-weight: 700;
-        color: var(--dnb-text);
-        margin: 14px 0 6px;
-        letter-spacing: -0.1px;
-      }
-      .dnb-prose-h2:first-child {
-        margin-top: 0;
-      }
-      .dnb-struct-head {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        padding: 3px 8px;
-        margin: 12px 0 6px;
-        border-radius: 7px;
-        font-size: 13px;
-        font-weight: 700;
-        letter-spacing: -0.1px;
-        line-height: 1.35;
-      }
-      .dnb-struct-head[data-compact="1"] {
-        font-size: 11.8px;
-        padding: 2px 7px;
-        margin: 6px 0 4px;
-      }
-      .dnb-struct-bar {
-        width: 3px;
-        height: 13px;
-        border-radius: 2px;
-        flex-shrink: 0;
-      }
-      .dnb-struct-head[data-compact="1"] .dnb-struct-bar {
-        height: 11px;
-      }
-      .dnb-prose-p {
-        font-size: 12.8px;
-        line-height: 1.72;
-        color: var(--dnb-text-2);
-        margin: 0 0 10px;
-        word-break: break-word;
-      }
-      .dnb-prose-p:last-child {
-        margin-bottom: 0;
-      }
-
-      /* Proactive Suggestion Capsule */
-      .dnb-sug-card {
-        margin: 0 12px 8px;
-        padding: 9px 11px;
-        border-radius: 13px;
-        background: linear-gradient(135deg, rgba(245, 158, 11, 0.11), rgba(10, 132, 255, 0.08));
-        border: 1px solid rgba(245, 158, 11, 0.30);
-        flex-shrink: 0;
-        animation: dnb-enter 0.2s cubic-bezier(0.32, 0.72, 0, 1);
-      }
-
-      /* Persistent Bottom Chief Input Bar (DS-Bot + iOS Style) */
-      .dnb-sec-bar {
-        flex-shrink: 0;
-        padding: 7px calc(12px + var(--dnb-safe-right, 0px)) 10px 12px;
-        border-top: 1px solid var(--dnb-border);
-        background: var(--dsw-alias-bg-layer-2, rgba(28, 28, 31, 0.65));
-        backdrop-filter: blur(16px);
-        transition: border-color 0.16s ease, background 0.16s ease;
-      }
-      .dnb-sec-bar[data-dragover="1"] {
-        border-top-color: var(--dnb-accent);
-        background: rgba(10, 132, 255, 0.10);
-      }
-      .dnb-sec-img-strip {
-        display: flex;
-        align-items: center;
-        gap: 7px;
-        overflow-x: auto;
-        padding: 2px 2px 7px;
-        scrollbar-width: none;
-      }
-      .dnb-sec-img-strip::-webkit-scrollbar { display: none; }
-      .dnb-sec-img-thumb {
-        position: relative;
-        width: 44px;
-        height: 44px;
-        border-radius: 9px;
-        overflow: hidden;
-        border: 1px solid var(--dnb-border-strong);
-        background: var(--dnb-card);
-        flex-shrink: 0;
-      }
-      .dnb-sec-img-thumb img {
-        width: 100%;
-        height: 100%;
-        object-fit: cover;
-        display: block;
-      }
-      .dnb-sec-img-rm {
-        position: absolute;
-        top: 2px;
-        right: 2px;
-        width: 15px;
-        height: 15px;
-        border-radius: 50%;
-        border: none;
-        background: rgba(0, 0, 0, 0.72);
-        color: #fff;
-        font-size: 11px;
-        line-height: 1;
-        padding: 0;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-      }
-      .dnb-sec-img-rm:hover {
-        background: #ff453a;
-      }
-      .dnb-sec-targets {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        overflow-x: auto;
-        padding-bottom: 6px;
-        scrollbar-width: none;
-      }
-      .dnb-sec-targets::-webkit-scrollbar { display: none; }
-      .dnb-sec-chip {
-        height: 24px;
-        padding: 0 9px;
-        border-radius: 99px;
-        border: 1px solid transparent;
-        background: var(--dnb-card);
-        color: var(--dnb-text-3);
-        font: inherit;
-        font-size: 11px;
-        font-weight: 500;
-        cursor: pointer;
-        white-space: nowrap;
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
-      }
-      .dnb-sec-chip:hover {
-        color: var(--dnb-text);
-        background: var(--dnb-fill);
-      }
-      .dnb-sec-chip[data-active="1"] {
-        background: rgba(37, 99, 235, 0.13);
-        border-color: rgba(37, 99, 235, 0.34);
-        color: var(--dnb-accent);
-      }
-      .dnb-sec-shell {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        padding: 4px 5px 4px 5px;
-        border-radius: 20px;
-        border: 1px solid var(--dnb-border-strong);
-        background: var(--dnb-card);
-        transition: border-color 0.18s ease, box-shadow 0.18s ease;
-      }
-      .dnb-sec-shell:focus-within {
-        border-color: var(--dnb-accent);
-        box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.14);
-      }
-      .dnb-sec-attach {
-        position: relative;
-        width: 26px;
-        height: 26px;
-        border-radius: 50%;
-        border: none;
-        background: transparent;
-        color: var(--dnb-text-2);
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        flex-shrink: 0;
-        transition: background 0.15s ease, color 0.15s ease;
-      }
-      .dnb-sec-attach:hover:not(:disabled) {
-        background: var(--dnb-fill);
-        color: var(--dnb-accent);
-      }
-      .dnb-sec-attach:disabled {
-        opacity: 0.45;
-        cursor: default;
-      }
-      .dnb-sec-attach-badge {
-        position: absolute;
-        top: -1px;
-        right: -1px;
-        min-width: 13px;
-        height: 13px;
-        padding: 0 3px;
-        border-radius: 99px;
-        background: var(--dnb-primary-bg, #2563eb);
-        color: var(--dnb-primary-fg, #fff);
-        font-size: 9px;
-        font-weight: 700;
-        line-height: 13px;
-        text-align: center;
-      }
-      .dnb-sec-input {
-        flex: 1;
-        min-width: 0;
-        border: none;
-        background: transparent;
-        color: var(--dnb-text);
-        font: inherit;
-        font-size: 12.5px;
-        line-height: 1.4;
-        padding: 4px 0;
-        outline: none;
-      }
-      .dnb-sec-input::placeholder {
-        color: var(--dnb-text-3);
-      }
-      .dnb-sec-send {
-        width: 28px;
-        height: 28px;
-        border-radius: 50%;
-        border: none;
-        background: var(--dnb-primary-bg, #2563eb);
-        color: var(--dnb-primary-fg, #fff);
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        cursor: pointer;
-        flex-shrink: 0;
-        transition: transform 0.14s ease, opacity 0.16s ease, background 0.16s ease;
-      }
-      .dnb-sec-send:hover:not(:disabled) { opacity: 0.92; transform: scale(1.04); }
-      .dnb-sec-send:active:not(:disabled) { transform: scale(0.92); }
-      .dnb-sec-send:disabled {
-        background: var(--dnb-fill);
-        color: var(--dnb-text-3);
-        cursor: default;
-      }
-      .dnb-sec-reply {
-        margin-bottom: 7px;
-        padding: 8px 10px;
-        border-radius: 12px;
-        background: var(--dnb-elevated);
-        border: 1px solid var(--dnb-border-strong);
-        font-size: 12px;
-        line-height: 1.5;
-        animation: dnb-enter 0.18s ease-out;
-      }
-
-      .dnb-empty {
-        padding: 28px 16px;
-        text-align: center;
-        color: var(--dnb-text-3);
-        font-size: 12.5px;
-      }
-      .dnb-tag {
-        display: inline-flex;
-        align-items: center;
-        gap: 3px;
-        font-size: 11px;
-        padding: 1px 7px;
-        border-radius: 99px;
-        background: var(--dnb-fill);
-        color: var(--dnb-text-2);
-      }
-      .dnb-pre {
-        white-space: pre-wrap;
-        word-break: break-word;
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 11px;
-        line-height: 1.55;
-        padding: 10px 12px;
-        margin: 0;
-        max-height: 320px;
-        overflow: auto;
-        color: var(--dnb-text-2);
-      }
-
-      /* ---------------- Engineering Memory Filing Cabinet (档案柜) ---------------- */
-      @keyframes dnb-drawer-slide {
-        from { opacity: 0; transform: translateY(-6px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
-      @keyframes dnb-point-open {
-        from { opacity: 0; transform: translateY(-3px); }
-        to { opacity: 1; transform: translateY(0); }
-      }
-
-      .dnb-vault-banner {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        padding: 8px 11px;
-        border-radius: 12px;
-        background: var(--dnb-card);
-        border: 1px solid var(--dnb-border);
-        margin-bottom: 8px;
-      }
-
-      .dnb-desk-tray {
-        border-radius: 13px;
-        padding: 9px 11px;
-        margin-bottom: 10px;
-        background: rgba(245, 158, 11, 0.08);
-        border: 1px solid rgba(245, 158, 11, 0.34);
-      }
-
-      .dnb-cabinet-drawer {
-        position: relative;
-        margin-top: 9px;
-        margin-bottom: 11px;
-      }
-      .dnb-folder-ear {
-        display: inline-flex;
-        align-items: center;
-        gap: 5px;
-        height: 18px;
-        padding: 0 10px 0 8px;
-        margin-left: 10px;
-        border-radius: 7px 9px 0 0;
-        background: var(--dnb-card);
-        border: 1px solid var(--dnb-border);
-        border-bottom: none;
-        font-size: 10px;
-        font-weight: 600;
-        color: var(--dnb-text-2);
-        letter-spacing: 0.02em;
-      }
-      .dnb-cabinet-drawer[data-open="1"] .dnb-folder-ear {
-        border-color: var(--dnb-border-strong);
-        color: var(--dnb-text);
-      }
-      .dnb-drawer-box {
-        border-radius: 10px;
-        background: var(--dnb-card);
-        border: 1px solid var(--dnb-border);
-        overflow: hidden;
-        transition: border-color 0.16s ease, background 0.16s ease;
-      }
-      .dnb-cabinet-drawer[data-open="1"] .dnb-drawer-box {
-        border-color: var(--dnb-border-strong);
-        overflow: visible;
-      }
-      .dnb-drawer-front {
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 8px 10px;
-        cursor: pointer;
-        user-select: none;
-        transition: background 0.14s ease;
-      }
-      .dnb-drawer-front:hover {
-        background: var(--dnb-card-hover);
-      }
-      .dnb-drawer-spine {
-        width: 3px;
-        height: 20px;
-        border-radius: 99px;
-        flex-shrink: 0;
-      }
-      .dnb-drawer-handle {
-        width: 22px;
-        height: 18px;
-        border-radius: 5px;
-        border: 1px solid transparent;
-        background: transparent;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        color: var(--dnb-text-3);
-        flex-shrink: 0;
-        transition: color 0.15s ease;
-      }
-      .dnb-cabinet-drawer[data-open="1"] .dnb-drawer-handle {
-        color: var(--dnb-text-2);
-      }
-      .dnb-drawer-well {
-        border-top: 1px solid var(--dnb-border);
-        padding: 8px 10px 10px;
-        background: rgba(128, 128, 136, 0.03);
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        animation: dnb-drawer-slide 0.18s ease-out;
-      }
-
-      /* Paperclipped Dossier Card */
-      .dnb-dossier-card {
-        position: relative;
-        border-radius: 11px;
-        background: var(--dnb-elevated);
-        border: 1px solid var(--dnb-border);
-        margin-top: 3px;
-        transition: border-color 0.15s ease;
-        animation: dnb-drawer-slide 0.18s ease-out both;
-      }
-      .dnb-dossier-card:hover {
-        border-color: var(--dnb-border-strong);
-      }
-      .dnb-dossier-card[data-open="1"] {
-        border-color: rgba(10, 132, 255, 0.42);
-      }
-      .dnb-dossier-card[data-out="1"] {
-        border-color: rgba(245, 158, 11, 0.48);
-      }
-      .dnb-paperclip-pin {
-        position: absolute;
-        top: 7px;
-        left: 11px;
-        width: 14px;
-        height: 18px;
-        border: none;
-        padding: 0;
-        background: transparent;
-        cursor: pointer;
-        z-index: 2;
-        opacity: 0.78;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        transition: transform 0.15s ease, opacity 0.15s ease;
-      }
-      .dnb-paperclip-pin:hover {
-        opacity: 1;
-        transform: scale(1.12);
-      }
-      .dnb-dossier-head {
-        padding: 8px 11px 7px 30px;
-        cursor: pointer;
-      }
-      .dnb-dossier-actions {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 6px;
-        flex-wrap: wrap;
-        padding: 6px 0 0;
-        margin-top: 6px;
-        border-top: 1px dashed var(--dnb-border);
-      }
-
-      /* Structured Memory Points & Sub-point Details */
-      .dnb-points-sheet {
-        border-top: 1px dashed var(--dnb-border-strong);
-        padding: 8px 10px 10px;
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        animation: dnb-point-open 0.16s ease-out;
-      }
-      .dnb-mem-point {
-        border-radius: 9px;
-        border: 1px solid var(--dnb-border);
-        background: var(--dnb-card);
-        overflow: hidden;
-        transition: border-color 0.14s ease, background 0.14s ease;
-      }
-      .dnb-mem-point:hover {
-        border-color: var(--dnb-border-strong);
-      }
-      .dnb-mem-point[data-open="1"] {
-        border-color: rgba(10, 132, 255, 0.36);
-      }
-      .dnb-mem-point-row {
-        display: flex;
-        align-items: flex-start;
-        gap: 7px;
-        padding: 7px 9px;
-        cursor: pointer;
-        user-select: none;
-      }
-      .dnb-mem-point-idx {
-        min-width: 20px;
-        height: 18px;
-        padding: 0 5px;
-        border-radius: 5px;
-        background: var(--dnb-fill);
-        color: var(--dnb-text-2);
-        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
-        font-size: 10.5px;
-        font-weight: 600;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        flex-shrink: 0;
-        margin-top: 1px;
-      }
-      .dnb-mem-point[data-open="1"] .dnb-mem-point-idx {
-        background: rgba(10, 132, 255, 0.16);
-        color: var(--dnb-accent);
-      }
-      .dnb-subpoint-detail {
-        border-top: 1px solid var(--dnb-border);
-        padding: 8px 10px;
-        background: rgba(128, 128, 136, 0.05);
-        font-size: 11.5px;
-        line-height: 1.58;
-        color: var(--dnb-text);
-        white-space: pre-wrap;
-        word-break: break-word;
-        animation: dnb-point-open 0.15s ease-out;
-      }
-      .dnb-mini-btn {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        height: 24px;
-        padding: 0 8px;
-        border-radius: 7px;
-        border: 1px solid var(--dnb-border);
-        background: transparent;
-        color: var(--dnb-text-2);
-        font-size: 11px;
-        font-weight: 500;
-        cursor: pointer;
-        white-space: nowrap;
-        transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
-      }
-      .dnb-mini-btn:hover {
-        border-color: var(--dnb-border-strong);
-        color: var(--dnb-text);
-        background: var(--dnb-fill);
-      }
-      .dnb-mini-btn[data-tone="amber"] {
-        border-color: rgba(245, 158, 11, 0.34);
-        background: rgba(245, 158, 11, 0.09);
-        color: #f59e0b;
-      }
-      .dnb-mini-btn[data-tone="accent"] {
-        border-color: rgba(37, 99, 235, 0.32);
-        background: rgba(37, 99, 235, 0.09);
-        color: var(--dnb-accent);
-      }
-
+    const CSS_MODALS = `
       /* vNext Micro-Flat Components: Tactical Cockpit, Scoped Modals, Goal Approval & Cold Vault */
       .dnb-sec-bar {
         position: relative;
@@ -7143,273 +6832,277 @@ window.__ModuleLoader__.load({
         background: rgba(10, 132, 255, 0.12);
       }
 
-      /* Chief Working Stage FX (Gradient Base + Running Border Beam + Frosted Glass + Jumping Text + Spinner) */
-      @keyframes dnb-fx-neon-flow {
-        0% { background-position: 0% 50%; }
-        50% { background-position: 100% 50%; }
-        100% { background-position: 0% 50%; }
+    `
+
+    // === [module: src/client/styles/archives.js] ===
+    /**
+     * src/client/styles/archives.js — 档案柜、回形针卷宗卡与“一沓纸”桌面叠放样式
+     *
+     * 【核心职责】
+     *   承载工程记忆档案柜抽屉、回形针纸质卷宗卡（Paperclipped Dossier）、结构化要点与子要点，
+     *   以及 v1.5.0 极简顶栏、桌面页与“一沓纸”（Top-Down Stacked Paper Dossiers）叠放展开样式。
+     *
+     * 【边界约定】
+     *   - 仅服务于「档案」页签及交接/沉淀卡片视觉表现，不依赖其他业务页签专属样式。
+     */
+
+    const CSS_ARCHIVES = `
+      /* ---------------- Engineering Memory Filing Cabinet (档案柜) ---------------- */
+      @keyframes dnb-drawer-slide {
+        from { opacity: 0; transform: translateY(-6px); }
+        to { opacity: 1; transform: translateY(0); }
       }
-      @keyframes dnb-fx-beam-spin {
-        from { transform: translate(-50%, -50%) rotate(0deg); }
-        to { transform: translate(-50%, -50%) rotate(360deg); }
+      @keyframes dnb-point-open {
+        from { opacity: 0; transform: translateY(-3px); }
+        to { opacity: 1; transform: translateY(0); }
       }
-      @keyframes dnb-fx-ring-spin {
-        from { transform: rotate(0deg); }
-        to { transform: rotate(360deg); }
-      }
-      @keyframes dnb-wave-jump {
-        0%, 56%, 100% { transform: translateY(0) scale(1); }
-        24% { transform: translateY(-6.5px) scale(1.06); }
-        42% { transform: translateY(1px) scale(0.98); }
-      }
-      .dnb-chief-fx-border,
-      .dnb-chief-fx-stage {
-        --fx-color: #38bdf8;
-        --fx-trail: rgba(56, 189, 248, 0.42);
-        --fx-glow: rgba(56, 189, 248, 0.44);
-        --fx-border: rgba(56, 189, 248, 0.72);
-        --fx-grad: linear-gradient(125deg, #0ea5e9, #38bdf8, #22d3ee, #0ea5e9);
-      }
-      .dnb-chief-fx-border[data-tone="wall"],
-      .dnb-chief-fx-stage[data-tone="wall"] {
-        --fx-color: #f87171;
-        --fx-trail: rgba(248, 113, 113, 0.44);
-        --fx-glow: rgba(239, 68, 68, 0.50);
-        --fx-border: rgba(248, 113, 113, 0.80);
-        --fx-grad: linear-gradient(125deg, #ef4444, #fb7185, #f97316, #ef4444);
-      }
-      .dnb-chief-fx-border[data-tone="bounds"],
-      .dnb-chief-fx-stage[data-tone="bounds"] {
-        --fx-color: #fbbf24;
-        --fx-trail: rgba(251, 191, 36, 0.44);
-        --fx-glow: rgba(245, 158, 11, 0.48);
-        --fx-border: rgba(251, 191, 36, 0.80);
-        --fx-grad: linear-gradient(125deg, #f59e0b, #fde047, #fb923c, #f59e0b);
-      }
-      .dnb-chief-fx-border[data-tone="archive"],
-      .dnb-chief-fx-stage[data-tone="archive"] {
-        --fx-color: #38bdf8;
-        --fx-trail: rgba(56, 189, 248, 0.44);
-        --fx-glow: rgba(14, 165, 233, 0.48);
-        --fx-border: rgba(56, 189, 248, 0.80);
-        --fx-grad: linear-gradient(125deg, #0284c7, #38bdf8, #2dd4bf, #0284c7);
-      }
-      .dnb-chief-fx-border[data-tone="tasks"],
-      .dnb-chief-fx-stage[data-tone="tasks"] {
-        --fx-color: #34d399;
-        --fx-trail: rgba(52, 211, 153, 0.44);
-        --fx-glow: rgba(16, 185, 129, 0.48);
-        --fx-border: rgba(52, 211, 153, 0.80);
-        --fx-grad: linear-gradient(125deg, #10b981, #34d399, #a3e635, #10b981);
-      }
-      .dnb-chief-fx-border[data-tone="peers"],
-      .dnb-chief-fx-stage[data-tone="peers"] {
-        --fx-color: #a78bfa;
-        --fx-trail: rgba(167, 139, 250, 0.44);
-        --fx-glow: rgba(139, 92, 246, 0.48);
-        --fx-border: rgba(167, 139, 250, 0.80);
-        --fx-grad: linear-gradient(125deg, #8b5cf6, #c084fc, #60a5fa, #8b5cf6);
-      }
-      .dnb-chief-fx-border[data-tone="neon"],
-      .dnb-chief-fx-stage[data-tone="neon"] {
-        --fx-color: #f472b6;
-        --fx-trail: rgba(192, 132, 252, 0.48);
-        --fx-glow: rgba(168, 85, 247, 0.48);
-        --fx-border: rgba(192, 132, 252, 0.82);
-        --fx-grad: linear-gradient(120deg, #ff4d6d, #fbbf24, #34d399, #38bdf8, #a78bfa, #f472b6, #ff4d6d);
-      }
-      .dnb-chief-fx-border[data-tone="dream"],
-      .dnb-chief-fx-stage[data-tone="dream"] {
-        --fx-color: #a78bfa;
-        --fx-trail: rgba(96, 165, 250, 0.46);
-        --fx-glow: rgba(129, 140, 248, 0.56);
-        --fx-border: rgba(167, 139, 250, 0.88);
-        --fx-grad: linear-gradient(125deg, #6366f1, #a855f7, #38bdf8, #c084fc, #6366f1);
-      }
-      .dnb-chief-fx-border {
-        position: absolute;
-        inset: 2px;
-        border-radius: 14px;
-        padding: 2.5px;
-        overflow: hidden;
-        pointer-events: none;
-        z-index: 93;
-        filter: drop-shadow(0 0 9px var(--fx-glow));
-        box-shadow: inset 0 0 14px var(--fx-glow);
-        -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-        -webkit-mask-composite: xor;
-        mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
-        mask-composite: exclude;
-      }
-      .dnb-chief-fx-border::after {
-        content: "";
-        position: absolute;
-        inset: 0;
-        background: var(--fx-grad);
-        background-size: 260% 260%;
-        opacity: 0.36;
-        animation: dnb-fx-neon-flow 3.2s linear infinite;
-      }
-      .dnb-chief-fx-border::before {
-        content: "";
-        position: absolute;
-        top: 50%;
-        left: 50%;
-        width: 260%;
-        aspect-ratio: 1 / 1;
-        background: conic-gradient(
-          from 0deg,
-          transparent 0deg,
-          transparent 45deg,
-          var(--fx-trail) 95deg,
-          var(--fx-color) 148deg,
-          #ffffff 174deg,
-          var(--fx-color) 180deg,
-          transparent 186deg,
-          transparent 225deg,
-          var(--fx-trail) 275deg,
-          var(--fx-color) 328deg,
-          #ffffff 354deg,
-          var(--fx-color) 360deg
-        );
-        animation: dnb-fx-beam-spin 2.25s linear infinite;
-      }
-      .dnb-chief-fx-border[data-tone="neon"]::before {
-        background: conic-gradient(
-          from 0deg,
-          #ff4d6d 0deg,
-          #fbbf24 54deg,
-          #ffffff 84deg,
-          #34d399 124deg,
-          #38bdf8 180deg,
-          #a78bfa 234deg,
-          #ffffff 264deg,
-          #f472b6 312deg,
-          #ff4d6d 360deg
-        );
-      }
-      .dnb-chief-fx-stage {
-        position: absolute;
-        inset: 4px;
-        border-radius: 12px;
-        z-index: 92;
-        cursor: pointer;
+
+      .dnb-vault-banner {
         display: flex;
-        flex-direction: column;
         align-items: center;
-        justify-content: center;
-        padding: 20px;
-        background: rgba(15, 23, 42, 0.30);
-        backdrop-filter: blur(4px) saturate(1.18);
-        -webkit-backdrop-filter: blur(4px) saturate(1.18);
-        box-shadow: inset 0 0 28px var(--fx-glow);
-        animation: dnb-enter 0.18s ease-out;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 11px;
+        border-radius: 12px;
+        background: var(--dnb-card);
+        border: 1px solid var(--dnb-border);
+        margin-bottom: 8px;
       }
-      .dnb-chief-fx-hint {
-        margin-top: 10px;
-        font-size: 11.5px;
-        font-weight: 600;
-        color: rgba(226, 232, 240, 0.86);
-        text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
-        letter-spacing: 0.2px;
-        user-select: none;
+
+      .dnb-desk-tray {
+        border-radius: 13px;
+        padding: 9px 11px;
+        margin-bottom: 10px;
+        background: rgba(245, 158, 11, 0.08);
+        border: 1px solid rgba(245, 158, 11, 0.34);
       }
-      html[data-ds-theme-source="light"] .dnb-chief-fx-hint,
-      html[data-ds-theme="light"] .dnb-chief-fx-hint,
-      [data-ds-theme-source="light"] .dnb-chief-fx-hint {
-        color: rgba(30, 41, 59, 0.78);
-        text-shadow: 0 1px 4px rgba(255, 255, 255, 0.65);
+
+      .dnb-cabinet-drawer {
+        position: relative;
+        margin-top: 9px;
+        margin-bottom: 11px;
       }
-      html[data-ds-theme-source="light"] .dnb-chief-fx-stage,
-      html[data-ds-theme="light"] .dnb-chief-fx-stage,
-      [data-ds-theme-source="light"] .dnb-chief-fx-stage {
-        background: rgba(248, 250, 252, 0.42);
-      }
-      @media (prefers-color-scheme: light) {
-        html:not([data-ds-theme-source="dark"]):not([data-ds-theme="dark"]) .dnb-chief-fx-stage {
-          background: rgba(248, 250, 252, 0.36);
-        }
-      }
-      .dnb-chief-fx-pill {
+      .dnb-folder-ear {
         display: inline-flex;
         align-items: center;
-        gap: 11px;
-        padding: 12px 18px;
-        border-radius: 16px;
-        max-width: 94%;
-        background: rgba(15, 23, 42, 0.78);
-        border: 1.5px solid var(--fx-border);
-        box-shadow:
-          0 14px 36px rgba(0, 0, 0, 0.34),
-          0 0 24px var(--fx-glow);
-        backdrop-filter: blur(12px);
-        -webkit-backdrop-filter: blur(12px);
+        gap: 5px;
+        height: 18px;
+        padding: 0 10px 0 8px;
+        margin-left: 10px;
+        border-radius: 7px 9px 0 0;
+        background: var(--dnb-card);
+        border: 1px solid var(--dnb-border);
+        border-bottom: none;
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--dnb-text-2);
+        letter-spacing: 0.02em;
       }
-      .dnb-chief-fx-ring {
-        width: 22px;
-        height: 22px;
-        border-radius: 50%;
-        flex-shrink: 0;
-        border: 2.5px solid rgba(255, 255, 255, 0.14);
-        border-top-color: var(--fx-color);
-        border-right-color: var(--fx-color);
-        box-shadow: 0 0 10px var(--fx-glow);
-        animation: dnb-fx-ring-spin 0.85s linear infinite;
+      .dnb-cabinet-drawer[data-open="1"] .dnb-folder-ear {
+        border-color: var(--dnb-border-strong);
+        color: var(--dnb-text);
       }
-      .dnb-chief-fx-stage[data-tone="neon"] .dnb-chief-fx-ring {
-        border: none;
-        background: conic-gradient(from 0deg, #ff4d6d, #fbbf24, #34d399, #38bdf8, #a78bfa, #f472b6, #ff4d6d);
-        -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
-        mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+      .dnb-drawer-box {
+        border-radius: 10px;
+        background: var(--dnb-card);
+        border: 1px solid var(--dnb-border);
+        overflow: hidden;
+        transition: border-color 0.16s ease, background 0.16s ease;
       }
-      .dnb-chief-fx-text {
+      .dnb-cabinet-drawer[data-open="1"] .dnb-drawer-box {
+        border-color: var(--dnb-border-strong);
+        overflow: visible;
+      }
+      .dnb-drawer-front {
         display: flex;
-        flex-wrap: wrap;
         align-items: center;
-        font-size: 13.5px;
-        font-weight: 700;
-        line-height: 1.5;
-        letter-spacing: 0.3px;
+        gap: 8px;
+        padding: 8px 10px;
+        cursor: pointer;
+        user-select: none;
+        transition: background 0.14s ease;
       }
-      .dnb-wave-char {
-        display: inline-block;
-        color: var(--fx-color);
-        text-shadow: 0 0 12px var(--fx-glow);
-        animation: dnb-wave-jump 1.35s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite;
-        animation-delay: calc(var(--char-i, 0) * 0.065s);
-        will-change: transform;
+      .dnb-drawer-front:hover {
+        background: var(--dnb-card-hover);
       }
-      .dnb-chief-fx-stage[data-tone="neon"] .dnb-wave-char {
-        background: linear-gradient(110deg, #ff6b8b, #fbbf24, #34d399, #38bdf8, #c084fc, #ff6b8b);
-        background-size: 260% 100%;
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-        text-shadow: none;
-        filter: drop-shadow(0 0 6px rgba(168, 85, 247, 0.45));
-        animation:
-          dnb-wave-jump 1.35s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite,
-          dnb-fx-neon-flow 2.8s linear infinite;
-        animation-delay: calc(var(--char-i, 0) * 0.065s), 0s;
+      .dnb-drawer-spine {
+        width: 3px;
+        height: 20px;
+        border-radius: 99px;
+        flex-shrink: 0;
       }
-      .dnb-chief-fx-stage[data-tone="dream"] .dnb-chief-fx-ring {
+      .dnb-drawer-handle {
+        width: 22px;
+        height: 18px;
+        border-radius: 5px;
+        border: 1px solid transparent;
+        background: transparent;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        color: var(--dnb-text-3);
+        flex-shrink: 0;
+        transition: color 0.15s ease;
+      }
+      .dnb-cabinet-drawer[data-open="1"] .dnb-drawer-handle {
+        color: var(--dnb-text-2);
+      }
+      .dnb-drawer-well {
+        border-top: 1px solid var(--dnb-border);
+        padding: 8px 10px 10px;
+        background: rgba(128, 128, 136, 0.03);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        animation: dnb-drawer-slide 0.18s ease-out;
+      }
+
+      /* Paperclipped Dossier Card */
+      .dnb-dossier-card {
+        position: relative;
+        border-radius: 11px;
+        background: var(--dnb-elevated);
+        border: 1px solid var(--dnb-border);
+        margin-top: 3px;
+        transition: border-color 0.15s ease;
+        animation: dnb-drawer-slide 0.18s ease-out both;
+      }
+      .dnb-dossier-card:hover {
+        border-color: var(--dnb-border-strong);
+      }
+      .dnb-dossier-card[data-open="1"] {
+        border-color: rgba(10, 132, 255, 0.42);
+      }
+      .dnb-dossier-card[data-out="1"] {
+        border-color: rgba(245, 158, 11, 0.48);
+      }
+      .dnb-paperclip-pin {
+        position: absolute;
+        top: 7px;
+        left: 11px;
+        width: 14px;
+        height: 18px;
         border: none;
-        background: conic-gradient(from 0deg, #6366f1, #38bdf8, #c084fc, #e0e7ff, #6366f1);
-        -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
-        mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+        padding: 0;
+        background: transparent;
+        cursor: pointer;
+        z-index: 2;
+        opacity: 0.78;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        transition: transform 0.15s ease, opacity 0.15s ease;
       }
-      .dnb-chief-fx-stage[data-tone="dream"] .dnb-wave-char {
-        background: linear-gradient(110deg, #a5b4fc, #38bdf8, #e879f9, #c084fc, #a5b4fc);
-        background-size: 260% 100%;
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
-        text-shadow: none;
-        filter: drop-shadow(0 0 8px rgba(129, 140, 248, 0.55));
-        animation:
-          dnb-wave-jump 1.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite,
-          dnb-fx-neon-flow 3.2s linear infinite;
-        animation-delay: calc(var(--char-i, 0) * 0.065s), 0s;
+      .dnb-paperclip-pin:hover {
+        opacity: 1;
+        transform: scale(1.12);
+      }
+      .dnb-dossier-head {
+        padding: 8px 11px 7px 30px;
+        cursor: pointer;
+      }
+      .dnb-dossier-actions {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        flex-wrap: wrap;
+        padding: 6px 0 0;
+        margin-top: 6px;
+        border-top: 1px dashed var(--dnb-border);
+      }
+
+      /* Structured Memory Points & Sub-point Details */
+      .dnb-points-sheet {
+        border-top: 1px dashed var(--dnb-border-strong);
+        padding: 8px 10px 10px;
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        animation: dnb-point-open 0.16s ease-out;
+      }
+      .dnb-mem-point {
+        border-radius: 9px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-card);
+        overflow: hidden;
+        transition: border-color 0.14s ease, background 0.14s ease;
+      }
+      .dnb-mem-point:hover {
+        border-color: var(--dnb-border-strong);
+      }
+      .dnb-mem-point[data-open="1"] {
+        border-color: rgba(10, 132, 255, 0.36);
+      }
+      .dnb-mem-point-row {
+        display: flex;
+        align-items: flex-start;
+        gap: 7px;
+        padding: 7px 9px;
+        cursor: pointer;
+        user-select: none;
+      }
+      .dnb-mem-point-idx {
+        min-width: 20px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 5px;
+        background: var(--dnb-fill);
+        color: var(--dnb-text-2);
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 10.5px;
+        font-weight: 600;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        margin-top: 1px;
+      }
+      .dnb-mem-point[data-open="1"] .dnb-mem-point-idx {
+        background: rgba(10, 132, 255, 0.16);
+        color: var(--dnb-accent);
+      }
+      .dnb-subpoint-detail {
+        border-top: 1px solid var(--dnb-border);
+        padding: 8px 10px;
+        background: rgba(128, 128, 136, 0.05);
+        font-size: 11.5px;
+        line-height: 1.58;
+        color: var(--dnb-text);
+        white-space: pre-wrap;
+        word-break: break-word;
+        animation: dnb-point-open 0.15s ease-out;
+      }
+      .dnb-mini-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        height: 24px;
+        padding: 0 8px;
+        border-radius: 7px;
+        border: 1px solid var(--dnb-border);
+        background: transparent;
+        color: var(--dnb-text-2);
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        white-space: nowrap;
+        transition: border-color 0.14s ease, color 0.14s ease, background 0.14s ease;
+      }
+      .dnb-mini-btn:hover {
+        border-color: var(--dnb-border-strong);
+        color: var(--dnb-text);
+        background: var(--dnb-fill);
+      }
+      .dnb-mini-btn[data-tone="amber"] {
+        border-color: rgba(245, 158, 11, 0.34);
+        background: rgba(245, 158, 11, 0.09);
+        color: #f59e0b;
+      }
+      .dnb-mini-btn[data-tone="accent"] {
+        border-color: rgba(37, 99, 235, 0.32);
+        background: rgba(37, 99, 235, 0.09);
+        color: var(--dnb-accent);
       }
 
       /* ── v1.5.0 Minimal Strip Bars, Menus, Desktop Page & Stacked Top-Down Paper Dossiers ── */
@@ -7897,6 +7590,663 @@ window.__ModuleLoader__.load({
         animation: dnb-obj-flash-red 0.72s ease-in-out 2;
       }
 
+    `
+
+    // === [module: src/client/styles/chief.js] ===
+    /**
+     * src/client/styles/chief.js — 参谋对话页签、工作流光动效、扇形思考深度仪与预算账本样式
+     *
+     * 【核心职责】
+     *   承载边界小图钉戳（Pushpin Stamp）、DS-Bot 叙事记忆卡、主动建议胶囊、底部参谋输入条、
+     *   参谋工作态流光边框与波纹 FX、半圆扇形思考深度仪、以及 v1.6.0 场景预设/LLM 账本/预算条样式。
+     *
+     * 【边界约定】
+     *   - 聚焦「参谋」核心控制面与全域 AI 工作状态反馈视觉，不含协同水泡与待命池样式。
+     */
+
+    const CSS_CHIEF = `
+      /* Pushpin Stamp (小图钉戳) for Global Shared Boundaries */
+      .dnb-pin-stamp {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        padding: 0;
+        border-radius: 7px;
+        border: 1px dashed var(--dnb-border-strong);
+        background: transparent;
+        color: var(--dnb-text-3);
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: transform 0.16s cubic-bezier(0.32, 0.72, 0, 1), background 0.16s ease, color 0.16s ease, border-color 0.16s ease, box-shadow 0.16s ease;
+      }
+      .dnb-pin-stamp:hover {
+        color: #fbbf24;
+        border-style: solid;
+        border-color: rgba(245, 158, 11, 0.48);
+        background: rgba(245, 158, 11, 0.1);
+        transform: scale(1.06) rotate(-4deg);
+      }
+      .dnb-pin-stamp:active {
+        transform: scale(0.92);
+      }
+      .dnb-pin-stamp[data-pinned="1"] {
+        border-style: solid;
+        border-color: rgba(245, 158, 11, 0.58);
+        background: linear-gradient(135deg, rgba(245, 158, 11, 0.26) 0%, rgba(217, 119, 6, 0.16) 100%);
+        color: #fbbf24;
+        box-shadow: 0 2px 7px rgba(245, 158, 11, 0.22), inset 0 0.5px 0 rgba(255, 255, 255, 0.22);
+      }
+      .dnb-pin-badge {
+        display: inline-flex;
+        align-items: center;
+        height: 16px;
+        padding: 0 5px;
+        border-radius: 5px;
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 0.2px;
+        color: #fbbf24;
+        background: rgba(245, 158, 11, 0.15);
+        border: 1px solid rgba(245, 158, 11, 0.34);
+        flex-shrink: 0;
+      }
+      .dnb-bound-check {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 15px;
+        height: 15px;
+        padding: 0;
+        border-radius: 4px;
+        border: 1px solid var(--dnb-border-strong);
+        background: transparent;
+        color: transparent;
+        cursor: pointer;
+        flex-shrink: 0;
+        opacity: 0.22;
+        transition: opacity 0.14s ease, border-color 0.14s ease, background 0.14s ease;
+      }
+      .dnb-cell:hover .dnb-bound-check,
+      .dnb-wall-item:hover .dnb-bound-check,
+      .dnb-bound-check:hover {
+        opacity: 0.92;
+        border-color: var(--dnb-accent);
+      }
+      .dnb-bound-check[data-checked="1"] {
+        opacity: 1;
+        border-color: var(--dnb-primary-bg, #2563eb);
+        background: var(--dnb-primary-bg, #2563eb);
+        color: var(--dnb-primary-fg, #fff);
+      }
+
+      /* DS-Bot Style Narrative Memory Card */
+      .dnb-prose-card {
+        background: var(--dnb-card);
+        border: 1px solid var(--dnb-border);
+        border-radius: 16px;
+        padding: 14px 16px 16px;
+        margin-bottom: 10px;
+      }
+      .dnb-prose-meta {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding-bottom: 10px;
+        margin-bottom: 12px;
+        border-bottom: 1px solid var(--dnb-border);
+      }
+      .dnb-prose-h2 {
+        font-size: 13.5px;
+        font-weight: 700;
+        color: var(--dnb-text);
+        margin: 14px 0 6px;
+        letter-spacing: -0.1px;
+      }
+      .dnb-prose-h2:first-child {
+        margin-top: 0;
+      }
+      .dnb-struct-head {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        padding: 3px 8px;
+        margin: 12px 0 6px;
+        border-radius: 7px;
+        font-size: 13px;
+        font-weight: 700;
+        letter-spacing: -0.1px;
+        line-height: 1.35;
+      }
+      .dnb-struct-head[data-compact="1"] {
+        font-size: 11.8px;
+        padding: 2px 7px;
+        margin: 6px 0 4px;
+      }
+      .dnb-struct-bar {
+        width: 3px;
+        height: 13px;
+        border-radius: 2px;
+        flex-shrink: 0;
+      }
+      .dnb-struct-head[data-compact="1"] .dnb-struct-bar {
+        height: 11px;
+      }
+      .dnb-prose-p {
+        font-size: 12.8px;
+        line-height: 1.72;
+        color: var(--dnb-text-2);
+        margin: 0 0 10px;
+        word-break: break-word;
+      }
+      .dnb-prose-p:last-child {
+        margin-bottom: 0;
+      }
+
+      /* Proactive Suggestion Capsule */
+      .dnb-sug-card {
+        margin: 0 12px 8px;
+        padding: 9px 11px;
+        border-radius: 13px;
+        background: linear-gradient(135deg, rgba(245, 158, 11, 0.11), rgba(10, 132, 255, 0.08));
+        border: 1px solid rgba(245, 158, 11, 0.30);
+        flex-shrink: 0;
+        animation: dnb-enter 0.2s cubic-bezier(0.32, 0.72, 0, 1);
+      }
+
+      /* Persistent Bottom Chief Input Bar (DS-Bot + iOS Style) */
+      .dnb-sec-bar {
+        flex-shrink: 0;
+        padding: 7px calc(12px + var(--dnb-safe-right, 0px)) 10px 12px;
+        border-top: 1px solid var(--dnb-border);
+        background: var(--dsw-alias-bg-layer-2, rgba(28, 28, 31, 0.65));
+        backdrop-filter: blur(16px);
+        transition: border-color 0.16s ease, background 0.16s ease;
+      }
+      .dnb-sec-bar[data-dragover="1"] {
+        border-top-color: var(--dnb-accent);
+        background: rgba(10, 132, 255, 0.10);
+      }
+      .dnb-sec-img-strip {
+        display: flex;
+        align-items: center;
+        gap: 7px;
+        overflow-x: auto;
+        padding: 2px 2px 7px;
+        scrollbar-width: none;
+      }
+      .dnb-sec-img-strip::-webkit-scrollbar { display: none; }
+      .dnb-sec-img-thumb {
+        position: relative;
+        width: 44px;
+        height: 44px;
+        border-radius: 9px;
+        overflow: hidden;
+        border: 1px solid var(--dnb-border-strong);
+        background: var(--dnb-card);
+        flex-shrink: 0;
+      }
+      .dnb-sec-img-thumb img {
+        width: 100%;
+        height: 100%;
+        object-fit: cover;
+        display: block;
+      }
+      .dnb-sec-img-rm {
+        position: absolute;
+        top: 2px;
+        right: 2px;
+        width: 15px;
+        height: 15px;
+        border-radius: 50%;
+        border: none;
+        background: rgba(0, 0, 0, 0.72);
+        color: #fff;
+        font-size: 11px;
+        line-height: 1;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+      }
+      .dnb-sec-img-rm:hover {
+        background: #ff453a;
+      }
+      .dnb-sec-targets {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        overflow-x: auto;
+        padding-bottom: 6px;
+        scrollbar-width: none;
+      }
+      .dnb-sec-targets::-webkit-scrollbar { display: none; }
+      .dnb-sec-chip {
+        height: 24px;
+        padding: 0 9px;
+        border-radius: 99px;
+        border: 1px solid transparent;
+        background: var(--dnb-card);
+        color: var(--dnb-text-3);
+        font: inherit;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+        white-space: nowrap;
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+      }
+      .dnb-sec-chip:hover {
+        color: var(--dnb-text);
+        background: var(--dnb-fill);
+      }
+      .dnb-sec-chip[data-active="1"] {
+        background: rgba(37, 99, 235, 0.13);
+        border-color: rgba(37, 99, 235, 0.34);
+        color: var(--dnb-accent);
+      }
+      .dnb-sec-shell {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 5px 4px 5px;
+        border-radius: 20px;
+        border: 1px solid var(--dnb-border-strong);
+        background: var(--dnb-card);
+        transition: border-color 0.18s ease, box-shadow 0.18s ease;
+      }
+      .dnb-sec-shell:focus-within {
+        border-color: var(--dnb-accent);
+        box-shadow: 0 0 0 2px rgba(10, 132, 255, 0.14);
+      }
+      .dnb-sec-attach {
+        position: relative;
+        width: 26px;
+        height: 26px;
+        border-radius: 50%;
+        border: none;
+        background: transparent;
+        color: var(--dnb-text-2);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: background 0.15s ease, color 0.15s ease;
+      }
+      .dnb-sec-attach:hover:not(:disabled) {
+        background: var(--dnb-fill);
+        color: var(--dnb-accent);
+      }
+      .dnb-sec-attach:disabled {
+        opacity: 0.45;
+        cursor: default;
+      }
+      .dnb-sec-attach-badge {
+        position: absolute;
+        top: -1px;
+        right: -1px;
+        min-width: 13px;
+        height: 13px;
+        padding: 0 3px;
+        border-radius: 99px;
+        background: var(--dnb-primary-bg, #2563eb);
+        color: var(--dnb-primary-fg, #fff);
+        font-size: 9px;
+        font-weight: 700;
+        line-height: 13px;
+        text-align: center;
+      }
+      .dnb-sec-input {
+        flex: 1;
+        min-width: 0;
+        border: none;
+        background: transparent;
+        color: var(--dnb-text);
+        font: inherit;
+        font-size: 12.5px;
+        line-height: 1.4;
+        padding: 4px 0;
+        outline: none;
+      }
+      .dnb-sec-input::placeholder {
+        color: var(--dnb-text-3);
+      }
+      .dnb-sec-send {
+        width: 28px;
+        height: 28px;
+        border-radius: 50%;
+        border: none;
+        background: var(--dnb-primary-bg, #2563eb);
+        color: var(--dnb-primary-fg, #fff);
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        flex-shrink: 0;
+        transition: transform 0.14s ease, opacity 0.16s ease, background 0.16s ease;
+      }
+      .dnb-sec-send:hover:not(:disabled) { opacity: 0.92; transform: scale(1.04); }
+      .dnb-sec-send:active:not(:disabled) { transform: scale(0.92); }
+      .dnb-sec-send:disabled {
+        background: var(--dnb-fill);
+        color: var(--dnb-text-3);
+        cursor: default;
+      }
+      .dnb-sec-reply {
+        margin-bottom: 7px;
+        padding: 8px 10px;
+        border-radius: 12px;
+        background: var(--dnb-elevated);
+        border: 1px solid var(--dnb-border-strong);
+        font-size: 12px;
+        line-height: 1.5;
+        animation: dnb-enter 0.18s ease-out;
+      }
+
+      .dnb-empty {
+        padding: 28px 16px;
+        text-align: center;
+        color: var(--dnb-text-3);
+        font-size: 12.5px;
+      }
+      .dnb-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        font-size: 11px;
+        padding: 1px 7px;
+        border-radius: 99px;
+        background: var(--dnb-fill);
+        color: var(--dnb-text-2);
+      }
+      .dnb-pre {
+        white-space: pre-wrap;
+        word-break: break-word;
+        font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+        font-size: 11px;
+        line-height: 1.55;
+        padding: 10px 12px;
+        margin: 0;
+        max-height: 320px;
+        overflow: auto;
+        color: var(--dnb-text-2);
+      }
+
+      /* Chief Working Stage FX (Gradient Base + Running Border Beam + Frosted Glass + Jumping Text + Spinner) */
+      @keyframes dnb-fx-neon-flow {
+        0% { background-position: 0% 50%; }
+        50% { background-position: 100% 50%; }
+        100% { background-position: 0% 50%; }
+      }
+      @keyframes dnb-fx-beam-spin {
+        from { transform: translate(-50%, -50%) rotate(0deg); }
+        to { transform: translate(-50%, -50%) rotate(360deg); }
+      }
+      @keyframes dnb-fx-ring-spin {
+        from { transform: rotate(0deg); }
+        to { transform: rotate(360deg); }
+      }
+      @keyframes dnb-wave-jump {
+        0%, 56%, 100% { transform: translateY(0) scale(1); }
+        24% { transform: translateY(-6.5px) scale(1.06); }
+        42% { transform: translateY(1px) scale(0.98); }
+      }
+      .dnb-chief-fx-border,
+      .dnb-chief-fx-stage {
+        --fx-color: #38bdf8;
+        --fx-trail: rgba(56, 189, 248, 0.42);
+        --fx-glow: rgba(56, 189, 248, 0.44);
+        --fx-border: rgba(56, 189, 248, 0.72);
+        --fx-grad: linear-gradient(125deg, #0ea5e9, #38bdf8, #22d3ee, #0ea5e9);
+      }
+      .dnb-chief-fx-border[data-tone="wall"],
+      .dnb-chief-fx-stage[data-tone="wall"] {
+        --fx-color: #f87171;
+        --fx-trail: rgba(248, 113, 113, 0.44);
+        --fx-glow: rgba(239, 68, 68, 0.50);
+        --fx-border: rgba(248, 113, 113, 0.80);
+        --fx-grad: linear-gradient(125deg, #ef4444, #fb7185, #f97316, #ef4444);
+      }
+      .dnb-chief-fx-border[data-tone="bounds"],
+      .dnb-chief-fx-stage[data-tone="bounds"] {
+        --fx-color: #fbbf24;
+        --fx-trail: rgba(251, 191, 36, 0.44);
+        --fx-glow: rgba(245, 158, 11, 0.48);
+        --fx-border: rgba(251, 191, 36, 0.80);
+        --fx-grad: linear-gradient(125deg, #f59e0b, #fde047, #fb923c, #f59e0b);
+      }
+      .dnb-chief-fx-border[data-tone="archive"],
+      .dnb-chief-fx-stage[data-tone="archive"] {
+        --fx-color: #38bdf8;
+        --fx-trail: rgba(56, 189, 248, 0.44);
+        --fx-glow: rgba(14, 165, 233, 0.48);
+        --fx-border: rgba(56, 189, 248, 0.80);
+        --fx-grad: linear-gradient(125deg, #0284c7, #38bdf8, #2dd4bf, #0284c7);
+      }
+      .dnb-chief-fx-border[data-tone="tasks"],
+      .dnb-chief-fx-stage[data-tone="tasks"] {
+        --fx-color: #34d399;
+        --fx-trail: rgba(52, 211, 153, 0.44);
+        --fx-glow: rgba(16, 185, 129, 0.48);
+        --fx-border: rgba(52, 211, 153, 0.80);
+        --fx-grad: linear-gradient(125deg, #10b981, #34d399, #a3e635, #10b981);
+      }
+      .dnb-chief-fx-border[data-tone="peers"],
+      .dnb-chief-fx-stage[data-tone="peers"] {
+        --fx-color: #a78bfa;
+        --fx-trail: rgba(167, 139, 250, 0.44);
+        --fx-glow: rgba(139, 92, 246, 0.48);
+        --fx-border: rgba(167, 139, 250, 0.80);
+        --fx-grad: linear-gradient(125deg, #8b5cf6, #c084fc, #60a5fa, #8b5cf6);
+      }
+      .dnb-chief-fx-border[data-tone="neon"],
+      .dnb-chief-fx-stage[data-tone="neon"] {
+        --fx-color: #f472b6;
+        --fx-trail: rgba(192, 132, 252, 0.48);
+        --fx-glow: rgba(168, 85, 247, 0.48);
+        --fx-border: rgba(192, 132, 252, 0.82);
+        --fx-grad: linear-gradient(120deg, #ff4d6d, #fbbf24, #34d399, #38bdf8, #a78bfa, #f472b6, #ff4d6d);
+      }
+      .dnb-chief-fx-border[data-tone="dream"],
+      .dnb-chief-fx-stage[data-tone="dream"] {
+        --fx-color: #a78bfa;
+        --fx-trail: rgba(96, 165, 250, 0.46);
+        --fx-glow: rgba(129, 140, 248, 0.56);
+        --fx-border: rgba(167, 139, 250, 0.88);
+        --fx-grad: linear-gradient(125deg, #6366f1, #a855f7, #38bdf8, #c084fc, #6366f1);
+      }
+      .dnb-chief-fx-border {
+        position: absolute;
+        inset: 2px;
+        border-radius: 14px;
+        padding: 2.5px;
+        overflow: hidden;
+        pointer-events: none;
+        z-index: 93;
+        filter: drop-shadow(0 0 9px var(--fx-glow));
+        box-shadow: inset 0 0 14px var(--fx-glow);
+        -webkit-mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+        -webkit-mask-composite: xor;
+        mask: linear-gradient(#fff 0 0) content-box, linear-gradient(#fff 0 0);
+        mask-composite: exclude;
+      }
+      .dnb-chief-fx-border::after {
+        content: "";
+        position: absolute;
+        inset: 0;
+        background: var(--fx-grad);
+        background-size: 260% 260%;
+        opacity: 0.36;
+        animation: dnb-fx-neon-flow 3.2s linear infinite;
+      }
+      .dnb-chief-fx-border::before {
+        content: "";
+        position: absolute;
+        top: 50%;
+        left: 50%;
+        width: 260%;
+        aspect-ratio: 1 / 1;
+        background: conic-gradient(
+          from 0deg,
+          transparent 0deg,
+          transparent 45deg,
+          var(--fx-trail) 95deg,
+          var(--fx-color) 148deg,
+          #ffffff 174deg,
+          var(--fx-color) 180deg,
+          transparent 186deg,
+          transparent 225deg,
+          var(--fx-trail) 275deg,
+          var(--fx-color) 328deg,
+          #ffffff 354deg,
+          var(--fx-color) 360deg
+        );
+        animation: dnb-fx-beam-spin 2.25s linear infinite;
+      }
+      .dnb-chief-fx-border[data-tone="neon"]::before {
+        background: conic-gradient(
+          from 0deg,
+          #ff4d6d 0deg,
+          #fbbf24 54deg,
+          #ffffff 84deg,
+          #34d399 124deg,
+          #38bdf8 180deg,
+          #a78bfa 234deg,
+          #ffffff 264deg,
+          #f472b6 312deg,
+          #ff4d6d 360deg
+        );
+      }
+      .dnb-chief-fx-stage {
+        position: absolute;
+        inset: 4px;
+        border-radius: 12px;
+        z-index: 92;
+        cursor: pointer;
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        justify-content: center;
+        padding: 20px;
+        background: rgba(15, 23, 42, 0.30);
+        backdrop-filter: blur(4px) saturate(1.18);
+        -webkit-backdrop-filter: blur(4px) saturate(1.18);
+        box-shadow: inset 0 0 28px var(--fx-glow);
+        animation: dnb-enter 0.18s ease-out;
+      }
+      .dnb-chief-fx-hint {
+        margin-top: 10px;
+        font-size: 11.5px;
+        font-weight: 600;
+        color: rgba(226, 232, 240, 0.86);
+        text-shadow: 0 1px 6px rgba(0, 0, 0, 0.55);
+        letter-spacing: 0.2px;
+        user-select: none;
+      }
+      html[data-ds-theme-source="light"] .dnb-chief-fx-hint,
+      html[data-ds-theme="light"] .dnb-chief-fx-hint,
+      [data-ds-theme-source="light"] .dnb-chief-fx-hint {
+        color: rgba(30, 41, 59, 0.78);
+        text-shadow: 0 1px 4px rgba(255, 255, 255, 0.65);
+      }
+      html[data-ds-theme-source="light"] .dnb-chief-fx-stage,
+      html[data-ds-theme="light"] .dnb-chief-fx-stage,
+      [data-ds-theme-source="light"] .dnb-chief-fx-stage {
+        background: rgba(248, 250, 252, 0.42);
+      }
+      @media (prefers-color-scheme: light) {
+        html:not([data-ds-theme-source="dark"]):not([data-ds-theme="dark"]) .dnb-chief-fx-stage {
+          background: rgba(248, 250, 252, 0.36);
+        }
+      }
+      .dnb-chief-fx-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 11px;
+        padding: 12px 18px;
+        border-radius: 16px;
+        max-width: 94%;
+        background: rgba(15, 23, 42, 0.78);
+        border: 1.5px solid var(--fx-border);
+        box-shadow:
+          0 14px 36px rgba(0, 0, 0, 0.34),
+          0 0 24px var(--fx-glow);
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+      }
+      .dnb-chief-fx-ring {
+        width: 22px;
+        height: 22px;
+        border-radius: 50%;
+        flex-shrink: 0;
+        border: 2.5px solid rgba(255, 255, 255, 0.14);
+        border-top-color: var(--fx-color);
+        border-right-color: var(--fx-color);
+        box-shadow: 0 0 10px var(--fx-glow);
+        animation: dnb-fx-ring-spin 0.85s linear infinite;
+      }
+      .dnb-chief-fx-stage[data-tone="neon"] .dnb-chief-fx-ring {
+        border: none;
+        background: conic-gradient(from 0deg, #ff4d6d, #fbbf24, #34d399, #38bdf8, #a78bfa, #f472b6, #ff4d6d);
+        -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+        mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+      }
+      .dnb-chief-fx-text {
+        display: flex;
+        flex-wrap: wrap;
+        align-items: center;
+        font-size: 13.5px;
+        font-weight: 700;
+        line-height: 1.5;
+        letter-spacing: 0.3px;
+      }
+      .dnb-wave-char {
+        display: inline-block;
+        color: var(--fx-color);
+        text-shadow: 0 0 12px var(--fx-glow);
+        animation: dnb-wave-jump 1.35s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite;
+        animation-delay: calc(var(--char-i, 0) * 0.065s);
+        will-change: transform;
+      }
+      .dnb-chief-fx-stage[data-tone="neon"] .dnb-wave-char {
+        background: linear-gradient(110deg, #ff6b8b, #fbbf24, #34d399, #38bdf8, #c084fc, #ff6b8b);
+        background-size: 260% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        text-shadow: none;
+        filter: drop-shadow(0 0 6px rgba(168, 85, 247, 0.45));
+        animation:
+          dnb-wave-jump 1.35s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite,
+          dnb-fx-neon-flow 2.8s linear infinite;
+        animation-delay: calc(var(--char-i, 0) * 0.065s), 0s;
+      }
+      .dnb-chief-fx-stage[data-tone="dream"] .dnb-chief-fx-ring {
+        border: none;
+        background: conic-gradient(from 0deg, #6366f1, #38bdf8, #c084fc, #e0e7ff, #6366f1);
+        -webkit-mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+        mask: radial-gradient(farthest-side, transparent calc(100% - 3px), #000 calc(100% - 2.5px));
+      }
+      .dnb-chief-fx-stage[data-tone="dream"] .dnb-wave-char {
+        background: linear-gradient(110deg, #a5b4fc, #38bdf8, #e879f9, #c084fc, #a5b4fc);
+        background-size: 260% 100%;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        text-shadow: none;
+        filter: drop-shadow(0 0 8px rgba(129, 140, 248, 0.55));
+        animation:
+          dnb-wave-jump 1.45s cubic-bezier(0.36, 0.07, 0.19, 0.97) infinite,
+          dnb-fx-neon-flow 3.2s linear infinite;
+        animation-delay: calc(var(--char-i, 0) * 0.065s), 0s;
+      }
+
       /* Interactive Semicircular Fan Effort Gauge + Team Auto/Manual Switch */
       .dnb-fan-gauge {
         display: flex;
@@ -8046,6 +8396,267 @@ window.__ModuleLoader__.load({
         color: var(--dnb-primary-fg, #ffffff);
       }
 
+      /* v1.6.0 Closing Pack: Scenario Presets, Chief LLM Ledger & Budget Progress */
+      .dnb-preset-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+        padding: 8px 10px 10px;
+      }
+      @container dnb-head (max-width: 340px) {
+        .dnb-preset-grid {
+          grid-template-columns: 1fr;
+        }
+      }
+      .dnb-preset-card {
+        display: flex;
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 4px;
+        padding: 8px 8px 9px;
+        border-radius: 10px;
+        border: 1px solid var(--dnb-border);
+        background: var(--dnb-fill);
+        color: var(--dnb-text);
+        text-align: left;
+        cursor: pointer;
+        transition: border-color 0.16s ease, background-color 0.16s ease, transform 0.12s ease;
+      }
+      .dnb-preset-card:hover {
+        border-color: var(--dnb-border-strong);
+        background: var(--dnb-card-hover);
+      }
+      .dnb-preset-card:active {
+        transform: scale(0.98);
+      }
+      .dnb-preset-card[data-active="1"] {
+        border-color: var(--dnb-accent);
+        background: rgba(10, 132, 255, 0.13);
+        box-shadow: 0 0 0 1px rgba(10, 132, 255, 0.25);
+      }
+      .dnb-preset-title {
+        font-size: 11.5px;
+        font-weight: 700;
+        color: var(--dnb-text);
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        line-height: 1.25;
+      }
+      .dnb-preset-tag {
+        font-size: 9.5px;
+        font-weight: 600;
+        padding: 1px 5px;
+        border-radius: 99px;
+        background: var(--dnb-card);
+        color: var(--dnb-text-2);
+        border: 1px solid var(--dnb-border);
+        white-space: nowrap;
+      }
+      .dnb-preset-card[data-active="1"] .dnb-preset-tag {
+        color: var(--dnb-accent);
+        border-color: rgba(10, 132, 255, 0.42);
+      }
+      .dnb-preset-desc {
+        font-size: 10px;
+        line-height: 1.4;
+        color: var(--dnb-text-3);
+      }
+
+      .dnb-ledger-grid {
+        display: grid;
+        grid-template-columns: repeat(3, minmax(0, 1fr));
+        gap: 6px;
+        margin: 6px 0 8px;
+      }
+      .dnb-ledger-chip {
+        padding: 6px 8px;
+        border-radius: 9px;
+        background: var(--dnb-fill);
+        border: 1px solid var(--dnb-border);
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .dnb-ledger-chip-label {
+        font-size: 10px;
+        color: var(--dnb-text-3);
+        font-weight: 500;
+      }
+      .dnb-ledger-chip-val {
+        font-size: 11.5px;
+        color: var(--dnb-text);
+        font-weight: 700;
+        font-variant-numeric: tabular-nums;
+      }
+      .dnb-budget-row {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        margin-bottom: 7px;
+      }
+      .dnb-budget-meta {
+        display: flex;
+        justify-content: space-between;
+        align-items: center;
+        font-size: 11px;
+        color: var(--dnb-text-2);
+        font-variant-numeric: tabular-nums;
+      }
+      .dnb-budget-bar {
+        height: 6px;
+        border-radius: 99px;
+        background: var(--dnb-fill);
+        border: 1px solid var(--dnb-border);
+        overflow: hidden;
+      }
+      .dnb-budget-fill {
+        height: 100%;
+        border-radius: 99px;
+        background: var(--dnb-accent);
+        transition: width 0.25s ease, background-color 0.2s ease;
+      }
+      .dnb-budget-fill[data-warn="1"] {
+        background: #f59e0b;
+      }
+      .dnb-budget-fill[data-tripped="1"] {
+        background: #ef4444;
+      }
+      .dnb-lang-inline-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        padding: 7px 10px 4px;
+        margin-top: 6px;
+        border-top: 1px solid var(--dnb-border);
+      }
+      html[data-ds-theme-source="light"] .dnb-preset-card[data-active="1"],
+      html[data-ds-theme="light"] .dnb-preset-card[data-active="1"],
+      [data-ds-theme-source="light"] .dnb-preset-card[data-active="1"] {
+        background: rgba(37, 99, 235, 0.08);
+        border-color: #2563eb;
+      }
+      html[data-ds-theme-source="light"] .dnb-ledger-chip,
+      html[data-ds-theme="light"] .dnb-ledger-chip,
+      [data-ds-theme-source="light"] .dnb-ledger-chip {
+        background: rgba(15, 23, 42, 0.04);
+      }
+      .dnb-gear-btn {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        width: 22px;
+        height: 22px;
+        border-radius: 7px;
+        border: 1px solid transparent;
+        background: transparent;
+        color: var(--dnb-text-3);
+        cursor: pointer;
+        padding: 0;
+        flex-shrink: 0;
+        margin: 0 -2px;
+        transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease;
+      }
+      .dnb-gear-btn svg {
+        transition: transform 0.42s cubic-bezier(0.34, 1.4, 0.64, 1);
+        transform-origin: center;
+      }
+      .dnb-gear-btn:hover {
+        background: var(--dnb-fill);
+        color: var(--dnb-text);
+        border-color: var(--dnb-border);
+      }
+      .dnb-gear-btn[data-active="1"] {
+        background: rgba(10, 132, 255, 0.15);
+        color: var(--dnb-accent);
+        border-color: rgba(10, 132, 255, 0.36);
+      }
+      .dnb-settings-bar {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 6px 10px;
+        margin-bottom: 10px;
+        border-radius: 10px;
+        background: var(--dnb-card);
+        border: 1px solid var(--dnb-border);
+      }
+      html[data-ds-theme-source="light"] .dnb-gear-btn[data-active="1"],
+      html[data-ds-theme="light"] .dnb-gear-btn[data-active="1"],
+      [data-ds-theme-source="light"] .dnb-gear-btn[data-active="1"] {
+        background: rgba(37, 99, 235, 0.1);
+        border-color: rgba(37, 99, 235, 0.34);
+        color: #2563eb;
+      }
+      @keyframes dnb-bubble-shake {
+        0%, 100% { transform: translateX(0); }
+        20% { transform: translateX(-5px); }
+        45% { transform: translateX(5px); }
+        70% { transform: translateX(-3px); }
+        90% { transform: translateX(2px); }
+      }
+      .dnb-bubble-stage {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .dnb-bubble-status {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        font-size: 11px;
+        font-weight: 600;
+        color: #34d399;
+        padding: 3px 9px;
+        border-radius: 999px;
+        corner-shape: round;
+        background: rgba(16, 185, 129, 0.11);
+        border: 1px solid rgba(16, 185, 129, 0.30);
+        max-width: 100%;
+        min-width: 0;
+      }
+      .dnb-bubble-status[data-locked="1"] {
+        color: #fcd34d;
+        background: rgba(245, 158, 11, 0.14);
+        border-color: rgba(245, 158, 11, 0.44);
+      }
+      .dnb-bubble-status-dot {
+        width: 6.5px;
+        height: 6.5px;
+        border-radius: 50%;
+        corner-shape: round;
+        background: currentColor;
+        flex-shrink: 0;
+      }
+      .dnb-bubble-estop-btn {
+        border-color: rgba(239, 68, 68, 0.52) !important;
+        background: rgba(239, 68, 68, 0.14) !important;
+        color: #fca5a5 !important;
+        font-weight: 700 !important;
+      }
+      .dnb-bubble-estop-btn[data-confirm="1"] {
+        background: rgba(239, 68, 68, 0.28) !important;
+        border-color: #ef4444 !important;
+        color: #fee2e2 !important;
+      }
+
+    `
+
+    // === [module: src/client/styles/tasks-flow.js] ===
+    /**
+     * src/client/styles/tasks-flow.js — 顺序工作流拓扑、组织展开树与任务板亮色适配样式
+     *
+     * 【核心职责】
+     *   承载 v1.6.0 顺序工作流管道拓扑（Steps ①→⑤、分支连线与交卷回流箭头）、浅色主题适配、
+     *   可展开 Attention-First 组织树、里程碑进度圆点、已完成折叠组与兼容任务板助手样式。
+     *
+     * 【边界约定】
+     *   - 紧跟 `styles/tasks-pyramid.js` 与全局样式加载，负责流程拓扑与新版任务板样式。
+     */
+
+    const CSS_TASKS_FLOW = `
       /* Sequential Workflow Pipeline Topology (v1.6.0) */
       .dnb-flow-root {
         display: flex;
@@ -8705,179 +9316,6 @@ window.__ModuleLoader__.load({
         background: #fef2f2;
       }
 
-      /* Attention-First Collapsible Accordion Cards & Unified Design System */
-      .dnb-acc-card {
-        margin-top: 8px;
-        border-radius: 12px;
-        border: 1px solid var(--dnb-border);
-        background: var(--dnb-card);
-        overflow: visible;
-        transition: border-color 0.15s ease;
-      }
-      .dnb-view > .dnb-acc-card:first-child {
-        margin-top: 0;
-      }
-      .dnb-acc-card:hover {
-        border-color: var(--dnb-border-strong);
-      }
-      .dnb-acc-card.dnb-wall-box {
-        margin-top: 8px;
-        margin-bottom: 0;
-        border-radius: 12px;
-        border: 1px solid var(--dnb-border);
-        border-left: 3.5px solid rgba(239, 68, 68, 0.78);
-        background: var(--dnb-card);
-      }
-      .dnb-fleet-card,
-      .dnb-acc-card.dnb-fleet-card {
-        border-left: 3.5px solid rgba(34, 211, 238, 0.85);
-        background: linear-gradient(135deg, rgba(6, 182, 212, 0.08) 0%, var(--dnb-card) 44%);
-      }
-      .dnb-acc-card.dnb-fleet-card > .dnb-acc-head {
-        background: linear-gradient(90deg, rgba(6, 182, 212, 0.12), rgba(6, 182, 212, 0.02) 55%, transparent);
-      }
-      .dnb-acc-card.dnb-obj-card {
-        border-left: 3.5px solid rgba(59, 130, 246, 0.88);
-        background: linear-gradient(135deg, rgba(59, 130, 246, 0.09) 0%, var(--dnb-card) 46%);
-      }
-      .dnb-acc-card.dnb-obj-card > .dnb-acc-head {
-        background: linear-gradient(90deg, rgba(59, 130, 246, 0.12), rgba(59, 130, 246, 0.025) 58%, transparent);
-      }
-      .dnb-acc-card.dnb-topo-card {
-        border-left: 3.5px solid rgba(16, 185, 129, 0.88);
-        background: linear-gradient(135deg, rgba(16, 185, 129, 0.08) 0%, var(--dnb-card) 44%);
-      }
-      .dnb-acc-card.dnb-topo-card > .dnb-acc-head {
-        background: linear-gradient(90deg, rgba(16, 185, 129, 0.12), rgba(16, 185, 129, 0.02) 55%, transparent);
-      }
-      .dnb-acc-card.dnb-board-card {
-        border-left: 3.5px solid rgba(139, 92, 246, 0.88);
-        background: linear-gradient(135deg, rgba(139, 92, 246, 0.08) 0%, var(--dnb-card) 40%);
-      }
-      .dnb-acc-card.dnb-board-card > .dnb-acc-head {
-        background: linear-gradient(90deg, rgba(139, 92, 246, 0.12), rgba(139, 92, 246, 0.02) 55%, transparent);
-      }
-      .dnb-acc-card.dnb-handoff-card {
-        border-left: 3.5px solid rgba(245, 158, 11, 0.88);
-        background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, var(--dnb-card) 44%);
-      }
-      .dnb-acc-card.dnb-handoff-card > .dnb-acc-head {
-        background: linear-gradient(90deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.02) 55%, transparent);
-      }
-      .dnb-acc-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        min-height: 36px;
-        padding: 7px 11px;
-        border-radius: 11px;
-        cursor: pointer;
-        user-select: none;
-        transition: background-color 0.14s ease;
-      }
-      .dnb-acc-card[data-open="1"] > .dnb-acc-head {
-        border-radius: 11px 11px 0 0;
-      }
-      .dnb-acc-head:hover {
-        background: var(--dnb-card-hover);
-      }
-      .dnb-acc-title-wrap {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex: 1 1 auto;
-        min-width: 0;
-        flex-wrap: wrap;
-      }
-      .dnb-acc-chevron {
-        color: var(--dnb-text-3);
-        flex-shrink: 0;
-        transform: rotate(0deg);
-        transition: transform 0.16s ease, color 0.14s ease;
-      }
-      .dnb-acc-card[data-open="1"] > .dnb-acc-head .dnb-acc-chevron {
-        transform: rotate(90deg);
-        color: var(--dnb-text-2);
-      }
-      .dnb-acc-title {
-        font-size: 12.5px;
-        font-weight: 600;
-        color: var(--dnb-text);
-        white-space: nowrap;
-      }
-      .dnb-acc-preview {
-        font-size: 11.5px;
-        color: var(--dnb-text-2);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        min-width: 0;
-        flex: 1;
-      }
-      .dnb-acc-card.dnb-obj-card .dnb-acc-preview {
-        color: var(--dnb-text);
-        opacity: 0.9;
-      }
-      .dnb-acc-count {
-        font-size: 10.5px;
-        color: var(--dnb-text-2);
-        padding: 1px 6px;
-        border-radius: 99px;
-        background: var(--dnb-fill);
-        white-space: nowrap;
-      }
-      .dnb-acc-badge {
-        font-size: 10px;
-        font-weight: 600;
-        padding: 1px 6px;
-        border-radius: 99px;
-        background: var(--dnb-fill);
-        color: var(--dnb-text-2);
-        white-space: nowrap;
-      }
-      .dnb-acc-badge[data-tone="amber"] {
-        background: rgba(245, 158, 11, 0.16);
-        color: #fbbf24;
-      }
-      .dnb-acc-badge[data-tone="accent"] {
-        background: rgba(59, 130, 246, 0.16);
-        color: #60a5fa;
-      }
-      .dnb-acc-ops {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        flex-shrink: 0;
-      }
-      .dnb-acc-ops .dnb-seg .dnb-seg-btn {
-        flex: 0 0 auto;
-      }
-      .dnb-acc-pull-hint {
-        font-size: 10.5px;
-        font-weight: 500;
-        color: var(--dnb-text-3);
-        padding: 1px 7px;
-        border-radius: 99px;
-        background: var(--dnb-fill);
-        white-space: nowrap;
-        cursor: pointer;
-      }
-      .dnb-acc-head:hover .dnb-acc-pull-hint {
-        color: var(--dnb-text-2);
-      }
-      .dnb-acc-body {
-        border-top: 1px solid var(--dnb-border);
-        border-radius: 0 0 11px 11px;
-        padding: 8px 10px 10px;
-      }
-      .dnb-acc-body > .dnb-cell:first-child {
-        border-top: none;
-      }
-      .dnb-acc-body > .dnb-qa-stream > .dnb-qa-turn-box:first-child {
-        margin-top: 2px;
-      }
-
       /* Compact Expandable Organization Tree (collapsed by default, pull-open on click) */
       .dnb-topo-pyr-wrap .dnb-pyr-apex {
         border-radius: 10px;
@@ -9216,252 +9654,21 @@ window.__ModuleLoader__.load({
         border-left-color: rgba(37, 99, 235, 0.3);
       }
 
-      /* v1.6.0 Closing Pack: Scenario Presets, Chief LLM Ledger & Budget Progress */
-      .dnb-preset-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 6px;
-        padding: 8px 10px 10px;
-      }
-      @container dnb-head (max-width: 340px) {
-        .dnb-preset-grid {
-          grid-template-columns: 1fr;
-        }
-      }
-      .dnb-preset-card {
-        display: flex;
-        flex-direction: column;
-        align-items: flex-start;
-        gap: 4px;
-        padding: 8px 8px 9px;
-        border-radius: 10px;
-        border: 1px solid var(--dnb-border);
-        background: var(--dnb-fill);
-        color: var(--dnb-text);
-        text-align: left;
-        cursor: pointer;
-        transition: border-color 0.16s ease, background-color 0.16s ease, transform 0.12s ease;
-      }
-      .dnb-preset-card:hover {
-        border-color: var(--dnb-border-strong);
-        background: var(--dnb-card-hover);
-      }
-      .dnb-preset-card:active {
-        transform: scale(0.98);
-      }
-      .dnb-preset-card[data-active="1"] {
-        border-color: var(--dnb-accent);
-        background: rgba(10, 132, 255, 0.13);
-        box-shadow: 0 0 0 1px rgba(10, 132, 255, 0.25);
-      }
-      .dnb-preset-title {
-        font-size: 11.5px;
-        font-weight: 700;
-        color: var(--dnb-text);
-        display: flex;
-        align-items: center;
-        gap: 4px;
-        line-height: 1.25;
-      }
-      .dnb-preset-tag {
-        font-size: 9.5px;
-        font-weight: 600;
-        padding: 1px 5px;
-        border-radius: 99px;
-        background: var(--dnb-card);
-        color: var(--dnb-text-2);
-        border: 1px solid var(--dnb-border);
-        white-space: nowrap;
-      }
-      .dnb-preset-card[data-active="1"] .dnb-preset-tag {
-        color: var(--dnb-accent);
-        border-color: rgba(10, 132, 255, 0.42);
-      }
-      .dnb-preset-desc {
-        font-size: 10px;
-        line-height: 1.4;
-        color: var(--dnb-text-3);
-      }
+    `
 
-      .dnb-ledger-grid {
-        display: grid;
-        grid-template-columns: repeat(3, minmax(0, 1fr));
-        gap: 6px;
-        margin: 6px 0 8px;
-      }
-      .dnb-ledger-chip {
-        padding: 6px 8px;
-        border-radius: 9px;
-        background: var(--dnb-fill);
-        border: 1px solid var(--dnb-border);
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .dnb-ledger-chip-label {
-        font-size: 10px;
-        color: var(--dnb-text-3);
-        font-weight: 500;
-      }
-      .dnb-ledger-chip-val {
-        font-size: 11.5px;
-        color: var(--dnb-text);
-        font-weight: 700;
-        font-variant-numeric: tabular-nums;
-      }
-      .dnb-budget-row {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        margin-bottom: 7px;
-      }
-      .dnb-budget-meta {
-        display: flex;
-        justify-content: space-between;
-        align-items: center;
-        font-size: 11px;
-        color: var(--dnb-text-2);
-        font-variant-numeric: tabular-nums;
-      }
-      .dnb-budget-bar {
-        height: 6px;
-        border-radius: 99px;
-        background: var(--dnb-fill);
-        border: 1px solid var(--dnb-border);
-        overflow: hidden;
-      }
-      .dnb-budget-fill {
-        height: 100%;
-        border-radius: 99px;
-        background: var(--dnb-accent);
-        transition: width 0.25s ease, background-color 0.2s ease;
-      }
-      .dnb-budget-fill[data-warn="1"] {
-        background: #f59e0b;
-      }
-      .dnb-budget-fill[data-tripped="1"] {
-        background: #ef4444;
-      }
-      .dnb-lang-inline-bar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 6px;
-        padding: 7px 10px 4px;
-        margin-top: 6px;
-        border-top: 1px solid var(--dnb-border);
-      }
-      html[data-ds-theme-source="light"] .dnb-preset-card[data-active="1"],
-      html[data-ds-theme="light"] .dnb-preset-card[data-active="1"],
-      [data-ds-theme-source="light"] .dnb-preset-card[data-active="1"] {
-        background: rgba(37, 99, 235, 0.08);
-        border-color: #2563eb;
-      }
-      html[data-ds-theme-source="light"] .dnb-ledger-chip,
-      html[data-ds-theme="light"] .dnb-ledger-chip,
-      [data-ds-theme-source="light"] .dnb-ledger-chip {
-        background: rgba(15, 23, 42, 0.04);
-      }
-      .dnb-gear-btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 22px;
-        height: 22px;
-        border-radius: 7px;
-        border: 1px solid transparent;
-        background: transparent;
-        color: var(--dnb-text-3);
-        cursor: pointer;
-        padding: 0;
-        flex-shrink: 0;
-        margin: 0 -2px;
-        transition: background-color 0.16s ease, color 0.16s ease, border-color 0.16s ease;
-      }
-      .dnb-gear-btn svg {
-        transition: transform 0.42s cubic-bezier(0.34, 1.4, 0.64, 1);
-        transform-origin: center;
-      }
-      .dnb-gear-btn:hover {
-        background: var(--dnb-fill);
-        color: var(--dnb-text);
-        border-color: var(--dnb-border);
-      }
-      .dnb-gear-btn[data-active="1"] {
-        background: rgba(10, 132, 255, 0.15);
-        color: var(--dnb-accent);
-        border-color: rgba(10, 132, 255, 0.36);
-      }
-      .dnb-settings-bar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        padding: 6px 10px;
-        margin-bottom: 10px;
-        border-radius: 10px;
-        background: var(--dnb-card);
-        border: 1px solid var(--dnb-border);
-      }
-      html[data-ds-theme-source="light"] .dnb-gear-btn[data-active="1"],
-      html[data-ds-theme="light"] .dnb-gear-btn[data-active="1"],
-      [data-ds-theme-source="light"] .dnb-gear-btn[data-active="1"] {
-        background: rgba(37, 99, 235, 0.1);
-        border-color: rgba(37, 99, 235, 0.34);
-        color: #2563eb;
-      }
-      @keyframes dnb-bubble-shake {
-        0%, 100% { transform: translateX(0); }
-        20% { transform: translateX(-5px); }
-        45% { transform: translateX(5px); }
-        70% { transform: translateX(-3px); }
-        90% { transform: translateX(2px); }
-      }
-      .dnb-bubble-stage {
-        display: flex;
-        flex-direction: column;
-        gap: 8px;
-      }
-      .dnb-bubble-status {
-        display: inline-flex;
-        align-items: center;
-        gap: 6px;
-        font-size: 11px;
-        font-weight: 600;
-        color: #34d399;
-        padding: 3px 9px;
-        border-radius: 999px;
-        corner-shape: round;
-        background: rgba(16, 185, 129, 0.11);
-        border: 1px solid rgba(16, 185, 129, 0.30);
-        max-width: 100%;
-        min-width: 0;
-      }
-      .dnb-bubble-status[data-locked="1"] {
-        color: #fcd34d;
-        background: rgba(245, 158, 11, 0.14);
-        border-color: rgba(245, 158, 11, 0.44);
-      }
-      .dnb-bubble-status-dot {
-        width: 6.5px;
-        height: 6.5px;
-        border-radius: 50%;
-        corner-shape: round;
-        background: currentColor;
-        flex-shrink: 0;
-      }
-      .dnb-bubble-estop-btn {
-        border-color: rgba(239, 68, 68, 0.52) !important;
-        background: rgba(239, 68, 68, 0.14) !important;
-        color: #fca5a5 !important;
-        font-weight: 700 !important;
-      }
-      .dnb-bubble-estop-btn[data-confirm="1"] {
-        background: rgba(239, 68, 68, 0.28) !important;
-        border-color: #ef4444 !important;
-        color: #fee2e2 !important;
-      }
+    // === [module: src/client/styles/bubble.js] ===
+    /**
+     * src/client/styles/bubble.js — Option A 液态融合协同水泡、官方徽标与待命池样式
+     *
+     * 【核心职责】
+     *   承载液态玻璃融合协同水泡（VisionOS Glass）、总控胶囊、双叶融合布局、主核与次级子代理卫星胶囊、
+     *   右侧外协自由悬浮胶囊、官方品牌 Logo 圆标、内联派单条、待命池与「↻ 刷新扫描」按钮及浅色主题全套覆盖。
+     *
+     * 【边界约定】
+     *   - 排在 `STYLE_SHEETS` 靠后位置，仅服务于「协同」页签中的水泡协作面板与待命池。
+     */
 
+    const CSS_BUBBLE = `
       /* Option A: Unified Liquid Fusion Bubble Canvas (VisionOS Glass Style) */
       .dnb-liquid-canvas {
         position: relative;
@@ -10290,17 +10497,45 @@ window.__ModuleLoader__.load({
       }
     `
 
-    function expandLightThemeSelectors(cssText) {
-      return String(cssText || '').replace(
-        /^([ \t]*)html\[data-ds-theme-source="light"\]([^,{\n]+)(,|[ \t]*\{)/gm,
-        (_, indent, sel, tail) =>
-          `${indent}html[data-dnb-theme="light"]${sel},\n`
-          + `${indent}html:not([data-ds-theme="dark"]):not([data-ds-theme-source="dark"]):not([data-dnb-theme="dark"]) body:not([data-ds-dark-theme])${sel},\n`
-          + `${indent}html[data-ds-theme-source="light"]${sel}${tail}`,
-      )
-    }
+    // === [module: src/client/styles.js] ===
+    /**
+     * src/client/styles.js — DSH Chief 客户端样式总装配门面与 <Style /> 注入器
+     *
+     * 【核心职责】
+     *   按既定级联顺序聚合 `src/client/styles/*.js` 各专题样式模块，经由 `expandLightThemeSelectors()`
+     *   自动展开 DSH 浅色主题选择器后注入单个 `<style data-dnb="3">` 标签；同时 re-export
+     *   `detectHostTheme` 与 `isHostLightTheme` 供外部组件使用，并监听宿主主题变化同步 `data-dnb-theme`。
+     *
+     * 【模块组成（`src/client/styles/`）】
+     *   - `styles/theme.js`          主题探测 & `html[data-ds-theme-source="light"]` 多选择器展开引擎
+     *   - `styles/base.js`           全局令牌、顶栏（含 `.dnb-ver-chip`）、通用控件、浮层与手风琴基础样式
+     *   - `styles/tasks-pyramid.js`  任务金字塔树、竖脊线与 SVG 全景画布样式
+     *   - `styles/modals.js`         战术舱、目标审批、冷库弹窗与四档权限审批卡片样式
+     *   - `styles/archives.js`       工程记忆档案柜、回形针卷宗与“一沓纸”叠放档案样式
+     *   - `styles/chief.js`          图钉戳、DS-Bot 叙事卡、参谋工作态流光 FX、思考深度仪与预算账本
+     *   - `styles/tasks-flow.js`     顺序工作流拓扑、组织展开树与新版任务板样式
+     *   - `styles/bubble.js`         Option A 液态融合协同水泡、官方 Logo 徽标与待命池样式
+     *
+     * 【未来新增页签样式的 3 步接入指南】
+     *   1. 在 `src/client/styles/` 下新建专题模块（如 `styles/<new-tab>.js`），导出 `export const CSS_<NEW_TAB> = `...` `，
+     *      并在该文件顶部补齐职责边界注释；浅色适配规则请统一使用 `html[data-ds-theme-source="light"] .xxx` 前缀。
+     *   2. 在本文件导入该常量，并按级联优先级追加到 `STYLE_SHEETS` 数组中（一般置于末尾即可）。
+     *   3. 运行 `npm run build:client` 与 `npm run check:client`，打包器会自动完成单包聚合与多选择器浅色展开。
+     */
 
-    const RESOLVED_CSS = expandLightThemeSelectors(CSS)
+
+
+    const STYLE_SHEETS = [
+      CSS_BASE,
+      CSS_TASKS_PYRAMID,
+      CSS_MODALS,
+      CSS_ARCHIVES,
+      CSS_CHIEF,
+      CSS_TASKS_FLOW,
+      CSS_BUBBLE,
+    ]
+
+    const RESOLVED_CSS = expandLightThemeSelectors(STYLE_SHEETS.join('\n'))
 
     function Style() {
       if (typeof document !== 'undefined' && document.documentElement) {
@@ -11672,11 +11907,16 @@ window.__ModuleLoader__.load({
       )
     }
 
-    // === [module: src/client/components/modals.js] ===
+    // === [module: src/client/components/modals/pickers.js] ===
     /**
-     * components/modals.js
+     * src/client/components/modals/pickers.js — 模型选择、轮数节奏弹出气泡与主动建议胶囊条
      *
-     * Popovers, SuggestionBanner, and all safety/risk/approval/elevation/audit confirmation modals.
+     * 【核心职责】
+     *   承载 `ModelPickerPopover`、`PacePickerPopover` 与 `SuggestionBanner`（含 `describeSuggestionMeta`），
+     *   提供轻量内联选择气泡与参谋建议逐条/一键采纳控制。
+     *
+     * 【边界约定】
+     *   - 只包含非全屏遮罩类选择器与建议横幅；模态确认弹窗分布在 `modals/{intervention,workflow,safety}.js`。
      */
 
 
@@ -12152,6 +12392,19 @@ window.__ModuleLoader__.load({
         }),
       )
     }
+
+    // === [module: src/client/components/modals/intervention.js] ===
+    /**
+     * src/client/components/modals/intervention.js — 参谋介入授权、无限轮次、托管与离家预设确认弹窗
+     *
+     * 【核心职责】
+     *   承载 `InterventionConfirmModal`（含 `MODAL_WALL_TYPE_TAG`）、`UnlimitedTurnsConfirmModal`、
+     *   `AutoPilotConfirmModal` 与 `AwayPresetConfirmModal`，把控参谋接管深度与托管预算风险确认。
+     *
+     * 【边界约定】
+     *   - 专注参谋介入级别与托管行为确认弹窗；高危工具操作审批见 `modals/safety.js`。
+     */
+
 
     const MODAL_WALL_TYPE_TAG = {
       forbid_cmd: '🚫 禁跑命令',
@@ -12896,6 +13149,19 @@ window.__ModuleLoader__.load({
       )
     }
 
+    // === [module: src/client/components/modals/workflow.js] ===
+    /**
+     * src/client/components/modals/workflow.js — 档案接力、全局蒸馏、参谋建议、沉淀与交接协同弹窗
+     *
+     * 【核心职责】
+     *   承载 `ArchiveRelayModal`、`DistillToGlobalModal`、`ChiefAdviceModal`、`HazardHaltModal`、
+     *   `PrecipitateConfirmModal`、`PeerLinkConfirmModal` 与 `HandoffWarnModal`。
+     *
+     * 【边界约定】
+     *   - 聚焦跨会话协同、档案流转与长程交接类业务流弹窗。
+     */
+
+
     function ArchiveRelayModal({ view }) {
       const m = view.archiveRelayModal
       if (!m) return null
@@ -13544,6 +13810,19 @@ window.__ModuleLoader__.load({
       )
     }
 
+    // === [module: src/client/components/modals/safety.js] ===
+    /**
+     * src/client/components/modals/safety.js — 高权限风险签认、工具拦截审批、权限提权与审计日志弹窗
+     *
+     * 【核心职责】
+     *   承载 `ChiefRiskConfirmModal`、`OperationApprovalModal`、`ElevationRequestModal` 与 `AuditLogModal`，
+     *   确保任何越权写操作/危险命令必须经由人工签认与明确授权后才放行。
+     *
+     * 【边界约定】
+     *   - 仅处理安全门禁与审计日志 UI 展示与回执提交，实际拦截校验完全由后端锁定内核负责。
+     */
+
+
     function ChiefRiskConfirmModal({ view }) {
       if (!view.chiefRiskModalOpen) return null
       const agreed = Boolean(view.chiefRiskAgreed)
@@ -13979,6 +14258,21 @@ window.__ModuleLoader__.load({
         ),
       )
     }
+
+    // === [module: src/client/components/modals.js] ===
+    /**
+     * src/client/components/modals.js — 弹出气泡与全局确认弹窗统一出口桶文件
+     *
+     * 【核心职责】
+     *   汇总并 re-export 原本集中在单一巨石文件里的全部 18 个弹窗与气泡组件，
+     *   让 `Panel.js` 等消费方保持零路径改动的稳定导入面。
+     *
+     * 【子模块划分（`src/client/components/modals/`）】
+     *   - `modals/pickers.js`       `ModelPickerPopover`、`PacePickerPopover`、`SuggestionBanner`
+     *   - `modals/intervention.js`  `InterventionConfirmModal`、`UnlimitedTurnsConfirmModal`、`AutoPilotConfirmModal`、`AwayPresetConfirmModal`
+     *   - `modals/workflow.js`      `ArchiveRelayModal`、`DistillToGlobalModal`、`ChiefAdviceModal`、`HazardHaltModal`、`PrecipitateConfirmModal`、`PeerLinkConfirmModal`、`HandoffWarnModal`
+     *   - `modals/safety.js`        `ChiefRiskConfirmModal`、`OperationApprovalModal`、`ElevationRequestModal`、`AuditLogModal`
+     */
 
     // === [module: src/client/tabs/tasks-flow.js] ===
     /**
@@ -17690,11 +17984,16 @@ window.__ModuleLoader__.load({
 
     /* -------------------------------------------------------- Boundaries Tab */
 
-    // === [module: src/client/tabs/tasks.js] ===
+    // === [module: src/client/tabs/tasks-widgets.js] ===
     /**
-     * tabs/tasks.js
+     * src/client/tabs/tasks-widgets.js — 任务抽屉详情、快捷添加行与基础任务行组件
      *
-     * Tasks tab: TaskInspectorDrawer, AddTask, TaskRow, pyramid topology, and TasksTab.
+     * 【核心职责】
+     *   承载任务检验底部抽屉（`TaskInspectorDrawer`）、人类可读解释助手（`explainTaskMeaning`）、
+     *   内联新增表单（`AddTask`）与任务列表行（`TaskRow`）。
+     *
+     * 【边界约定】
+     *   - 只负责通用任务条目与编辑抽屉组件，不含金字塔组织树或顺序工作流拓扑。
      */
 
 
@@ -18393,6 +18692,1760 @@ window.__ModuleLoader__.load({
       )
     }
 
+    // === [module: src/client/tabs/tasks-pyramid.js] ===
+    /**
+     * src/client/tabs/tasks-pyramid.js — 可展开金字塔组织树与可选 SVG 全景画布渲染器
+     *
+     * 【核心职责】
+     *   1. `renderGrandPyramidView(ctx)`：渲染按主代理/子代理分层且支持渐进展开的组织树视图。
+     *   2. `computeTaskPyramidLayout(ctx)` 与 `createPyramidSvgRenderers(ctx)`：计算与绘制全景 SVG 节点/连线。
+     *
+     * 【边界与 Hook 安全】
+     *   - 所有函数均为纯渲染辅助函数（不直接持有 `useState`/`useEffect`），所有状态由 `tabs/tasks.js` 的
+     *     `TasksTab` 统一持有并通过 `ctx` 传入，保证 React Hook 调用顺序与重构前 100% 一致。
+     */
+
+
+    function computeTaskPyramidLayout(ctx) {
+      const {
+        filterAgent,
+        hier,
+        tasks,
+        childrenOf,
+        focusedTask,
+        focusInfo,
+        focusedAgentSet,
+        focusedTaskScopeSet,
+        AGENT_W,
+        AGENT_H,
+        LEAD_W,
+        LEAD_H,
+        TASK_W,
+        TASK_H,
+        FOLD_W,
+        FOLD_H,
+        H_GAP,
+        V_GAP,
+        isLR,
+        collapsed,
+        tasksByAgent,
+      } = ctx
+
+      const pNodes = []
+      const pNodeById = new Map()
+      const taskNodeByTaskId = new Map()
+      const agentNodeByName = new Map()
+      const visitedTasks = new Set()
+      const visitedAgents = new Set()
+
+      const buildTaskSubtree = (task, tier) => {
+        if (!task || visitedTasks.has(task.id)) return null
+        visitedTasks.add(task.id)
+        const nodeKey = 'task:' + task.id
+        const allKids = childrenOf(task.id)
+        const isCol = collapsed.has(nodeKey)
+        const childNodes = isCol
+          ? []
+          : allKids.map(k => buildTaskSubtree(k, tier + 1)).filter(Boolean)
+
+        const isHighlighted = focusedTaskScopeSet.has(task.id)
+          || task.status === 'doing'
+          || task.status === 'blocked'
+
+        const node = {
+          id: nodeKey,
+          kind: 'task',
+          task,
+          tier,
+          w: TASK_W,
+          h: TASK_H,
+          x: 0,
+          y: 0,
+          span: 0,
+          kidCount: allKids.length,
+          hiddenKids: isCol ? allKids.length : 0,
+          childNodes,
+          activeBranch: isHighlighted || childNodes.some(c => c.activeBranch),
+          focusBranch: focusedTaskScopeSet.has(task.id) || childNodes.some(c => c.focusBranch),
+        }
+        pNodeById.set(nodeKey, node)
+        taskNodeByTaskId.set(task.id, node)
+        pNodes.push(node)
+        return node
+      }
+
+      const buildAgentSubtree = (agentObj, tier) => {
+        if (!agentObj || visitedAgents.has(agentObj.name)) return null
+        visitedAgents.add(agentObj.name)
+        const nodeKey = 'agent:' + agentObj.name
+        const isCol = collapsed.has(nodeKey)
+
+        const rawSubAgents = (hier.kidsMap.get(agentObj.name) || []).filter(a => !visitedAgents.has(a.name))
+        const directTasks = tasksByAgent.get(agentObj.name) || []
+
+        let childNodes = []
+        if (!isCol) {
+          const subAgentNodes = buildAgentTierChildren(agentObj.name, rawSubAgents, tier + 1)
+          const taskNodes = directTasks.map(t => buildTaskSubtree(t, tier + 1)).filter(Boolean)
+          childNodes = [...subAgentNodes, ...taskNodes]
+        }
+
+        const totalKids = rawSubAgents.length + directTasks.length
+        const isAgentFocused = focusedAgentSet.has(agentObj.name)
+        const isRunning = agentObj.status === 'running'
+
+        const node = {
+          id: nodeKey,
+          kind: 'agent',
+          agent: agentObj,
+          tier,
+          w: AGENT_W,
+          h: AGENT_H,
+          x: 0,
+          y: 0,
+          span: 0,
+          kidCount: totalKids,
+          hiddenKids: isCol ? totalKids : 0,
+          childNodes,
+          activeBranch: isRunning || isAgentFocused || childNodes.some(c => c.activeBranch),
+          focusBranch: isAgentFocused || childNodes.some(c => c.focusBranch),
+        }
+        pNodeById.set(nodeKey, node)
+        agentNodeByName.set(agentObj.name, node)
+        pNodes.push(node)
+        return node
+      }
+
+      function buildAgentTierChildren(parentKey, agentList, tier) {
+        if (!agentList.length) return []
+        const sorted = [...agentList].sort((a, b) => {
+          const fa = focusedAgentSet.has(a.name) ? 1 : 0
+          const fb = focusedAgentSet.has(b.name) ? 1 : 0
+          if (fa !== fb) return fb - fa
+          const ra = a.status === 'running' ? 1 : 0
+          const rb = b.status === 'running' ? 1 : 0
+          if (ra !== rb) return rb - ra
+          const ta = (tasksByAgent.get(a.name) || []).length
+          const tb = (tasksByAgent.get(b.name) || []).length
+          return tb - ta
+        })
+
+        if (store.pyramidShowAllAgents || sorted.length <= 8) {
+          return sorted.map(a => buildAgentSubtree(a, tier)).filter(Boolean)
+        }
+
+        const isImportant = a => (
+          a.status === 'running'
+          || focusedAgentSet.has(a.name)
+          || (filterAgent && a.name === filterAgent)
+          || (tasksByAgent.get(a.name) || []).length > 0
+          || (hier.kidsMap.get(a.name) || []).length > 0
+        )
+        const important = sorted.filter(isImportant)
+        const shownAgents = important.length > 0 ? important : sorted.slice(0, 4)
+        const hiddenIdle = sorted.filter(a => !shownAgents.includes(a))
+        const out = shownAgents.map(a => buildAgentSubtree(a, tier)).filter(Boolean)
+
+        if (hiddenIdle.length > 0) {
+          const foldId = 'fold:' + parentKey
+          const foldNode = {
+            id: foldId,
+            kind: 'fold',
+            parentKey,
+            hiddenAgents: hiddenIdle,
+            tier,
+            w: FOLD_W,
+            h: FOLD_H,
+            x: 0,
+            y: 0,
+            span: 0,
+            kidCount: 0,
+            hiddenKids: 0,
+            childNodes: [],
+            activeBranch: false,
+            focusBranch: false,
+          }
+          pNodeById.set(foldId, foldNode)
+          pNodes.push(foldNode)
+          out.push(foldNode)
+        }
+        return out
+      }
+
+      const tier1Agents = !filterAgent
+        ? (hier.kidsMap.get('lead') || [])
+        : hier.children.filter(a => a.name === filterAgent)
+      const leadDirectTasks = tasksByAgent.get('lead') || []
+      const leadCollapsed = collapsed.has('agent:lead')
+      const leadAgentKids = leadCollapsed ? [] : buildAgentTierChildren('lead', tier1Agents, 1)
+      const leadTaskKids = leadCollapsed ? [] : leadDirectTasks.map(t => buildTaskSubtree(t, 1)).filter(Boolean)
+
+      if (!leadCollapsed) {
+        for (const t of tasks) {
+          if (!visitedTasks.has(t.id)) {
+            const extra = buildTaskSubtree(t, 1)
+            if (extra) leadTaskKids.push(extra)
+          }
+        }
+      }
+
+      const leadChildren = [...leadAgentKids, ...leadTaskKids]
+      const leadTotalKids = tier1Agents.length + leadDirectTasks.length
+      const isLeadFocused = Boolean(focusInfo && focusInfo.includeLead)
+
+      const apexNode = {
+        id: 'agent:lead',
+        kind: 'lead',
+        agent: hier.leadEntry || { name: 'lead', status: hier.children.some(a => a.status === 'running') ? 'running' : 'idle' },
+        tier: 0,
+        w: LEAD_W,
+        h: LEAD_H,
+        x: 0,
+        y: 0,
+        span: 0,
+        kidCount: leadTotalKids,
+        hiddenKids: leadCollapsed ? leadTotalKids : 0,
+        childNodes: leadChildren,
+        activeBranch: true,
+        focusBranch: isLeadFocused || leadChildren.some(c => c.focusBranch),
+      }
+      pNodeById.set(apexNode.id, apexNode)
+      agentNodeByName.set('lead', apexNode)
+      pNodes.push(apexNode)
+
+      const measureSpan = node => {
+        const ownBreadth = isLR ? node.h : node.w
+        const gap = isLR ? 16 : H_GAP
+        if (!node.childNodes || !node.childNodes.length) {
+          node.span = ownBreadth
+          return node.span
+        }
+        let childrenSpan = 0
+        node.childNodes.forEach((c, idx) => {
+          if (idx > 0) childrenSpan += gap
+          childrenSpan += measureSpan(c)
+        })
+        node.span = Math.max(ownBreadth, childrenSpan)
+        return node.span
+      }
+      measureSpan(apexNode)
+
+      const padBreadth = 24
+      const padDepth = 22
+      const placeSubtree = (node, startBreadth, depthPx) => {
+        const ownBreadth = isLR ? node.h : node.w
+        const ownDepth = isLR ? node.w : node.h
+        const gap = isLR ? 16 : H_GAP
+        const centerB = startBreadth + node.span / 2
+
+        if (isLR) {
+          node.x = depthPx
+          node.y = Math.round(centerB - ownBreadth / 2)
+        } else {
+          node.x = Math.round(centerB - ownBreadth / 2)
+          node.y = depthPx
+        }
+
+        if (node.childNodes && node.childNodes.length) {
+          const totalKidsSpan = node.childNodes.reduce((acc, c) => acc + c.span, 0) + gap * (node.childNodes.length - 1)
+          let curB = centerB - totalKidsSpan / 2
+          const nextDepthPx = depthPx + ownDepth + V_GAP
+          for (const c of node.childNodes) {
+            placeSubtree(c, curB, nextDepthPx)
+            curB += c.span + gap
+          }
+        }
+      }
+      placeSubtree(apexNode, padBreadth, padDepth)
+
+      const depEdges = []
+      for (const node of pNodes) {
+        if (node.kind !== 'task' || !node.task) continue
+        const deps = Array.isArray(node.task.blockedBy) ? node.task.blockedBy : []
+        for (const depId of deps) {
+          const fromNode = taskNodeByTaskId.get(depId)
+          if (fromNode && fromNode !== node) {
+            depEdges.push({
+              from: fromNode,
+              to: node,
+              satisfied: fromNode.task.status === 'done',
+            })
+          }
+        }
+      }
+
+      let spotlight = null
+      if (focusedTask && focusInfo) {
+        let framedNodes = pNodes.filter(n => n.kind === 'agent' && focusedAgentSet.has(n.agent.name))
+        if (framedNodes.length === 0 && focusInfo.includeLead) {
+          const ftNode = taskNodeByTaskId.get(focusedTask.id)
+          framedNodes = [apexNode, ...(ftNode ? [ftNode] : [])]
+        }
+        if (framedNodes.length > 0) {
+          const minX = Math.min(...framedNodes.map(n => n.x)) - 14
+          const minY = Math.min(...framedNodes.map(n => n.y)) - 28
+          const maxX = Math.max(...framedNodes.map(n => n.x + n.w)) + 14
+          const maxY = Math.max(...framedNodes.map(n => n.y + n.h)) + 12
+          const isBlockedFocus = focusedTask.status === 'blocked'
+          const agentCount = framedNodes.filter(n => n.kind === 'agent').length
+          const badgeLabel = (isBlockedFocus ? '⚠ 卡住了 · ' : '🎯 进行中 · ')
+            + (agentCount > 0 ? `${agentCount} 个子代理` : '主对话自己在做')
+            + ' ▸ ' + clampTitle(focusedTask.title || focusedTask.id, 12)
+          spotlight = {
+            x: minX,
+            y: minY,
+            w: Math.max(196, maxX - minX),
+            h: maxY - minY,
+            color: isBlockedFocus ? '#ff453a' : '#409cff',
+            isBlocked: isBlockedFocus,
+            badgeLabel,
+            agentCount,
+          }
+        }
+      }
+
+      return { pNodes, apexNode, depEdges, spotlight }
+    }
+
+    function renderGrandPyramidView(ctx) {
+      const {
+        board,
+        allTasks,
+        allById,
+        filterAgent,
+        statusFilter,
+        hier,
+        tasks,
+        childrenOf,
+        isRoot,
+        focusedTask,
+        focusInfo,
+        focusedAgentSet,
+        focusedTaskScopeSet,
+        collapsed,
+        setContextMenu,
+        pyrOpenNodes,
+        setPyrOpenNodes,
+        pyrOpenDetails,
+        pyrOpenDoneGroups,
+        setPyrOpenDoneGroups,
+        pyrRootRef,
+        togglePyrNode,
+        togglePyrDetail,
+        tasksByAgent,
+        spotlight,
+        doneTotal,
+        doingTotal,
+        blockedTotal,
+        triggerAiPlanGraph,
+      } = ctx
+
+    const markTaskSubtreeVisited = (taskList, visitedTaskIds) => {
+      for (const t of taskList || []) {
+        if (!t || visitedTaskIds.has(t.id)) continue
+        visitedTaskIds.add(t.id)
+        markTaskSubtreeVisited(childrenOf(t.id), visitedTaskIds)
+      }
+    }
+
+    const markAgentSubtreeVisited = (agentObj, visitedAgents, visitedTaskIds) => {
+      if (!agentObj || visitedAgents.has(agentObj.name)) return
+      visitedAgents.add(agentObj.name)
+      markTaskSubtreeVisited(tasksByAgent.get(agentObj.name) || [], visitedTaskIds)
+      const subAgents = hier.kidsMap.get(agentObj.name) || []
+      for (const sa of subAgents) markAgentSubtreeVisited(sa, visitedAgents, visitedTaskIds)
+    }
+
+    const renderTreeTaskList = (list, visitedTaskIds, groupKey) => {
+      const cleanList = (list || []).filter(t => t && !visitedTaskIds.has(t.id))
+      if (!cleanList.length) return null
+      const rankTreeTask = t => (t.status === 'blocked' ? 0 : t.status === 'doing' ? 1 : 2)
+      const activeItems = cleanList.filter(t => t.status !== 'done').sort((a, b) => rankTreeTask(a) - rankTreeTask(b))
+      const doneItems = cleanList.filter(t => t.status === 'done')
+      const foldDone = doneItems.length > 0 && statusFilter !== 'done' && activeItems.length > 0
+      const doneExpanded = Boolean(
+        pyrOpenDoneGroups[groupKey]
+        || doneItems.some(t => t.id === store.selectedTaskId || t.id === store.focusTaskId),
+      )
+
+      if (foldDone && !doneExpanded) {
+        markTaskSubtreeVisited(doneItems, visitedTaskIds)
+      }
+
+      const wrapTaskItem = t => {
+        const tTone = t.status === 'blocked' ? 'blocked' : t.status === 'doing' ? 'doing' : t.status === 'done' ? 'done' : undefined
+        return h(
+          'div',
+          { key: 'tr-' + t.id, className: 'dnb-pyr-subitem', 'data-tone': tTone },
+          renderGrandTaskCard(t, visitedTaskIds),
+        )
+      }
+
+      return h(
+        React.Fragment,
+        null,
+        activeItems.map(wrapTaskItem),
+        doneItems.length > 0
+          ? foldDone
+            ? h(
+                'div',
+                { key: 'df-' + groupKey, className: 'dnb-flow-done-fold', style: { marginTop: 2 } },
+                h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dnb-flow-done-fold-btn',
+                    'data-open': doneExpanded ? '1' : '0',
+                    onClick: () => setPyrOpenDoneGroups(prev => ({ ...prev, [groupKey]: !doneExpanded })),
+                  },
+                  h(
+                    'span',
+                    { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
+                    h(Icon, { name: 'check', size: 11, style: { color: '#22c55e' } }),
+                    bi(`已完成 ${doneItems.length} 项任务`, `${doneItems.length} done tasks`),
+                  ),
+                  h('span', { className: 'dnb-flow-done-fold-hint' }, doneExpanded ? bi('收起 ▴', 'Hide ▴') : bi('展开 ▾', 'Show ▾')),
+                ),
+                doneExpanded ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 5 } }, doneItems.map(wrapTaskItem)) : null,
+              )
+            : doneItems.map(wrapTaskItem)
+          : null,
+      )
+    }
+
+    const renderGrandTaskCard = (task, visitedTaskIds) => {
+      if (!task || visitedTaskIds.has(task.id)) return null
+      visitedTaskIds.add(task.id)
+      const nodeKey = 'task:' + task.id
+      const kids = childrenOf(task.id)
+      const isSelected = store.selectedTaskId === task.id
+      const isFocusedTarget = store.focusTaskId === task.id
+      const inFocusScope = focusedTaskScopeSet.has(task.id)
+      const isDoing = task.status === 'doing'
+      const isBlocked = task.status === 'blocked'
+      const isDone = task.status === 'done'
+      const nextStatus = STATUSES[(STATUSES.indexOf(task.status) + 1) % STATUSES.length]
+
+      const rawAgent = task.subagent || task.owner || ''
+      const showAgentTag = rawAgent && !GENERIC_OWNERS.has(String(rawAgent).toLowerCase())
+      const matchedAgent = hier.matchAgentRef(rawAgent)
+      const deps = Array.isArray(task.blockedBy) ? task.blockedBy : []
+      const unresolvedDeps = deps.map(id => allById.get(id) || { id, title: id }).filter(d => !d.status || d.status !== 'done')
+      const doneDeps = deps.map(id => allById.get(id)).filter(d => d && d.status === 'done')
+
+      const spotlightKind = (focusedTask && inFocusScope)
+        ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing')
+        : ''
+      const dimmed = focusedTask && !inFocusScope && !kids.some(k => focusedTaskScopeSet.has(k.id))
+
+      const detailOpen = pyrOpenDetails.has(nodeKey) || isSelected || isFocusedTarget
+      const kidsOpen = kids.length > 0 && (
+        pyrOpenNodes.has(nodeKey)
+        || kids.some(k => focusedTaskScopeSet.has(k.id) || k.id === store.selectedTaskId)
+      )
+      if (!kidsOpen && kids.length > 0) {
+        markTaskSubtreeVisited(kids, visitedTaskIds)
+      }
+
+      const handleToggleDetail = () => {
+        if (detailOpen) {
+          if (isSelected) patch({ selectedTaskId: '', editTaskId: '' })
+          if (pyrOpenDetails.has(nodeKey)) togglePyrDetail(nodeKey)
+        } else {
+          togglePyrDetail(nodeKey)
+        }
+      }
+
+      return h(
+        'div',
+        {
+          key: nodeKey,
+          'data-pyr-spotlight': isFocusedTarget ? '1' : undefined,
+          style: { minWidth: 0, opacity: dimmed ? 0.42 : 1, transition: 'opacity 0.2s ease' },
+        },
+        h(
+          'div',
+          {
+            className: 'dnb-pyr-task-card dnb-pyr-tree-node',
+            'data-status': task.status || 'todo',
+            'data-spotlight': spotlightKind || undefined,
+            'data-open': detailOpen ? '1' : '0',
+            onContextMenu: e => {
+              e.preventDefault()
+              e.stopPropagation()
+              setContextMenu({ taskId: task.id, task, x: e.clientX, y: e.clientY })
+            },
+          },
+          // Compact 1-line Tree Node Header (click row to pull open detail & actions)
+          h(
+            'div',
+            {
+              className: 'dnb-pyr-node-head',
+              onClick: handleToggleDetail,
+              title: detailOpen ? '收起详情' : '展开详情和操作',
+            },
+            kids.length > 0
+              ? h('button', {
+                  type: 'button',
+                  className: 'dnb-flow-mini-btn',
+                  style: { width: 18, height: 18, flexShrink: 0 },
+                  title: kidsOpen ? '收起子任务' : `展开 ${kids.length} 项子任务`,
+                  onClick: e => {
+                    e.stopPropagation()
+                    togglePyrNode(nodeKey)
+                  },
+                }, h(Icon, {
+                  name: 'chevron',
+                  size: 11,
+                  style: { transform: kidsOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' },
+                }))
+              : null,
+            h(
+              'button',
+              {
+                type: 'button',
+                className: 'dnb-ring',
+                style: isDone
+                  ? { width: 16, height: 16, background: '#22c55e', borderColor: '#22c55e', color: '#fff', flexShrink: 0 }
+                  : { width: 16, height: 16, borderColor: STATUS_HEX[task.status] || STATUS_HEX.todo, flexShrink: 0 },
+                title: '标为 ' + (STATUS_LABEL[nextStatus] || nextStatus),
+                onClick: e => {
+                  e.stopPropagation()
+                  void act({ action: 'task.update', id: task.id, status: nextStatus })
+                },
+              },
+              isDone
+                ? h(Icon, { name: 'check', size: 9.5 })
+                : isDoing
+                  ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8.5px', color: '#3b82f6' } })
+                  : null,
+            ),
+            h(
+              'span',
+              {
+                className: 'dnb-pyr-node-title',
+                'data-done': isDone ? '1' : '0',
+              },
+              task.title || task.id,
+            ),
+            showAgentTag
+              ? h('span', {
+                  className: 'dnb-tag',
+                  style: { fontSize: 9.5, color: 'var(--dnb-accent)', padding: '0 5px', flexShrink: 0 },
+                }, '@' + clampTitle(shortAgentName(rawAgent), 10))
+              : null,
+            unresolvedDeps.length > 0
+              ? h('span', {
+                  className: 'dnb-tag',
+                  style: { fontSize: 9.5, background: 'rgba(245, 158, 11, 0.16)', color: '#fbbf24', flexShrink: 0 },
+                  title: '还有前面没做完的任务在等',
+                }, `⏳${unresolvedDeps.length}`)
+              : null,
+            kids.length > 0
+              ? h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, bi(`${kids.length}子项`, `${kids.length} sub`))
+              : null,
+            h('span', { className: 'dnb-pyr-detail-pill' }, detailOpen ? bi('收起 ▴', 'Hide ▴') : bi('详情 ▾', 'Details ▾')),
+          ),
+
+          // Expanded Pull-Open Detail Drawer (hidden by default!)
+          detailOpen
+            ? h(
+                'div',
+                { className: 'dnb-pyr-node-detail', onClick: e => e.stopPropagation() },
+                (showAgentTag || unresolvedDeps.length > 0 || doneDeps.length > 0 || task.intent || task.evidence || task.note || (Array.isArray(task.assumptions) && task.assumptions.length > 0))
+                  ? h(
+                      'div',
+                      { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+                      (showAgentTag || unresolvedDeps.length > 0 || doneDeps.length > 0)
+                        ? h(
+                            'div',
+                            { style: { display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' } },
+                            showAgentTag
+                              ? h('span', { className: 'dnb-tag', style: { color: 'var(--dnb-accent)', fontWeight: 600, fontSize: 10.5 } }, '@' + shortAgentName(rawAgent))
+                              : null,
+                            unresolvedDeps.map(d =>
+                              h('span', {
+                                key: d.id,
+                                className: 'dnb-tag',
+                                style: { background: 'rgba(245, 158, 11, 0.16)', color: '#fbbf24', fontSize: 10.5 },
+                              }, '⏳ 先等做完：' + clampTitle(d.title || d.id, 14)),
+                            ),
+                            doneDeps.map(d =>
+                              h('span', {
+                                key: d.id,
+                                className: 'dnb-tag',
+                                style: { background: STATUS_BG.done, color: '#30d158', fontSize: 10.5 },
+                              }, '✓ 已准备好：' + clampTitle(d.title || d.id, 12)),
+                            ),
+                          )
+                        : null,
+                      task.intent ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, '目的 · ' + task.intent) : null,
+                      task.evidence ? h('div', { style: { fontSize: 11.5, color: '#30d158', lineHeight: 1.42, wordBreak: 'break-word' } }, '结论 · ' + task.evidence) : null,
+                      task.note ? h('div', { style: { fontSize: 11.5, color: isBlocked ? '#ff6961' : 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, task.note) : null,
+                      Array.isArray(task.assumptions) && task.assumptions.length > 0
+                        ? h(
+                            'div',
+                            { style: { display: 'flex', flexDirection: 'column', gap: 3, marginTop: 2 } },
+                            task.assumptions.map((assum, idx) =>
+                              h(
+                                'div',
+                                { key: idx, style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 } },
+                                h('button', {
+                                  className: 'dnb-ring',
+                                  style: {
+                                    width: 15,
+                                    height: 15,
+                                    ...(assum.verified ? { background: '#30d158', borderColor: '#30d158' } : { borderColor: '#f59e0b' }),
+                                  },
+                                  onClick: e => {
+                                    e.stopPropagation()
+                                    if (!assum.verified) void act({ action: 'task.verify', id: task.id, assumptionIndex: idx })
+                                  },
+                                }, assum.verified ? h(Icon, { name: 'check', size: 9 }) : null),
+                                h('span', { style: assum.verified ? { textDecoration: 'line-through', opacity: 0.58 } : null }, assum.text),
+                              ),
+                            ),
+                          )
+                        : null,
+                    )
+                  : null,
+
+                h(
+                  'div',
+                  { className: 'dnb-pyr-st-row', style: { marginTop: 2 } },
+                  STATUSES.map(st =>
+                    h(
+                      'button',
+                      {
+                        key: st,
+                        type: 'button',
+                        className: 'dnb-pyr-st-btn',
+                        'data-st': st,
+                        'data-active': task.status === st ? '1' : '0',
+                        onClick: () => { if (task.status !== st) void act({ action: 'task.update', id: task.id, status: st }) },
+                      },
+                      h('span', { style: { width: 5.5, height: 5.5, borderRadius: '50%', background: STATUS_HEX[st] } }),
+                      st === 'done' ? '已完成' : STATUS_LABEL[st],
+                    ),
+                  ),
+                ),
+
+                h(
+                  'div',
+                  { className: 'dnb-pyr-act-row' },
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-pyr-act-btn',
+                    'data-accent': '1',
+                    title: '用大白话解释这条任务',
+                    onClick: () => explainTaskMeaning(task, board),
+                  }, h(Icon, { name: 'sparkles', size: 11 }), '解释'),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-pyr-act-btn',
+                    title: '让子代理开始或继续做这件事',
+                    onClick: () => void act({
+                      action: 'task.dispatch',
+                      id: task.id,
+                      agent: rawAgent || ('worker-' + String(task.id).slice(-4)),
+                    }),
+                  }, h(Icon, { name: 'play', size: 10.5 }), isDoing ? '唤醒' : '派发'),
+                  isDoing && showAgentTag
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-pyr-act-btn',
+                        'data-danger': '1',
+                        onClick: () => void act({ action: 'team.interrupt', id: task.id, agent: rawAgent }),
+                      }, h(Icon, { name: 'stop', size: 10.5 }), '停止')
+                    : null,
+                  matchedAgent && matchedAgent.id
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-pyr-act-btn',
+                        onClick: () => { if (!openSubagentChat(matchedAgent)) patch({ notice: '这个子代理没有单独的聊天窗口' }) },
+                      }, h(Icon, { name: 'chat', size: 11 }), '对话')
+                    : null,
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-pyr-act-btn',
+                    style: isFocusedTarget ? { borderColor: '#409cff', color: '#409cff', background: 'rgba(10,132,255,0.14)' } : undefined,
+                    onClick: () => focusObjectiveInPyramid(isFocusedTarget ? '' : task.id),
+                  }, h(Icon, { name: 'target', size: 11 }), isFocusedTarget ? '已高亮' : '高亮'),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-pyr-act-btn',
+                    onClick: () => {
+                      if (isSelected) patch({ selectedTaskId: '', editTaskId: '' })
+                      else openTaskEditor(task)
+                    },
+                  }, h(Icon, { name: 'edit', size: 11 }), isSelected ? '收起编辑' : '编辑'),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-pyr-act-btn',
+                    'data-danger': '1',
+                    onClick: () => {
+                      if (store.selectedTaskId === task.id) patch({ selectedTaskId: '', editTaskId: '' })
+                      if (store.focusTaskId === task.id) patch({ focusTaskId: '' })
+                      void act({ action: 'task.remove', id: task.id })
+                    },
+                  }, h(Icon, { name: 'trash', size: 11 }), '删除'),
+                ),
+
+                isSelected ? h(TaskInspectorDrawer, { board, task }) : null,
+              )
+            : null,
+        ),
+
+        // Nested Child Sub-tasks connected with vertical spine (expanded on demand)
+        kidsOpen
+          ? h(
+              'div',
+              {
+                className: 'dnb-pyr-subtree',
+                'data-tone': isBlocked ? 'blocked' : isDoing ? 'doing' : undefined,
+              },
+              renderTreeTaskList(kids, visitedTaskIds, 'task-kids:' + task.id),
+            )
+          : null,
+      )
+    }
+
+    const renderGrandAgentSubtree = (agentObj, tier, visitedAgents, visitedTaskIds) => {
+      if (!agentObj || visitedAgents.has(agentObj.name)) return null
+      visitedAgents.add(agentObj.name)
+
+      const nodeKey = 'agent:' + agentObj.name
+      const isRunning = agentObj.status === 'running'
+      const isAgentFocused = focusedAgentSet.has(agentObj.name)
+      const isFiltered = store.filterAgent === agentObj.name
+      const subAgents = (hier.kidsMap.get(agentObj.name) || []).filter(a => !visitedAgents.has(a.name))
+      const directTasks = tasksByAgent.get(agentObj.name) || []
+      const totalKids = subAgents.length + directTasks.length
+      const tierLabel = tier === 1 ? '一级代理' : `${tier}级代理`
+      const desc = agentObj.taskTitle || agentObj.description || (isRunning ? '正在干活…' : (directTasks.length ? `手头 ${directTasks.length} 项任务` : '空闲 / 已完成'))
+
+      const focusTone = isAgentFocused
+        ? (focusedTask && focusedTask.status === 'blocked' ? 'blocked' : 'doing')
+        : ''
+      const spineTone = focusTone || (isRunning ? 'live' : undefined)
+
+      const detailOpen = pyrOpenDetails.has(nodeKey) || isAgentFocused
+      const childrenOpen = totalKids > 0 && (
+        pyrOpenNodes.has(nodeKey)
+        || isAgentFocused
+        || subAgents.some(sa => focusedAgentSet.has(sa.name))
+        || directTasks.some(t => focusedTaskScopeSet.has(t.id) || t.id === store.selectedTaskId)
+      )
+      if (!childrenOpen && totalKids > 0) {
+        markTaskSubtreeVisited(directTasks, visitedTaskIds)
+        for (const sa of subAgents) markAgentSubtreeVisited(sa, visitedAgents, visitedTaskIds)
+      }
+
+      return h(
+        'div',
+        { key: nodeKey, style: { minWidth: 0 } },
+        h(
+          'div',
+          {
+            className: 'dnb-pyr-agent-card dnb-pyr-tree-node',
+            'data-running': isRunning ? '1' : '0',
+            'data-focused': focusTone || undefined,
+            'data-open': detailOpen ? '1' : '0',
+          },
+          // Compact 1-Line Agent Tree Header
+          h(
+            'div',
+            {
+              className: 'dnb-pyr-node-head',
+              onClick: () => togglePyrDetail(nodeKey),
+              title: detailOpen ? '收起操作' : '展开详情和操作',
+            },
+            totalKids > 0
+              ? h('button', {
+                  type: 'button',
+                  className: 'dnb-flow-mini-btn',
+                  style: { width: 18, height: 18, flexShrink: 0 },
+                  title: childrenOpen ? '收起下面负责的任务' : `展开 ${totalKids} 个下级任务`,
+                  onClick: e => {
+                    e.stopPropagation()
+                    togglePyrNode(nodeKey)
+                  },
+                }, h(Icon, {
+                  name: 'chevron',
+                  size: 11,
+                  style: { transform: childrenOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' },
+                }))
+              : null,
+            isRunning
+              ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8.5px', color: '#409cff' } })
+              : h('span', {
+                  style: {
+                    width: 7,
+                    height: 7,
+                    borderRadius: '50%',
+                    background: focusTone === 'blocked' ? '#ff453a' : focusTone === 'doing' ? '#409cff' : 'var(--dnb-text-3)',
+                    flexShrink: 0,
+                  },
+                }),
+            h(Icon, { name: 'agentSub', size: 11.5, style: { color: '#34d399', flexShrink: 0 } }),
+            h('span', { style: { fontWeight: 700, fontSize: 12, color: 'var(--dnb-text)', whiteSpace: 'nowrap' } },
+              '@' + shortAgentName(agentObj.name, tier > 1)),
+            agentObj.reasoningEffort
+              ? h('span', { className: 'dnb-chat-effort-badge', style: { fontSize: 9.5 } }, `🧠${agentObj.reasoningEffort}`)
+              : null,
+            h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, isRunning ? '运行中' : tierLabel),
+            totalKids > 0
+              ? h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, bi(`${totalKids} 项`, `${totalKids}`))
+              : null,
+            !detailOpen && desc
+              ? h('span', { className: 'dnb-acc-preview', style: { fontSize: 11 } }, desc)
+              : null,
+            h('span', { className: 'dnb-pyr-detail-pill' }, detailOpen ? bi('收起 ▴', 'Hide ▴') : bi('详情 ▾', 'Details ▾')),
+          ),
+
+          // Expanded Pull-Open Agent Details & Action Strip
+          detailOpen
+            ? h(
+                'div',
+                { className: 'dnb-pyr-node-detail', onClick: e => e.stopPropagation() },
+                desc
+                  ? h('div', { style: { fontSize: 11.5, color: isRunning ? '#409cff' : 'var(--dnb-text-2)', lineHeight: 1.4, wordBreak: 'break-word' } }, desc)
+                  : null,
+                h(
+                  'div',
+                  { className: 'dnb-pyr-act-row', style: { marginTop: 2 } },
+                  agentObj.id
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-pyr-act-btn',
+                        'data-accent': '1',
+                        title: bi('分屏打开这个子代理的聊天窗口', 'Open subagent chat in split view'),
+                        onClick: () => {
+                          if (!openSubagentChat(agentObj)) patch({ notice: bi('这个子代理没有单独的聊天窗口', 'No dedicated chat for this subagent') })
+                        },
+                      }, h(Icon, { name: 'chat', size: 11 }), bi('分屏对话', 'Split Chat'))
+                    : null,
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-pyr-act-btn',
+                    title: bi('选中它，在底栏输入框直接发消息', 'Target this subagent in bottom input'),
+                    onClick: () => {
+                      patch({
+                        secTarget: agentObj.name,
+                        secMode: isRunning ? 'steer' : 'followup',
+                        notice: bi('已选中 @', 'Selected @') + shortAgentName(agentObj.name, true) + bi('，在下面输入回车发送', ', type below and press Enter'),
+                      })
+                      focusSecInput()
+                    },
+                  }, h(Icon, { name: 'send', size: 10.5 }), bi('@递话', '@Relay')),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-pyr-act-btn',
+                    style: isFiltered ? { borderColor: 'var(--dnb-accent)', color: 'var(--dnb-accent)' } : undefined,
+                    onClick: () => patch({ filterAgent: isFiltered ? '' : agentObj.name }),
+                  }, isFiltered ? bi('显示全员', 'Show All') : bi('只看TA', 'Focus Only')),
+                  isRunning
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-pyr-act-btn',
+                        'data-danger': '1',
+                        onClick: () => void act({ action: 'team.interrupt', agent: agentObj.name }),
+                      }, h(Icon, { name: 'stop', size: 10.5 }), bi('停止', 'Stop'))
+                    : null,
+                ),
+              )
+            : null,
+        ),
+
+        // Vertical Tree Spine connecting Tier-2+ subagents & this agent's assigned tasks (expanded on demand)
+        childrenOpen
+          ? h(
+              'div',
+              { className: 'dnb-pyr-subtree', 'data-tone': spineTone },
+              subAgents.map(sa =>
+                h(
+                  'div',
+                  {
+                    key: 'sa-' + sa.name,
+                    className: 'dnb-pyr-subitem',
+                    'data-tone': focusedAgentSet.has(sa.name) ? (focusedTask && focusedTask.status === 'blocked' ? 'blocked' : 'doing') : undefined,
+                  },
+                  renderGrandAgentSubtree(sa, tier + 1, visitedAgents, visitedTaskIds),
+                ),
+              ),
+              renderTreeTaskList(directTasks, visitedTaskIds, 'agent:' + agentObj.name),
+            )
+          : null,
+      )
+    }
+
+    const renderGrandPyramid = () => {
+      const visitedAgents = new Set()
+      const visitedTaskIds = new Set()
+
+      const rawTier1Agents = !filterAgent
+        ? (hier.kidsMap.get('lead') || [])
+        : hier.children.filter(a => a.name === filterAgent)
+      const sortedTier1Agents = [...rawTier1Agents].sort((a, b) => {
+        const fa = focusedAgentSet.has(a.name) ? 1 : 0
+        const fb = focusedAgentSet.has(b.name) ? 1 : 0
+        if (fa !== fb) return fb - fa
+        const ra = a.status === 'running' ? 1 : 0
+        const rb = b.status === 'running' ? 1 : 0
+        if (ra !== rb) return rb - ra
+        const ta = (tasksByAgent.get(a.name) || []).length
+        const tb = (tasksByAgent.get(b.name) || []).length
+        return tb - ta
+      })
+
+      // Pre-mark tasks claimed by subagents so leftover tasks under Lead are crisp & deduplicated
+      const claimedTaskIds = new Set()
+      const markSubtreeClaimed = taskList => {
+        for (const t of taskList) {
+          if (!t || claimedTaskIds.has(t.id)) continue
+          claimedTaskIds.add(t.id)
+          markSubtreeClaimed(childrenOf(t.id))
+        }
+      }
+      for (const a of hier.children) {
+        markSubtreeClaimed(tasksByAgent.get(a.name) || [])
+      }
+      const leadDirectRoots = [
+        ...(tasksByAgent.get('lead') || []),
+        ...tasks.filter(t => !claimedTaskIds.has(t.id) && !(tasksByAgent.get('lead') || []).includes(t) && isRoot(t)),
+      ]
+
+      const runningKidsCount = hier.children.filter(a => a.status === 'running').length
+      const isLeadSpotlight = Boolean(focusedTask && focusInfo && focusInfo.includeLead && focusedAgentSet.size === 0)
+      const apexSpotlightTone = isLeadSpotlight ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing') : ''
+      const trunkTone = focusedTask
+        ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing')
+        : (blockedTotal > 0 ? 'blocked' : doingTotal > 0 ? 'doing' : runningKidsCount > 0 ? 'live' : '')
+
+      const treeItems = []
+
+      for (const ag of sortedTier1Agents) {
+        const descAgents = hier.descendantsOf(ag.name)
+        const branchHasSpotlight = Boolean(
+          focusedTask && (focusedAgentSet.has(ag.name) || descAgents.some(d => focusedAgentSet.has(d.name))),
+        )
+        const spotTone = branchHasSpotlight
+          ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing')
+          : ''
+        const colTone = spotTone || (ag.status === 'running' ? 'live' : '')
+        const dimmedBranch = Boolean(focusedTask && !branchHasSpotlight)
+
+        treeItems.push(
+          h(
+            'div',
+            {
+              key: 'col-agent-' + ag.name,
+              className: 'dnb-pyr-subitem',
+              'data-tone': colTone || undefined,
+              'data-pyr-spotlight': branchHasSpotlight ? '1' : undefined,
+              style: { opacity: dimmedBranch ? 0.38 : 1 },
+            },
+            branchHasSpotlight
+              ? h(
+                  'div',
+                  { className: 'dnb-pyr-spot-tag', 'data-blocked': spotTone === 'blocked' ? '1' : '0' },
+                  spotTone === 'blocked' ? '⚠ 卡在这个代理 · @' + shortAgentName(ag.name, true) : '🎯 正在做 · @' + shortAgentName(ag.name, true),
+                )
+              : null,
+            renderGrandAgentSubtree(ag, 1, visitedAgents, visitedTaskIds),
+          ),
+        )
+      }
+
+      if (leadDirectRoots.length > 0) {
+        if (sortedTier1Agents.length === 0) {
+          treeItems.push(renderTreeTaskList(leadDirectRoots, visitedTaskIds, 'lead-direct-root'))
+        } else {
+          const leadGroupInSpot = Boolean(focusedTask && leadDirectRoots.some(t => focusedTaskScopeSet.has(t.id)))
+          const spotTone = leadGroupInSpot ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing') : ''
+          const groupKey = 'lead-direct-group'
+          const groupDetailOpen = pyrOpenDetails.has(groupKey)
+          const groupOpen = pyrOpenNodes.has(groupKey) || leadGroupInSpot || leadDirectRoots.some(t => t.id === store.selectedTaskId)
+          if (!groupOpen) {
+            markTaskSubtreeVisited(leadDirectRoots, visitedTaskIds)
+          }
+          treeItems.push(
+            h(
+              'div',
+              {
+                key: 'col-lead-direct',
+                className: 'dnb-pyr-subitem',
+                'data-tone': spotTone || undefined,
+                'data-pyr-spotlight': leadGroupInSpot ? '1' : undefined,
+                style: { opacity: (focusedTask && !leadGroupInSpot) ? 0.42 : 1 },
+              },
+              h(
+                'div',
+                { className: 'dnb-pyr-agent-card dnb-pyr-tree-node', 'data-focused': spotTone || undefined, 'data-open': groupDetailOpen ? '1' : '0' },
+                h(
+                  'div',
+                  { className: 'dnb-pyr-node-head', onClick: () => togglePyrDetail(groupKey) },
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-flow-mini-btn',
+                    style: { width: 18, height: 18, flexShrink: 0 },
+                    title: groupOpen ? '收起主对话任务' : `展开 ${leadDirectRoots.length} 项主对话任务`,
+                    onClick: e => {
+                      e.stopPropagation()
+                      togglePyrNode(groupKey)
+                    },
+                  }, h(Icon, {
+                    name: 'chevron',
+                    size: 11,
+                    style: { transform: groupOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' },
+                  })),
+                  h(Icon, { name: 'agentLead', size: 12, style: { color: '#60a5fa', flexShrink: 0 } }),
+                  h('span', { style: { fontWeight: 700, fontSize: 12, color: 'var(--dnb-text)' } }, bi('主对话自己做的任务', 'Main Chat Tasks')),
+                  h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, bi(`${leadDirectRoots.length} 项`, `${leadDirectRoots.length}`)),
+                  h('span', { className: 'dnb-pyr-detail-pill' }, groupDetailOpen ? bi('收起 ▴', 'Hide ▴') : bi('操作 ▾', 'Actions ▾')),
+                ),
+                groupDetailOpen
+                  ? h(
+                      'div',
+                      { className: 'dnb-pyr-node-detail', onClick: e => e.stopPropagation() },
+                      h(
+                        'div',
+                        { className: 'dnb-pyr-act-row' },
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-pyr-act-btn',
+                          onClick: () => {
+                            patch({ secTarget: 'lead', secMode: 'steer', notice: bi('已选中 @主对话，在下面发消息', 'Selected @Lead') })
+                            focusSecInput()
+                          },
+                        }, h(Icon, { name: 'send', size: 10.5 }), bi('@主对话', '@Lead')),
+                      ),
+                    )
+                  : null,
+              ),
+              groupOpen
+                ? h(
+                    'div',
+                    { className: 'dnb-pyr-subtree', 'data-tone': spotTone || undefined },
+                    renderTreeTaskList(leadDirectRoots, visitedTaskIds, groupKey),
+                  )
+                : null,
+            ),
+          )
+        }
+      }
+
+      // Catch any cycle/leftover tasks so nothing ever disappears
+      const leftovers = tasks.filter(t => !visitedTaskIds.has(t.id))
+      for (const lf of leftovers) {
+        treeItems.push(
+          h(
+            'div',
+            { key: 'col-lf-' + lf.id, className: 'dnb-pyr-subitem' },
+            renderGrandTaskCard(lf, visitedTaskIds),
+          ),
+        )
+      }
+
+      const leadOpen = pyrOpenNodes.has('agent:lead') || Boolean(focusedTask)
+      const toggleLeadOpen = () => {
+        if (treeItems.length === 0) return
+        if (leadOpen) {
+          setPyrOpenNodes(prev => {
+            const next = new Set(prev)
+            next.delete('agent:lead')
+            return next
+          })
+          if (store.focusTaskId) patch({ focusTaskId: '' })
+        } else {
+          setPyrOpenNodes(prev => {
+            const next = new Set(prev)
+            next.add('agent:lead')
+            return next
+          })
+        }
+      }
+
+      return h(
+        'div',
+        { ref: pyrRootRef, className: 'dnb-pyr-root' },
+        // Tier 0 Compact Apex Node (`👑 主代理 · 总指挥`, click anywhere on card to expand/collapse)
+        h(
+          'div',
+          {
+            className: 'dnb-pyr-apex',
+            'data-spotlight': apexSpotlightTone || undefined,
+            style: treeItems.length > 0 ? { cursor: 'pointer' } : undefined,
+            title: treeItems.length > 0
+              ? (leadOpen ? bi('收起下面的子代理和任务', 'Collapse tasks & subagents') : bi('展开下面的子代理和任务', 'Expand tasks & subagents'))
+              : undefined,
+            onClick: treeItems.length > 0 ? toggleLeadOpen : undefined,
+          },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 } },
+              treeItems.length > 0
+                ? h('button', {
+                    type: 'button',
+                    className: 'dnb-flow-mini-btn',
+                    style: { width: 18, height: 18, flexShrink: 0 },
+                    title: leadOpen ? bi('收起组织树下一级', 'Collapse org tree') : bi('展开组织树下一级', 'Expand org tree'),
+                    onClick: e => {
+                      e.stopPropagation()
+                      toggleLeadOpen()
+                    },
+                  }, h(Icon, {
+                    name: 'chevron',
+                    size: 11,
+                    style: { transform: leadOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' },
+                  }))
+                : null,
+              h('span', {
+                style: {
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 4,
+                  height: 20,
+                  padding: '0 8px',
+                  borderRadius: 99,
+                  background: 'rgba(10, 132, 255, 0.18)',
+                  color: '#409cff',
+                  fontSize: 11,
+                  fontWeight: 700,
+                },
+              }, bi('👑 主代理', '👑 Lead')),
+              runningKidsCount > 0
+                ? h('span', { className: 'dnb-acc-count', style: { color: '#409cff' } }, bi(`${runningKidsCount} 运行`, `${runningKidsCount} active`))
+                : null,
+              doingTotal > 0
+                ? h('span', { className: 'dnb-acc-count', style: { color: '#409cff' } }, bi(`${doingTotal} 进行中`, `${doingTotal} doing`))
+                : null,
+              blockedTotal > 0
+                ? h('span', { className: 'dnb-acc-count', style: { color: '#ff453a' } }, bi(`${blockedTotal} 卡住`, `${blockedTotal} blocked`))
+                : null,
+              doneTotal > 0
+                ? h('span', { className: 'dnb-acc-count', style: { color: '#30d158' } }, bi(`${doneTotal}/${allTasks.length} 完成`, `${doneTotal}/${allTasks.length} done`))
+                : null,
+            ),
+            h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
+              h('button', {
+                type: 'button',
+                className: 'dnb-mini-btn',
+                'data-tone': 'accent',
+                style: { height: 22, padding: '0 7px', fontSize: 10.5 },
+                title: bi('让主对话把目标拆成步骤，分给子代理做', 'Break goal into steps and assign subagents'),
+                onClick: e => {
+                  e.stopPropagation()
+                  triggerAiPlanGraph()
+                },
+              }, h(Icon, { name: 'sparkles', size: 10.5 }), bi('拆解', 'Plan')),
+              treeItems.length > 0
+                ? h('span', { className: 'dnb-acc-pull-hint' }, leadOpen ? bi('收起 ▴', 'Hide ▴') : bi('展开 ▾', 'Show ▾'))
+                : null,
+            ),
+          ),
+          (board && board.objective)
+            ? h('div', {
+                style: {
+                  marginTop: 5,
+                  fontSize: 11.5,
+                  color: 'var(--dnb-text-2)',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                },
+                title: board.objective,
+              }, '🎯 ' + board.objective)
+            : null,
+        ),
+
+        // Expandable Vertical Tree under Apex (collapsed by default, click Apex card to pull open)
+        (leadOpen && treeItems.length > 0)
+          ? h(
+              'div',
+              { className: 'dnb-pyr-tree-list', 'data-tone': trunkTone || undefined },
+              treeItems,
+            )
+          : null,
+      )
+    }
+
+      return renderGrandPyramid()
+    }
+
+    function createPyramidSvgRenderers(ctx) {
+      const {
+        board,
+        allById,
+        filterAgent,
+        hier,
+        focusedTask,
+        focusInfo,
+        focusedAgentSet,
+        focusedTaskScopeSet,
+        NODE_R,
+        isLR,
+        collapsed,
+        hoveredId,
+        setHoveredId,
+        setContextMenu,
+        toggleCollapse,
+        spotlight,
+        doneTotal,
+        doingTotal,
+        blockedTotal,
+      } = ctx
+
+    const isNodeInSpotlight = node => {
+      if (!focusedTask) return true
+      if (node.kind === 'lead') return Boolean(focusInfo && (focusInfo.includeLead || focusInfo.agentNames.length > 0))
+      if (node.kind === 'agent') return focusedAgentSet.has(node.agent.name)
+      if (node.kind === 'task') return focusedTaskScopeSet.has(node.task.id)
+      return false
+    }
+
+    const renderPyramidConnectors = parent => {
+      const kids = parent.childNodes || []
+      if (!kids.length) return null
+      const els = []
+
+      if (!isLR) {
+        const px = Math.round(parent.x + parent.w / 2)
+        const py = parent.y + parent.h
+        const minCy = Math.min(...kids.map(k => k.y))
+        const midY = Math.round(py + (minCy - py) * 0.5)
+        const firstCx = Math.round(kids[0].x + kids[0].w / 2)
+        const lastCx = Math.round(kids[kids.length - 1].x + kids[kids.length - 1].w / 2)
+        const baseDim = focusedTask && !parent.focusBranch
+
+        els.push(h('path', {
+          key: `stem-${parent.id}`,
+          d: `M ${px} ${py} V ${midY}`,
+          fill: 'none',
+          stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
+          strokeWidth: 1.65,
+          opacity: baseDim ? 0.25 : 0.9,
+        }))
+
+        const barMinX = Math.min(px, firstCx)
+        const barMaxX = Math.max(px, lastCx)
+        if (barMaxX - barMinX > 1) {
+          els.push(h('path', {
+            key: `bar-${parent.id}`,
+            d: `M ${barMinX} ${midY} H ${barMaxX}`,
+            fill: 'none',
+            stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
+            strokeWidth: 1.65,
+            opacity: baseDim ? 0.25 : 0.9,
+          }))
+        }
+
+        for (const kid of kids) {
+          const cx = Math.round(kid.x + kid.w / 2)
+          const cy = kid.y
+          const isFocusEdge = Boolean(focusedTask && kid.focusBranch)
+          const isLiveEdge = !focusedTask && (
+            (kid.kind === 'agent' && kid.agent.status === 'running')
+            || (kid.kind === 'task' && (kid.task.status === 'doing' || kid.task.status === 'blocked'))
+          )
+
+          els.push(h('path', {
+            key: `drop-${parent.id}-${kid.id}`,
+            d: `M ${cx} ${midY} V ${cy}`,
+            fill: 'none',
+            stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
+            strokeWidth: 1.65,
+            opacity: (focusedTask && !isFocusEdge) ? 0.22 : 0.9,
+          }))
+
+          if (isFocusEdge || isLiveEdge) {
+            const hiColor = isFocusEdge
+              ? (focusedTask.status === 'blocked' ? '#ff453a' : '#0a84ff')
+              : (kid.kind === 'task' && kid.task.status === 'blocked' ? '#ff453a' : '#0a84ff')
+            els.push(h('path', {
+              key: `hi-${parent.id}-${kid.id}`,
+              d: `M ${px} ${py} V ${midY} H ${cx} V ${cy}`,
+              fill: 'none',
+              stroke: hiColor,
+              strokeWidth: 2.3,
+              strokeLinejoin: 'round',
+              opacity: 0.95,
+            }))
+          }
+
+          els.push(h('circle', {
+            key: `dot-${kid.id}`,
+            cx,
+            cy,
+            r: isFocusEdge ? 3.2 : 2.3,
+            fill: isFocusEdge
+              ? (focusedTask.status === 'blocked' ? '#ff453a' : '#0a84ff')
+              : 'var(--dnb-border-strong, rgba(165,165,178,0.75))',
+            opacity: (focusedTask && !isFocusEdge) ? 0.25 : 1,
+          }))
+        }
+      } else {
+        const px = parent.x + parent.w
+        const py = Math.round(parent.y + parent.h / 2)
+        const minCx = Math.min(...kids.map(k => k.x))
+        const midX = Math.round(px + (minCx - px) * 0.5)
+        const firstCy = Math.round(kids[0].y + kids[0].h / 2)
+        const lastCy = Math.round(kids[kids.length - 1].y + kids[kids.length - 1].h / 2)
+        const barMinY = Math.min(py, firstCy)
+        const barMaxY = Math.max(py, lastCy)
+
+        els.push(h('path', {
+          key: `stem-lr-${parent.id}`,
+          d: `M ${px} ${py} H ${midX}`,
+          fill: 'none',
+          stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
+          strokeWidth: 1.6,
+        }))
+        if (barMaxY - barMinY > 1) {
+          els.push(h('path', {
+            key: `bar-lr-${parent.id}`,
+            d: `M ${midX} ${barMinY} V ${barMaxY}`,
+            fill: 'none',
+            stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
+            strokeWidth: 1.6,
+          }))
+        }
+        for (const kid of kids) {
+          const cx = kid.x
+          const cy = Math.round(kid.y + kid.h / 2)
+          const isFocusEdge = Boolean(focusedTask && kid.focusBranch)
+          els.push(h('path', {
+            key: `drop-lr-${parent.id}-${kid.id}`,
+            d: `M ${midX} ${cy} H ${cx}`,
+            fill: 'none',
+            stroke: isFocusEdge ? '#0a84ff' : 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
+            strokeWidth: isFocusEdge ? 2.2 : 1.6,
+          }))
+        }
+      }
+      return els
+    }
+
+    const renderDepEdge = edge => {
+      const { from, to, satisfied } = edge
+      const dimmed = focusedTask && !(focusedTaskScopeSet.has(from.task.id) || focusedTaskScopeSet.has(to.task.id))
+      const sameRow = Math.abs(from.y - to.y) < 14
+      const x1 = sameRow ? (from.x < to.x ? from.x + from.w : from.x) : from.x + from.w / 2
+      const y1 = sameRow ? from.y + from.h / 2 : from.y + from.h
+      const x2 = sameRow ? (from.x < to.x ? to.x : to.x + to.w) : to.x + to.w / 2
+      const y2 = sameRow ? to.y + to.h / 2 : to.y
+      const d = sameRow
+        ? `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${Math.min(y1, y2) - 22}, ${x2} ${y2}`
+        : `M ${x1} ${y1} C ${x1 + 18} ${(y1 + y2) / 2}, ${x2 - 18} ${(y1 + y2) / 2}, ${x2} ${y2}`
+      return h('path', {
+        key: 'dep-' + from.id + '-' + to.id,
+        d,
+        fill: 'none',
+        stroke: satisfied ? '#30d158' : '#f59e0b',
+        strokeWidth: 1.5,
+        strokeDasharray: satisfied ? '3 2.5' : '5 3.5',
+        markerEnd: satisfied ? 'url(#dnb-arrow-done)' : 'url(#dnb-arrow-wait)',
+        opacity: dimmed ? 0.18 : 0.88,
+      })
+    }
+
+    const renderPyramidNode = node => {
+      const { x, y, w, h: nh, kidCount, hiddenKids } = node
+      const isCol = collapsed.has(node.id)
+      const dimmed = focusedTask && !isNodeInSpotlight(node)
+
+      if (node.kind === 'lead') {
+        const objTitle = (board && board.objective)
+          ? clampTitle(board.objective, 13.5)
+          : `推进 ${doingTotal} · 受阻 ${blockedTotal} · 完成 ${doneTotal}`
+        const runningKids = hier.children.filter(a => a.status === 'running').length
+
+        return h(
+          'g',
+          {
+            key: node.id,
+            opacity: dimmed ? 0.35 : 1,
+            style: { cursor: 'pointer', transition: 'opacity 0.2s ease' },
+            onClick: e => {
+              e.stopPropagation()
+              if (store.filterAgent || store.focusTaskId) patch({ filterAgent: '', focusTaskId: '' })
+            },
+          },
+          h('rect', {
+            x, y, width: w, height: nh, rx: NODE_R + 2,
+            fill: 'var(--dnb-elevated, #2a2a30)',
+            stroke: 'rgba(10, 132, 255, 0.58)',
+            strokeWidth: 1.8,
+          }),
+          h('rect', {
+            x: x + 10, y: y + 9, width: 64, height: 17, rx: 8.5,
+            fill: 'rgba(10, 132, 255, 0.18)',
+          }),
+          h('text', {
+            x: x + 42, y: y + 21,
+            textAnchor: 'middle',
+            fill: '#409cff',
+            fontSize: 10.5,
+            fontWeight: 700,
+          }, '👑 主代理'),
+          runningKids > 0
+            ? h('text', {
+                x: x + w - 12, y: y + 21,
+                textAnchor: 'end',
+                fill: '#409cff',
+                fontSize: 10,
+                fontWeight: 600,
+              }, `${runningKids} 运行中`)
+            : null,
+          h('text', {
+            x: x + 12, y: y + 43,
+            fill: 'var(--dnb-text, #f2f2f7)',
+            fontSize: 11.5,
+            fontWeight: 500,
+          }, objTitle),
+          kidCount > 0
+            ? h(
+                'g',
+                { onClick: e => { e.stopPropagation(); toggleCollapse(node.id) } },
+                h('rect', {
+                  x: x + w - 32, y: y + 32, width: 24, height: 16, rx: 8,
+                  fill: 'var(--dnb-fill, rgba(120,120,128,0.24))',
+                }),
+                h('text', {
+                  x: x + w - 20, y: y + 43,
+                  textAnchor: 'middle',
+                  fill: 'var(--dnb-text-2, #ebebf5)',
+                  fontSize: 10,
+                  fontWeight: 600,
+                }, (isCol ? '+' : '−') + (hiddenKids || kidCount)),
+              )
+            : null,
+        )
+      }
+
+      if (node.kind === 'fold') {
+        return h(
+          'g',
+          {
+            key: node.id,
+            opacity: dimmed ? 0.22 : 0.9,
+            style: { cursor: 'pointer' },
+            onClick: e => { e.stopPropagation(); patch({ pyramidShowAllAgents: true }) },
+          },
+          h('rect', {
+            x, y, width: w, height: nh, rx: NODE_R,
+            fill: 'var(--dsw-alias-bg-layer-2, #202024)',
+            stroke: 'var(--dnb-border-strong, rgba(140,140,150,0.45))',
+            strokeWidth: 1.2,
+            strokeDasharray: '4 3',
+          }),
+          h('text', {
+            x: x + w / 2, y: y + 20,
+            textAnchor: 'middle',
+            fill: 'var(--dnb-text-2, #aeaeb2)',
+            fontSize: 11.5,
+            fontWeight: 600,
+          }, `+${node.hiddenAgents.length} 个空闲助手`),
+          h('text', {
+            x: x + w / 2, y: y + 35,
+            textAnchor: 'middle',
+            fill: 'var(--dnb-accent, #0a84ff)',
+            fontSize: 10,
+          }, '点这里展开'),
+        )
+      }
+
+      if (node.kind === 'agent') {
+        const ag = node.agent
+        const isRunning = ag.status === 'running'
+        const isAgentFocused = focusedAgentSet.has(ag.name)
+        const isFiltered = store.filterAgent === ag.name
+        const tierLabel = node.tier === 1 ? '一级代理' : `${node.tier}级代理`
+        const accent = isAgentFocused
+          ? (focusedTask && focusedTask.status === 'blocked' ? '#ff453a' : '#0a84ff')
+          : isRunning
+            ? '#0a84ff'
+            : 'var(--dnb-border-strong, rgba(140,140,150,0.4))'
+        const desc = ag.taskTitle || ag.description || (isRunning ? '正在干活…' : '空闲 / 已完成')
+
+        return h(
+          'g',
+          {
+            key: node.id,
+            opacity: dimmed ? 0.24 : 1,
+            style: { cursor: 'pointer', transition: 'opacity 0.2s ease' },
+            onMouseEnter: () => setHoveredId(node.id),
+            onMouseLeave: () => setHoveredId(''),
+            onClick: e => {
+              e.stopPropagation()
+              if (ag.id && e.detail === 2) {
+                openSubagentChat(ag)
+                return
+              }
+              patch({ filterAgent: isFiltered ? '' : ag.name })
+            },
+          },
+          (isRunning || isAgentFocused)
+            ? h('rect', {
+                className: 'dnb-pulse-ring',
+                x: x - 2.5, y: y - 2.5, width: w + 5, height: nh + 5, rx: NODE_R + 2,
+                fill: 'none',
+                stroke: isAgentFocused ? accent : '#0a84ff',
+                strokeWidth: 1.8,
+              })
+            : null,
+          h('rect', {
+            x, y, width: w, height: nh, rx: NODE_R,
+            fill: isAgentFocused
+              ? (focusedTask && focusedTask.status === 'blocked' ? 'rgba(255,69,58,0.12)' : 'rgba(10,132,255,0.12)')
+              : 'var(--dsw-alias-bg-layer-2, #232328)',
+            stroke: isAgentFocused || isRunning || isFiltered ? accent : 'var(--dnb-border)',
+            strokeWidth: isAgentFocused ? 2.1 : (isRunning || isFiltered ? 1.6 : 1.1),
+          }),
+          isRunning
+            ? h('circle', {
+                className: 'dnb-svg-spin',
+                cx: x + 13, cy: y + 18, r: 4,
+                fill: 'none',
+                stroke: '#409cff',
+                strokeWidth: 1.6,
+                strokeDasharray: '16 9',
+              })
+            : h('circle', {
+                cx: x + 13, cy: y + 18, r: 4,
+                fill: isAgentFocused ? accent : 'var(--dnb-text-3)',
+              }),
+          h('text', {
+            x: x + 23, y: y + 22,
+            fill: 'var(--dnb-text, #f2f2f7)',
+            fontSize: 11.5,
+            fontWeight: 600,
+          }, '@' + clampTitle(shortAgentName(ag.name, true), 8.2)),
+          h('text', {
+            x: x + w - 9, y: y + 21,
+            textAnchor: 'end',
+            fill: isAgentFocused ? accent : 'var(--dnb-text-3, #8e8e93)',
+            fontSize: 9.5,
+            fontWeight: 600,
+          }, tierLabel),
+          h('text', {
+            x: x + 12, y: y + 40,
+            fill: isRunning ? '#409cff' : 'var(--dnb-text-2, #98989d)',
+            fontSize: 10.5,
+          }, clampTitle(desc, 12)),
+          kidCount > 0
+            ? h(
+                'g',
+                { onClick: e => { e.stopPropagation(); toggleCollapse(node.id) } },
+                h('rect', {
+                  x: x + w - 32, y: y + 30, width: 24, height: 15, rx: 7.5,
+                  fill: 'var(--dnb-fill, rgba(120,120,128,0.22))',
+                }),
+                h('text', {
+                  x: x + w - 20, y: y + 41,
+                  textAnchor: 'middle',
+                  fill: 'var(--dnb-text-2, #ebebf5)',
+                  fontSize: 9.5,
+                  fontWeight: 600,
+                }, (isCol ? '+' : '−') + (hiddenKids || kidCount)),
+              )
+            : null,
+        )
+      }
+
+      const { task } = node
+      const color = STATUS_HEX[task.status] || STATUS_HEX.todo
+      const badgeBg = STATUS_BG[task.status] || STATUS_BG.todo
+      const badgeText = STATUS_BADGE[task.status] || STATUS_LABEL[task.status] || task.status
+      const isSelected = store.selectedTaskId === task.id
+      const isFocusedTarget = store.focusTaskId === task.id
+      const isDoing = task.status === 'doing'
+      const isBlocked = task.status === 'blocked'
+      const isDone = task.status === 'done'
+      const unresolvedDepCount = (Array.isArray(task.blockedBy) ? task.blockedBy : []).filter(id => {
+        const d = allById.get(id)
+        return d && d.status !== 'done'
+      }).length
+
+      return h(
+        'g',
+        {
+          key: node.id,
+          opacity: dimmed ? 0.25 : 1,
+          onMouseEnter: () => setHoveredId(node.id),
+          onMouseLeave: () => setHoveredId(''),
+          onClick: e => {
+            e.stopPropagation()
+            const nextSel = isSelected ? '' : task.id
+            if (isDoing || isBlocked) {
+              patch({
+                selectedTaskId: nextSel,
+                focusTaskId: isFocusedTarget && !nextSel ? '' : task.id,
+              })
+            } else {
+              patch({ selectedTaskId: nextSel })
+            }
+          },
+          onContextMenu: e => {
+            e.preventDefault()
+            e.stopPropagation()
+            patch({ selectedTaskId: task.id })
+            setContextMenu({ taskId: task.id, task, x: e.clientX, y: e.clientY })
+          },
+          style: { cursor: 'pointer', transition: 'opacity 0.2s ease' },
+        },
+        (isDoing || isBlocked)
+          ? h('rect', {
+              className: 'dnb-pulse-ring',
+              x: x - 3, y: y - 3, width: w + 6, height: nh + 6, rx: NODE_R + 3,
+              fill: 'none', stroke: color, strokeWidth: 2,
+            })
+          : null,
+        h('rect', {
+          x, y, width: w, height: nh, rx: NODE_R,
+          fill: isBlocked
+            ? 'rgba(255, 69, 58, 0.11)'
+            : isDoing
+              ? 'rgba(10, 132, 255, 0.09)'
+              : isSelected
+                ? 'var(--dnb-elevated, #2c2c2e)'
+                : 'var(--dsw-alias-bg-layer-2, #222225)',
+          stroke: (isSelected || isFocusedTarget || isDoing || isBlocked)
+            ? color
+            : (hoveredId === node.id ? 'var(--dnb-border-strong)' : 'var(--dnb-border)'),
+          strokeWidth: (isSelected || isFocusedTarget) ? 2.2 : ((isDoing || isBlocked) ? 1.6 : 1),
+        }),
+        h('rect', {
+          x: x + 9, y: y + 8, width: isBlocked ? 52 : (isDoing ? 66 : 60), height: 16, rx: 8,
+          fill: badgeBg,
+        }),
+        isDoing
+          ? h('circle', {
+              className: 'dnb-svg-spin',
+              cx: x + 19, y: y + 16, r: 3.6,
+              fill: 'none',
+              stroke: '#409cff',
+              strokeWidth: 1.4,
+              strokeDasharray: '14 8',
+            })
+          : null,
+        h('text', {
+          x: x + (isBlocked ? 35 : (isDoing ? 47 : 39)), y: y + 19.5,
+          textAnchor: 'middle',
+          fill: color,
+          fontSize: 9.5,
+          fontWeight: 700,
+        }, badgeText),
+        unresolvedDepCount > 0
+          ? h('text', {
+              x: x + w - 10, y: y + 19.5,
+              textAnchor: 'end',
+              fill: '#f59e0b',
+              fontSize: 9.5,
+              fontWeight: 600,
+            }, `等 ${unresolvedDepCount}`)
+          : null,
+        h('text', {
+          x: x + 11,
+          y: y + 43,
+          fill: isDone ? 'var(--dnb-text-3, #8e8e93)' : 'var(--dnb-text, #f2f2f7)',
+          fontSize: 11.8,
+          fontWeight: (isDoing || isBlocked) ? 600 : 500,
+        }, clampTitle(task.title || task.id, 12.2)),
+        kidCount > 0
+          ? h(
+              'g',
+              { onClick: e => { e.stopPropagation(); toggleCollapse(node.id) } },
+              h('rect', {
+                x: x + w - 33, y: y + 33, width: 25, height: 16, rx: 8,
+                fill: 'var(--dnb-fill, rgba(120,120,128,0.22))',
+              }),
+              h('text', {
+                x: x + w - 20.5, y: y + 44,
+                textAnchor: 'middle',
+                fill: 'var(--dnb-text-2, #ebebf5)',
+                fontSize: 10,
+                fontWeight: 600,
+              }, (isCol ? '+' : '−') + (hiddenKids || kidCount)),
+            )
+          : null,
+      )
+    }
+
+    const renderSpotlightFrame = sp => {
+      if (!sp) return null
+      const pillW = Math.min(Math.max(158, sp.w - 8), 268)
+      return h(
+        'g',
+        { key: 'pyramid-spotlight', style: { pointerEvents: 'none' } },
+        h('rect', {
+          className: 'dnb-spotlight-halo',
+          x: sp.x - 4, y: sp.y - 4, width: sp.w + 8, height: sp.h + 8, rx: 18,
+          fill: sp.isBlocked ? 'rgba(255, 69, 58, 0.08)' : 'rgba(10, 132, 255, 0.08)',
+          stroke: sp.color,
+          strokeWidth: 1,
+          opacity: 0.55,
+        }),
+        h('rect', {
+          x: sp.x, y: sp.y, width: sp.w, height: sp.h, rx: 15,
+          fill: sp.isBlocked ? 'rgba(255, 69, 58, 0.05)' : 'rgba(10, 132, 255, 0.05)',
+          stroke: sp.color,
+          strokeWidth: 2.3,
+        }),
+        h('rect', {
+          className: 'dnb-spotlight-dash',
+          x: sp.x + 3.5, y: sp.y + 3.5, width: Math.max(0, sp.w - 7), height: Math.max(0, sp.h - 7), rx: 12,
+          fill: 'none',
+          stroke: sp.color,
+          strokeWidth: 1.3,
+          opacity: 0.85,
+        }),
+        h('rect', {
+          x: sp.x + 10, y: sp.y - 11, width: pillW, height: 22, rx: 11,
+          fill: sp.color,
+        }),
+        h('text', {
+          x: sp.x + 10 + pillW / 2,
+          y: sp.y + 3.5,
+          textAnchor: 'middle',
+          fill: '#ffffff',
+          fontSize: 10.5,
+          fontWeight: 700,
+        }, sp.badgeLabel),
+      )
+    }
+
+      return {
+        isNodeInSpotlight,
+        renderPyramidConnectors,
+        renderDepEdge,
+        renderPyramidNode,
+        renderSpotlightFrame,
+      }
+    }
+
+    // === [module: src/client/tabs/tasks.js] ===
+    /**
+     * src/client/tabs/tasks.js — 任务页签主控制容器（子代理团队、工作关系图与顺序任务板）
+     *
+     * 【核心职责】
+     *   持有 `TasksTab` 的 React 状态与过滤器，编排顶部 Subagent 车队条（Zone 1）、
+     *   可折叠工作关系图（Zone 2：流程画布 / 组织树，委托给 `tasks-flow.js` 与 `tasks-pyramid.js`）、
+     *   以及顺序推进任务板（Zone 3：联合 `PlanTab` 与 `tasks-widgets.js` 的 `TaskInspectorDrawer`）。
+     *
+     * 【子模块划分】
+     *   - `tabs/tasks-widgets.js`  任务抽屉、新建行与行卡片组件
+     *   - `tabs/tasks-pyramid.js`  可展开组织树与 SVG 金字塔视图渲染器
+     *   - `tabs/tasks-flow.js`     顺序工作流管道拓扑与 SVG 画布
+     */
+
+
+
     function TasksTab({ board }) {
       const allTasks = (board && Array.isArray(board.tasks)) ? board.tasks.filter(Boolean) : []
       const allById = new Map(allTasks.map(t => [t.id, t]))
@@ -18520,283 +20573,6 @@ window.__ModuleLoader__.load({
         tasksByAgent.get(ownerKey).push(t)
       }
 
-      // Build SVG Canvas Pyramid Coordinates (used when `viewMode === 'canvas'`)
-      const layoutPyramidTree = () => {
-        const pNodes = []
-        const pNodeById = new Map()
-        const taskNodeByTaskId = new Map()
-        const agentNodeByName = new Map()
-        const visitedTasks = new Set()
-        const visitedAgents = new Set()
-
-        const buildTaskSubtree = (task, tier) => {
-          if (!task || visitedTasks.has(task.id)) return null
-          visitedTasks.add(task.id)
-          const nodeKey = 'task:' + task.id
-          const allKids = childrenOf(task.id)
-          const isCol = collapsed.has(nodeKey)
-          const childNodes = isCol
-            ? []
-            : allKids.map(k => buildTaskSubtree(k, tier + 1)).filter(Boolean)
-
-          const isHighlighted = focusedTaskScopeSet.has(task.id)
-            || task.status === 'doing'
-            || task.status === 'blocked'
-
-          const node = {
-            id: nodeKey,
-            kind: 'task',
-            task,
-            tier,
-            w: TASK_W,
-            h: TASK_H,
-            x: 0,
-            y: 0,
-            span: 0,
-            kidCount: allKids.length,
-            hiddenKids: isCol ? allKids.length : 0,
-            childNodes,
-            activeBranch: isHighlighted || childNodes.some(c => c.activeBranch),
-            focusBranch: focusedTaskScopeSet.has(task.id) || childNodes.some(c => c.focusBranch),
-          }
-          pNodeById.set(nodeKey, node)
-          taskNodeByTaskId.set(task.id, node)
-          pNodes.push(node)
-          return node
-        }
-
-        const buildAgentSubtree = (agentObj, tier) => {
-          if (!agentObj || visitedAgents.has(agentObj.name)) return null
-          visitedAgents.add(agentObj.name)
-          const nodeKey = 'agent:' + agentObj.name
-          const isCol = collapsed.has(nodeKey)
-
-          const rawSubAgents = (hier.kidsMap.get(agentObj.name) || []).filter(a => !visitedAgents.has(a.name))
-          const directTasks = tasksByAgent.get(agentObj.name) || []
-
-          let childNodes = []
-          if (!isCol) {
-            const subAgentNodes = buildAgentTierChildren(agentObj.name, rawSubAgents, tier + 1)
-            const taskNodes = directTasks.map(t => buildTaskSubtree(t, tier + 1)).filter(Boolean)
-            childNodes = [...subAgentNodes, ...taskNodes]
-          }
-
-          const totalKids = rawSubAgents.length + directTasks.length
-          const isAgentFocused = focusedAgentSet.has(agentObj.name)
-          const isRunning = agentObj.status === 'running'
-
-          const node = {
-            id: nodeKey,
-            kind: 'agent',
-            agent: agentObj,
-            tier,
-            w: AGENT_W,
-            h: AGENT_H,
-            x: 0,
-            y: 0,
-            span: 0,
-            kidCount: totalKids,
-            hiddenKids: isCol ? totalKids : 0,
-            childNodes,
-            activeBranch: isRunning || isAgentFocused || childNodes.some(c => c.activeBranch),
-            focusBranch: isAgentFocused || childNodes.some(c => c.focusBranch),
-          }
-          pNodeById.set(nodeKey, node)
-          agentNodeByName.set(agentObj.name, node)
-          pNodes.push(node)
-          return node
-        }
-
-        function buildAgentTierChildren(parentKey, agentList, tier) {
-          if (!agentList.length) return []
-          const sorted = [...agentList].sort((a, b) => {
-            const fa = focusedAgentSet.has(a.name) ? 1 : 0
-            const fb = focusedAgentSet.has(b.name) ? 1 : 0
-            if (fa !== fb) return fb - fa
-            const ra = a.status === 'running' ? 1 : 0
-            const rb = b.status === 'running' ? 1 : 0
-            if (ra !== rb) return rb - ra
-            const ta = (tasksByAgent.get(a.name) || []).length
-            const tb = (tasksByAgent.get(b.name) || []).length
-            return tb - ta
-          })
-
-          if (store.pyramidShowAllAgents || sorted.length <= 8) {
-            return sorted.map(a => buildAgentSubtree(a, tier)).filter(Boolean)
-          }
-
-          const isImportant = a => (
-            a.status === 'running'
-            || focusedAgentSet.has(a.name)
-            || (filterAgent && a.name === filterAgent)
-            || (tasksByAgent.get(a.name) || []).length > 0
-            || (hier.kidsMap.get(a.name) || []).length > 0
-          )
-          const important = sorted.filter(isImportant)
-          const shownAgents = important.length > 0 ? important : sorted.slice(0, 4)
-          const hiddenIdle = sorted.filter(a => !shownAgents.includes(a))
-          const out = shownAgents.map(a => buildAgentSubtree(a, tier)).filter(Boolean)
-
-          if (hiddenIdle.length > 0) {
-            const foldId = 'fold:' + parentKey
-            const foldNode = {
-              id: foldId,
-              kind: 'fold',
-              parentKey,
-              hiddenAgents: hiddenIdle,
-              tier,
-              w: FOLD_W,
-              h: FOLD_H,
-              x: 0,
-              y: 0,
-              span: 0,
-              kidCount: 0,
-              hiddenKids: 0,
-              childNodes: [],
-              activeBranch: false,
-              focusBranch: false,
-            }
-            pNodeById.set(foldId, foldNode)
-            pNodes.push(foldNode)
-            out.push(foldNode)
-          }
-          return out
-        }
-
-        const tier1Agents = !filterAgent
-          ? (hier.kidsMap.get('lead') || [])
-          : hier.children.filter(a => a.name === filterAgent)
-        const leadDirectTasks = tasksByAgent.get('lead') || []
-        const leadCollapsed = collapsed.has('agent:lead')
-        const leadAgentKids = leadCollapsed ? [] : buildAgentTierChildren('lead', tier1Agents, 1)
-        const leadTaskKids = leadCollapsed ? [] : leadDirectTasks.map(t => buildTaskSubtree(t, 1)).filter(Boolean)
-
-        if (!leadCollapsed) {
-          for (const t of tasks) {
-            if (!visitedTasks.has(t.id)) {
-              const extra = buildTaskSubtree(t, 1)
-              if (extra) leadTaskKids.push(extra)
-            }
-          }
-        }
-
-        const leadChildren = [...leadAgentKids, ...leadTaskKids]
-        const leadTotalKids = tier1Agents.length + leadDirectTasks.length
-        const isLeadFocused = Boolean(focusInfo && focusInfo.includeLead)
-
-        const apexNode = {
-          id: 'agent:lead',
-          kind: 'lead',
-          agent: hier.leadEntry || { name: 'lead', status: hier.children.some(a => a.status === 'running') ? 'running' : 'idle' },
-          tier: 0,
-          w: LEAD_W,
-          h: LEAD_H,
-          x: 0,
-          y: 0,
-          span: 0,
-          kidCount: leadTotalKids,
-          hiddenKids: leadCollapsed ? leadTotalKids : 0,
-          childNodes: leadChildren,
-          activeBranch: true,
-          focusBranch: isLeadFocused || leadChildren.some(c => c.focusBranch),
-        }
-        pNodeById.set(apexNode.id, apexNode)
-        agentNodeByName.set('lead', apexNode)
-        pNodes.push(apexNode)
-
-        const measureSpan = node => {
-          const ownBreadth = isLR ? node.h : node.w
-          const gap = isLR ? 16 : H_GAP
-          if (!node.childNodes || !node.childNodes.length) {
-            node.span = ownBreadth
-            return node.span
-          }
-          let childrenSpan = 0
-          node.childNodes.forEach((c, idx) => {
-            if (idx > 0) childrenSpan += gap
-            childrenSpan += measureSpan(c)
-          })
-          node.span = Math.max(ownBreadth, childrenSpan)
-          return node.span
-        }
-        measureSpan(apexNode)
-
-        const padBreadth = 24
-        const padDepth = 22
-        const placeSubtree = (node, startBreadth, depthPx) => {
-          const ownBreadth = isLR ? node.h : node.w
-          const ownDepth = isLR ? node.w : node.h
-          const gap = isLR ? 16 : H_GAP
-          const centerB = startBreadth + node.span / 2
-
-          if (isLR) {
-            node.x = depthPx
-            node.y = Math.round(centerB - ownBreadth / 2)
-          } else {
-            node.x = Math.round(centerB - ownBreadth / 2)
-            node.y = depthPx
-          }
-
-          if (node.childNodes && node.childNodes.length) {
-            const totalKidsSpan = node.childNodes.reduce((acc, c) => acc + c.span, 0) + gap * (node.childNodes.length - 1)
-            let curB = centerB - totalKidsSpan / 2
-            const nextDepthPx = depthPx + ownDepth + V_GAP
-            for (const c of node.childNodes) {
-              placeSubtree(c, curB, nextDepthPx)
-              curB += c.span + gap
-            }
-          }
-        }
-        placeSubtree(apexNode, padBreadth, padDepth)
-
-        const depEdges = []
-        for (const node of pNodes) {
-          if (node.kind !== 'task' || !node.task) continue
-          const deps = Array.isArray(node.task.blockedBy) ? node.task.blockedBy : []
-          for (const depId of deps) {
-            const fromNode = taskNodeByTaskId.get(depId)
-            if (fromNode && fromNode !== node) {
-              depEdges.push({
-                from: fromNode,
-                to: node,
-                satisfied: fromNode.task.status === 'done',
-              })
-            }
-          }
-        }
-
-        let spotlight = null
-        if (focusedTask && focusInfo) {
-          let framedNodes = pNodes.filter(n => n.kind === 'agent' && focusedAgentSet.has(n.agent.name))
-          if (framedNodes.length === 0 && focusInfo.includeLead) {
-            const ftNode = taskNodeByTaskId.get(focusedTask.id)
-            framedNodes = [apexNode, ...(ftNode ? [ftNode] : [])]
-          }
-          if (framedNodes.length > 0) {
-            const minX = Math.min(...framedNodes.map(n => n.x)) - 14
-            const minY = Math.min(...framedNodes.map(n => n.y)) - 28
-            const maxX = Math.max(...framedNodes.map(n => n.x + n.w)) + 14
-            const maxY = Math.max(...framedNodes.map(n => n.y + n.h)) + 12
-            const isBlockedFocus = focusedTask.status === 'blocked'
-            const agentCount = framedNodes.filter(n => n.kind === 'agent').length
-            const badgeLabel = (isBlockedFocus ? '⚠ 卡住了 · ' : '🎯 进行中 · ')
-              + (agentCount > 0 ? `${agentCount} 个子代理` : '主对话自己在做')
-              + ' ▸ ' + clampTitle(focusedTask.title || focusedTask.id, 12)
-            spotlight = {
-              x: minX,
-              y: minY,
-              w: Math.max(196, maxX - minX),
-              h: maxY - minY,
-              color: isBlockedFocus ? '#ff453a' : '#409cff',
-              isBlocked: isBlockedFocus,
-              badgeLabel,
-              agentCount,
-            }
-          }
-        }
-
-        return { pNodes, apexNode, depEdges, spotlight }
-      }
 
       const planSteps = (board && Array.isArray(board.plan)) ? board.plan.filter(Boolean) : []
       const hasPyramidContent = tasks.length > 0 || hier.children.length > 0 || Boolean(board && board.objective) || planSteps.length > 0
@@ -18863,1362 +20639,37 @@ window.__ModuleLoader__.load({
         patch({ notice: sent || '请在主对话里让 AI 帮你拆出步骤' })
       }
 
-      /* ---------------- Expandable Attention-First Organization Tree ---------------- */
 
-      const markTaskSubtreeVisited = (taskList, visitedTaskIds) => {
-        for (const t of taskList || []) {
-          if (!t || visitedTaskIds.has(t.id)) continue
-          visitedTaskIds.add(t.id)
-          markTaskSubtreeVisited(childrenOf(t.id), visitedTaskIds)
-        }
-      }
-
-      const markAgentSubtreeVisited = (agentObj, visitedAgents, visitedTaskIds) => {
-        if (!agentObj || visitedAgents.has(agentObj.name)) return
-        visitedAgents.add(agentObj.name)
-        markTaskSubtreeVisited(tasksByAgent.get(agentObj.name) || [], visitedTaskIds)
-        const subAgents = hier.kidsMap.get(agentObj.name) || []
-        for (const sa of subAgents) markAgentSubtreeVisited(sa, visitedAgents, visitedTaskIds)
-      }
-
-      const renderTreeTaskList = (list, visitedTaskIds, groupKey) => {
-        const cleanList = (list || []).filter(t => t && !visitedTaskIds.has(t.id))
-        if (!cleanList.length) return null
-        const rankTreeTask = t => (t.status === 'blocked' ? 0 : t.status === 'doing' ? 1 : 2)
-        const activeItems = cleanList.filter(t => t.status !== 'done').sort((a, b) => rankTreeTask(a) - rankTreeTask(b))
-        const doneItems = cleanList.filter(t => t.status === 'done')
-        const foldDone = doneItems.length > 0 && statusFilter !== 'done' && activeItems.length > 0
-        const doneExpanded = Boolean(
-          pyrOpenDoneGroups[groupKey]
-          || doneItems.some(t => t.id === store.selectedTaskId || t.id === store.focusTaskId),
-        )
-
-        if (foldDone && !doneExpanded) {
-          markTaskSubtreeVisited(doneItems, visitedTaskIds)
-        }
-
-        const wrapTaskItem = t => {
-          const tTone = t.status === 'blocked' ? 'blocked' : t.status === 'doing' ? 'doing' : t.status === 'done' ? 'done' : undefined
-          return h(
-            'div',
-            { key: 'tr-' + t.id, className: 'dnb-pyr-subitem', 'data-tone': tTone },
-            renderGrandTaskCard(t, visitedTaskIds),
-          )
-        }
-
-        return h(
-          React.Fragment,
-          null,
-          activeItems.map(wrapTaskItem),
-          doneItems.length > 0
-            ? foldDone
-              ? h(
-                  'div',
-                  { key: 'df-' + groupKey, className: 'dnb-flow-done-fold', style: { marginTop: 2 } },
-                  h(
-                    'button',
-                    {
-                      type: 'button',
-                      className: 'dnb-flow-done-fold-btn',
-                      'data-open': doneExpanded ? '1' : '0',
-                      onClick: () => setPyrOpenDoneGroups(prev => ({ ...prev, [groupKey]: !doneExpanded })),
-                    },
-                    h(
-                      'span',
-                      { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
-                      h(Icon, { name: 'check', size: 11, style: { color: '#22c55e' } }),
-                      bi(`已完成 ${doneItems.length} 项任务`, `${doneItems.length} done tasks`),
-                    ),
-                    h('span', { className: 'dnb-flow-done-fold-hint' }, doneExpanded ? bi('收起 ▴', 'Hide ▴') : bi('展开 ▾', 'Show ▾')),
-                  ),
-                  doneExpanded ? h('div', { style: { display: 'flex', flexDirection: 'column', gap: 5, marginTop: 5 } }, doneItems.map(wrapTaskItem)) : null,
-                )
-              : doneItems.map(wrapTaskItem)
-            : null,
-        )
-      }
-
-      const renderGrandTaskCard = (task, visitedTaskIds) => {
-        if (!task || visitedTaskIds.has(task.id)) return null
-        visitedTaskIds.add(task.id)
-        const nodeKey = 'task:' + task.id
-        const kids = childrenOf(task.id)
-        const isSelected = store.selectedTaskId === task.id
-        const isFocusedTarget = store.focusTaskId === task.id
-        const inFocusScope = focusedTaskScopeSet.has(task.id)
-        const isDoing = task.status === 'doing'
-        const isBlocked = task.status === 'blocked'
-        const isDone = task.status === 'done'
-        const nextStatus = STATUSES[(STATUSES.indexOf(task.status) + 1) % STATUSES.length]
-
-        const rawAgent = task.subagent || task.owner || ''
-        const showAgentTag = rawAgent && !GENERIC_OWNERS.has(String(rawAgent).toLowerCase())
-        const matchedAgent = hier.matchAgentRef(rawAgent)
-        const deps = Array.isArray(task.blockedBy) ? task.blockedBy : []
-        const unresolvedDeps = deps.map(id => allById.get(id) || { id, title: id }).filter(d => !d.status || d.status !== 'done')
-        const doneDeps = deps.map(id => allById.get(id)).filter(d => d && d.status === 'done')
-
-        const spotlightKind = (focusedTask && inFocusScope)
-          ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing')
-          : ''
-        const dimmed = focusedTask && !inFocusScope && !kids.some(k => focusedTaskScopeSet.has(k.id))
-
-        const detailOpen = pyrOpenDetails.has(nodeKey) || isSelected || isFocusedTarget
-        const kidsOpen = kids.length > 0 && (
-          pyrOpenNodes.has(nodeKey)
-          || kids.some(k => focusedTaskScopeSet.has(k.id) || k.id === store.selectedTaskId)
-        )
-        if (!kidsOpen && kids.length > 0) {
-          markTaskSubtreeVisited(kids, visitedTaskIds)
-        }
-
-        const handleToggleDetail = () => {
-          if (detailOpen) {
-            if (isSelected) patch({ selectedTaskId: '', editTaskId: '' })
-            if (pyrOpenDetails.has(nodeKey)) togglePyrDetail(nodeKey)
-          } else {
-            togglePyrDetail(nodeKey)
-          }
-        }
-
-        return h(
-          'div',
-          {
-            key: nodeKey,
-            'data-pyr-spotlight': isFocusedTarget ? '1' : undefined,
-            style: { minWidth: 0, opacity: dimmed ? 0.42 : 1, transition: 'opacity 0.2s ease' },
-          },
-          h(
-            'div',
-            {
-              className: 'dnb-pyr-task-card dnb-pyr-tree-node',
-              'data-status': task.status || 'todo',
-              'data-spotlight': spotlightKind || undefined,
-              'data-open': detailOpen ? '1' : '0',
-              onContextMenu: e => {
-                e.preventDefault()
-                e.stopPropagation()
-                setContextMenu({ taskId: task.id, task, x: e.clientX, y: e.clientY })
-              },
-            },
-            // Compact 1-line Tree Node Header (click row to pull open detail & actions)
-            h(
-              'div',
-              {
-                className: 'dnb-pyr-node-head',
-                onClick: handleToggleDetail,
-                title: detailOpen ? '收起详情' : '展开详情和操作',
-              },
-              kids.length > 0
-                ? h('button', {
-                    type: 'button',
-                    className: 'dnb-flow-mini-btn',
-                    style: { width: 18, height: 18, flexShrink: 0 },
-                    title: kidsOpen ? '收起子任务' : `展开 ${kids.length} 项子任务`,
-                    onClick: e => {
-                      e.stopPropagation()
-                      togglePyrNode(nodeKey)
-                    },
-                  }, h(Icon, {
-                    name: 'chevron',
-                    size: 11,
-                    style: { transform: kidsOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' },
-                  }))
-                : null,
-              h(
-                'button',
-                {
-                  type: 'button',
-                  className: 'dnb-ring',
-                  style: isDone
-                    ? { width: 16, height: 16, background: '#22c55e', borderColor: '#22c55e', color: '#fff', flexShrink: 0 }
-                    : { width: 16, height: 16, borderColor: STATUS_HEX[task.status] || STATUS_HEX.todo, flexShrink: 0 },
-                  title: '标为 ' + (STATUS_LABEL[nextStatus] || nextStatus),
-                  onClick: e => {
-                    e.stopPropagation()
-                    void act({ action: 'task.update', id: task.id, status: nextStatus })
-                  },
-                },
-                isDone
-                  ? h(Icon, { name: 'check', size: 9.5 })
-                  : isDoing
-                    ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8.5px', color: '#3b82f6' } })
-                    : null,
-              ),
-              h(
-                'span',
-                {
-                  className: 'dnb-pyr-node-title',
-                  'data-done': isDone ? '1' : '0',
-                },
-                task.title || task.id,
-              ),
-              showAgentTag
-                ? h('span', {
-                    className: 'dnb-tag',
-                    style: { fontSize: 9.5, color: 'var(--dnb-accent)', padding: '0 5px', flexShrink: 0 },
-                  }, '@' + clampTitle(shortAgentName(rawAgent), 10))
-                : null,
-              unresolvedDeps.length > 0
-                ? h('span', {
-                    className: 'dnb-tag',
-                    style: { fontSize: 9.5, background: 'rgba(245, 158, 11, 0.16)', color: '#fbbf24', flexShrink: 0 },
-                    title: '还有前面没做完的任务在等',
-                  }, `⏳${unresolvedDeps.length}`)
-                : null,
-              kids.length > 0
-                ? h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, bi(`${kids.length}子项`, `${kids.length} sub`))
-                : null,
-              h('span', { className: 'dnb-pyr-detail-pill' }, detailOpen ? bi('收起 ▴', 'Hide ▴') : bi('详情 ▾', 'Details ▾')),
-            ),
-
-            // Expanded Pull-Open Detail Drawer (hidden by default!)
-            detailOpen
-              ? h(
-                  'div',
-                  { className: 'dnb-pyr-node-detail', onClick: e => e.stopPropagation() },
-                  (showAgentTag || unresolvedDeps.length > 0 || doneDeps.length > 0 || task.intent || task.evidence || task.note || (Array.isArray(task.assumptions) && task.assumptions.length > 0))
-                    ? h(
-                        'div',
-                        { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
-                        (showAgentTag || unresolvedDeps.length > 0 || doneDeps.length > 0)
-                          ? h(
-                              'div',
-                              { style: { display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' } },
-                              showAgentTag
-                                ? h('span', { className: 'dnb-tag', style: { color: 'var(--dnb-accent)', fontWeight: 600, fontSize: 10.5 } }, '@' + shortAgentName(rawAgent))
-                                : null,
-                              unresolvedDeps.map(d =>
-                                h('span', {
-                                  key: d.id,
-                                  className: 'dnb-tag',
-                                  style: { background: 'rgba(245, 158, 11, 0.16)', color: '#fbbf24', fontSize: 10.5 },
-                                }, '⏳ 先等做完：' + clampTitle(d.title || d.id, 14)),
-                              ),
-                              doneDeps.map(d =>
-                                h('span', {
-                                  key: d.id,
-                                  className: 'dnb-tag',
-                                  style: { background: STATUS_BG.done, color: '#30d158', fontSize: 10.5 },
-                                }, '✓ 已准备好：' + clampTitle(d.title || d.id, 12)),
-                              ),
-                            )
-                          : null,
-                        task.intent ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, '目的 · ' + task.intent) : null,
-                        task.evidence ? h('div', { style: { fontSize: 11.5, color: '#30d158', lineHeight: 1.42, wordBreak: 'break-word' } }, '结论 · ' + task.evidence) : null,
-                        task.note ? h('div', { style: { fontSize: 11.5, color: isBlocked ? '#ff6961' : 'var(--dnb-text-2)', lineHeight: 1.42, wordBreak: 'break-word' } }, task.note) : null,
-                        Array.isArray(task.assumptions) && task.assumptions.length > 0
-                          ? h(
-                              'div',
-                              { style: { display: 'flex', flexDirection: 'column', gap: 3, marginTop: 2 } },
-                              task.assumptions.map((assum, idx) =>
-                                h(
-                                  'div',
-                                  { key: idx, style: { display: 'flex', alignItems: 'center', gap: 6, fontSize: 11 } },
-                                  h('button', {
-                                    className: 'dnb-ring',
-                                    style: {
-                                      width: 15,
-                                      height: 15,
-                                      ...(assum.verified ? { background: '#30d158', borderColor: '#30d158' } : { borderColor: '#f59e0b' }),
-                                    },
-                                    onClick: e => {
-                                      e.stopPropagation()
-                                      if (!assum.verified) void act({ action: 'task.verify', id: task.id, assumptionIndex: idx })
-                                    },
-                                  }, assum.verified ? h(Icon, { name: 'check', size: 9 }) : null),
-                                  h('span', { style: assum.verified ? { textDecoration: 'line-through', opacity: 0.58 } : null }, assum.text),
-                                ),
-                              ),
-                            )
-                          : null,
-                      )
-                    : null,
-
-                  h(
-                    'div',
-                    { className: 'dnb-pyr-st-row', style: { marginTop: 2 } },
-                    STATUSES.map(st =>
-                      h(
-                        'button',
-                        {
-                          key: st,
-                          type: 'button',
-                          className: 'dnb-pyr-st-btn',
-                          'data-st': st,
-                          'data-active': task.status === st ? '1' : '0',
-                          onClick: () => { if (task.status !== st) void act({ action: 'task.update', id: task.id, status: st }) },
-                        },
-                        h('span', { style: { width: 5.5, height: 5.5, borderRadius: '50%', background: STATUS_HEX[st] } }),
-                        st === 'done' ? '已完成' : STATUS_LABEL[st],
-                      ),
-                    ),
-                  ),
-
-                  h(
-                    'div',
-                    { className: 'dnb-pyr-act-row' },
-                    h('button', {
-                      type: 'button',
-                      className: 'dnb-pyr-act-btn',
-                      'data-accent': '1',
-                      title: '用大白话解释这条任务',
-                      onClick: () => explainTaskMeaning(task, board),
-                    }, h(Icon, { name: 'sparkles', size: 11 }), '解释'),
-                    h('button', {
-                      type: 'button',
-                      className: 'dnb-pyr-act-btn',
-                      title: '让子代理开始或继续做这件事',
-                      onClick: () => void act({
-                        action: 'task.dispatch',
-                        id: task.id,
-                        agent: rawAgent || ('worker-' + String(task.id).slice(-4)),
-                      }),
-                    }, h(Icon, { name: 'play', size: 10.5 }), isDoing ? '唤醒' : '派发'),
-                    isDoing && showAgentTag
-                      ? h('button', {
-                          type: 'button',
-                          className: 'dnb-pyr-act-btn',
-                          'data-danger': '1',
-                          onClick: () => void act({ action: 'team.interrupt', id: task.id, agent: rawAgent }),
-                        }, h(Icon, { name: 'stop', size: 10.5 }), '停止')
-                      : null,
-                    matchedAgent && matchedAgent.id
-                      ? h('button', {
-                          type: 'button',
-                          className: 'dnb-pyr-act-btn',
-                          onClick: () => { if (!openSubagentChat(matchedAgent)) patch({ notice: '这个子代理没有单独的聊天窗口' }) },
-                        }, h(Icon, { name: 'chat', size: 11 }), '对话')
-                      : null,
-                    h('button', {
-                      type: 'button',
-                      className: 'dnb-pyr-act-btn',
-                      style: isFocusedTarget ? { borderColor: '#409cff', color: '#409cff', background: 'rgba(10,132,255,0.14)' } : undefined,
-                      onClick: () => focusObjectiveInPyramid(isFocusedTarget ? '' : task.id),
-                    }, h(Icon, { name: 'target', size: 11 }), isFocusedTarget ? '已高亮' : '高亮'),
-                    h('button', {
-                      type: 'button',
-                      className: 'dnb-pyr-act-btn',
-                      onClick: () => {
-                        if (isSelected) patch({ selectedTaskId: '', editTaskId: '' })
-                        else openTaskEditor(task)
-                      },
-                    }, h(Icon, { name: 'edit', size: 11 }), isSelected ? '收起编辑' : '编辑'),
-                    h('button', {
-                      type: 'button',
-                      className: 'dnb-pyr-act-btn',
-                      'data-danger': '1',
-                      onClick: () => {
-                        if (store.selectedTaskId === task.id) patch({ selectedTaskId: '', editTaskId: '' })
-                        if (store.focusTaskId === task.id) patch({ focusTaskId: '' })
-                        void act({ action: 'task.remove', id: task.id })
-                      },
-                    }, h(Icon, { name: 'trash', size: 11 }), '删除'),
-                  ),
-
-                  isSelected ? h(TaskInspectorDrawer, { board, task }) : null,
-                )
-              : null,
-          ),
-
-          // Nested Child Sub-tasks connected with vertical spine (expanded on demand)
-          kidsOpen
-            ? h(
-                'div',
-                {
-                  className: 'dnb-pyr-subtree',
-                  'data-tone': isBlocked ? 'blocked' : isDoing ? 'doing' : undefined,
-                },
-                renderTreeTaskList(kids, visitedTaskIds, 'task-kids:' + task.id),
-              )
-            : null,
-        )
-      }
-
-      const renderGrandAgentSubtree = (agentObj, tier, visitedAgents, visitedTaskIds) => {
-        if (!agentObj || visitedAgents.has(agentObj.name)) return null
-        visitedAgents.add(agentObj.name)
-
-        const nodeKey = 'agent:' + agentObj.name
-        const isRunning = agentObj.status === 'running'
-        const isAgentFocused = focusedAgentSet.has(agentObj.name)
-        const isFiltered = store.filterAgent === agentObj.name
-        const subAgents = (hier.kidsMap.get(agentObj.name) || []).filter(a => !visitedAgents.has(a.name))
-        const directTasks = tasksByAgent.get(agentObj.name) || []
-        const totalKids = subAgents.length + directTasks.length
-        const tierLabel = tier === 1 ? '一级代理' : `${tier}级代理`
-        const desc = agentObj.taskTitle || agentObj.description || (isRunning ? '正在干活…' : (directTasks.length ? `手头 ${directTasks.length} 项任务` : '空闲 / 已完成'))
-
-        const focusTone = isAgentFocused
-          ? (focusedTask && focusedTask.status === 'blocked' ? 'blocked' : 'doing')
-          : ''
-        const spineTone = focusTone || (isRunning ? 'live' : undefined)
-
-        const detailOpen = pyrOpenDetails.has(nodeKey) || isAgentFocused
-        const childrenOpen = totalKids > 0 && (
-          pyrOpenNodes.has(nodeKey)
-          || isAgentFocused
-          || subAgents.some(sa => focusedAgentSet.has(sa.name))
-          || directTasks.some(t => focusedTaskScopeSet.has(t.id) || t.id === store.selectedTaskId)
-        )
-        if (!childrenOpen && totalKids > 0) {
-          markTaskSubtreeVisited(directTasks, visitedTaskIds)
-          for (const sa of subAgents) markAgentSubtreeVisited(sa, visitedAgents, visitedTaskIds)
-        }
-
-        return h(
-          'div',
-          { key: nodeKey, style: { minWidth: 0 } },
-          h(
-            'div',
-            {
-              className: 'dnb-pyr-agent-card dnb-pyr-tree-node',
-              'data-running': isRunning ? '1' : '0',
-              'data-focused': focusTone || undefined,
-              'data-open': detailOpen ? '1' : '0',
-            },
-            // Compact 1-Line Agent Tree Header
-            h(
-              'div',
-              {
-                className: 'dnb-pyr-node-head',
-                onClick: () => togglePyrDetail(nodeKey),
-                title: detailOpen ? '收起操作' : '展开详情和操作',
-              },
-              totalKids > 0
-                ? h('button', {
-                    type: 'button',
-                    className: 'dnb-flow-mini-btn',
-                    style: { width: 18, height: 18, flexShrink: 0 },
-                    title: childrenOpen ? '收起下面负责的任务' : `展开 ${totalKids} 个下级任务`,
-                    onClick: e => {
-                      e.stopPropagation()
-                      togglePyrNode(nodeKey)
-                    },
-                  }, h(Icon, {
-                    name: 'chevron',
-                    size: 11,
-                    style: { transform: childrenOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' },
-                  }))
-                : null,
-              isRunning
-                ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8.5px', color: '#409cff' } })
-                : h('span', {
-                    style: {
-                      width: 7,
-                      height: 7,
-                      borderRadius: '50%',
-                      background: focusTone === 'blocked' ? '#ff453a' : focusTone === 'doing' ? '#409cff' : 'var(--dnb-text-3)',
-                      flexShrink: 0,
-                    },
-                  }),
-              h(Icon, { name: 'agentSub', size: 11.5, style: { color: '#34d399', flexShrink: 0 } }),
-              h('span', { style: { fontWeight: 700, fontSize: 12, color: 'var(--dnb-text)', whiteSpace: 'nowrap' } },
-                '@' + shortAgentName(agentObj.name, tier > 1)),
-              agentObj.reasoningEffort
-                ? h('span', { className: 'dnb-chat-effort-badge', style: { fontSize: 9.5 } }, `🧠${agentObj.reasoningEffort}`)
-                : null,
-              h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, isRunning ? '运行中' : tierLabel),
-              totalKids > 0
-                ? h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, bi(`${totalKids} 项`, `${totalKids}`))
-                : null,
-              !detailOpen && desc
-                ? h('span', { className: 'dnb-acc-preview', style: { fontSize: 11 } }, desc)
-                : null,
-              h('span', { className: 'dnb-pyr-detail-pill' }, detailOpen ? bi('收起 ▴', 'Hide ▴') : bi('详情 ▾', 'Details ▾')),
-            ),
-
-            // Expanded Pull-Open Agent Details & Action Strip
-            detailOpen
-              ? h(
-                  'div',
-                  { className: 'dnb-pyr-node-detail', onClick: e => e.stopPropagation() },
-                  desc
-                    ? h('div', { style: { fontSize: 11.5, color: isRunning ? '#409cff' : 'var(--dnb-text-2)', lineHeight: 1.4, wordBreak: 'break-word' } }, desc)
-                    : null,
-                  h(
-                    'div',
-                    { className: 'dnb-pyr-act-row', style: { marginTop: 2 } },
-                    agentObj.id
-                      ? h('button', {
-                          type: 'button',
-                          className: 'dnb-pyr-act-btn',
-                          'data-accent': '1',
-                          title: bi('分屏打开这个子代理的聊天窗口', 'Open subagent chat in split view'),
-                          onClick: () => {
-                            if (!openSubagentChat(agentObj)) patch({ notice: bi('这个子代理没有单独的聊天窗口', 'No dedicated chat for this subagent') })
-                          },
-                        }, h(Icon, { name: 'chat', size: 11 }), bi('分屏对话', 'Split Chat'))
-                      : null,
-                    h('button', {
-                      type: 'button',
-                      className: 'dnb-pyr-act-btn',
-                      title: bi('选中它，在底栏输入框直接发消息', 'Target this subagent in bottom input'),
-                      onClick: () => {
-                        patch({
-                          secTarget: agentObj.name,
-                          secMode: isRunning ? 'steer' : 'followup',
-                          notice: bi('已选中 @', 'Selected @') + shortAgentName(agentObj.name, true) + bi('，在下面输入回车发送', ', type below and press Enter'),
-                        })
-                        focusSecInput()
-                      },
-                    }, h(Icon, { name: 'send', size: 10.5 }), bi('@递话', '@Relay')),
-                    h('button', {
-                      type: 'button',
-                      className: 'dnb-pyr-act-btn',
-                      style: isFiltered ? { borderColor: 'var(--dnb-accent)', color: 'var(--dnb-accent)' } : undefined,
-                      onClick: () => patch({ filterAgent: isFiltered ? '' : agentObj.name }),
-                    }, isFiltered ? bi('显示全员', 'Show All') : bi('只看TA', 'Focus Only')),
-                    isRunning
-                      ? h('button', {
-                          type: 'button',
-                          className: 'dnb-pyr-act-btn',
-                          'data-danger': '1',
-                          onClick: () => void act({ action: 'team.interrupt', agent: agentObj.name }),
-                        }, h(Icon, { name: 'stop', size: 10.5 }), bi('停止', 'Stop'))
-                      : null,
-                  ),
-                )
-              : null,
-          ),
-
-          // Vertical Tree Spine connecting Tier-2+ subagents & this agent's assigned tasks (expanded on demand)
-          childrenOpen
-            ? h(
-                'div',
-                { className: 'dnb-pyr-subtree', 'data-tone': spineTone },
-                subAgents.map(sa =>
-                  h(
-                    'div',
-                    {
-                      key: 'sa-' + sa.name,
-                      className: 'dnb-pyr-subitem',
-                      'data-tone': focusedAgentSet.has(sa.name) ? (focusedTask && focusedTask.status === 'blocked' ? 'blocked' : 'doing') : undefined,
-                    },
-                    renderGrandAgentSubtree(sa, tier + 1, visitedAgents, visitedTaskIds),
-                  ),
-                ),
-                renderTreeTaskList(directTasks, visitedTaskIds, 'agent:' + agentObj.name),
-              )
-            : null,
-        )
-      }
-
-      const renderGrandPyramid = () => {
-        const visitedAgents = new Set()
-        const visitedTaskIds = new Set()
-
-        const rawTier1Agents = !filterAgent
-          ? (hier.kidsMap.get('lead') || [])
-          : hier.children.filter(a => a.name === filterAgent)
-        const sortedTier1Agents = [...rawTier1Agents].sort((a, b) => {
-          const fa = focusedAgentSet.has(a.name) ? 1 : 0
-          const fb = focusedAgentSet.has(b.name) ? 1 : 0
-          if (fa !== fb) return fb - fa
-          const ra = a.status === 'running' ? 1 : 0
-          const rb = b.status === 'running' ? 1 : 0
-          if (ra !== rb) return rb - ra
-          const ta = (tasksByAgent.get(a.name) || []).length
-          const tb = (tasksByAgent.get(b.name) || []).length
-          return tb - ta
-        })
-
-        // Pre-mark tasks claimed by subagents so leftover tasks under Lead are crisp & deduplicated
-        const claimedTaskIds = new Set()
-        const markSubtreeClaimed = taskList => {
-          for (const t of taskList) {
-            if (!t || claimedTaskIds.has(t.id)) continue
-            claimedTaskIds.add(t.id)
-            markSubtreeClaimed(childrenOf(t.id))
-          }
-        }
-        for (const a of hier.children) {
-          markSubtreeClaimed(tasksByAgent.get(a.name) || [])
-        }
-        const leadDirectRoots = [
-          ...(tasksByAgent.get('lead') || []),
-          ...tasks.filter(t => !claimedTaskIds.has(t.id) && !(tasksByAgent.get('lead') || []).includes(t) && isRoot(t)),
-        ]
-
-        const runningKidsCount = hier.children.filter(a => a.status === 'running').length
-        const isLeadSpotlight = Boolean(focusedTask && focusInfo && focusInfo.includeLead && focusedAgentSet.size === 0)
-        const apexSpotlightTone = isLeadSpotlight ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing') : ''
-        const trunkTone = focusedTask
-          ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing')
-          : (blockedTotal > 0 ? 'blocked' : doingTotal > 0 ? 'doing' : runningKidsCount > 0 ? 'live' : '')
-
-        const treeItems = []
-
-        for (const ag of sortedTier1Agents) {
-          const descAgents = hier.descendantsOf(ag.name)
-          const branchHasSpotlight = Boolean(
-            focusedTask && (focusedAgentSet.has(ag.name) || descAgents.some(d => focusedAgentSet.has(d.name))),
-          )
-          const spotTone = branchHasSpotlight
-            ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing')
-            : ''
-          const colTone = spotTone || (ag.status === 'running' ? 'live' : '')
-          const dimmedBranch = Boolean(focusedTask && !branchHasSpotlight)
-
-          treeItems.push(
-            h(
-              'div',
-              {
-                key: 'col-agent-' + ag.name,
-                className: 'dnb-pyr-subitem',
-                'data-tone': colTone || undefined,
-                'data-pyr-spotlight': branchHasSpotlight ? '1' : undefined,
-                style: { opacity: dimmedBranch ? 0.38 : 1 },
-              },
-              branchHasSpotlight
-                ? h(
-                    'div',
-                    { className: 'dnb-pyr-spot-tag', 'data-blocked': spotTone === 'blocked' ? '1' : '0' },
-                    spotTone === 'blocked' ? '⚠ 卡在这个代理 · @' + shortAgentName(ag.name, true) : '🎯 正在做 · @' + shortAgentName(ag.name, true),
-                  )
-                : null,
-              renderGrandAgentSubtree(ag, 1, visitedAgents, visitedTaskIds),
-            ),
-          )
-        }
-
-        if (leadDirectRoots.length > 0) {
-          if (sortedTier1Agents.length === 0) {
-            treeItems.push(renderTreeTaskList(leadDirectRoots, visitedTaskIds, 'lead-direct-root'))
-          } else {
-            const leadGroupInSpot = Boolean(focusedTask && leadDirectRoots.some(t => focusedTaskScopeSet.has(t.id)))
-            const spotTone = leadGroupInSpot ? (focusedTask.status === 'blocked' ? 'blocked' : 'doing') : ''
-            const groupKey = 'lead-direct-group'
-            const groupDetailOpen = pyrOpenDetails.has(groupKey)
-            const groupOpen = pyrOpenNodes.has(groupKey) || leadGroupInSpot || leadDirectRoots.some(t => t.id === store.selectedTaskId)
-            if (!groupOpen) {
-              markTaskSubtreeVisited(leadDirectRoots, visitedTaskIds)
-            }
-            treeItems.push(
-              h(
-                'div',
-                {
-                  key: 'col-lead-direct',
-                  className: 'dnb-pyr-subitem',
-                  'data-tone': spotTone || undefined,
-                  'data-pyr-spotlight': leadGroupInSpot ? '1' : undefined,
-                  style: { opacity: (focusedTask && !leadGroupInSpot) ? 0.42 : 1 },
-                },
-                h(
-                  'div',
-                  { className: 'dnb-pyr-agent-card dnb-pyr-tree-node', 'data-focused': spotTone || undefined, 'data-open': groupDetailOpen ? '1' : '0' },
-                  h(
-                    'div',
-                    { className: 'dnb-pyr-node-head', onClick: () => togglePyrDetail(groupKey) },
-                    h('button', {
-                      type: 'button',
-                      className: 'dnb-flow-mini-btn',
-                      style: { width: 18, height: 18, flexShrink: 0 },
-                      title: groupOpen ? '收起主对话任务' : `展开 ${leadDirectRoots.length} 项主对话任务`,
-                      onClick: e => {
-                        e.stopPropagation()
-                        togglePyrNode(groupKey)
-                      },
-                    }, h(Icon, {
-                      name: 'chevron',
-                      size: 11,
-                      style: { transform: groupOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' },
-                    })),
-                    h(Icon, { name: 'agentLead', size: 12, style: { color: '#60a5fa', flexShrink: 0 } }),
-                    h('span', { style: { fontWeight: 700, fontSize: 12, color: 'var(--dnb-text)' } }, bi('主对话自己做的任务', 'Main Chat Tasks')),
-                    h('span', { className: 'dnb-acc-count', style: { fontSize: 9.5 } }, bi(`${leadDirectRoots.length} 项`, `${leadDirectRoots.length}`)),
-                    h('span', { className: 'dnb-pyr-detail-pill' }, groupDetailOpen ? bi('收起 ▴', 'Hide ▴') : bi('操作 ▾', 'Actions ▾')),
-                  ),
-                  groupDetailOpen
-                    ? h(
-                        'div',
-                        { className: 'dnb-pyr-node-detail', onClick: e => e.stopPropagation() },
-                        h(
-                          'div',
-                          { className: 'dnb-pyr-act-row' },
-                          h('button', {
-                            type: 'button',
-                            className: 'dnb-pyr-act-btn',
-                            onClick: () => {
-                              patch({ secTarget: 'lead', secMode: 'steer', notice: bi('已选中 @主对话，在下面发消息', 'Selected @Lead') })
-                              focusSecInput()
-                            },
-                          }, h(Icon, { name: 'send', size: 10.5 }), bi('@主对话', '@Lead')),
-                        ),
-                      )
-                    : null,
-                ),
-                groupOpen
-                  ? h(
-                      'div',
-                      { className: 'dnb-pyr-subtree', 'data-tone': spotTone || undefined },
-                      renderTreeTaskList(leadDirectRoots, visitedTaskIds, groupKey),
-                    )
-                  : null,
-              ),
-            )
-          }
-        }
-
-        // Catch any cycle/leftover tasks so nothing ever disappears
-        const leftovers = tasks.filter(t => !visitedTaskIds.has(t.id))
-        for (const lf of leftovers) {
-          treeItems.push(
-            h(
-              'div',
-              { key: 'col-lf-' + lf.id, className: 'dnb-pyr-subitem' },
-              renderGrandTaskCard(lf, visitedTaskIds),
-            ),
-          )
-        }
-
-        const leadOpen = pyrOpenNodes.has('agent:lead') || Boolean(focusedTask)
-        const toggleLeadOpen = () => {
-          if (treeItems.length === 0) return
-          if (leadOpen) {
-            setPyrOpenNodes(prev => {
-              const next = new Set(prev)
-              next.delete('agent:lead')
-              return next
-            })
-            if (store.focusTaskId) patch({ focusTaskId: '' })
-          } else {
-            setPyrOpenNodes(prev => {
-              const next = new Set(prev)
-              next.add('agent:lead')
-              return next
-            })
-          }
-        }
-
-        return h(
-          'div',
-          { ref: pyrRootRef, className: 'dnb-pyr-root' },
-          // Tier 0 Compact Apex Node (`👑 主代理 · 总指挥`, click anywhere on card to expand/collapse)
-          h(
-            'div',
-            {
-              className: 'dnb-pyr-apex',
-              'data-spotlight': apexSpotlightTone || undefined,
-              style: treeItems.length > 0 ? { cursor: 'pointer' } : undefined,
-              title: treeItems.length > 0
-                ? (leadOpen ? bi('收起下面的子代理和任务', 'Collapse tasks & subagents') : bi('展开下面的子代理和任务', 'Expand tasks & subagents'))
-                : undefined,
-              onClick: treeItems.length > 0 ? toggleLeadOpen : undefined,
-            },
-            h(
-              'div',
-              { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
-              h(
-                'div',
-                { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 } },
-                treeItems.length > 0
-                  ? h('button', {
-                      type: 'button',
-                      className: 'dnb-flow-mini-btn',
-                      style: { width: 18, height: 18, flexShrink: 0 },
-                      title: leadOpen ? bi('收起组织树下一级', 'Collapse org tree') : bi('展开组织树下一级', 'Expand org tree'),
-                      onClick: e => {
-                        e.stopPropagation()
-                        toggleLeadOpen()
-                      },
-                    }, h(Icon, {
-                      name: 'chevron',
-                      size: 11,
-                      style: { transform: leadOpen ? 'rotate(90deg)' : 'rotate(0deg)', transition: 'transform 0.15s ease' },
-                    }))
-                  : null,
-                h('span', {
-                  style: {
-                    display: 'inline-flex',
-                    alignItems: 'center',
-                    gap: 4,
-                    height: 20,
-                    padding: '0 8px',
-                    borderRadius: 99,
-                    background: 'rgba(10, 132, 255, 0.18)',
-                    color: '#409cff',
-                    fontSize: 11,
-                    fontWeight: 700,
-                  },
-                }, bi('👑 主代理', '👑 Lead')),
-                runningKidsCount > 0
-                  ? h('span', { className: 'dnb-acc-count', style: { color: '#409cff' } }, bi(`${runningKidsCount} 运行`, `${runningKidsCount} active`))
-                  : null,
-                doingTotal > 0
-                  ? h('span', { className: 'dnb-acc-count', style: { color: '#409cff' } }, bi(`${doingTotal} 进行中`, `${doingTotal} doing`))
-                  : null,
-                blockedTotal > 0
-                  ? h('span', { className: 'dnb-acc-count', style: { color: '#ff453a' } }, bi(`${blockedTotal} 卡住`, `${blockedTotal} blocked`))
-                  : null,
-                doneTotal > 0
-                  ? h('span', { className: 'dnb-acc-count', style: { color: '#30d158' } }, bi(`${doneTotal}/${allTasks.length} 完成`, `${doneTotal}/${allTasks.length} done`))
-                  : null,
-              ),
-              h(
-                'div',
-                { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-mini-btn',
-                  'data-tone': 'accent',
-                  style: { height: 22, padding: '0 7px', fontSize: 10.5 },
-                  title: bi('让主对话把目标拆成步骤，分给子代理做', 'Break goal into steps and assign subagents'),
-                  onClick: e => {
-                    e.stopPropagation()
-                    triggerAiPlanGraph()
-                  },
-                }, h(Icon, { name: 'sparkles', size: 10.5 }), bi('拆解', 'Plan')),
-                treeItems.length > 0
-                  ? h('span', { className: 'dnb-acc-pull-hint' }, leadOpen ? bi('收起 ▴', 'Hide ▴') : bi('展开 ▾', 'Show ▾'))
-                  : null,
-              ),
-            ),
-            (board && board.objective)
-              ? h('div', {
-                  style: {
-                    marginTop: 5,
-                    fontSize: 11.5,
-                    color: 'var(--dnb-text-2)',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                    whiteSpace: 'nowrap',
-                  },
-                  title: board.objective,
-                }, '🎯 ' + board.objective)
-              : null,
-          ),
-
-          // Expandable Vertical Tree under Apex (collapsed by default, click Apex card to pull open)
-          (leadOpen && treeItems.length > 0)
-            ? h(
-                'div',
-                { className: 'dnb-pyr-tree-list', 'data-tone': trunkTone || undefined },
-                treeItems,
-              )
-            : null,
-        )
-      }
-
-      /* ---------------- Optional SVG Zoom Canvas Renderers ---------------- */
-
-      const isNodeInSpotlight = node => {
-        if (!focusedTask) return true
-        if (node.kind === 'lead') return Boolean(focusInfo && (focusInfo.includeLead || focusInfo.agentNames.length > 0))
-        if (node.kind === 'agent') return focusedAgentSet.has(node.agent.name)
-        if (node.kind === 'task') return focusedTaskScopeSet.has(node.task.id)
-        return false
-      }
-
-      const renderPyramidConnectors = parent => {
-        const kids = parent.childNodes || []
-        if (!kids.length) return null
-        const els = []
-
-        if (!isLR) {
-          const px = Math.round(parent.x + parent.w / 2)
-          const py = parent.y + parent.h
-          const minCy = Math.min(...kids.map(k => k.y))
-          const midY = Math.round(py + (minCy - py) * 0.5)
-          const firstCx = Math.round(kids[0].x + kids[0].w / 2)
-          const lastCx = Math.round(kids[kids.length - 1].x + kids[kids.length - 1].w / 2)
-          const baseDim = focusedTask && !parent.focusBranch
-
-          els.push(h('path', {
-            key: `stem-${parent.id}`,
-            d: `M ${px} ${py} V ${midY}`,
-            fill: 'none',
-            stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
-            strokeWidth: 1.65,
-            opacity: baseDim ? 0.25 : 0.9,
-          }))
-
-          const barMinX = Math.min(px, firstCx)
-          const barMaxX = Math.max(px, lastCx)
-          if (barMaxX - barMinX > 1) {
-            els.push(h('path', {
-              key: `bar-${parent.id}`,
-              d: `M ${barMinX} ${midY} H ${barMaxX}`,
-              fill: 'none',
-              stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
-              strokeWidth: 1.65,
-              opacity: baseDim ? 0.25 : 0.9,
-            }))
-          }
-
-          for (const kid of kids) {
-            const cx = Math.round(kid.x + kid.w / 2)
-            const cy = kid.y
-            const isFocusEdge = Boolean(focusedTask && kid.focusBranch)
-            const isLiveEdge = !focusedTask && (
-              (kid.kind === 'agent' && kid.agent.status === 'running')
-              || (kid.kind === 'task' && (kid.task.status === 'doing' || kid.task.status === 'blocked'))
-            )
-
-            els.push(h('path', {
-              key: `drop-${parent.id}-${kid.id}`,
-              d: `M ${cx} ${midY} V ${cy}`,
-              fill: 'none',
-              stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
-              strokeWidth: 1.65,
-              opacity: (focusedTask && !isFocusEdge) ? 0.22 : 0.9,
-            }))
-
-            if (isFocusEdge || isLiveEdge) {
-              const hiColor = isFocusEdge
-                ? (focusedTask.status === 'blocked' ? '#ff453a' : '#0a84ff')
-                : (kid.kind === 'task' && kid.task.status === 'blocked' ? '#ff453a' : '#0a84ff')
-              els.push(h('path', {
-                key: `hi-${parent.id}-${kid.id}`,
-                d: `M ${px} ${py} V ${midY} H ${cx} V ${cy}`,
-                fill: 'none',
-                stroke: hiColor,
-                strokeWidth: 2.3,
-                strokeLinejoin: 'round',
-                opacity: 0.95,
-              }))
-            }
-
-            els.push(h('circle', {
-              key: `dot-${kid.id}`,
-              cx,
-              cy,
-              r: isFocusEdge ? 3.2 : 2.3,
-              fill: isFocusEdge
-                ? (focusedTask.status === 'blocked' ? '#ff453a' : '#0a84ff')
-                : 'var(--dnb-border-strong, rgba(165,165,178,0.75))',
-              opacity: (focusedTask && !isFocusEdge) ? 0.25 : 1,
-            }))
-          }
-        } else {
-          const px = parent.x + parent.w
-          const py = Math.round(parent.y + parent.h / 2)
-          const minCx = Math.min(...kids.map(k => k.x))
-          const midX = Math.round(px + (minCx - px) * 0.5)
-          const firstCy = Math.round(kids[0].y + kids[0].h / 2)
-          const lastCy = Math.round(kids[kids.length - 1].y + kids[kids.length - 1].h / 2)
-          const barMinY = Math.min(py, firstCy)
-          const barMaxY = Math.max(py, lastCy)
-
-          els.push(h('path', {
-            key: `stem-lr-${parent.id}`,
-            d: `M ${px} ${py} H ${midX}`,
-            fill: 'none',
-            stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
-            strokeWidth: 1.6,
-          }))
-          if (barMaxY - barMinY > 1) {
-            els.push(h('path', {
-              key: `bar-lr-${parent.id}`,
-              d: `M ${midX} ${barMinY} V ${barMaxY}`,
-              fill: 'none',
-              stroke: 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
-              strokeWidth: 1.6,
-            }))
-          }
-          for (const kid of kids) {
-            const cx = kid.x
-            const cy = Math.round(kid.y + kid.h / 2)
-            const isFocusEdge = Boolean(focusedTask && kid.focusBranch)
-            els.push(h('path', {
-              key: `drop-lr-${parent.id}-${kid.id}`,
-              d: `M ${midX} ${cy} H ${cx}`,
-              fill: 'none',
-              stroke: isFocusEdge ? '#0a84ff' : 'var(--dnb-border-strong, rgba(155,155,168,0.52))',
-              strokeWidth: isFocusEdge ? 2.2 : 1.6,
-            }))
-          }
-        }
-        return els
-      }
-
-      const renderDepEdge = edge => {
-        const { from, to, satisfied } = edge
-        const dimmed = focusedTask && !(focusedTaskScopeSet.has(from.task.id) || focusedTaskScopeSet.has(to.task.id))
-        const sameRow = Math.abs(from.y - to.y) < 14
-        const x1 = sameRow ? (from.x < to.x ? from.x + from.w : from.x) : from.x + from.w / 2
-        const y1 = sameRow ? from.y + from.h / 2 : from.y + from.h
-        const x2 = sameRow ? (from.x < to.x ? to.x : to.x + to.w) : to.x + to.w / 2
-        const y2 = sameRow ? to.y + to.h / 2 : to.y
-        const d = sameRow
-          ? `M ${x1} ${y1} Q ${(x1 + x2) / 2} ${Math.min(y1, y2) - 22}, ${x2} ${y2}`
-          : `M ${x1} ${y1} C ${x1 + 18} ${(y1 + y2) / 2}, ${x2 - 18} ${(y1 + y2) / 2}, ${x2} ${y2}`
-        return h('path', {
-          key: 'dep-' + from.id + '-' + to.id,
-          d,
-          fill: 'none',
-          stroke: satisfied ? '#30d158' : '#f59e0b',
-          strokeWidth: 1.5,
-          strokeDasharray: satisfied ? '3 2.5' : '5 3.5',
-          markerEnd: satisfied ? 'url(#dnb-arrow-done)' : 'url(#dnb-arrow-wait)',
-          opacity: dimmed ? 0.18 : 0.88,
-        })
-      }
-
-      const renderPyramidNode = node => {
-        const { x, y, w, h: nh, kidCount, hiddenKids } = node
-        const isCol = collapsed.has(node.id)
-        const dimmed = focusedTask && !isNodeInSpotlight(node)
-
-        if (node.kind === 'lead') {
-          const objTitle = (board && board.objective)
-            ? clampTitle(board.objective, 13.5)
-            : `推进 ${doingTotal} · 受阻 ${blockedTotal} · 完成 ${doneTotal}`
-          const runningKids = hier.children.filter(a => a.status === 'running').length
-
-          return h(
-            'g',
-            {
-              key: node.id,
-              opacity: dimmed ? 0.35 : 1,
-              style: { cursor: 'pointer', transition: 'opacity 0.2s ease' },
-              onClick: e => {
-                e.stopPropagation()
-                if (store.filterAgent || store.focusTaskId) patch({ filterAgent: '', focusTaskId: '' })
-              },
-            },
-            h('rect', {
-              x, y, width: w, height: nh, rx: NODE_R + 2,
-              fill: 'var(--dnb-elevated, #2a2a30)',
-              stroke: 'rgba(10, 132, 255, 0.58)',
-              strokeWidth: 1.8,
-            }),
-            h('rect', {
-              x: x + 10, y: y + 9, width: 64, height: 17, rx: 8.5,
-              fill: 'rgba(10, 132, 255, 0.18)',
-            }),
-            h('text', {
-              x: x + 42, y: y + 21,
-              textAnchor: 'middle',
-              fill: '#409cff',
-              fontSize: 10.5,
-              fontWeight: 700,
-            }, '👑 主代理'),
-            runningKids > 0
-              ? h('text', {
-                  x: x + w - 12, y: y + 21,
-                  textAnchor: 'end',
-                  fill: '#409cff',
-                  fontSize: 10,
-                  fontWeight: 600,
-                }, `${runningKids} 运行中`)
-              : null,
-            h('text', {
-              x: x + 12, y: y + 43,
-              fill: 'var(--dnb-text, #f2f2f7)',
-              fontSize: 11.5,
-              fontWeight: 500,
-            }, objTitle),
-            kidCount > 0
-              ? h(
-                  'g',
-                  { onClick: e => { e.stopPropagation(); toggleCollapse(node.id) } },
-                  h('rect', {
-                    x: x + w - 32, y: y + 32, width: 24, height: 16, rx: 8,
-                    fill: 'var(--dnb-fill, rgba(120,120,128,0.24))',
-                  }),
-                  h('text', {
-                    x: x + w - 20, y: y + 43,
-                    textAnchor: 'middle',
-                    fill: 'var(--dnb-text-2, #ebebf5)',
-                    fontSize: 10,
-                    fontWeight: 600,
-                  }, (isCol ? '+' : '−') + (hiddenKids || kidCount)),
-                )
-              : null,
-          )
-        }
-
-        if (node.kind === 'fold') {
-          return h(
-            'g',
-            {
-              key: node.id,
-              opacity: dimmed ? 0.22 : 0.9,
-              style: { cursor: 'pointer' },
-              onClick: e => { e.stopPropagation(); patch({ pyramidShowAllAgents: true }) },
-            },
-            h('rect', {
-              x, y, width: w, height: nh, rx: NODE_R,
-              fill: 'var(--dsw-alias-bg-layer-2, #202024)',
-              stroke: 'var(--dnb-border-strong, rgba(140,140,150,0.45))',
-              strokeWidth: 1.2,
-              strokeDasharray: '4 3',
-            }),
-            h('text', {
-              x: x + w / 2, y: y + 20,
-              textAnchor: 'middle',
-              fill: 'var(--dnb-text-2, #aeaeb2)',
-              fontSize: 11.5,
-              fontWeight: 600,
-            }, `+${node.hiddenAgents.length} 个空闲助手`),
-            h('text', {
-              x: x + w / 2, y: y + 35,
-              textAnchor: 'middle',
-              fill: 'var(--dnb-accent, #0a84ff)',
-              fontSize: 10,
-            }, '点这里展开'),
-          )
-        }
-
-        if (node.kind === 'agent') {
-          const ag = node.agent
-          const isRunning = ag.status === 'running'
-          const isAgentFocused = focusedAgentSet.has(ag.name)
-          const isFiltered = store.filterAgent === ag.name
-          const tierLabel = node.tier === 1 ? '一级代理' : `${node.tier}级代理`
-          const accent = isAgentFocused
-            ? (focusedTask && focusedTask.status === 'blocked' ? '#ff453a' : '#0a84ff')
-            : isRunning
-              ? '#0a84ff'
-              : 'var(--dnb-border-strong, rgba(140,140,150,0.4))'
-          const desc = ag.taskTitle || ag.description || (isRunning ? '正在干活…' : '空闲 / 已完成')
-
-          return h(
-            'g',
-            {
-              key: node.id,
-              opacity: dimmed ? 0.24 : 1,
-              style: { cursor: 'pointer', transition: 'opacity 0.2s ease' },
-              onMouseEnter: () => setHoveredId(node.id),
-              onMouseLeave: () => setHoveredId(''),
-              onClick: e => {
-                e.stopPropagation()
-                if (ag.id && e.detail === 2) {
-                  openSubagentChat(ag)
-                  return
-                }
-                patch({ filterAgent: isFiltered ? '' : ag.name })
-              },
-            },
-            (isRunning || isAgentFocused)
-              ? h('rect', {
-                  className: 'dnb-pulse-ring',
-                  x: x - 2.5, y: y - 2.5, width: w + 5, height: nh + 5, rx: NODE_R + 2,
-                  fill: 'none',
-                  stroke: isAgentFocused ? accent : '#0a84ff',
-                  strokeWidth: 1.8,
-                })
-              : null,
-            h('rect', {
-              x, y, width: w, height: nh, rx: NODE_R,
-              fill: isAgentFocused
-                ? (focusedTask && focusedTask.status === 'blocked' ? 'rgba(255,69,58,0.12)' : 'rgba(10,132,255,0.12)')
-                : 'var(--dsw-alias-bg-layer-2, #232328)',
-              stroke: isAgentFocused || isRunning || isFiltered ? accent : 'var(--dnb-border)',
-              strokeWidth: isAgentFocused ? 2.1 : (isRunning || isFiltered ? 1.6 : 1.1),
-            }),
-            isRunning
-              ? h('circle', {
-                  className: 'dnb-svg-spin',
-                  cx: x + 13, cy: y + 18, r: 4,
-                  fill: 'none',
-                  stroke: '#409cff',
-                  strokeWidth: 1.6,
-                  strokeDasharray: '16 9',
-                })
-              : h('circle', {
-                  cx: x + 13, cy: y + 18, r: 4,
-                  fill: isAgentFocused ? accent : 'var(--dnb-text-3)',
-                }),
-            h('text', {
-              x: x + 23, y: y + 22,
-              fill: 'var(--dnb-text, #f2f2f7)',
-              fontSize: 11.5,
-              fontWeight: 600,
-            }, '@' + clampTitle(shortAgentName(ag.name, true), 8.2)),
-            h('text', {
-              x: x + w - 9, y: y + 21,
-              textAnchor: 'end',
-              fill: isAgentFocused ? accent : 'var(--dnb-text-3, #8e8e93)',
-              fontSize: 9.5,
-              fontWeight: 600,
-            }, tierLabel),
-            h('text', {
-              x: x + 12, y: y + 40,
-              fill: isRunning ? '#409cff' : 'var(--dnb-text-2, #98989d)',
-              fontSize: 10.5,
-            }, clampTitle(desc, 12)),
-            kidCount > 0
-              ? h(
-                  'g',
-                  { onClick: e => { e.stopPropagation(); toggleCollapse(node.id) } },
-                  h('rect', {
-                    x: x + w - 32, y: y + 30, width: 24, height: 15, rx: 7.5,
-                    fill: 'var(--dnb-fill, rgba(120,120,128,0.22))',
-                  }),
-                  h('text', {
-                    x: x + w - 20, y: y + 41,
-                    textAnchor: 'middle',
-                    fill: 'var(--dnb-text-2, #ebebf5)',
-                    fontSize: 9.5,
-                    fontWeight: 600,
-                  }, (isCol ? '+' : '−') + (hiddenKids || kidCount)),
-                )
-              : null,
-          )
-        }
-
-        const { task } = node
-        const color = STATUS_HEX[task.status] || STATUS_HEX.todo
-        const badgeBg = STATUS_BG[task.status] || STATUS_BG.todo
-        const badgeText = STATUS_BADGE[task.status] || STATUS_LABEL[task.status] || task.status
-        const isSelected = store.selectedTaskId === task.id
-        const isFocusedTarget = store.focusTaskId === task.id
-        const isDoing = task.status === 'doing'
-        const isBlocked = task.status === 'blocked'
-        const isDone = task.status === 'done'
-        const unresolvedDepCount = (Array.isArray(task.blockedBy) ? task.blockedBy : []).filter(id => {
-          const d = allById.get(id)
-          return d && d.status !== 'done'
-        }).length
-
-        return h(
-          'g',
-          {
-            key: node.id,
-            opacity: dimmed ? 0.25 : 1,
-            onMouseEnter: () => setHoveredId(node.id),
-            onMouseLeave: () => setHoveredId(''),
-            onClick: e => {
-              e.stopPropagation()
-              const nextSel = isSelected ? '' : task.id
-              if (isDoing || isBlocked) {
-                patch({
-                  selectedTaskId: nextSel,
-                  focusTaskId: isFocusedTarget && !nextSel ? '' : task.id,
-                })
-              } else {
-                patch({ selectedTaskId: nextSel })
-              }
-            },
-            onContextMenu: e => {
-              e.preventDefault()
-              e.stopPropagation()
-              patch({ selectedTaskId: task.id })
-              setContextMenu({ taskId: task.id, task, x: e.clientX, y: e.clientY })
-            },
-            style: { cursor: 'pointer', transition: 'opacity 0.2s ease' },
-          },
-          (isDoing || isBlocked)
-            ? h('rect', {
-                className: 'dnb-pulse-ring',
-                x: x - 3, y: y - 3, width: w + 6, height: nh + 6, rx: NODE_R + 3,
-                fill: 'none', stroke: color, strokeWidth: 2,
-              })
-            : null,
-          h('rect', {
-            x, y, width: w, height: nh, rx: NODE_R,
-            fill: isBlocked
-              ? 'rgba(255, 69, 58, 0.11)'
-              : isDoing
-                ? 'rgba(10, 132, 255, 0.09)'
-                : isSelected
-                  ? 'var(--dnb-elevated, #2c2c2e)'
-                  : 'var(--dsw-alias-bg-layer-2, #222225)',
-            stroke: (isSelected || isFocusedTarget || isDoing || isBlocked)
-              ? color
-              : (hoveredId === node.id ? 'var(--dnb-border-strong)' : 'var(--dnb-border)'),
-            strokeWidth: (isSelected || isFocusedTarget) ? 2.2 : ((isDoing || isBlocked) ? 1.6 : 1),
-          }),
-          h('rect', {
-            x: x + 9, y: y + 8, width: isBlocked ? 52 : (isDoing ? 66 : 60), height: 16, rx: 8,
-            fill: badgeBg,
-          }),
-          isDoing
-            ? h('circle', {
-                className: 'dnb-svg-spin',
-                cx: x + 19, y: y + 16, r: 3.6,
-                fill: 'none',
-                stroke: '#409cff',
-                strokeWidth: 1.4,
-                strokeDasharray: '14 8',
-              })
-            : null,
-          h('text', {
-            x: x + (isBlocked ? 35 : (isDoing ? 47 : 39)), y: y + 19.5,
-            textAnchor: 'middle',
-            fill: color,
-            fontSize: 9.5,
-            fontWeight: 700,
-          }, badgeText),
-          unresolvedDepCount > 0
-            ? h('text', {
-                x: x + w - 10, y: y + 19.5,
-                textAnchor: 'end',
-                fill: '#f59e0b',
-                fontSize: 9.5,
-                fontWeight: 600,
-              }, `等 ${unresolvedDepCount}`)
-            : null,
-          h('text', {
-            x: x + 11,
-            y: y + 43,
-            fill: isDone ? 'var(--dnb-text-3, #8e8e93)' : 'var(--dnb-text, #f2f2f7)',
-            fontSize: 11.8,
-            fontWeight: (isDoing || isBlocked) ? 600 : 500,
-          }, clampTitle(task.title || task.id, 12.2)),
-          kidCount > 0
-            ? h(
-                'g',
-                { onClick: e => { e.stopPropagation(); toggleCollapse(node.id) } },
-                h('rect', {
-                  x: x + w - 33, y: y + 33, width: 25, height: 16, rx: 8,
-                  fill: 'var(--dnb-fill, rgba(120,120,128,0.22))',
-                }),
-                h('text', {
-                  x: x + w - 20.5, y: y + 44,
-                  textAnchor: 'middle',
-                  fill: 'var(--dnb-text-2, #ebebf5)',
-                  fontSize: 10,
-                  fontWeight: 600,
-                }, (isCol ? '+' : '−') + (hiddenKids || kidCount)),
-              )
-            : null,
-        )
-      }
-
-      const renderSpotlightFrame = sp => {
-        if (!sp) return null
-        const pillW = Math.min(Math.max(158, sp.w - 8), 268)
-        return h(
-          'g',
-          { key: 'pyramid-spotlight', style: { pointerEvents: 'none' } },
-          h('rect', {
-            className: 'dnb-spotlight-halo',
-            x: sp.x - 4, y: sp.y - 4, width: sp.w + 8, height: sp.h + 8, rx: 18,
-            fill: sp.isBlocked ? 'rgba(255, 69, 58, 0.08)' : 'rgba(10, 132, 255, 0.08)',
-            stroke: sp.color,
-            strokeWidth: 1,
-            opacity: 0.55,
-          }),
-          h('rect', {
-            x: sp.x, y: sp.y, width: sp.w, height: sp.h, rx: 15,
-            fill: sp.isBlocked ? 'rgba(255, 69, 58, 0.05)' : 'rgba(10, 132, 255, 0.05)',
-            stroke: sp.color,
-            strokeWidth: 2.3,
-          }),
-          h('rect', {
-            className: 'dnb-spotlight-dash',
-            x: sp.x + 3.5, y: sp.y + 3.5, width: Math.max(0, sp.w - 7), height: Math.max(0, sp.h - 7), rx: 12,
-            fill: 'none',
-            stroke: sp.color,
-            strokeWidth: 1.3,
-            opacity: 0.85,
-          }),
-          h('rect', {
-            x: sp.x + 10, y: sp.y - 11, width: pillW, height: 22, rx: 11,
-            fill: sp.color,
-          }),
-          h('text', {
-            x: sp.x + 10 + pillW / 2,
-            y: sp.y + 3.5,
-            textAnchor: 'middle',
-            fill: '#ffffff',
-            fontSize: 10.5,
-            fontWeight: 700,
-          }, sp.badgeLabel),
-        )
+      const pyramidCtx = {
+        board,
+        allTasks,
+        allById,
+        filterAgent,
+        statusFilter,
+        hier,
+        tasks,
+        childrenOf,
+        isRoot,
+        focusedTask,
+        focusInfo,
+        focusedAgentSet,
+        focusedTaskScopeSet,
+        collapsed,
+        setContextMenu,
+        pyrOpenNodes,
+        setPyrOpenNodes,
+        pyrOpenDetails,
+        pyrOpenDoneGroups,
+        setPyrOpenDoneGroups,
+        pyrRootRef,
+        togglePyrNode,
+        togglePyrDetail,
+        tasksByAgent,
+        spotlight,
+        doneTotal,
+        doingTotal,
+        blockedTotal,
+        triggerAiPlanGraph,
       }
 
       const STATUS_FILTERS = [
@@ -20390,7 +20841,7 @@ window.__ModuleLoader__.load({
                   }),
                 ),
               )
-            : h('div', { className: 'dnb-topo-pyr-wrap' }, renderGrandPyramid())
+            : h('div', { className: 'dnb-topo-pyr-wrap' }, renderGrandPyramidView(pyramidCtx))
           : h(
               'div',
               { className: 'dnb-empty', style: { padding: '14px 10px' } },
@@ -20621,15 +21072,17 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /* ------------------------------------------------------------- Plan Tab */
-
-    // === [module: src/client/tabs/archives.js] ===
+    // === [module: src/client/tabs/archives-cards.js] ===
     /**
-     * tabs/archives.js
+     * src/client/tabs/archives-cards.js — 档案页签卡片组件库（回形针、编辑卡、抽屉文件夹、卷宗卡与冷库卡）
      *
-     * Four-page Engineering Archives UI:
-     *   📌 桌面 (Cognitive Desktop) | 🗂️ 本局 | 🌐 全局 | 🧊 冷藏
-     * Ultra-clean top strip + color rails + top-down stacked paper dossiers ("一沓纸").
+     * 【核心职责】
+     *   承载工程档案 4 页 UI 共用的单条档案卡片渲染组件：`ArchiveEditorCard`、
+     *   `renderArchiveFolderDrawer`、`ArchiveDossierCard`（“一沓纸”正面/展开态）与 `ArchiveColdCard`，
+     *   以及辅助 `PaperclipPin` 与 `resolveDossierViewerMeta`。
+     *
+     * 【边界约定】
+     *   - 仅负责单卡/文件夹级渲染与卡片局部交互；顶部四页切换、全局搜索与批量栏保留在 `tabs/archives.js`。
      */
 
 
@@ -21605,6 +22058,19 @@ window.__ModuleLoader__.load({
           : null,
       )
     }
+
+    // === [module: src/client/tabs/archives.js] ===
+    /**
+     * src/client/tabs/archives.js — 工程记忆档案四页总控页签
+     *
+     * 【核心职责】
+     *   组织 📌 桌面 (Cognitive Desktop) | 🗂️ 本局 | 🌐 全局 | 🧊 冷藏 四页视图切换、
+     *   顶部操作条、搜索/筛选状态及多选接力工具栏；单卡与文件夹抽屉组件已拆出至 `archives-cards.js`。
+     *
+     * 【导出】
+     *   - `ArchiveTab({ board, view })`
+     */
+
 
     function ArchiveTab({ board, view }) {
       const [openMenuKey, setOpenMenuKey] = React.useState('')
