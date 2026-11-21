@@ -212,27 +212,31 @@ function peersCountSafe(branches) {
   return n
 }
 
-function computeSquadConnectorPaths(membraneEl, hubEl, podElsMap, branches, hasHarnessWing) {
-  if (!membraneEl || !hubEl) return { w: 0, h: 0, links: [] }
-  const mRect = membraneEl.getBoundingClientRect()
-  const hubRect = hubEl.getBoundingClientRect()
-  if (!mRect.width || !mRect.height || !hubRect.width) return { w: 0, h: 0, links: [] }
+function computeLiquidLinks(stageEl, hubEl, leadEl, allyElsMap, allies) {
+  if (!stageEl || !hubEl || !leadEl) return { w: 0, h: 0, links: [] }
+  const sRect = stageEl.getBoundingClientRect()
+  const hRect = hubEl.getBoundingClientRect()
+  const lRect = leadEl.getBoundingClientRect()
+  if (!sRect.width || !sRect.height || !hRect.width || !lRect.width) return { w: 0, h: 0, links: [] }
 
   const hubBottom = {
-    x: hubRect.left - mRect.left + hubRect.width / 2,
-    y: hubRect.bottom - mRect.top,
+    x: hRect.left - sRect.left + hRect.width / 2,
+    y: hRect.bottom - sRect.top,
   }
-  const links = []
-  const podBoxes = []
+  const leadBox = {
+    left: lRect.left - sRect.left,
+    right: lRect.right - sRect.left,
+    top: lRect.top - sRect.top,
+    bottom: lRect.bottom - sRect.top,
+    cx: lRect.left - sRect.left + lRect.width / 2,
+    cy: lRect.top - sRect.top + lRect.height / 2,
+  }
 
-  const addCurve = (id, kind, p1, p2, color, dashed, label, labelAnchor = null) => {
+  const links = []
+  const addCurve = (id, kind, p1, p2, color, dashed, label) => {
     const dy = p2.y - p1.y
-    const spread = Math.max(22, Math.abs(dy) * 0.46)
-    const c1x = p1.x
-    const c1y = p1.y + spread
-    const c2x = p2.x
-    const c2y = p2.y - spread
-    const d = `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+    const spread = Math.max(18, Math.abs(dy) * 0.48)
+    const d = `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} C ${p1.x.toFixed(1)} ${(p1.y + spread).toFixed(1)}, ${p2.x.toFixed(1)} ${(p2.y - spread).toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
     links.push({
       id,
       kind,
@@ -241,94 +245,86 @@ function computeSquadConnectorPaths(membraneEl, hubEl, podElsMap, branches, hasH
       y1: p1.y,
       x2: p2.x,
       y2: p2.y,
-      mx: labelAnchor ? labelAnchor.x : (p1.x + p2.x) / 2,
-      my: labelAnchor ? labelAnchor.y : (p1.y + p2.y) / 2,
+      mx: (p1.x + p2.x) / 2,
+      my: (p1.y + p2.y) / 2,
       color,
       dashed,
       label,
     })
   }
 
-  for (const branch of branches) {
-    const el = podElsMap.get(branch.podKey)
+  addCurve(
+    'hub-lead',
+    'primary',
+    hubBottom,
+    { x: leadBox.cx, y: leadBox.top },
+    '#38bdf8',
+    false,
+    allies.length > 0 ? '主控' : '',
+  )
+
+  const allyBoxes = []
+  let firstHarnessLabeled = false
+  let firstPeerLabeled = false
+
+  for (const ally of allies) {
+    const el = allyElsMap.get(ally.uid)
     if (!el) continue
     const r = el.getBoundingClientRect()
     if (!r.width) continue
     const box = {
-      key: branch.podKey,
-      roleTier: branch.roleTier,
-      left: r.left - mRect.left,
-      right: r.right - mRect.left,
-      top: r.top - mRect.top,
-      bottom: r.bottom - mRect.top,
-      cx: r.left - mRect.left + r.width / 2,
-      cy: r.top - mRect.top + r.height / 2,
-      color: branch.roleTier === 'primary' ? '#38bdf8' : branch.accent.dot,
+      uid: ally.uid,
+      kind: ally.kind,
+      left: r.left - sRect.left,
+      top: r.top - sRect.top,
+      cx: r.left - sRect.left + r.width / 2,
+      cy: r.top - sRect.top + r.height / 2,
+      color: ally.color,
     }
-    podBoxes.push(box)
+    allyBoxes.push(box)
+    let lbl = ''
+    if (ally.kind === 'harness' && !firstHarnessLabeled) {
+      firstHarnessLabeled = true
+      lbl = '派单'
+    } else if (ally.kind === 'peer' && !firstPeerLabeled) {
+      firstPeerLabeled = true
+      lbl = '联动'
+    }
     addCurve(
-      `hub-${branch.podKey}`,
-      branch.roleTier,
+      `hub-${ally.uid}`,
+      ally.kind,
       hubBottom,
       { x: box.cx, y: box.top },
       box.color,
-      false,
-      branch.roleTier === 'primary' ? '主控' : '协同',
+      ally.kind === 'harness',
+      lbl,
     )
   }
 
-  // Horizontal collaboration link between primary branch and peer-session branches
-  const primaryBox = podBoxes.find(b => b.roleTier === 'primary')
-  const peerBoxes = podBoxes.filter(b => b.roleTier === 'peer')
-  if (primaryBox && peerBoxes.length > 0) {
-    for (const pb of peerBoxes) {
-      const sameRow = Math.abs(primaryBox.top - pb.top) < 42 && pb.left > primaryBox.right - 8
-      if (sameRow) {
-        const yMid = primaryBox.top + 30
-        const x1 = primaryBox.right
-        const x2 = pb.left
-        const mx = (x1 + x2) / 2
-        links.push({
-          id: `collab-${pb.key}`,
-          kind: 'collab-sync',
-          d: `M ${x1.toFixed(1)} ${yMid.toFixed(1)} L ${x2.toFixed(1)} ${yMid.toFixed(1)}`,
-          x1,
-          y1: yMid,
-          x2,
-          y2: yMid,
-          mx,
-          my: yMid,
-          color: pb.color,
-          dashed: true,
-          label: '⇄联动',
-        })
-      }
+  if (allyBoxes.length > 0) {
+    const topAlly = allyBoxes[0]
+    if (topAlly.left > leadBox.right + 18) {
+      const yMid = Math.round((leadBox.cy + topAlly.cy) / 2)
+      const x1 = leadBox.right
+      const x2 = topAlly.left
+      links.push({
+        id: 'lead-ally-sync',
+        kind: 'collab-sync',
+        d: `M ${x1.toFixed(1)} ${leadBox.cy.toFixed(1)} C ${((x1 + x2) / 2).toFixed(1)} ${yMid.toFixed(1)}, ${((x1 + x2) / 2).toFixed(1)} ${yMid.toFixed(1)}, ${x2.toFixed(1)} ${topAlly.cy.toFixed(1)}`,
+        x1,
+        y1: leadBox.cy,
+        x2,
+        y2: topAlly.cy,
+        mx: (x1 + x2) / 2,
+        my: yMid,
+        color: topAlly.color,
+        dashed: true,
+        label: '⇄协同',
+      })
     }
   }
 
-  if (hasHarnessWing) {
-    const hwEl = podElsMap.get('harness-wing')
-    if (hwEl) {
-      const r = hwEl.getBoundingClientRect()
-      if (r.width) {
-        const hwTop = r.top - mRect.top
-        const hwCx = r.left - mRect.left + r.width / 2
-        const onSecondRow = primaryBox && hwTop > primaryBox.bottom + 4
-        addCurve(
-          'hub-harness-wing',
-          'harness',
-          hubBottom,
-          { x: hwCx, y: hwTop },
-          '#f59e0b',
-          true,
-          '派单+红线',
-          onSecondRow ? { x: hwCx, y: hwTop - 14 } : null,
-        )
-      }
-    }
-  }
-
-  return { w: Math.round(mRect.width), h: Math.round(mRect.height), links }
+  return { w: Math.round(sRect.width), h: Math.round(sRect.height), links }
 }
 
 export function PeersTab({ view }) {
@@ -458,9 +454,10 @@ export function PeersTab({ view }) {
   const [dragOverZone, setDragOverZone] = React.useState('')
   const [linkLayout, setLinkLayout] = React.useState({ w: 0, h: 0, links: [] })
 
-  const membraneRef = React.useRef(null)
+  const stageRef = React.useRef(null)
   const hubRef = React.useRef(null)
-  const podElsRef = React.useRef(new Map())
+  const leadRef = React.useRef(null)
+  const allyClusterRef = React.useRef(null)
   const dragPayloadRef = React.useRef(null)
 
   React.useEffect(() => {
@@ -484,8 +481,29 @@ export function PeersTab({ view }) {
     otherSessions,
   })
   const { branches, harnessWing, readyStandbyHarnesses, counts } = squad
+  const primaryBranch = branches.find(b => b.roleTier === 'primary') || branches[0] || null
+  const peerBranches = branches.filter(b => b && b !== primaryBranch)
+  const hasRightAllies = peerBranches.length > 0 || harnessWing.length > 0
   const hasStandby = squad.standbySessions.length > 0 || readyStandbyHarnesses.length > 0
-  const branchCols = (branches.length + (harnessWing.length > 0 ? 1 : 0)) > 1 ? 2 : 1
+
+  const rightAlliesList = []
+  if (hasRightAllies) {
+    const hasH = harnessWing.length > 0
+    const hasP = peerBranches.length > 0
+    const accentColor = bubbleLocked
+      ? '#f59e0b'
+      : (hasH && harnessWing[0].provider === 'claude-code'
+          ? '#D97757'
+          : (hasH ? '#38bdf8' : peerBranches[0].accent.dot))
+    const linkKind = hasH ? 'harness' : 'peer'
+    const linkLbl = hasH && hasP ? bi('派单/联动', 'Ext/Link') : (hasH ? bi('派单', 'Dispatch') : bi('联动', 'Linked'))
+    rightAlliesList.push({
+      uid: 'ally-cluster',
+      kind: linkKind,
+      color: accentColor,
+      label: linkLbl,
+    })
+  }
 
   const layoutSig = [
     view.peersNetCollapsed ? '1' : '0',
@@ -497,19 +515,21 @@ export function PeersTab({ view }) {
   React.useLayoutEffect(() => {
     if (view.peersNetCollapsed) return undefined
     const measure = () => {
-      const next = computeSquadConnectorPaths(
-        membraneRef.current,
+      const allyMap = new Map()
+      if (allyClusterRef.current) allyMap.set('ally-cluster', allyClusterRef.current)
+      const next = computeLiquidLinks(
+        stageRef.current,
         hubRef.current,
-        podElsRef.current,
-        branches,
-        harnessWing.length > 0,
+        leadRef.current,
+        allyMap,
+        rightAlliesList,
       )
       setLinkLayout(prev => {
         if (
           prev.w === next.w
           && prev.h === next.h
           && prev.links.length === next.links.length
-          && prev.links.every((l, idx) => l.d === next.links[idx].d)
+          && prev.links.every((l, idx) => l.d === next.links[idx].d && l.color === next.links[idx].color && l.label === next.links[idx].label)
         ) {
           return prev
         }
@@ -518,9 +538,9 @@ export function PeersTab({ view }) {
     }
     measure()
     let ro = null
-    if (typeof ResizeObserver !== 'undefined' && membraneRef.current) {
+    if (typeof ResizeObserver !== 'undefined' && stageRef.current) {
       ro = new ResizeObserver(measure)
-      ro.observe(membraneRef.current)
+      ro.observe(stageRef.current)
     }
     return () => {
       if (ro) ro.disconnect()
@@ -562,7 +582,7 @@ export function PeersTab({ view }) {
       return
     }
     if (kind === 'peer-session') {
-      const bObj = branch || branches.find(b => b.rootId === id && b.roleTier === 'peer')
+      const bObj = branch || peerBranches.find(b => b.rootId === id)
       const sessObj = (bObj && bObj.linkedSessObj) || {
         id,
         name: (bObj && bObj.raw && bObj.raw.name) || shortSession(id),
@@ -684,84 +704,71 @@ export function PeersTab({ view }) {
       h(
         'div',
         { className: 'dnb-bubble-stage' },
-        // Status & Structural Work-Lock Control Strip
-        h(
-          'div',
-          { className: 'dnb-bubble-bar' },
-          h(
-            'div',
-            { className: 'dnb-bubble-status', 'data-locked': bubbleLocked ? '1' : '0' },
-            h('span', { className: 'dnb-bubble-status-dot' }),
-            h(
-              'span',
-              { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-              bubbleLocked
-                ? bi(`🔒 工作中已锁死${bubbleLockReason ? ' · ' + bubbleLockReason : ''}`, `🔒 Locked${bubbleLockReason ? ' · ' + bubbleLockReason : ''}`)
-                : bi('🫧 编队整备中 · 拖入或点选组建水泡', '🫧 Staging · Drag or click to form Bubble'),
-            ),
-          ),
-          h(
-            'div',
-            { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
-            h('button', {
-              type: 'button',
-              className: 'dnb-pill',
-              disabled: bubbleAutoLocked && bubbleLocked,
-              'data-active': bubble.manualLocked ? '1' : '0',
-              style: { height: 22, padding: '0 8px', fontSize: 10.5 },
-              title: (bubbleAutoLocked && bubbleLocked)
-                ? bi('有成员运行中，自动锁生效中；请先急停或等完工后再解锁', 'Auto-locked by active workers; finish or Emergency Stop first')
-                : (bubbleLocked ? bi('点击解除手动编队锁', 'Unlock manual squad lock') : bi('开干前手动锁死当前编队结构，防误拆', 'Manually lock squad structure before starting work')),
-              onClick: () => {
-                if (bubbleAutoLocked && bubbleLocked) {
-                  triggerLockedReject()
-                  return
-                }
-                void toggleBubbleLock(!bubble.manualLocked)
-              },
-            }, (bubbleAutoLocked && bubbleLocked)
-              ? bi('🔒 自动锁定中', '🔒 Auto-Locked')
-              : (bubble.manualLocked ? bi('🔓 解锁', '🔓 Unlock') : bi('🔒 锁死编队', '🔒 Lock'))),
-            bubbleLocked
-              ? h('button', {
-                  type: 'button',
-                  className: 'dnb-pill dnb-bubble-estop-btn',
-                  'data-confirm': confirmStop ? '1' : '0',
-                  style: { height: 22, padding: '0 8px', fontSize: 10.5 },
-                  title: bi('安全急停所有在途子代理、跨窗与外部 Harness，并解锁水泡', 'Interrupt all running workers & Harnesses and unlock Bubble'),
-                  onClick: () => {
-                    if (!confirmStop) {
-                      setConfirmStop(true)
-                      return
-                    }
-                    setConfirmStop(false)
-                    setDispatchTarget('')
-                    void emergencyStopBubble()
-                  },
-                }, confirmStop ? bi('确认急停全员?', 'Confirm Stop?') : bi('⏹ 急停解体', '⏹ Stop & Unlock'))
-              : null,
-          ),
-        ),
-
-        // Main Organic Bubble-Shaped Squad Enclosure
+        // Option A: Unified Liquid Fusion Bubble Canvas (zero nested rigid box stack)
         h(
           'div',
           {
-            ref: membraneRef,
-            className: 'dnb-squad-membrane',
+            ref: stageRef,
+            className: 'dnb-liquid-canvas',
             'data-locked': bubbleLocked ? '1' : '0',
             'data-shake': lockShake ? '1' : '0',
+            'data-dual': hasRightAllies ? '1' : '0',
             'data-dragover': dragOverZone === 'inside' ? '1' : '0',
             onDragOver: e => handleZoneDragOver(e, 'outside', 'inside'),
             onDragLeave: () => { if (dragOverZone === 'inside') setDragOverZone('') },
             onDrop: handleMembraneDrop,
           },
-          // Adaptive SVG Directed Collaboration & Hierarchy Connectors (paths layer + top label pills layer)
+          // Layer 0: Organic Liquid Membrane Contour & Soft Glow Backdrop
+          h(
+            'svg',
+            {
+              className: 'dnb-liquid-bg-svg',
+              viewBox: '0 0 640 240',
+              preserveAspectRatio: 'none',
+              'aria-hidden': 'true',
+            },
+            h(
+              'defs',
+              null,
+              h(
+                'radialGradient',
+                { id: 'dnb-liq-glow-a', cx: hasRightAllies ? '30%' : '50%', cy: '58%', r: '46%' },
+                h('stop', { offset: '0%', stopColor: bubbleLocked ? '#f59e0b' : '#38bdf8', stopOpacity: '0.20' }),
+                h('stop', { offset: '100%', stopColor: bubbleLocked ? '#f59e0b' : '#38bdf8', stopOpacity: '0' }),
+              ),
+              hasRightAllies
+                ? h(
+                    'radialGradient',
+                    { id: 'dnb-liq-glow-b', cx: '73%', cy: '58%', r: '40%' },
+                    h('stop', { offset: '0%', stopColor: bubbleLocked ? '#f59e0b' : '#2dd4bf', stopOpacity: '0.15' }),
+                    h('stop', { offset: '100%', stopColor: '#2dd4bf', stopOpacity: '0' }),
+                  )
+                : null,
+            ),
+            h('rect', { width: 640, height: 240, fill: 'url(#dnb-liq-glow-a)' }),
+            hasRightAllies ? h('rect', { width: 640, height: 240, fill: 'url(#dnb-liq-glow-b)' }) : null,
+            h('path', {
+              className: 'dnb-liquid-contour',
+              d: hasRightAllies
+                ? 'M 18 134 C 18 42, 150 32, 286 50 C 310 53, 330 53, 354 50 C 490 32, 622 42, 622 134 C 622 218, 496 232, 352 215 C 330 212, 310 212, 288 215 C 144 232, 18 218, 18 134 Z'
+                : 'M 94 132 C 94 42, 206 32, 320 32 C 434 32, 546 42, 546 132 C 546 218, 434 228, 320 228 C 206 228, 94 218, 94 132 Z',
+              fill: 'none',
+            }),
+            h('path', {
+              className: 'dnb-liquid-specular',
+              d: hasRightAllies
+                ? 'M 64 53 Q 160 35 256 48'
+                : 'M 176 47 Q 320 30 464 47',
+              fill: 'none',
+            }),
+          ),
+
+          // Layer 1: Adaptive Optical Filament Connectors (paths first, top labels second)
           (linkLayout.w > 0 && linkLayout.h > 0 && linkLayout.links.length > 0)
             ? h(
                 'svg',
                 {
-                  className: 'dnb-squad-links-svg',
+                  className: 'dnb-liquid-links-svg',
                   width: linkLayout.w,
                   height: linkLayout.h,
                   viewBox: `0 0 ${linkLayout.w} ${linkLayout.h}`,
@@ -780,25 +787,13 @@ export function PeersTab({ view }) {
                         d: lk.d,
                         fill: 'none',
                         stroke: lk.color,
-                        strokeWidth: lk.kind === 'collab-sync' ? 1.6 : 1.9,
-                        strokeDasharray: lk.dashed ? '5 4' : undefined,
+                        strokeWidth: lk.kind === 'collab-sync' ? 1.4 : 1.7,
+                        strokeDasharray: lk.dashed ? '4 4' : undefined,
                         strokeLinecap: 'round',
-                        opacity: lk.kind === 'collab-sync' ? 0.85 : 0.72,
+                        opacity: lk.kind === 'collab-sync' ? 0.72 : 0.65,
                       }),
-                      h('circle', {
-                        cx: lk.x1,
-                        cy: lk.y1,
-                        r: 2.6,
-                        fill: lk.color,
-                        opacity: 0.85,
-                      }),
-                      h('circle', {
-                        cx: lk.x2,
-                        cy: lk.y2,
-                        r: 3.1,
-                        fill: lk.color,
-                        opacity: 0.92,
-                      }),
+                      h('circle', { cx: lk.x1, cy: lk.y1, r: 2.3, fill: lk.color, opacity: 0.85 }),
+                      h('circle', { cx: lk.x2, cy: lk.y2, r: 2.8, fill: lk.color, opacity: 0.92 }),
                     ),
                   ),
                 ),
@@ -807,25 +802,25 @@ export function PeersTab({ view }) {
                   { className: 'dnb-squad-links-labels' },
                   linkLayout.links.map((lk) => {
                     if (!lk.label) return null
-                    const pillW = Math.max(32, Math.round(lk.label.split('').reduce((s, ch) => s + (/[\u4e00-\u9fa5]/.test(ch) ? 10.2 : 6.2), 12)))
+                    const pillW = Math.max(30, Math.round(lk.label.split('').reduce((s, ch) => s + (/[\u4e00-\u9fa5]/.test(ch) ? 9.8 : 6.0), 12)))
                     return h(
                       'g',
                       { key: 'l-' + lk.id, transform: `translate(${lk.mx.toFixed(1)}, ${lk.my.toFixed(1)})` },
                       h('rect', {
                         x: -(pillW / 2),
-                        y: -8.5,
+                        y: -8,
                         width: pillW,
-                        height: 17,
-                        rx: 8.5,
+                        height: 16,
+                        rx: 8,
                         className: 'dnb-squad-link-pill-bg',
                         stroke: lk.color,
-                        strokeWidth: 0.95,
+                        strokeWidth: 0.85,
                       }),
                       h(
                         'text',
                         {
                           x: 0,
-                          y: 3.2,
+                          y: 3.1,
                           textAnchor: 'middle',
                           className: 'dnb-squad-link-pill-txt',
                           fill: lk.color,
@@ -838,292 +833,342 @@ export function PeersTab({ view }) {
               )
             : null,
 
-          // Membrane Top Summary Strip
+          // Layer 2a: Integrated Minimal Floating Top Bar (merged cleanly inside bubble)
           h(
             'div',
-            { className: 'dnb-squad-membrane-head' },
+            { className: 'dnb-liquid-topbar' },
             h(
-              'span',
-              { className: 'dnb-squad-membrane-title' },
-              bubbleLocked ? '🛡️' : '🫧',
-              ' ',
-              bi('当前协同队伍水泡', 'Active Collab Squad Bubble'),
+              'div',
+              { className: 'dnb-bubble-status', 'data-locked': bubbleLocked ? '1' : '0' },
+              h('span', { className: 'dnb-bubble-status-dot' }),
+              h(
+                'span',
+                { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                bubbleLocked
+                  ? bi(`🔒 工作中已锁死${bubbleLockReason ? ' · ' + bubbleLockReason : ''}`, `🔒 Locked${bubbleLockReason ? ' · ' + bubbleLockReason : ''}`)
+                  : bi('整备协同中 · 拖或点入泡', 'Staging · Drag or click to join'),
+              ),
             ),
             h(
-              'span',
-              { className: 'dnb-squad-summary-pills' },
-              summaryParts.map((txt, idx) => h('span', { key: idx, className: 'dnb-squad-mini-stat' }, txt)),
-              counts.running > 0
-                ? h('span', { className: 'dnb-squad-mini-stat', 'data-running': '1' }, `${counts.running} ${bi('执行中', 'Active')}`)
+              'div',
+              { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
+              h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                disabled: bubbleAutoLocked && bubbleLocked,
+                'data-active': bubble.manualLocked ? '1' : '0',
+                style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+                title: (bubbleAutoLocked && bubbleLocked)
+                  ? bi('有成员运行中，自动锁生效中；请先急停或等完工后再解锁', 'Auto-locked by active workers; finish or Emergency Stop first')
+                  : (bubbleLocked ? bi('点击解除手动编队锁', 'Unlock manual squad lock') : bi('开干前手动锁死当前编队结构，防误拆', 'Manually lock squad structure before starting work')),
+                onClick: () => {
+                  if (bubbleAutoLocked && bubbleLocked) {
+                    triggerLockedReject()
+                    return
+                  }
+                  void toggleBubbleLock(!bubble.manualLocked)
+                },
+              }, (bubbleAutoLocked && bubbleLocked)
+                ? bi('🔒 自动锁定中', '🔒 Auto-Locked')
+                : (bubble.manualLocked ? bi('🔓 解锁', '🔓 Unlock') : bi('🔒 锁死编队', '🔒 Lock'))),
+              bubbleLocked
+                ? h('button', {
+                    type: 'button',
+                    className: 'dnb-pill dnb-bubble-estop-btn',
+                    'data-confirm': confirmStop ? '1' : '0',
+                    style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+                    title: bi('安全急停所有在途子代理、跨窗与外部 Harness，并解锁水泡', 'Interrupt all running workers & Harnesses and unlock Bubble'),
+                    onClick: () => {
+                      if (!confirmStop) {
+                        setConfirmStop(true)
+                        return
+                      }
+                      setConfirmStop(false)
+                      setDispatchTarget('')
+                      void emergencyStopBubble()
+                    },
+                  }, confirmStop ? bi('确认急停全员?', 'Confirm Stop?') : bi('⏹ 急停解体', '⏹ Stop & Unlock'))
                 : null,
             ),
           ),
 
-          // Tier 0: Chief Coordinator Center Capsule
+          // Layer 2b: Floating Central Coordinator Micro-Hub
           h(
             'div',
-            { className: 'dnb-squad-hub-wrap' },
+            { className: 'dnb-liquid-hub-wrap' },
             h(
               'div',
               {
                 ref: hubRef,
-                className: 'dnb-squad-hub',
+                className: 'dnb-liquid-hub',
                 'data-locked': bubbleLocked ? '1' : '0',
                 title: bi('DSH 参谋长作为统一总调度枢纽，串联主对话、下属子代理、联动主窗与外部 Harness', 'DSH Chief orchestrates Primary Lead, Subagents, Linked Windows & Harnesses'),
               },
-              h('span', { className: 'dnb-squad-hub-star' }, '✦'),
-              h(
-                'div',
-                { className: 'dnb-squad-hub-text' },
-                h('span', { className: 'dnb-squad-hub-name' }, bi('DSH 参谋长 · 总调度核心', 'DSH Chief · Coordinator')),
-                h('span', { className: 'dnb-squad-hub-sub' },
-                  bubbleLocked
-                    ? bi(`结构锁定中 · 共 ${counts.total} 位在编`, `Locked · ${counts.total} enrolled`)
-                    : bi(`统领编队 · 共 ${counts.total} 位在编`, `Orchestrating · ${counts.total} enrolled`)),
-              ),
+              h('span', { className: 'dnb-liquid-hub-star' }, '✦'),
+              h('span', { className: 'dnb-liquid-hub-name' }, bi('DSH 参谋长', 'DSH Chief')),
+              h('span', { className: 'dnb-liquid-hub-meta' }, `· ${counts.total} ${bi('在编', 'in squad')}`),
+              counts.running > 0
+                ? h('span', { className: 'dnb-liquid-run-badge' }, `${counts.running} ${bi('运行', 'run')}`)
+                : null,
             ),
           ),
 
-          // Tier 1 & Tier 2: Primary/Peer Branch Pods (with nested Secondary Subagents) + External Harness Wing
+          // Layer 2c: Liquid Core Body (Left Primary Core + Satellite Pearls | Right Glass Allies)
           h(
             'div',
-            {
-              className: 'dnb-squad-branches',
-              'data-cols': String(branchCols),
-            },
-            branches.map((branch) => {
-              const peer = branch.raw || {}
-              const isPrimary = branch.roleTier === 'primary'
-              const isPeer = branch.roleTier === 'peer'
-              const isRunning = peer.status === 'running'
-              const taskSummary = peer.taskTitle || peer.progressSummary || peer.objective || (isPrimary ? bi('主指挥核心会话', 'Primary coordinator session') : bi('已并入当前协同编队', 'Linked squad window'))
-              return h(
-                'div',
-                {
-                  key: branch.uid,
-                  ref: (el) => {
-                    if (el) podElsRef.current.set(branch.podKey, el)
-                    else podElsRef.current.delete(branch.podKey)
-                  },
-                  className: 'dnb-squad-pod',
-                  'data-tier': branch.roleTier,
-                  'data-running': isRunning ? '1' : '0',
-                  draggable: isPeer,
-                  onDragStart: isPeer
-                    ? e => beginDragItem(e, { fromZone: 'inside', kind: 'peer-session', id: branch.rootId, branch })
-                    : undefined,
-                  onDragEnd: isPeer ? endDragItem : undefined,
-                  style: {
-                    '--pod-dot': branch.accent.dot,
-                    '--pod-bg': branch.accent.bg,
-                    '--pod-border': branch.accent.border,
-                    '--pod-text': branch.accent.text,
-                  },
-                },
-                // Pod Header: Status + Clear Role Badge (主 / 联动主窗) + Full Session Title + Actions
-                h(
-                  'div',
-                  { className: 'dnb-squad-pod-head' },
-                  h(
+            { className: 'dnb-liquid-body', 'data-dual': hasRightAllies ? '1' : '0' },
+            // Left Core: Lead Bubble + Close Satellite Pearls
+            primaryBranch
+              ? (() => {
+                  const leadPeer = primaryBranch.raw || {}
+                  const leadRunning = leadPeer.status === 'running'
+                  const leadTip = leadPeer.taskTitle || leadPeer.progressSummary || leadPeer.objective || bi('当前主指挥核心会话', 'Current primary coordinator session')
+                  return h(
                     'div',
-                    { className: 'dnb-squad-pod-ident' },
-                    isRunning
-                      ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9px', color: isPrimary ? '#38bdf8' : branch.accent.dot } })
-                      : h('span', { className: 'dnb-squad-dot', style: { background: isPrimary ? '#38bdf8' : branch.accent.dot } }),
-                    h('span', { className: 'dnb-tier-badge', 'data-tier': branch.roleTier }, branch.tierBadge),
-                    h('span', { className: 'dnb-squad-pod-name', title: peer.name || '' }, peer.name || (isPrimary ? bi('主对话', 'Main') : shortSession(branch.rootId))),
-                  ),
-                  h(
-                    'div',
-                    { className: 'dnb-squad-pod-acts' },
-                    peer.key
-                      ? h('button', {
-                          type: 'button',
-                          className: 'dnb-pill',
-                          style: { height: 20, padding: '0 6px', fontSize: 10 },
-                          title: bi('快速向该主会话递话调度', 'Send relay message'),
-                          onClick: () => {
-                            patch({
-                              secTarget: peer.key,
-                              secMode: isRunning ? 'steer' : 'followup',
-                              notice: bi('已在下方锁定 @', 'Locked target @') + (peer.name || peer.key),
-                            })
-                            focusSecInput()
-                          },
-                        }, '@递话')
-                      : null,
-                    isPeer
-                      ? h('button', {
-                          type: 'button',
-                          className: 'dnb-pill',
-                          style: { height: 20, padding: '0 6px', fontSize: 10 },
-                          title: bubbleLocked ? bi('编队已锁，请先急停或等完工后移出', 'Locked while active') : bi('将该联动窗口移出编队水泡', 'Remove from Bubble'),
-                          onClick: () => performLeave({ kind: 'peer-session', id: branch.rootId, branch }),
-                        }, bubbleLocked ? '🔒' : '×')
-                      : null,
-                  ),
-                ),
-
-                h(
-                  'div',
-                  { className: 'dnb-squad-pod-sub', title: taskSummary },
-                  taskSummary,
-                ),
-
-                // Tier 2: Nested Secondary Subagent Sub-Bubble Cluster under this Primary/Peer
-                branch.children.length > 0
-                  ? h(
+                    { className: 'dnb-liquid-lead-cluster' },
+                    h(
                       'div',
-                      { className: 'dnb-sub-cluster' },
-                      h(
-                        'div',
-                        { className: 'dnb-sub-cluster-head' },
-                        `↳ ${bi(`下属子代理（次 · ${branch.children.length}）`, `Subagents (Secondary · ${branch.children.length})`)}`,
-                      ),
-                      h(
-                        'div',
-                        { className: 'dnb-sub-list' },
-                        branch.children.map((sub) => {
-                          const sPeer = sub.raw || {}
-                          const sRun = sPeer.status === 'running'
-                          return h(
-                            'div',
-                            {
-                              key: sub.uid,
-                              className: 'dnb-sub-pill',
-                              'data-tier': 'secondary',
-                              'data-running': sRun ? '1' : '0',
+                      {
+                        ref: leadRef,
+                        className: 'dnb-liquid-lead-orb',
+                        'data-tier': 'primary',
+                        'data-running': leadRunning ? '1' : '0',
+                        title: leadTip,
+                      },
+                      leadRunning
+                        ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9px', color: '#38bdf8' } })
+                        : h('span', { className: 'dnb-squad-dot', style: { background: '#38bdf8', width: 8, height: 8 } }),
+                      h('span', { className: 'dnb-tier-badge', 'data-tier': 'primary' }, primaryBranch.tierBadge),
+                      h('span', { className: 'dnb-liquid-lead-name' }, leadPeer.name || bi('主对话', 'Main')),
+                      leadPeer.key
+                        ? h('button', {
+                            type: 'button',
+                            className: 'dnb-mini-btn',
+                            title: bi('快速向主对话递话调度', 'Send relay to Main'),
+                            onClick: () => {
+                              patch({
+                                secTarget: leadPeer.key,
+                                secMode: leadRunning ? 'steer' : 'followup',
+                                notice: bi('已在下方锁定 @', 'Locked target @') + (leadPeer.name || leadPeer.key),
+                              })
+                              focusSecInput()
                             },
-                            h(
+                          }, '@递话')
+                        : null,
+                    ),
+                    primaryBranch.children.length > 0
+                      ? h(
+                          'div',
+                          { className: 'dnb-liquid-satellites' },
+                          h('span', { className: 'dnb-liquid-sat-prefix' }, `↳ ${bi('次', 'Sub')}`),
+                          primaryBranch.children.map((sub) => {
+                            const sPeer = sub.raw || {}
+                            const sRun = sPeer.status === 'running'
+                            const subName = sPeer.name || shortSession(sPeer.id)
+                            return h(
                               'div',
-                              { className: 'dnb-sub-pill-main' },
+                              {
+                                key: sub.uid,
+                                className: 'dnb-liquid-sat-pill',
+                                'data-tier': 'secondary',
+                                'data-running': sRun ? '1' : '0',
+                                title: `${subName}${sPeer.taskTitle ? ' — ' + sPeer.taskTitle : ''}`,
+                              },
                               sRun
-                                ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: branch.accent.dot } })
-                                : h('span', { className: 'dnb-squad-dot', style: { background: branch.accent.dot, width: 6, height: 6 } }),
-                              h('span', { className: 'dnb-tier-badge', 'data-tier': 'secondary' }, sub.tierBadge),
-                              h('span', { className: 'dnb-sub-name', title: sPeer.taskTitle || sPeer.name || '' }, sPeer.name || shortSession(sPeer.id)),
-                              sPeer.taskTitle
-                                ? h('span', { className: 'dnb-sub-task', title: sPeer.taskTitle }, sPeer.taskTitle)
-                                : null,
-                            ),
-                            h(
-                              'div',
-                              { className: 'dnb-sub-pill-acts' },
-                              sPeer.id
-                                ? h('button', {
-                                    type: 'button',
-                                    className: 'dnb-mini-btn',
-                                    title: bi('分屏查看该子代理对话流', 'Open subagent split view'),
-                                    onClick: () => {
-                                      if (!openSubagentChat(sPeer)) patch({ notice: bi('该子代理暂无独立面板视图', 'No dedicated pane view for this subagent') })
-                                    },
-                                  }, h(Icon, { name: 'chat', size: 9.5 }), bi('分屏', 'Split'))
-                                : null,
-                              sPeer.key
-                                ? h('button', {
-                                    type: 'button',
-                                    className: 'dnb-mini-btn',
-                                    title: bi('向该子代理直接递话', 'Relay to subagent'),
-                                    onClick: () => {
-                                      patch({
-                                        secTarget: sPeer.key,
-                                        secMode: sRun ? 'steer' : 'followup',
-                                        notice: bi('已在下方锁定 @', 'Locked target @') + (sPeer.name || sPeer.key),
-                                      })
-                                      focusSecInput()
-                                    },
-                                  }, '@递话')
-                                : null,
-                            ),
-                          )
-                        }),
-                      ),
-                    )
-                  : null,
-              )
-            }),
+                                ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '7px', color: '#38bdf8' } })
+                                : h('span', { className: 'dnb-squad-dot', style: { background: 'rgba(56, 189, 248, 0.78)', width: 5.5, height: 5.5 } }),
+                              h('span', { className: 'dnb-liquid-sat-name' }, subName),
+                              h(
+                                'span',
+                                { className: 'dnb-sat-acts' },
+                                sPeer.id
+                                  ? h('button', {
+                                      type: 'button',
+                                      className: 'dnb-sat-btn',
+                                      title: bi('分屏查看该子代理对话流', 'Open subagent split view'),
+                                      onClick: () => {
+                                        if (!openSubagentChat(sPeer)) patch({ notice: bi('该子代理暂无独立面板视图', 'No dedicated pane view for this subagent') })
+                                      },
+                                    }, h(Icon, { name: 'chat', size: 9 }), bi('分屏', 'Split'))
+                                  : null,
+                                sPeer.key
+                                  ? h('button', {
+                                      type: 'button',
+                                      className: 'dnb-sat-btn',
+                                      title: bi('向该子代理直接递话', 'Relay to subagent'),
+                                      onClick: () => {
+                                        patch({
+                                          secTarget: sPeer.key,
+                                          secMode: sRun ? 'steer' : 'followup',
+                                          notice: bi('已在下方锁定 @', 'Locked target @') + subName,
+                                        })
+                                        focusSecInput()
+                                      },
+                                    }, '@')
+                                  : null,
+                              ),
+                            )
+                          }),
+                        )
+                      : null,
+                  )
+                })()
+              : null,
 
-            // External Harness Wing inside Squad Bubble (only rendered when enrolled installed Harnesses > 0)
-            harnessWing.length > 0
+            // Right Wing: Organic Glass Ally Pills (External Harnesses & Linked Peer Windows — zero extra wrapper box)
+            hasRightAllies
               ? h(
                   'div',
                   {
-                    ref: (el) => {
-                      if (el) podElsRef.current.set('harness-wing', el)
-                      else podElsRef.current.delete('harness-wing')
-                    },
-                    className: 'dnb-harness-pod',
-                    'data-tier': 'harness',
-                    'data-span': branches.length > 1 ? 'full' : 'col',
+                    ref: allyClusterRef,
+                    className: 'dnb-liquid-ally-cluster',
                   },
-                  h(
-                    'div',
-                    { className: 'dnb-harness-pod-head' },
-                    h('span', { className: 'dnb-tier-badge', 'data-tier': 'harness' }, bi('外协执行', 'External')),
-                    h('span', { className: 'dnb-harness-pod-title' }, bi(`受差遣外部 Harness（${harnessWing.length}）`, `Dispatched External Harnesses (${harnessWing.length})`)),
-                    h('span', { className: 'dnb-harness-pod-note' }, bi('独立进程 · 派单自动附带红线与物理墙', 'Out-of-process · redlines & walls prepended')),
-                  ),
-                  h(
-                    'div',
-                    { className: 'dnb-harness-cards' },
-                    harnessWing.map((hItem) => {
-                      const roleText = hItem.role || hItem.roleHint || bi('外部独立执行进程', 'External Harness')
-                      const isLocal = hItem.transport === 'local-cli'
-                      const isSelTarget = dispatchTarget === hItem.provider
-                      return h(
+                  harnessWing.map((hItem) => {
+                    const roleText = hItem.role || hItem.roleHint || bi('外部独立执行进程', 'External Harness')
+                    const isLocal = hItem.transport === 'local-cli'
+                    const isSelTarget = dispatchTarget === hItem.provider
+                    const shortCfg = hItem.configLabel
+                      ? (hItem.configLabel.length > 10 ? bi('本机已配', 'Local Cfg') : hItem.configLabel)
+                      : ''
+                    const subInfo = hItem.running
+                      ? bi('执行中', 'Running')
+                      : `${isLocal ? bi('直连', 'Local') : bi('插件', 'Plugin')}${shortCfg ? ' · ' + shortCfg : ''}`
+                    return h(
+                      'div',
+                      {
+                        key: 'h-' + hItem.provider,
+                        className: 'dnb-liquid-ally-pill',
+                        'data-tier': 'harness',
+                        'data-uid': 'harness:' + hItem.provider,
+                        'data-provider': hItem.provider,
+                        'data-running': hItem.running ? '1' : '0',
+                        draggable: true,
+                        title: `${hItem.label || hItem.provider} — ${roleText}\n${bi('独立进程 · 派单自动附带当前红线与物理墙', 'Out-of-process · redlines & walls auto-prepended')}${hItem.binaryPath ? '\n' + hItem.binaryPath : ''}`,
+                        onDragStart: e => beginDragItem(e, { fromZone: 'inside', kind: 'harness', id: hItem.provider }),
+                        onDragEnd: endDragItem,
+                      },
+                      h(HarnessLogoIcon, { provider: hItem.provider, size: 18 }),
+                      h(
+                        'div',
+                        { className: 'dnb-ally-info' },
+                        h(
+                          'div',
+                          { className: 'dnb-ally-name-row' },
+                          h('span', { className: 'dnb-ally-name' }, hItem.label || hItem.provider),
+                          hItem.running ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '7px', color: '#34d399' } }) : null,
+                        ),
+                        h('div', { className: 'dnb-ally-sub' }, subInfo),
+                      ),
+                      h(
+                        'div',
+                        { className: 'dnb-ally-acts' },
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-pill dnb-pill-accent',
+                          'data-active': isSelTarget ? '1' : '0',
+                          style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+                          onClick: () => setDispatchTarget(d => (d === hItem.provider ? '' : hItem.provider)),
+                        }, bi('⚡ 调用', '⚡ Run')),
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-mini-btn',
+                          title: bubbleLocked ? bi('编队已锁，禁止移出', 'Locked while active') : bi('移回待命池', 'Move to standby'),
+                          onClick: () => performLeave({ kind: 'harness', id: hItem.provider }),
+                        }, bubbleLocked ? '🔒' : '×'),
+                      ),
+                    )
+                  }),
+                  peerBranches.map((branch) => {
+                    const pPeer = branch.raw || {}
+                    const pRun = pPeer.status === 'running'
+                    const pSummary = pPeer.taskTitle || pPeer.progressSummary || pPeer.objective || bi('已并入当前协同水泡', 'Linked in Bubble')
+                    return h(
+                      'div',
+                      { key: 'pwrap-' + branch.rootId, className: 'dnb-liquid-peer-block' },
+                      h(
                         'div',
                         {
-                          key: hItem.provider,
-                          className: 'dnb-harness-card',
-                          'data-uid': 'harness:' + hItem.provider,
-                          'data-provider': hItem.provider,
-                          'data-running': hItem.running ? '1' : '0',
+                          className: 'dnb-liquid-ally-pill',
+                          'data-tier': 'peer',
+                          'data-uid': 'peer:' + branch.rootId,
+                          'data-running': pRun ? '1' : '0',
                           draggable: true,
-                          onDragStart: e => beginDragItem(e, { fromZone: 'inside', kind: 'harness', id: hItem.provider }),
+                          title: `${pPeer.name || shortSession(branch.rootId)}\n${pSummary}`,
+                          style: {
+                            '--pod-dot': branch.accent.dot,
+                            '--pod-bg': branch.accent.bg,
+                            '--pod-border': branch.accent.border,
+                            '--pod-text': branch.accent.text,
+                          },
+                          onDragStart: e => beginDragItem(e, { fromZone: 'inside', kind: 'peer-session', id: branch.rootId, branch }),
                           onDragEnd: endDragItem,
                         },
-                        h(HarnessLogoIcon, { provider: hItem.provider, size: 20 }),
+                        pRun
+                          ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: branch.accent.dot } })
+                          : h('span', { className: 'dnb-squad-dot', style: { background: branch.accent.dot, width: 7.5, height: 7.5 } }),
                         h(
                           'div',
-                          { className: 'dnb-harness-card-info' },
+                          { className: 'dnb-ally-info' },
                           h(
                             'div',
-                            { className: 'dnb-harness-card-top' },
-                            h('span', { className: 'dnb-harness-card-name' }, hItem.label || hItem.provider),
-                            h(
-                              'span',
-                              { className: 'dnb-harness-state-tag', 'data-running': hItem.running ? '1' : '0' },
-                              hItem.running
-                                ? h(React.Fragment, null, h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '7px' } }), bi('运行中', 'Running'))
-                                : (isLocal ? bi('本机直连', 'Local CLI') : bi('DSH插件', 'Plugin')),
-                            ),
-                            hItem.configLabel
-                              ? h('span', { className: 'dnb-harness-cfg-tag', title: hItem.binaryPath || hItem.configLabel }, `${bi('已配', 'Cfg')} ${hItem.configLabel}`)
-                              : null,
+                            { className: 'dnb-ally-name-row' },
+                            h('span', { className: 'dnb-tier-badge', 'data-tier': 'peer' }, bi('联动', 'Link')),
+                            h('span', { className: 'dnb-ally-name' }, pPeer.name || shortSession(branch.rootId)),
                           ),
-                          h('div', { className: 'dnb-harness-card-role', title: hItem.binaryPath || roleText }, roleText),
+                          h('div', { className: 'dnb-ally-sub' }, pSummary),
                         ),
                         h(
                           'div',
-                          { className: 'dnb-harness-card-acts' },
+                          { className: 'dnb-ally-acts' },
+                          pPeer.key
+                            ? h('button', {
+                                type: 'button',
+                                className: 'dnb-mini-btn',
+                                title: bi('向该联动窗口递话', 'Relay to linked window'),
+                                onClick: () => {
+                                  patch({
+                                    secTarget: pPeer.key,
+                                    secMode: pRun ? 'steer' : 'followup',
+                                    notice: bi('已在下方锁定 @', 'Locked target @') + (pPeer.name || pPeer.key),
+                                  })
+                                  focusSecInput()
+                                },
+                              }, '@递话')
+                            : null,
                           h('button', {
                             type: 'button',
-                            className: 'dnb-pill dnb-pill-accent',
-                            'data-active': isSelTarget ? '1' : '0',
-                            style: { height: 22, padding: '0 8px', fontSize: 10.5 },
-                            onClick: () => setDispatchTarget(d => (d === hItem.provider ? '' : hItem.provider)),
-                          }, bi('⚡ 调用', '⚡ Run')),
-                          h('button', {
-                            type: 'button',
-                            className: 'dnb-pill',
-                            style: { height: 22, padding: '0 6px', fontSize: 10.5 },
-                            title: bubbleLocked ? bi('编队已锁，禁止移出', 'Locked while active') : bi('将此工具移回待命池', 'Remove to standby'),
-                            onClick: () => performLeave({ kind: 'harness', id: hItem.provider }),
+                            className: 'dnb-mini-btn',
+                            title: bubbleLocked ? bi('编队已锁，请先急停或等完工后移出', 'Locked while active') : bi('移出当前水泡', 'Eject from Bubble'),
+                            onClick: () => performLeave({ kind: 'peer-session', id: branch.rootId, branch }),
                           }, bubbleLocked ? '🔒' : '×'),
                         ),
-                      )
-                    }),
-                  ),
+                      ),
+                      branch.children.length > 0
+                        ? h(
+                            'div',
+                            { className: 'dnb-liquid-satellites', 'data-compact': '1' },
+                            h('span', { className: 'dnb-liquid-sat-prefix' }, `↳ ${bi('次', 'Sub')}`),
+                            branch.children.map((sub) => {
+                              const sPeer = sub.raw || {}
+                              const sRun = sPeer.status === 'running'
+                              const subName = sPeer.name || shortSession(sPeer.id)
+                              return h(
+                                'div',
+                                {
+                                  key: sub.uid,
+                                  className: 'dnb-liquid-sat-pill',
+                                  'data-tier': 'secondary',
+                                  'data-running': sRun ? '1' : '0',
+                                  title: `${subName}${sPeer.taskTitle ? ' — ' + sPeer.taskTitle : ''}`,
+                                },
+                                h('span', { className: 'dnb-squad-dot', style: { background: branch.accent.dot, width: 5.5, height: 5.5 } }),
+                                h('span', { className: 'dnb-liquid-sat-name' }, subName),
+                              )
+                            }),
+                          )
+                        : null,
+                    )
+                  }),
                 )
               : null,
           ),
@@ -1169,11 +1214,11 @@ export function PeersTab({ view }) {
             )
           : null,
 
-        // Outer Standby Pool (Strictly ONLY locally installed Harnesses & standalone open DSH sessions)
+        // Compact Standby Pill Dock (Strictly ONLY locally installed Harnesses & open DSH windows)
         h(
           'div',
           {
-            className: 'dnb-standby-zone',
+            className: 'dnb-liquid-dock',
             'data-dragover': dragOverZone === 'outside' ? '1' : '0',
             onDragOver: e => handleZoneDragOver(e, 'inside', 'outside'),
             onDragLeave: () => { if (dragOverZone === 'outside') setDragOverZone('') },
@@ -1181,110 +1226,86 @@ export function PeersTab({ view }) {
           },
           h(
             'div',
-            { className: 'dnb-standby-head' },
-            h('span', { className: 'dnb-standby-title' }, bi('队外待命 · 本机已检测可用', 'Standby Pool · Detected Locally')),
-            h('span', { className: 'dnb-standby-hint' },
+            { className: 'dnb-dock-head' },
+            h(
+              'span',
+              { className: 'dnb-dock-title' },
+              h('span', { className: 'dnb-dock-dot' }),
+              bi('待命池 · 本机已检测可用', 'Standby · Local Ready'),
+            ),
+            h(
+              'span',
+              { className: 'dnb-dock-hint' },
               hasStandby
-                ? bi('拖入上方水泡协同或点 + 入队（未安装工具已自动隐藏）', 'Drag into Bubble above or click + Join (uninstalled tools hidden)')
-                : bi('仅展示本机已配置的外部工具与独立窗口', 'Shows only locally configured tools & open sessions')),
+                ? bi('拖入水泡或点 + 入队', 'Drag up or tap + to join')
+                : bi('仅展示本机已配置的外部工具与独立窗口', 'Only locally configured tools & open sessions'),
+            ),
           ),
           hasStandby
             ? h(
                 'div',
-                { className: 'dnb-standby-grid' },
-                squad.standbySessions.map((sess) => {
-                  const col = colorForRootSession(sess.id, selfRootId)
-                  const desc = sess.objective || sess.progressSummary || bi('已打开的独立会话窗口，可拖拽并入水泡', 'Standalone window ready to join Bubble')
-                  return h(
-                    'div',
-                    {
-                      key: 'sess:' + sess.id,
-                      className: 'dnb-standby-card',
-                      'data-kind': 'standby-session',
-                      'data-uid': 'standby-sess:' + sess.id,
-                      draggable: true,
-                      onDragStart: e => beginDragItem(e, { fromZone: 'outside', kind: 'standby-session', id: sess.id, item: sess }),
-                      onDragEnd: endDragItem,
-                      style: { borderLeftColor: col.dot },
-                    },
-                    h('span', { className: 'dnb-squad-dot', style: { background: col.dot, width: 8, height: 8 } }),
-                    h(
-                      'div',
-                      { className: 'dnb-standby-card-body' },
-                      h(
-                        'div',
-                        { className: 'dnb-standby-card-top' },
-                        h('span', { className: 'dnb-tier-badge', 'data-tier': 'standby' }, bi('独立窗', 'Window')),
-                        h('span', { className: 'dnb-standby-card-name' }, sess.name || shortSession(sess.id)),
-                      ),
-                      h('div', { className: 'dnb-standby-card-desc', title: desc }, desc),
-                    ),
-                    h('button', {
-                      type: 'button',
-                      className: 'dnb-pill dnb-pill-accent',
-                      style: { height: 22, padding: '0 8px', fontSize: 10.5, flexShrink: 0 },
-                      onClick: () => performJoin({ kind: 'standby-session', id: sess.id, item: sess }),
-                    }, bubbleLocked ? '🔒' : bi('+ 入队', '+ Join')),
-                  )
-                }),
+                { className: 'dnb-dock-flow' },
                 readyStandbyHarnesses.map((hItem) => {
                   const roleText = hItem.roleHint || hItem.role || bi('本机外部执行引擎', 'Local external Harness')
-                  const isLocal = hItem.transport === 'local-cli'
                   const isSelTarget = dispatchTarget === hItem.provider
                   return h(
                     'div',
                     {
                       key: 'harness:' + hItem.provider,
-                      className: 'dnb-standby-card',
+                      className: 'dnb-dock-pill',
                       'data-kind': 'standby-harness',
                       'data-uid': 'standby-harness:' + hItem.provider,
                       'data-provider': hItem.provider,
                       draggable: true,
+                      title: `${hItem.label || hItem.provider}（${hItem.configLabel || bi('已安装', 'Ready')}）\n${roleText}${hItem.binaryPath ? '\n' + hItem.binaryPath : ''}`,
                       onDragStart: e => beginDragItem(e, { fromZone: 'outside', kind: 'standby-harness', id: hItem.provider, item: hItem }),
                       onDragEnd: endDragItem,
+                      onClick: () => performJoin({ kind: 'standby-harness', id: hItem.provider, item: hItem }),
                     },
-                    h(HarnessLogoIcon, { provider: hItem.provider, size: 19 }),
-                    h(
-                      'div',
-                      { className: 'dnb-standby-card-body' },
-                      h(
-                        'div',
-                        { className: 'dnb-standby-card-top' },
-                        h('span', { className: 'dnb-standby-card-name' }, hItem.label || hItem.provider),
-                        h('span', { className: 'dnb-harness-state-tag' }, isLocal ? bi('本机直连', 'Local CLI') : bi('DSH插件', 'Plugin')),
-                        hItem.configLabel
-                          ? h('span', { className: 'dnb-harness-cfg-tag', title: hItem.binaryPath || hItem.configLabel }, `${bi('已配', 'Cfg')} ${hItem.configLabel}`)
-                          : null,
-                      ),
-                      h('div', { className: 'dnb-standby-card-desc', title: hItem.binaryPath || roleText }, roleText),
-                    ),
-                    h(
-                      'div',
-                      { style: { display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 } },
-                      h('button', {
-                        type: 'button',
-                        className: 'dnb-pill dnb-pill-accent',
-                        'data-active': isSelTarget ? '1' : '0',
-                        style: { height: 22, padding: '0 7px', fontSize: 10.5 },
-                        title: bi('一键直连调用并自动纳入水泡锁死', 'One-click run & lock in Bubble'),
-                        onClick: () => setDispatchTarget(d => (d === hItem.provider ? '' : hItem.provider)),
-                      }, bi('⚡ 调用', '⚡ Run')),
-                      h('button', {
-                        type: 'button',
-                        className: 'dnb-pill',
-                        style: { height: 22, padding: '0 7px', fontSize: 10.5 },
-                        onClick: () => performJoin({ kind: 'standby-harness', id: hItem.provider, item: hItem }),
-                      }, bubbleLocked ? '🔒' : bi('+ 入队', '+ Join')),
-                    ),
+                    h(HarnessLogoIcon, { provider: hItem.provider, size: 14 }),
+                    h('span', { className: 'dnb-dock-pill-name' }, hItem.label || hItem.provider),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-dock-bolt-btn',
+                      'data-active': isSelTarget ? '1' : '0',
+                      title: bi('⚡ 一键调用并自动纳入水泡锁死', '⚡ One-click run & lock'),
+                      onClick: (e) => {
+                        e.stopPropagation()
+                        setDispatchTarget(d => (d === hItem.provider ? '' : hItem.provider))
+                      },
+                    }, '⚡'),
+                    h('span', { className: 'dnb-dock-plus' }, bubbleLocked ? '🔒' : '+'),
+                  )
+                }),
+                squad.standbySessions.map((sess) => {
+                  const col = colorForRootSession(sess.id, selfRootId)
+                  const sessTitle = sess.name || shortSession(sess.id)
+                  const desc = sess.objective || sess.progressSummary || bi('已打开的独立会话窗口，可拖拽或点击入队', 'Standalone window ready to join')
+                  return h(
+                    'div',
+                    {
+                      key: 'sess:' + sess.id,
+                      className: 'dnb-dock-pill',
+                      'data-kind': 'standby-session',
+                      'data-uid': 'standby-sess:' + sess.id,
+                      draggable: true,
+                      title: `${sessTitle}\n${desc}`,
+                      onDragStart: e => beginDragItem(e, { fromZone: 'outside', kind: 'standby-session', id: sess.id, item: sess }),
+                      onDragEnd: endDragItem,
+                      onClick: () => performJoin({ kind: 'standby-session', id: sess.id, item: sess }),
+                    },
+                    h('span', { className: 'dnb-squad-dot', style: { background: col.dot, width: 7, height: 7 } }),
+                    h('span', { className: 'dnb-dock-pill-name' }, sessTitle),
+                    h('span', { className: 'dnb-dock-plus' }, bubbleLocked ? '🔒' : '+'),
                   )
                 }),
               )
             : h(
                 'div',
-                { className: 'dnb-standby-empty' },
-                harnessWing.length > 0
-                  ? bi('所有已检测到的本机外部 Harness 与联动窗口均已入队协同。', 'All detected local Harnesses and standalone windows are inside the Bubble.')
-                  : bi('暂未检测到其他未入队的本机外部 Harness 或独立窗口（本机装有 Codex / Claude Code 时将自动出现）。', 'No additional local Harnesses or standalone windows detected on standby.'),
+                { className: 'dnb-dock-empty' },
+                hasRightAllies
+                  ? bi('已检测到的本机外协工具与独立窗口均已入队。', 'All detected local Harnesses and standalone windows are enrolled.')
+                  : bi('暂未检测到其他可加入的本机外部 Harness 或独立窗口。', 'No standby local Harnesses or standalone windows detected.'),
               ),
         ),
       ),
