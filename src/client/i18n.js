@@ -265,17 +265,6 @@ export function effortMeta(key) {
   }
 }
 
-export function factCatLabel(key) {
-  switch (key) {
-    case 'discipline': return bi('纪律', 'Discipline')
-    case 'architecture': return bi('架构', 'Architecture')
-    case 'team': return bi('分工', 'Roles')
-    case 'progress': return bi('进展', 'Progress')
-    case 'preference': return bi('偏好', 'Preference')
-    default: return String(key || '')
-  }
-}
-
 export function boundListLabel(field) {
   switch (field) {
     case 'allowed': return bi('必做事项', 'Must Do')

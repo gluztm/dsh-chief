@@ -1054,6 +1054,7 @@ export function ArchiveTab({ board, view }) {
             role: 'tab',
             'aria-selected': activeScope === seg.key ? 'true' : 'false',
             className: 'dnb-vault-seg-btn',
+            'data-scope': seg.key,
             'data-active': activeScope === seg.key ? '1' : '0',
             onClick: () => switchScope(seg.key),
           },

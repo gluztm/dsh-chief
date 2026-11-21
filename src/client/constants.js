@@ -69,45 +69,11 @@ export const TABS = [
   { key: 'boundaries', label: '边界' },
 ]
 
-export const FACT_CATEGORIES = [
-  { key: 'discipline', label: '纪律' },
-  { key: 'architecture', label: '架构' },
-  { key: 'team', label: '分工' },
-  { key: 'progress', label: '进展' },
-  { key: 'preference', label: '偏好' },
-]
-
-export const FACT_CAT_LABEL = FACT_CATEGORIES.reduce((acc, c) => {
-  acc[c.key] = c.label
-  return acc
-}, {})
-
-export const FACT_CAT_TONE = {
-  discipline: { bg: 'rgba(245, 158, 11, 0.16)', fg: '#fbbf24', border: 'rgba(245, 158, 11, 0.34)' },
-  preference: { bg: 'rgba(245, 158, 11, 0.16)', fg: '#fbbf24', border: 'rgba(245, 158, 11, 0.34)' },
-  architecture: { bg: 'rgba(10, 132, 255, 0.14)', fg: '#409cff', border: 'rgba(10, 132, 255, 0.30)' },
-  team: { bg: 'rgba(10, 132, 255, 0.14)', fg: '#409cff', border: 'rgba(10, 132, 255, 0.30)' },
-  progress: { bg: 'rgba(10, 132, 255, 0.14)', fg: '#409cff', border: 'rgba(10, 132, 255, 0.30)' },
-}
-
 export const RELAY_MODES = [
   { key: 'steer', label: '插话', hint: '对方正在干活时，下一步立刻插进去提醒。' },
   { key: 'followup', label: '递话', hint: '排在当前话后面发，对方空闲时直接唤醒。' },
   { key: 'silent', label: '备忘', hint: '先放到收件箱里，不打断也不叫醒对方。' },
 ]
-
-export const MEMORY_SECTIONS = [
-  { key: 'progress', label: '目标与进展' },
-  { key: 'decision', label: '决策与结论' },
-  { key: 'verify', label: '门禁与验证' },
-  { key: 'open', label: '待办与风险' },
-  { key: 'other', label: '其他要点' },
-]
-
-export const SECTION_LABEL = MEMORY_SECTIONS.reduce((all, section) => {
-  all[section.key] = section.label
-  return all
-}, {})
 
 export const BOUND_LISTS = [
   { field: 'allowed', label: '必做事项', dot: '#30d158' },

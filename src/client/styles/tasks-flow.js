@@ -886,12 +886,7 @@ export const CSS_TASKS_FLOW = `
     color: var(--dnb-text-3);
     padding: 6px 12px 2px;
   }
-  html[data-ds-theme-source="light"] .dnb-acc-card,
-  html[data-ds-theme="light"] .dnb-acc-card,
-  [data-ds-theme-source="light"] .dnb-acc-card,
-  html[data-ds-theme-source="light"] .dnb-acc-card.dnb-wall-box,
-  html[data-ds-theme="light"] .dnb-acc-card.dnb-wall-box,
-  [data-ds-theme-source="light"] .dnb-acc-card.dnb-wall-box {
+  html[data-ds-theme-source="light"] .dnb-acc-card:not([data-tone]) {
     background: #ffffff;
   }
   html[data-ds-theme-source="light"] .dnb-fleet-card,

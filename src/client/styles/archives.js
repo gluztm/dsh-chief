@@ -441,12 +441,24 @@ export const CSS_ARCHIVES = `
     position: relative;
     padding: 12px;
     border-radius: 12px;
-    background: var(--dnb-card);
+    background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, var(--dnb-card) 44%);
     border: 1px solid var(--dnb-border);
-    border-left: 3px solid #f59e0b;
+    border-left: 3.5px solid rgba(245, 158, 11, 0.88);
     display: flex;
     flex-direction: column;
     gap: 9px;
+  }
+  html[data-ds-theme-source="light"] .dnb-desktop-zone {
+    background: linear-gradient(135deg, #fffbeb 0%, #ffffff 42%);
+    border-color: rgba(15, 23, 42, 0.10);
+    border-left-color: #d97706;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+  }
+  html[data-ds-theme-source="light"] .dnb-strip-bar,
+  html[data-ds-theme-source="light"] .dnb-vault-banner {
+    background: linear-gradient(135deg, #f8fafc 0%, #ffffff 50%);
+    border-color: rgba(15, 23, 42, 0.10);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
   }
   .dnb-token-track {
     width: 100%;

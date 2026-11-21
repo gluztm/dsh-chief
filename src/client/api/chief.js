@@ -708,22 +708,6 @@ export function prefillSuggestion(sug) {
   if (sug.id && !sug.isSynthetic) void decideSuggestion(sug, 'dismiss')
 }
 
-export async function mutateFact(payload) {
-  try {
-    const value = await call('chief/fact', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ session: store.sessionId, ...payload }),
-    })
-    if (payload.op === 'add') patch({ notice: '已保存这条记录' })
-    else if (payload.op === 'remove') patch({ notice: '已删除这条记录' })
-    return value
-  } catch (error) {
-    patch({ error: String((error && error.message) || error) })
-    return null
-  }
-}
-
 export async function ingestSecImageFiles(fileList) {
   const incoming = Array.from(fileList || []).filter(f => {
     if (!f) return false

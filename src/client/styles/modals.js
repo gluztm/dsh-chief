@@ -321,11 +321,12 @@ export const CSS_MODALS = `
     margin-bottom: 10px;
   }
   .dnb-vault-seg-btn {
+    position: relative;
     display: inline-flex;
     align-items: center;
     justify-content: center;
     gap: 4px;
-    min-height: 26px;
+    min-height: 27px;
     padding: 3px 5px;
     border-radius: 7px;
     border: 1px solid transparent;
@@ -338,7 +339,7 @@ export const CSS_MODALS = `
   }
   .dnb-vault-seg-btn:hover {
     color: var(--dnb-text);
-    background: rgba(255, 255, 255, 0.04);
+    background: rgba(128, 128, 140, 0.08);
   }
   .dnb-vault-seg-btn[data-active="1"] {
     background: var(--dnb-elevated);
@@ -346,6 +347,78 @@ export const CSS_MODALS = `
     color: var(--dnb-text);
     font-weight: 600;
     box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
+  }
+  .dnb-vault-seg-btn[data-active="1"]::after {
+    content: "";
+    position: absolute;
+    left: 24%;
+    right: 24%;
+    bottom: 1.5px;
+    height: 2px;
+    border-radius: 99px;
+    background: var(--dnb-vault-bar, var(--dnb-accent));
+    opacity: 0.9;
+  }
+  .dnb-vault-seg-btn[data-active="1"][data-scope="desktop"] {
+    --dnb-vault-bar: #f59e0b;
+    background: linear-gradient(180deg, rgba(245, 158, 11, 0.14), rgba(245, 158, 11, 0.05));
+    border-color: rgba(245, 158, 11, 0.34);
+  }
+  .dnb-vault-seg-btn[data-active="1"][data-scope="session"] {
+    --dnb-vault-bar: #3b82f6;
+    background: linear-gradient(180deg, rgba(59, 130, 246, 0.14), rgba(59, 130, 246, 0.05));
+    border-color: rgba(59, 130, 246, 0.34);
+  }
+  .dnb-vault-seg-btn[data-active="1"][data-scope="global"] {
+    --dnb-vault-bar: #10b981;
+    background: linear-gradient(180deg, rgba(16, 185, 129, 0.14), rgba(16, 185, 129, 0.05));
+    border-color: rgba(16, 185, 129, 0.34);
+  }
+  .dnb-vault-seg-btn[data-active="1"][data-scope="precipitated"] {
+    --dnb-vault-bar: #06b6d4;
+    background: linear-gradient(180deg, rgba(6, 182, 212, 0.14), rgba(6, 182, 212, 0.05));
+    border-color: rgba(6, 182, 212, 0.34);
+  }
+  html[data-ds-theme-source="light"] .dnb-vault-seg {
+    background: rgba(15, 23, 42, 0.055);
+    border-color: rgba(15, 23, 42, 0.09);
+  }
+  html[data-ds-theme-source="light"] .dnb-vault-seg-btn {
+    color: #475569;
+  }
+  html[data-ds-theme-source="light"] .dnb-vault-seg-btn:hover {
+    color: #0f172a;
+    background: rgba(255, 255, 255, 0.55);
+  }
+  html[data-ds-theme-source="light"] .dnb-vault-seg-btn[data-active="1"] {
+    background: #ffffff;
+    color: #0f172a;
+    border-color: rgba(15, 23, 42, 0.12);
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+  }
+  html[data-ds-theme-source="light"] .dnb-vault-seg-btn[data-active="1"][data-scope="desktop"] {
+    --dnb-vault-bar: #d97706;
+    background: linear-gradient(180deg, #fffbeb 0%, #ffffff 100%);
+    border-color: rgba(217, 119, 6, 0.30);
+    color: #92400e;
+  }
+  html[data-ds-theme-source="light"] .dnb-vault-seg-btn[data-active="1"][data-scope="session"] {
+    --dnb-vault-bar: #2563eb;
+    background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+    border-color: rgba(37, 99, 235, 0.28);
+    color: #1e40af;
+  }
+  html[data-ds-theme-source="light"] .dnb-vault-seg-btn[data-active="1"][data-scope="global"] {
+    --dnb-vault-bar: #059669;
+    background: linear-gradient(180deg, #ecfdf5 0%, #ffffff 100%);
+    border-color: rgba(5, 150, 105, 0.28);
+    color: #065f46;
+  }
+  html[data-ds-theme-source="light"] .dnb-vault-seg-btn[data-active="1"][data-scope="precipitated"] {
+    --dnb-vault-bar: #0891b2;
+    background: linear-gradient(180deg, #ecfeff 0%, #ffffff 100%);
+    border-color: rgba(8, 145, 178, 0.28);
+    color: #155e75;
   }
   .dnb-vault-seg-badge {
     display: inline-flex;
@@ -361,7 +434,7 @@ export const CSS_MODALS = `
     color: var(--dnb-text-3);
   }
   .dnb-vault-seg-btn[data-active="1"] .dnb-vault-seg-badge {
-    background: rgba(37, 99, 235, 0.14);
+    background: rgba(37, 99, 235, 0.12);
     color: var(--dnb-accent);
   }
   .dnb-vault-perm-banner {
@@ -377,19 +450,6 @@ export const CSS_MODALS = `
     font-size: 11px;
     line-height: 1.45;
     color: var(--dnb-text-2);
-  }
-  .dnb-drawer-head {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    padding: 8px 11px;
-    cursor: pointer;
-    border-left: 3px solid transparent;
-    transition: background 0.14s ease;
-  }
-  .dnb-drawer-head:hover {
-    background: var(--dnb-card-hover);
   }
   /* v1.2.1 4-Tier Permission Cards, Operation Approval & Chief Risk Modals */
   .dnb-perm-pop {

@@ -86,45 +86,11 @@ window.__ModuleLoader__.load({
       { key: 'boundaries', label: '边界' },
     ]
 
-    const FACT_CATEGORIES = [
-      { key: 'discipline', label: '纪律' },
-      { key: 'architecture', label: '架构' },
-      { key: 'team', label: '分工' },
-      { key: 'progress', label: '进展' },
-      { key: 'preference', label: '偏好' },
-    ]
-
-    const FACT_CAT_LABEL = FACT_CATEGORIES.reduce((acc, c) => {
-      acc[c.key] = c.label
-      return acc
-    }, {})
-
-    const FACT_CAT_TONE = {
-      discipline: { bg: 'rgba(245, 158, 11, 0.16)', fg: '#fbbf24', border: 'rgba(245, 158, 11, 0.34)' },
-      preference: { bg: 'rgba(245, 158, 11, 0.16)', fg: '#fbbf24', border: 'rgba(245, 158, 11, 0.34)' },
-      architecture: { bg: 'rgba(10, 132, 255, 0.14)', fg: '#409cff', border: 'rgba(10, 132, 255, 0.30)' },
-      team: { bg: 'rgba(10, 132, 255, 0.14)', fg: '#409cff', border: 'rgba(10, 132, 255, 0.30)' },
-      progress: { bg: 'rgba(10, 132, 255, 0.14)', fg: '#409cff', border: 'rgba(10, 132, 255, 0.30)' },
-    }
-
     const RELAY_MODES = [
       { key: 'steer', label: '插话', hint: '对方正在干活时，下一步立刻插进去提醒。' },
       { key: 'followup', label: '递话', hint: '排在当前话后面发，对方空闲时直接唤醒。' },
       { key: 'silent', label: '备忘', hint: '先放到收件箱里，不打断也不叫醒对方。' },
     ]
-
-    const MEMORY_SECTIONS = [
-      { key: 'progress', label: '目标与进展' },
-      { key: 'decision', label: '决策与结论' },
-      { key: 'verify', label: '门禁与验证' },
-      { key: 'open', label: '待办与风险' },
-      { key: 'other', label: '其他要点' },
-    ]
-
-    const SECTION_LABEL = MEMORY_SECTIONS.reduce((all, section) => {
-      all[section.key] = section.label
-      return all
-    }, {})
 
     const BOUND_LISTS = [
       { field: 'allowed', label: '必做事项', dot: '#30d158' },
@@ -472,17 +438,6 @@ window.__ModuleLoader__.load({
       }
     }
 
-    function factCatLabel(key) {
-      switch (key) {
-        case 'discipline': return bi('纪律', 'Discipline')
-        case 'architecture': return bi('架构', 'Architecture')
-        case 'team': return bi('分工', 'Roles')
-        case 'progress': return bi('进展', 'Progress')
-        case 'preference': return bi('偏好', 'Preference')
-        default: return String(key || '')
-      }
-    }
-
     function boundListLabel(field) {
       switch (field) {
         case 'allowed': return bi('必做事项', 'Must Do')
@@ -559,9 +514,7 @@ window.__ModuleLoader__.load({
       boardSectionCollapsed: false,
       handoffSectionCollapsed: true,
       chiefDigestCollapsed: false,
-      chiefFactsCollapsed: false,
       peersNetCollapsed: false,
-      peersFedCollapsed: null,
       peersMailCollapsed: false,
       graphDir: 'TD',
       taskStatusFilter: 'all',
@@ -592,19 +545,6 @@ window.__ModuleLoader__.load({
       editNoteTags: '',
       editNoteShared: false,
       newNote: false,
-      memAsk: '',
-      memReply: '',
-      memHits: null,
-      memNote: '',
-      memSections: [],
-      memCount: 0,
-      memDigest: '',
-      memOpen: '',
-      memBusy: false,
-      memComposerOpen: false,
-      memText: '',
-      memTitle: '',
-      memSection: 'other',
       boundDraft: { allowed: '', forbidden: '', notes: '' },
       boundPinDraft: { allowed: false, forbidden: false, notes: false },
       boundSelected: { allowed: [], forbidden: [], notes: [] },
@@ -703,7 +643,6 @@ window.__ModuleLoader__.load({
       secBusy: false,
       chiefQuickAction: '',
       secRegenerating: false,
-      secSubTab: 'digest',
       secInput: '',
       secImages: [],
       secDragOver: false,
@@ -750,9 +689,6 @@ window.__ModuleLoader__.load({
       deployDrawer: '',
       planResetPrompt: null,
       secModelsCatalog: null,
-      secNewFactText: '',
-      secNewFactCat: 'discipline',
-      secShowRawTurns: false,
       // Engineering Memory Filing Cabinet (桌面独立 + 三层档案柜 · Desktop / Session / System Global Cold / Precipitated Cold)
       archiveTabScope: 'desktop',
       archiveSearchOpen: false,
@@ -2425,59 +2361,6 @@ window.__ModuleLoader__.load({
       }
     }
 
-    async function loadMemory() {
-      patch({ memBusy: true, error: '' })
-      try {
-        const value = await call('memory' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
-        patch({
-          memSections: (value && Array.isArray(value.sections)) ? value.sections : [],
-          memCount: Number(value && value.count) || 0,
-          memDigest: (value && value.digest) || '',
-        })
-      } catch (error) {
-        patch({ error: String((error && error.message) || error) })
-      } finally {
-        patch({ memBusy: false })
-      }
-    }
-
-    async function askMemory(question) {
-      const text = String(question || '').trim()
-      if (!text) return
-      patch({ memBusy: true, memNote: '' })
-      try {
-        const value = await call('action', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ action: 'memory.ask', question: text, session: store.sessionId, by: 'user' }),
-        })
-        patch({
-          memReply: (value && value.reply) || '',
-          memHits: (value && value.hits) || [],
-          memNote: value && value.terms && value.terms.length ? value.terms.join(' · ') : '',
-        })
-      } catch (error) {
-        patch({ memNote: String((error && error.message) || error) })
-      } finally {
-        patch({ memBusy: false })
-      }
-    }
-
-    async function addMemory() {
-      const text = store.memText.trim()
-      const title = store.memTitle.trim()
-      const section = store.memSection
-      if (!text) return
-      patch({ memText: '', memTitle: '', memComposerOpen: false, notice: '已记下来' })
-      await act({ action: 'memory.add', text, title, section })
-      void loadMemory()
-    }
-
-    async function removeMemory(id) {
-      await act({ action: 'memory.remove', id })
-      void loadMemory()
-    }
-
     function searchBoard(term) {
       const needle = String(term || '').trim().toLowerCase()
       if (!needle) return []
@@ -2485,11 +2368,6 @@ window.__ModuleLoader__.load({
       const sec = store.secView || {}
       const hits = []
       const hit = text => String(text || '').toLowerCase().includes(needle)
-      for (const fact of sec.facts || []) {
-        if (hit(fact.text)) {
-          hits.push({ kind: '纪律/记忆', tab: 'chief', subTab: 'facts', id: fact.id, title: FACT_CAT_LABEL[fact.category] || '记忆条目', snippet: snippetOf(fact.text, needle, 36) })
-        }
-      }
       for (const task of board.tasks || []) {
         if (hit(task.title) || hit(task.note) || hit(task.intent) || hit(task.evidence)) {
           hits.push({ kind: '任务', tab: 'tasks', id: task.id, title: task.title, snippet: snippetOf(task.note || task.evidence || task.title, needle, 34) })
@@ -2524,11 +2402,6 @@ window.__ModuleLoader__.load({
         if (hit(step.text)) hits.push({ kind: '规划', tab: 'tasks', id: step.id, title: step.text, snippet: '' })
       }
       if (hit(board.objective)) hits.push({ kind: '目标', tab: 'tasks', id: 'objective', title: '当前目标', snippet: snippetOf(board.objective, needle, 36) })
-      for (const item of board.memory || []) {
-        if (hit(item.title) || hit(item.text)) {
-          hits.push({ kind: '回合记录', tab: 'chief', subTab: 'facts', showRawTurns: true, id: item.id, title: item.title || SECTION_LABEL[item.section] || '记忆', snippet: snippetOf(item.text || item.title, needle, 36) })
-        }
-      }
       return hits
     }
 
@@ -4135,22 +4008,6 @@ window.__ModuleLoader__.load({
       if (sug.id && !sug.isSynthetic) void decideSuggestion(sug, 'dismiss')
     }
 
-    async function mutateFact(payload) {
-      try {
-        const value = await call('chief/fact', {
-          method: 'POST',
-          headers: { 'content-type': 'application/json' },
-          body: JSON.stringify({ session: store.sessionId, ...payload }),
-        })
-        if (payload.op === 'add') patch({ notice: '已保存这条记录' })
-        else if (payload.op === 'remove') patch({ notice: '已删除这条记录' })
-        return value
-      } catch (error) {
-        patch({ error: String((error && error.message) || error) })
-        return null
-      }
-    }
-
     async function ingestSecImageFiles(fileList) {
       const incoming = Array.from(fileList || []).filter(f => {
         if (!f) return false
@@ -4468,12 +4325,6 @@ window.__ModuleLoader__.load({
               peerLinkConfirmModal: null,
               mailChannelFilter: 'all',
               mailOpenDrawers: {},
-              memSections: [],
-              memCount: 0,
-              memDigest: '',
-              memReply: '',
-              memHits: null,
-              memOpen: '',
               tacticalMenuOpen: false,
               interventionModalOpen: false,
               interventionAgreed: false,
@@ -4945,7 +4796,7 @@ window.__ModuleLoader__.load({
       @keyframes dnb-spin { to { transform: rotate(360deg); } }
       .dnb-spin { animation: dnb-spin 0.9s linear infinite; }
 
-      /* iOS Segmented Control */
+      /* iOS Segmented Control + Subtle Tab Identity (dark & light balanced) */
       .dnb-seg-wrap {
         padding: 0 12px 8px;
         flex-shrink: 0;
@@ -4955,12 +4806,14 @@ window.__ModuleLoader__.load({
         padding: 2.5px;
         border-radius: 10px;
         background: var(--dnb-fill);
+        border: 1px solid var(--dnb-border);
         gap: 2px;
       }
       .dnb-seg-btn {
+        position: relative;
         flex: 1 1 0;
         min-width: 0;
-        border: none;
+        border: 1px solid transparent;
         background: transparent;
         color: var(--dnb-text-2);
         font: inherit;
@@ -4974,15 +4827,99 @@ window.__ModuleLoader__.load({
         align-items: center;
         justify-content: center;
         gap: 3px;
-        transition: background 0.2s cubic-bezier(0.32, 0.72, 0, 1), color 0.2s ease, box-shadow 0.2s ease, transform 0.12s ease;
+        transition: background 0.2s cubic-bezier(0.32, 0.72, 0, 1), color 0.2s ease, border-color 0.2s ease, box-shadow 0.2s ease, transform 0.12s ease;
       }
-      .dnb-seg-btn:hover { color: var(--dnb-text); }
+      .dnb-seg-btn:hover { color: var(--dnb-text); background: rgba(128, 128, 140, 0.08); }
       .dnb-seg-btn:active { transform: scale(0.96); }
       .dnb-seg-btn[data-active="1"] {
         background: var(--dnb-elevated);
+        border-color: var(--dnb-border-strong);
         color: var(--dnb-text);
         font-weight: 600;
-        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.18), 0 0 0 0.5px var(--dnb-border);
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.20);
+      }
+      .dnb-seg-btn[data-active="1"]::after {
+        content: "";
+        position: absolute;
+        left: 22%;
+        right: 22%;
+        bottom: 1.5px;
+        height: 2px;
+        border-radius: 99px;
+        background: var(--dnb-tab-bar, var(--dnb-accent));
+        opacity: 0.9;
+      }
+      .dnb-seg-btn[data-active="1"][data-tab="chief"] {
+        --dnb-tab-bar: #3b82f6;
+        background: linear-gradient(180deg, rgba(59, 130, 246, 0.14), rgba(59, 130, 246, 0.05));
+        border-color: rgba(59, 130, 246, 0.34);
+      }
+      .dnb-seg-btn[data-active="1"][data-tab="tasks"] {
+        --dnb-tab-bar: #8b5cf6;
+        background: linear-gradient(180deg, rgba(139, 92, 246, 0.14), rgba(139, 92, 246, 0.05));
+        border-color: rgba(139, 92, 246, 0.34);
+      }
+      .dnb-seg-btn[data-active="1"][data-tab="peers"] {
+        --dnb-tab-bar: #06b6d4;
+        background: linear-gradient(180deg, rgba(6, 182, 212, 0.14), rgba(6, 182, 212, 0.05));
+        border-color: rgba(6, 182, 212, 0.34);
+      }
+      .dnb-seg-btn[data-active="1"][data-tab="archive"] {
+        --dnb-tab-bar: #f59e0b;
+        background: linear-gradient(180deg, rgba(245, 158, 11, 0.14), rgba(245, 158, 11, 0.05));
+        border-color: rgba(245, 158, 11, 0.34);
+      }
+      .dnb-seg-btn[data-active="1"][data-tab="boundaries"] {
+        --dnb-tab-bar: #f43f5e;
+        background: linear-gradient(180deg, rgba(244, 63, 94, 0.14), rgba(244, 63, 94, 0.05));
+        border-color: rgba(244, 63, 94, 0.34);
+      }
+      html[data-ds-theme-source="light"] .dnb-seg {
+        background: rgba(15, 23, 42, 0.055);
+        border-color: rgba(15, 23, 42, 0.09);
+      }
+      html[data-ds-theme-source="light"] .dnb-seg-btn {
+        color: #475569;
+      }
+      html[data-ds-theme-source="light"] .dnb-seg-btn:hover {
+        color: #0f172a;
+        background: rgba(255, 255, 255, 0.55);
+      }
+      html[data-ds-theme-source="light"] .dnb-seg-btn[data-active="1"] {
+        background: #ffffff;
+        color: #0f172a;
+        border-color: rgba(15, 23, 42, 0.12);
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+      }
+      html[data-ds-theme-source="light"] .dnb-seg-btn[data-active="1"][data-tab="chief"] {
+        --dnb-tab-bar: #2563eb;
+        background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+        border-color: rgba(37, 99, 235, 0.28);
+        color: #1e40af;
+      }
+      html[data-ds-theme-source="light"] .dnb-seg-btn[data-active="1"][data-tab="tasks"] {
+        --dnb-tab-bar: #7c3aed;
+        background: linear-gradient(180deg, #f5f3ff 0%, #ffffff 100%);
+        border-color: rgba(124, 58, 237, 0.28);
+        color: #5b21b6;
+      }
+      html[data-ds-theme-source="light"] .dnb-seg-btn[data-active="1"][data-tab="peers"] {
+        --dnb-tab-bar: #0891b2;
+        background: linear-gradient(180deg, #ecfeff 0%, #ffffff 100%);
+        border-color: rgba(8, 145, 178, 0.28);
+        color: #155e75;
+      }
+      html[data-ds-theme-source="light"] .dnb-seg-btn[data-active="1"][data-tab="archive"] {
+        --dnb-tab-bar: #d97706;
+        background: linear-gradient(180deg, #fffbeb 0%, #ffffff 100%);
+        border-color: rgba(217, 119, 6, 0.30);
+        color: #92400e;
+      }
+      html[data-ds-theme-source="light"] .dnb-seg-btn[data-active="1"][data-tab="boundaries"] {
+        --dnb-tab-bar: #e11d48;
+        background: linear-gradient(180deg, #fff1f2 0%, #ffffff 100%);
+        border-color: rgba(225, 29, 72, 0.28);
+        color: #9f1239;
       }
       .dnb-seg-dot {
         font-size: 10px;
@@ -5392,6 +5329,119 @@ window.__ModuleLoader__.load({
       }
       .dnb-acc-card.dnb-handoff-card > .dnb-acc-head {
         background: linear-gradient(90deg, rgba(245, 158, 11, 0.12), rgba(245, 158, 11, 0.02) 55%, transparent);
+      }
+      /* Unified 8-Tone Soft Accent Card System (Image 4 visual family across all tabs) */
+      .dnb-acc-card[data-tone="cyan"] {
+        border-left: 3.5px solid rgba(34, 211, 238, 0.84);
+        background: linear-gradient(135deg, rgba(6, 182, 212, 0.075) 0%, var(--dnb-card) 44%);
+      }
+      .dnb-acc-card[data-tone="cyan"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(6, 182, 212, 0.11), rgba(6, 182, 212, 0.02) 55%, transparent);
+      }
+      .dnb-acc-card[data-tone="blue"] {
+        border-left: 3.5px solid rgba(59, 130, 246, 0.86);
+        background: linear-gradient(135deg, rgba(59, 130, 246, 0.08) 0%, var(--dnb-card) 44%);
+      }
+      .dnb-acc-card[data-tone="blue"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(59, 130, 246, 0.11), rgba(59, 130, 246, 0.02) 56%, transparent);
+      }
+      .dnb-acc-card[data-tone="indigo"] {
+        border-left: 3.5px solid rgba(99, 102, 241, 0.86);
+        background: linear-gradient(135deg, rgba(99, 102, 241, 0.075) 0%, var(--dnb-card) 44%);
+      }
+      .dnb-acc-card[data-tone="indigo"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(99, 102, 241, 0.11), rgba(99, 102, 241, 0.02) 55%, transparent);
+      }
+      .dnb-acc-card[data-tone="emerald"] {
+        border-left: 3.5px solid rgba(16, 185, 129, 0.86);
+        background: linear-gradient(135deg, rgba(16, 185, 129, 0.075) 0%, var(--dnb-card) 44%);
+      }
+      .dnb-acc-card[data-tone="emerald"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(16, 185, 129, 0.11), rgba(16, 185, 129, 0.02) 55%, transparent);
+      }
+      .dnb-acc-card[data-tone="violet"] {
+        border-left: 3.5px solid rgba(139, 92, 246, 0.86);
+        background: linear-gradient(135deg, rgba(139, 92, 246, 0.075) 0%, var(--dnb-card) 44%);
+      }
+      .dnb-acc-card[data-tone="violet"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(139, 92, 246, 0.11), rgba(139, 92, 246, 0.02) 55%, transparent);
+      }
+      .dnb-acc-card[data-tone="amber"] {
+        border-left: 3.5px solid rgba(245, 158, 11, 0.86);
+        background: linear-gradient(135deg, rgba(245, 158, 11, 0.075) 0%, var(--dnb-card) 44%);
+      }
+      .dnb-acc-card[data-tone="amber"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(245, 158, 11, 0.11), rgba(245, 158, 11, 0.02) 55%, transparent);
+      }
+      .dnb-acc-card[data-tone="rose"] {
+        border-left: 3.5px solid rgba(244, 63, 94, 0.86);
+        background: linear-gradient(135deg, rgba(244, 63, 94, 0.075) 0%, var(--dnb-card) 44%);
+      }
+      .dnb-acc-card[data-tone="rose"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(244, 63, 94, 0.11), rgba(244, 63, 94, 0.02) 55%, transparent);
+      }
+      .dnb-acc-card[data-tone="slate"] {
+        border-left: 3.5px solid rgba(148, 163, 184, 0.65);
+        background: linear-gradient(135deg, rgba(148, 163, 184, 0.065) 0%, var(--dnb-card) 44%);
+      }
+      .dnb-acc-card[data-tone="slate"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(148, 163, 184, 0.09), rgba(148, 163, 184, 0.015) 55%, transparent);
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="cyan"] {
+        background: linear-gradient(135deg, #ecfeff 0%, #ffffff 42%);
+        border-left-color: #0891b2;
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="cyan"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(6, 182, 212, 0.13), rgba(6, 182, 212, 0.02) 55%, transparent);
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="blue"] {
+        background: linear-gradient(135deg, #eff6ff 0%, #ffffff 44%);
+        border-left-color: #2563eb;
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="blue"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(37, 99, 235, 0.12), rgba(37, 99, 235, 0.02) 56%, transparent);
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="indigo"] {
+        background: linear-gradient(135deg, #eef2ff 0%, #ffffff 42%);
+        border-left-color: #4f46e5;
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="indigo"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(79, 70, 229, 0.12), rgba(79, 70, 229, 0.02) 55%, transparent);
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="emerald"] {
+        background: linear-gradient(135deg, #ecfdf5 0%, #ffffff 42%);
+        border-left-color: #059669;
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="emerald"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(16, 185, 129, 0.12), rgba(16, 185, 129, 0.02) 55%, transparent);
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="violet"] {
+        background: linear-gradient(135deg, #f5f3ff 0%, #ffffff 40%);
+        border-left-color: #7c3aed;
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="violet"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(124, 58, 237, 0.12), rgba(124, 58, 237, 0.02) 55%, transparent);
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="amber"] {
+        background: linear-gradient(135deg, #fffbeb 0%, #ffffff 42%);
+        border-left-color: #d97706;
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="amber"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(245, 158, 11, 0.13), rgba(245, 158, 11, 0.02) 55%, transparent);
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="rose"] {
+        background: linear-gradient(135deg, #fff1f2 0%, #ffffff 42%);
+        border-left-color: #e11d48;
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="rose"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(225, 29, 72, 0.12), rgba(225, 29, 72, 0.02) 55%, transparent);
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="slate"] {
+        background: linear-gradient(135deg, #f1f5f9 0%, #ffffff 42%);
+        border-left-color: #64748b;
+      }
+      html[data-ds-theme-source="light"] .dnb-acc-card[data-tone="slate"] > .dnb-acc-head {
+        background: linear-gradient(90deg, rgba(100, 116, 139, 0.12), rgba(100, 116, 139, 0.02) 55%, transparent);
       }
       .dnb-acc-head {
         display: flex;
@@ -6357,11 +6407,12 @@ window.__ModuleLoader__.load({
         margin-bottom: 10px;
       }
       .dnb-vault-seg-btn {
+        position: relative;
         display: inline-flex;
         align-items: center;
         justify-content: center;
         gap: 4px;
-        min-height: 26px;
+        min-height: 27px;
         padding: 3px 5px;
         border-radius: 7px;
         border: 1px solid transparent;
@@ -6374,7 +6425,7 @@ window.__ModuleLoader__.load({
       }
       .dnb-vault-seg-btn:hover {
         color: var(--dnb-text);
-        background: rgba(255, 255, 255, 0.04);
+        background: rgba(128, 128, 140, 0.08);
       }
       .dnb-vault-seg-btn[data-active="1"] {
         background: var(--dnb-elevated);
@@ -6382,6 +6433,78 @@ window.__ModuleLoader__.load({
         color: var(--dnb-text);
         font-weight: 600;
         box-shadow: 0 1px 4px rgba(0, 0, 0, 0.14);
+      }
+      .dnb-vault-seg-btn[data-active="1"]::after {
+        content: "";
+        position: absolute;
+        left: 24%;
+        right: 24%;
+        bottom: 1.5px;
+        height: 2px;
+        border-radius: 99px;
+        background: var(--dnb-vault-bar, var(--dnb-accent));
+        opacity: 0.9;
+      }
+      .dnb-vault-seg-btn[data-active="1"][data-scope="desktop"] {
+        --dnb-vault-bar: #f59e0b;
+        background: linear-gradient(180deg, rgba(245, 158, 11, 0.14), rgba(245, 158, 11, 0.05));
+        border-color: rgba(245, 158, 11, 0.34);
+      }
+      .dnb-vault-seg-btn[data-active="1"][data-scope="session"] {
+        --dnb-vault-bar: #3b82f6;
+        background: linear-gradient(180deg, rgba(59, 130, 246, 0.14), rgba(59, 130, 246, 0.05));
+        border-color: rgba(59, 130, 246, 0.34);
+      }
+      .dnb-vault-seg-btn[data-active="1"][data-scope="global"] {
+        --dnb-vault-bar: #10b981;
+        background: linear-gradient(180deg, rgba(16, 185, 129, 0.14), rgba(16, 185, 129, 0.05));
+        border-color: rgba(16, 185, 129, 0.34);
+      }
+      .dnb-vault-seg-btn[data-active="1"][data-scope="precipitated"] {
+        --dnb-vault-bar: #06b6d4;
+        background: linear-gradient(180deg, rgba(6, 182, 212, 0.14), rgba(6, 182, 212, 0.05));
+        border-color: rgba(6, 182, 212, 0.34);
+      }
+      html[data-ds-theme-source="light"] .dnb-vault-seg {
+        background: rgba(15, 23, 42, 0.055);
+        border-color: rgba(15, 23, 42, 0.09);
+      }
+      html[data-ds-theme-source="light"] .dnb-vault-seg-btn {
+        color: #475569;
+      }
+      html[data-ds-theme-source="light"] .dnb-vault-seg-btn:hover {
+        color: #0f172a;
+        background: rgba(255, 255, 255, 0.55);
+      }
+      html[data-ds-theme-source="light"] .dnb-vault-seg-btn[data-active="1"] {
+        background: #ffffff;
+        color: #0f172a;
+        border-color: rgba(15, 23, 42, 0.12);
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.08);
+      }
+      html[data-ds-theme-source="light"] .dnb-vault-seg-btn[data-active="1"][data-scope="desktop"] {
+        --dnb-vault-bar: #d97706;
+        background: linear-gradient(180deg, #fffbeb 0%, #ffffff 100%);
+        border-color: rgba(217, 119, 6, 0.30);
+        color: #92400e;
+      }
+      html[data-ds-theme-source="light"] .dnb-vault-seg-btn[data-active="1"][data-scope="session"] {
+        --dnb-vault-bar: #2563eb;
+        background: linear-gradient(180deg, #eff6ff 0%, #ffffff 100%);
+        border-color: rgba(37, 99, 235, 0.28);
+        color: #1e40af;
+      }
+      html[data-ds-theme-source="light"] .dnb-vault-seg-btn[data-active="1"][data-scope="global"] {
+        --dnb-vault-bar: #059669;
+        background: linear-gradient(180deg, #ecfdf5 0%, #ffffff 100%);
+        border-color: rgba(5, 150, 105, 0.28);
+        color: #065f46;
+      }
+      html[data-ds-theme-source="light"] .dnb-vault-seg-btn[data-active="1"][data-scope="precipitated"] {
+        --dnb-vault-bar: #0891b2;
+        background: linear-gradient(180deg, #ecfeff 0%, #ffffff 100%);
+        border-color: rgba(8, 145, 178, 0.28);
+        color: #155e75;
       }
       .dnb-vault-seg-badge {
         display: inline-flex;
@@ -6397,7 +6520,7 @@ window.__ModuleLoader__.load({
         color: var(--dnb-text-3);
       }
       .dnb-vault-seg-btn[data-active="1"] .dnb-vault-seg-badge {
-        background: rgba(37, 99, 235, 0.14);
+        background: rgba(37, 99, 235, 0.12);
         color: var(--dnb-accent);
       }
       .dnb-vault-perm-banner {
@@ -6413,19 +6536,6 @@ window.__ModuleLoader__.load({
         font-size: 11px;
         line-height: 1.45;
         color: var(--dnb-text-2);
-      }
-      .dnb-drawer-head {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 8px;
-        padding: 8px 11px;
-        cursor: pointer;
-        border-left: 3px solid transparent;
-        transition: background 0.14s ease;
-      }
-      .dnb-drawer-head:hover {
-        background: var(--dnb-card-hover);
       }
       /* v1.2.1 4-Tier Permission Cards, Operation Approval & Chief Risk Modals */
       .dnb-perm-pop {
@@ -7278,12 +7388,24 @@ window.__ModuleLoader__.load({
         position: relative;
         padding: 12px;
         border-radius: 12px;
-        background: var(--dnb-card);
+        background: linear-gradient(135deg, rgba(245, 158, 11, 0.08) 0%, var(--dnb-card) 44%);
         border: 1px solid var(--dnb-border);
-        border-left: 3px solid #f59e0b;
+        border-left: 3.5px solid rgba(245, 158, 11, 0.88);
         display: flex;
         flex-direction: column;
         gap: 9px;
+      }
+      html[data-ds-theme-source="light"] .dnb-desktop-zone {
+        background: linear-gradient(135deg, #fffbeb 0%, #ffffff 42%);
+        border-color: rgba(15, 23, 42, 0.10);
+        border-left-color: #d97706;
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
+      }
+      html[data-ds-theme-source="light"] .dnb-strip-bar,
+      html[data-ds-theme-source="light"] .dnb-vault-banner {
+        background: linear-gradient(135deg, #f8fafc 0%, #ffffff 50%);
+        border-color: rgba(15, 23, 42, 0.10);
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.04);
       }
       .dnb-token-track {
         width: 100%;
@@ -9533,12 +9655,7 @@ window.__ModuleLoader__.load({
         color: var(--dnb-text-3);
         padding: 6px 12px 2px;
       }
-      html[data-ds-theme-source="light"] .dnb-acc-card,
-      html[data-ds-theme="light"] .dnb-acc-card,
-      [data-ds-theme-source="light"] .dnb-acc-card,
-      html[data-ds-theme-source="light"] .dnb-acc-card.dnb-wall-box,
-      html[data-ds-theme="light"] .dnb-acc-card.dnb-wall-box,
-      [data-ds-theme-source="light"] .dnb-acc-card.dnb-wall-box {
+      html[data-ds-theme-source="light"] .dnb-acc-card:not([data-tone]) {
         background: #ffffff;
       }
       html[data-ds-theme-source="light"] .dnb-fleet-card,
@@ -10495,6 +10612,301 @@ window.__ModuleLoader__.load({
         background: rgba(2, 132, 199, 0.10);
         border-color: rgba(2, 132, 199, 0.28);
       }
+
+      /* Redesigned Grouped Card-Stream Team Mailbox */
+      .dnb-mail-threads {
+        display: flex;
+        flex-direction: column;
+        gap: 8px;
+      }
+      .dnb-mail-thread {
+        border-radius: 11px;
+        border: 1px solid var(--dnb-border);
+        background: rgba(15, 23, 42, 0.16);
+        overflow: hidden;
+        transition: border-color 0.15s ease;
+      }
+      .dnb-mail-thread:hover {
+        border-color: var(--dnb-border-strong);
+      }
+      .dnb-mail-thread[data-kind="detached"] {
+        opacity: 0.72;
+      }
+      .dnb-mail-thread-head {
+        position: relative;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        padding: 8px 11px 8px 12px;
+        cursor: pointer;
+        user-select: none;
+        background: transparent;
+        transition: background 0.14s ease;
+      }
+      .dnb-mail-thread[data-open="1"] > .dnb-mail-thread-head {
+        background: var(--dnb-thread-tint, rgba(99, 102, 241, 0.08));
+        border-bottom: 1px solid var(--dnb-border);
+      }
+      .dnb-mail-thread-head:hover {
+        background: var(--dnb-card-hover);
+      }
+      .dnb-mail-thread-bar {
+        position: absolute;
+        left: 0;
+        top: 0;
+        bottom: 0;
+        width: 3px;
+      }
+      .dnb-mail-thread-meta {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        min-width: 0;
+        flex: 1;
+      }
+      .dnb-mail-channel-pill {
+        font-size: 10px;
+        font-weight: 600;
+        padding: 1px 6px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.24);
+        background: rgba(148, 163, 184, 0.10);
+        color: var(--dnb-text-2);
+        flex-shrink: 0;
+      }
+      .dnb-mail-channel-pill[data-kind="broadcast"] {
+        color: #38bdf8;
+        background: rgba(56, 189, 248, 0.12);
+        border-color: rgba(56, 189, 248, 0.30);
+      }
+      .dnb-mail-channel-pill[data-kind="cross"] {
+        color: #c084fc;
+        background: rgba(168, 85, 247, 0.12);
+        border-color: rgba(168, 85, 247, 0.30);
+      }
+      .dnb-mail-channel-pill[data-kind="internal"] {
+        color: #93c5fd;
+        background: rgba(59, 130, 246, 0.12);
+        border-color: rgba(59, 130, 246, 0.28);
+      }
+      .dnb-mail-thread-title {
+        font-size: 12px;
+        font-weight: 600;
+        color: var(--dnb-text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dnb-mail-feed {
+        padding: 8px;
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+      }
+      .dnb-mail-msg {
+        position: relative;
+        padding: 8px 10px 8px 11px;
+        border-radius: 9px;
+        border: 1px solid rgba(148, 163, 184, 0.14);
+        border-left: 2.5px solid #6366f1;
+        background: rgba(255, 255, 255, 0.025);
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        transition: border-color 0.14s ease, background 0.14s ease;
+      }
+      .dnb-mail-msg:hover {
+        border-color: var(--dnb-border-strong);
+        background: rgba(255, 255, 255, 0.045);
+      }
+      .dnb-mail-msg[data-role="chief"] { border-left-color: #6366f1; }
+      .dnb-mail-msg[data-role="harness"] { border-left-color: #f59e0b; }
+      .dnb-mail-msg[data-role="lead"] { border-left-color: #0ea5e9; }
+      .dnb-mail-msg[data-role="subagent"] { border-left-color: #06b6d4; }
+      .dnb-mail-msg[data-role="detached"] { border-left-color: #64748b; }
+      .dnb-mail-msg-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+      }
+      .dnb-mail-msg-route {
+        display: flex;
+        align-items: center;
+        gap: 4px;
+        min-width: 0;
+        flex: 1;
+        flex-wrap: wrap;
+      }
+      .dnb-mail-sender {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        padding: 1px 6px;
+        border-radius: 6px;
+        background: var(--dnb-fill);
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--dnb-text);
+        max-width: 170px;
+      }
+      .dnb-mail-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        flex-shrink: 0;
+      }
+      .dnb-mail-arrow {
+        font-size: 10.5px;
+        color: var(--dnb-text-3);
+      }
+      .dnb-mail-target {
+        font-size: 11px;
+        font-weight: 600;
+        color: #93c5fd;
+      }
+      .dnb-mail-target[data-all="1"] {
+        color: var(--dnb-accent);
+      }
+      .dnb-mail-mode {
+        font-size: 10px;
+        font-weight: 500;
+        padding: 1px 6px;
+        border-radius: 999px;
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        color: var(--dnb-text-2);
+        background: rgba(148, 163, 184, 0.08);
+      }
+      .dnb-mail-mode[data-mode="steer"] {
+        color: #fbbf24;
+        background: rgba(245, 158, 11, 0.11);
+        border-color: rgba(245, 158, 11, 0.28);
+      }
+      .dnb-mail-mode[data-mode="followup"] {
+        color: #60a5fa;
+        background: rgba(59, 130, 246, 0.11);
+        border-color: rgba(59, 130, 246, 0.28);
+      }
+      .dnb-mail-msg-meta {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        flex-shrink: 0;
+      }
+      .dnb-mail-copy-btn {
+        border: none;
+        background: transparent;
+        color: var(--dnb-text-3);
+        width: 20px;
+        height: 20px;
+        border-radius: 5px;
+        padding: 0;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        cursor: pointer;
+        opacity: 0;
+        transition: opacity 0.14s ease, background 0.14s ease, color 0.14s ease;
+      }
+      .dnb-mail-msg:hover .dnb-mail-copy-btn,
+      .dnb-mail-copy-btn:focus-visible {
+        opacity: 1;
+      }
+      .dnb-mail-copy-btn:hover {
+        color: var(--dnb-text);
+        background: var(--dnb-fill);
+      }
+      .dnb-mail-time {
+        font-size: 10.5px;
+        color: var(--dnb-text-3);
+        white-space: nowrap;
+      }
+      .dnb-mail-subject {
+        font-size: 11.8px;
+        font-weight: 600;
+        color: var(--dnb-text);
+        line-height: 1.4;
+      }
+      .dnb-mail-body {
+        font-size: 11.8px;
+        color: var(--dnb-text-2);
+        line-height: 1.55;
+        white-space: pre-wrap;
+        word-break: break-word;
+      }
+      .dnb-mail-body[data-clamped="1"] {
+        display: -webkit-box;
+        -webkit-box-orient: vertical;
+        -webkit-line-clamp: 3;
+        overflow: hidden;
+      }
+      .dnb-mail-expand-btn {
+        align-self: flex-start;
+        border: none;
+        background: transparent;
+        padding: 1px 0 0;
+        color: var(--dnb-accent);
+        font: inherit;
+        font-size: 11px;
+        font-weight: 500;
+        cursor: pointer;
+      }
+      .dnb-mail-expand-btn:hover {
+        text-decoration: underline;
+      }
+      html[data-ds-theme-source="light"] .dnb-mail-thread {
+        background: #f8fafc;
+        border-color: rgba(15, 23, 42, 0.10);
+      }
+      html[data-ds-theme-source="light"] .dnb-mail-thread[data-open="1"] > .dnb-mail-thread-head {
+        background: linear-gradient(90deg, rgba(79, 70, 229, 0.07), #f8fafc 60%);
+        border-bottom-color: rgba(15, 23, 42, 0.08);
+      }
+      html[data-ds-theme-source="light"] .dnb-mail-channel-pill[data-kind="broadcast"] {
+        color: #0284c7;
+        background: #e0f2fe;
+        border-color: rgba(2, 132, 199, 0.26);
+      }
+      html[data-ds-theme-source="light"] .dnb-mail-channel-pill[data-kind="cross"] {
+        color: #7e22ce;
+        background: #f3e8ff;
+        border-color: rgba(126, 34, 206, 0.24);
+      }
+      html[data-ds-theme-source="light"] .dnb-mail-channel-pill[data-kind="internal"] {
+        color: #1d4ed8;
+        background: #eff6ff;
+        border-color: rgba(37, 99, 235, 0.24);
+      }
+      html[data-ds-theme-source="light"] .dnb-mail-msg {
+        background: #ffffff;
+        border-color: rgba(15, 23, 42, 0.08);
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+      }
+      html[data-ds-theme-source="light"] .dnb-mail-msg:hover {
+        background: #ffffff;
+        border-color: rgba(15, 23, 42, 0.16);
+      }
+      html[data-ds-theme-source="light"] .dnb-mail-sender {
+        background: rgba(15, 23, 42, 0.05);
+        color: #0f172a;
+      }
+      html[data-ds-theme-source="light"] .dnb-mail-target {
+        color: #1d4ed8;
+      }
+      html[data-ds-theme-source="light"] .dnb-mail-mode[data-mode="steer"] {
+        color: #b45309;
+        background: #fffbeb;
+        border-color: rgba(217, 119, 6, 0.28);
+      }
+      html[data-ds-theme-source="light"] .dnb-mail-mode[data-mode="followup"] {
+        color: #1d4ed8;
+        background: #eff6ff;
+        border-color: rgba(37, 99, 235, 0.24);
+      }
+      html[data-ds-theme-source="light"] .dnb-mail-body {
+        color: #334155;
+      }
     `
 
     // === [module: src/client/styles.js] ===
@@ -10863,8 +11275,6 @@ window.__ModuleLoader__.load({
                         style: { cursor: 'pointer', padding: '7px 12px' },
                         onClick: () => {
                           const nextPatch = { tab: item.tab || 'chief', searchOpen: false }
-                          if (item.subTab) nextPatch.secSubTab = item.subTab
-                          if (item.showRawTurns) nextPatch.secShowRawTurns = true
                           if (item.tab === 'tasks') nextPatch.selectedTaskId = item.id
                           if (item.tab === 'archive' && item.archiveId) {
                             nextPatch.archiveOpenFolders = { ...(store.archiveOpenFolders || {}), ...(item.folderId ? { [item.folderId]: true } : {}) }
@@ -11834,6 +12244,7 @@ window.__ModuleLoader__.load({
       title,
       icon = null,
       accentColor = '',
+      tone = '',
       preview = '',
       count = '',
       badges = null,
@@ -11863,6 +12274,7 @@ window.__ModuleLoader__.load({
           ref: cardRef || undefined,
           className: cardCls,
           'data-open': open ? '1' : '0',
+          'data-tone': tone || undefined,
           style: mergedStyle,
         },
         h(
@@ -17290,140 +17702,6 @@ window.__ModuleLoader__.load({
       )
     }
 
-    /* ----------------------------------------------------------- Memory Tab */
-
-    function MemoryCard({ item }) {
-      const open = store.memOpen === item.id
-      const body = String(item.text || '')
-      return h(
-        'div',
-        { className: 'dnb-cell dnb-cell-hover', style: { alignItems: 'flex-start', flexDirection: 'column', gap: 4 } },
-        h(
-          'div',
-          { style: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
-          h(
-            'div',
-            { style: { display: 'flex', alignItems: 'center', gap: 6 } },
-            h('span', { className: 'dnb-tag' }, item.turn ? '第 ' + item.turn + ' 轮' : '手动'),
-            h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, timeLabel(item.at)),
-          ),
-          h(
-            'div',
-            { className: 'dnb-row-actions' },
-            body.length > 140
-              ? h('button', {
-                  className: 'dnb-pill',
-                  style: { height: 22, padding: '0 7px', fontSize: 11 },
-                  onClick: () => patch({ memOpen: open ? '' : item.id }),
-                }, open ? '收起' : '展开')
-              : null,
-            h('button', {
-              className: 'dnb-icon-btn',
-              style: { width: 22, height: 22, color: '#ff453a' },
-              onClick: () => void removeMemory(item.id),
-            }, h(Icon, { name: 'trash', size: 12 })),
-          ),
-        ),
-        item.title ? h('div', { style: { fontWeight: 600, fontSize: 12.5 } }, item.title) : null,
-        h(
-          'div',
-          { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5, whiteSpace: 'pre-wrap' } },
-          open || body.length <= 140 ? body : body.slice(0, 140) + '…',
-        ),
-      )
-    }
-
-    function MemoryTab() {
-      React.useEffect(() => {
-        if (!store.memSections.length && !store.memBusy) void loadMemory()
-      }, [store.sessionId])
-
-      const runAsk = () => {
-        if (!(store.memAsk || '').trim()) return
-        void askMemory(store.memAsk)
-      }
-
-      const sections = Array.isArray(store.memSections) ? store.memSections : []
-
-      return h(
-        'div',
-        { className: 'dnb-view' },
-        // Top Search & Add Bar
-        h(
-          'div',
-          { style: { display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 } },
-          h('input', {
-            className: 'dnb-input',
-            style: { borderRadius: 99, paddingLeft: 12, height: 32 },
-            placeholder: '搜记忆…',
-            value: store.memAsk || '',
-            onChange: e => patch({ memAsk: e.target.value, memReply: '', memHits: null, memNote: '' }),
-            onKeyDown: e => { if (e.key === 'Enter') runAsk() },
-          }),
-          (store.memAsk || '').trim()
-            ? h('button', { className: 'dnb-primary-btn', style: { height: 30 }, onClick: runAsk }, '搜索')
-            : null,
-          h('button', {
-            className: 'dnb-pill',
-            style: { height: 30 },
-            'data-active': store.memComposerOpen ? '1' : '0',
-            onClick: () => patch({ memComposerOpen: !store.memComposerOpen }),
-          }, h(Icon, { name: 'plus', size: 13 }), '记录'),
-        ),
-
-        store.memReply
-          ? h('div', { className: 'dnb-group' }, h('pre', { className: 'dnb-pre' }, store.memReply))
-          : null,
-
-        // Collapsible New Memory Composer
-        store.memComposerOpen
-          ? h(
-              'div',
-              { className: 'dnb-group', style: { padding: 10, marginBottom: 12 } },
-              h(
-                'div',
-                { style: { display: 'flex', gap: 6, marginBottom: 6 } },
-                h('input', {
-                  className: 'dnb-input',
-                  placeholder: '标题（选填）',
-                  value: store.memTitle || '',
-                  onChange: e => patch({ memTitle: e.target.value }),
-                }),
-                h('select', {
-                  className: 'dnb-input',
-                  style: { width: 118, flexShrink: 0 },
-                  value: store.memSection || 'other',
-                  onChange: e => patch({ memSection: e.target.value }),
-                }, MEMORY_SECTIONS.map(s => h('option', { key: s.key, value: s.key }, s.label))),
-              ),
-              h('textarea', {
-                className: 'dnb-area',
-                placeholder: '写下要长期记住的要求或结论…',
-                value: store.memText || '',
-                onChange: e => patch({ memText: e.target.value }),
-              }),
-              h(
-                'div',
-                { style: { display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 8 } },
-                h('button', { className: 'dnb-pill', onClick: () => patch({ memComposerOpen: false }) }, '取消'),
-                h('button', { className: 'dnb-primary-btn', disabled: !(store.memText || '').trim(), onClick: () => void addMemory() }, '保存'),
-              ),
-            )
-          : null,
-
-        sections.length
-          ? sections.map(section =>
-              h(
-                'div',
-                { key: section.key, style: { marginBottom: 10 } },
-                h('div', { className: 'dnb-section-head' }, h('span', null, section.label), h('span', null, (section.items || []).length)),
-                h('div', { className: 'dnb-group' }, (section.items || []).map(item => h(MemoryCard, { item, key: item.id }))),
-              ),
-            )
-          : h('div', { className: 'dnb-empty' }, '还没有记住任何内容'),
-      )
-    }
-
     /* ------------------------------------------------------------ Notes Tab */
 
     function NoteEditor({ note }) {
@@ -17638,6 +17916,7 @@ window.__ModuleLoader__.load({
           {
             open: presetsOpen,
             onToggle: () => setPresetsOpen(v => !v),
+            tone: 'cyan',
             title: bi('🚀 常用场景预设', '🚀 Scenario Presets'),
             badges: h('span', { className: 'dnb-acc-badge', 'data-tone': activePreset ? 'accent' : undefined },
               activePreset
@@ -17675,6 +17954,7 @@ window.__ModuleLoader__.load({
           {
             open: notifyOpen,
             onToggle: () => setNotifyOpen(v => !v),
+            tone: 'amber',
             title: bi('🔔 离开电脑时的提醒和声音', '🔔 Away Alerts & Sound'),
             badges: h('span', { className: 'dnb-acc-badge', 'data-tone': notifPerm === 'granted' ? 'green' : undefined }, notifPermLabel),
             preview: meta.notifyEnabled !== false ? bi('重要节点会通知你', 'Alerts on') : bi('通知已关', 'Alerts off'),
@@ -17743,6 +18023,7 @@ window.__ModuleLoader__.load({
           {
             open: ledgerOpen,
             onToggle: () => setLedgerOpen(v => !v),
+            tone: 'violet',
             title: bi('📊 参谋花费统计与托管上限', '📊 Chief Usage & Budget Cap'),
             badges: mr.tripped
               ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'red' }, bi('🛑 已到上限停下', '🛑 Cap Reached'))
@@ -17872,6 +18153,7 @@ window.__ModuleLoader__.load({
           {
             open: langOpen,
             onToggle: () => setLangOpen(v => !v),
+            tone: 'blue',
             title: bi('🌐 界面语言 / Interface Language', '🌐 Interface Language / 界面语言'),
             preview: uiLangVal === 'en' ? 'English' : (uiLangVal === 'zh' ? '简体中文' : bi('自动跟随主界面', 'Auto (Follow App)')),
             bodyStyle: { padding: '8px 11px' },
@@ -17902,6 +18184,7 @@ window.__ModuleLoader__.load({
           {
             open: guardPrefOpen,
             onToggle: () => setGuardPrefOpen(v => !v),
+            tone: 'emerald',
             title: bi('自动化设置', 'Automation Settings'),
             showPullHint: false,
             headerExtra: h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } },
@@ -23097,6 +23380,7 @@ window.__ModuleLoader__.load({
                 role: 'tab',
                 'aria-selected': activeScope === seg.key ? 'true' : 'false',
                 className: 'dnb-vault-seg-btn',
+                'data-scope': seg.key,
                 'data-active': activeScope === seg.key ? '1' : '0',
                 onClick: () => switchScope(seg.key),
               },
@@ -23203,6 +23487,7 @@ window.__ModuleLoader__.load({
           open: !collapsed,
           onToggle: () => patch({ wallCollapsed: !collapsed }),
           className: 'dnb-wall-box',
+          tone: 'rose',
           icon: h(Icon, { name: 'shieldSentinel', size: 13.5, style: { color: activeCount > 0 ? '#ef4444' : '#f87171', flexShrink: 0 } }),
           title: bi('物理驻墙 · 执行前拦截', 'Guard Wall · Pre-Tool Block'),
           preview: walls.length
@@ -23493,12 +23778,13 @@ window.__ModuleLoader__.load({
           : label === '注意事项'
             ? bi('注意事项', 'Watchouts')
             : label
+      const boundTone = field === 'allowed' ? 'emerald' : (field === 'forbidden' ? 'rose' : 'amber')
       return h(
         AccCard,
         {
           open: !isColCollapsed,
           onToggle: toggleColCollapsed,
-          accentColor: dot,
+          tone: boundTone,
           title: uiLabel,
           headTitle: isColCollapsed ? bi(`展开「${uiLabel}」`, `Expand ${uiLabel}`) : bi(`收起「${uiLabel}」`, `Collapse ${uiLabel}`),
           icon: h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: dot, flexShrink: 0 } }),
@@ -23784,6 +24070,7 @@ window.__ModuleLoader__.load({
           {
             open: showEnv,
             onToggle: () => setShowEnv(v => !v),
+            tone: 'slate',
             title: bi('运行环境', 'Runtime Info'),
             count: rows.length ? String(rows.length) : '',
             preview: info.workspaceRoot || info.sessionWorkingDirectory || info.workingDirectory || '',
@@ -23821,9 +24108,15 @@ window.__ModuleLoader__.load({
 
     // === [module: src/client/tabs/chief.js] ===
     /**
-     * tabs/chief.js
+     * src/client/tabs/chief.js — 参谋总览页签与底部参谋输入条
      *
-     * Chief situation view tab and composer bar.
+     * 【核心职责】
+     *   1. `ChiefTab`：展示「当前进展摘要 / 极简目标汇报」与「问答与操作记录」卡片，
+     *      并提供咨询、更新摘要、导出复盘报告与切换界面语言等快捷动作。
+     *   2. `ChiefComposerBar`：底部常驻 DS-Bot 风格参谋输入条（含权限切换、点选对象、图片附件与开关面板）。
+     *
+     * 【边界约定】
+     *   - 已去掉旧版「摘要 | 长期规矩」次级页与旧回合记忆视图，保持单页主视图零冗余。
      */
 
 
@@ -23840,8 +24133,6 @@ window.__ModuleLoader__.load({
     function ChiefTab({ board, view }) {
       const [showHistory, setShowHistory] = React.useState(true)
       const [chatFilter, setChatFilter] = React.useState('all')
-      const [editingFactId, setEditingFactId] = React.useState('')
-      const [editingFactText, setEditingFactText] = React.useState('')
 
       React.useEffect(() => {
         void loadChiefView(false)
@@ -23856,9 +24147,7 @@ window.__ModuleLoader__.load({
 
       const sec = view.secView || {}
 
-      const subTab = view.secSubTab || 'digest'
       const narrative = sec.narrative || {}
-      const facts = Array.isArray(sec.facts) ? sec.facts : []
       const chat = Array.isArray(sec.chat) ? sec.chat : []
       const notes = (board && Array.isArray(board.notes)) ? board.notes : []
       const isConciseMode = Boolean(view.chiefMeta && view.chiefMeta.tacticalModes && view.chiefMeta.tacticalModes.conciseBrief)
@@ -23866,673 +24155,519 @@ window.__ModuleLoader__.load({
       const useSixBriefCards = Boolean(sixGoalRows && (isConciseMode || sixGoalRows.length >= 4))
       const blocks = parseNarrativeBlocks(narrative.text || '')
 
-      const submitNewFact = () => {
-        const txt = String(view.secNewFactText || '').trim()
-        if (!txt) return
-        const cat = view.secNewFactCat || 'discipline'
-        patch({ secNewFactText: '' })
-        void mutateFact({ op: 'add', text: txt, category: cat })
+      const hState = (board && board.handoff) || {}
+      const hMeta = view.handoffMeta || {}
+      const isHandoffPinned = Boolean(hState.pinned || hMeta.pinned)
+      const syncOnDigest = Boolean(hState.syncOnDigest ?? hMeta.syncOnDigest)
+      const exportReport = (copyOnly = false) => {
+        const md = buildSessionReportMarkdown({
+          board,
+          secView: sec,
+          chiefMeta: view.chiefMeta,
+          subagents: view.subagents,
+          guardWalls: view.guardWalls,
+          sessionId: view.sessionId,
+        })
+        if (copyOnly) {
+          copyText(md, bi('📋 复盘报告已复制到剪贴板', '📋 Report copied to clipboard'))
+          return
+        }
+        const dl = downloadSessionReportMarkdown(md, view.sessionId)
+        if (dl && dl.ok) {
+          patch({ notice: bi('📄 已导出复盘报告：', '📄 Exported report: ') + dl.filename })
+        } else {
+          copyText(md, bi('📄 复盘报告已复制到剪贴板', '📋 Report copied to clipboard'))
+        }
       }
+      const nextLangPref = () => {
+        const cur = view.uiLangPref || getUiLangPref()
+        return cur === 'auto' ? 'en' : (cur === 'en' ? 'zh' : 'auto')
+      }
+
+      const digestStatusText = (narrative.summarizing || view.secRegenerating)
+        ? bi('正在整理最新进展…', 'Updating summary…')
+        : narrative.isLiveZeroToken
+          ? bi('实时状态（不额外耗 Token）', 'Live overview (no extra tokens)')
+          : ((narrative.at ? bi('更新于 ', 'Updated ') + relativeTimeLabel(narrative.at) : bi('已更新', 'Updated'))
+              + (narrative.hasUnsummarizedChanges ? bi(' · 有新进展', ' · New updates') : ''))
+      const digestPreview = sixGoalRows && sixGoalRows[0]
+        ? clampTitle(sixGoalRows[0].body, 28)
+        : digestStatusText
+      const chiefLedger = sec.llmLedger || (view.chiefMeta && view.chiefMeta.llmLedgerSummary) || null
+      const ledgerTotalCalls = chiefLedger ? (Number(chiefLedger.totalCalls) || 0) : 0
+      const ledgerTotalTok = chiefLedger ? (Number(chiefLedger.totalTokens) || 0) : 0
+      const ledgerChipLabel = ledgerTotalTok >= 1000
+        ? `${ledgerTotalCalls}${bi('次', 'x')} · ${(ledgerTotalTok / 1000).toFixed(1).replace(/\.0$/, '')}K`
+        : `${ledgerTotalCalls}${bi('次', 'x')} · ${ledgerTotalTok}`
 
       return h(
         'div',
         { className: 'dnb-view' },
-        // Sub-view Segmented Bar + Quick Actions
+        // Clean Header Bar + Quick Actions
         h(
           'div',
           { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 10, flexWrap: 'wrap' } },
           h(
             'div',
-            { className: 'dnb-seg', style: { padding: 2 } },
-            h('button', {
-              type: 'button',
-              className: 'dnb-seg-btn',
-              style: { padding: '3px 10px', fontSize: 11.5 },
-              'data-active': subTab === 'digest' ? '1' : '0',
-              onClick: () => patch({ secSubTab: 'digest' }),
-            }, bi('摘要', 'Summary')),
-            h('button', {
-              type: 'button',
-              className: 'dnb-seg-btn',
-              style: { padding: '3px 10px', fontSize: 11.5 },
-              'data-active': subTab !== 'digest' ? '1' : '0',
-              onClick: () => patch({ secSubTab: 'facts' }),
-            }, bi('长期规矩', 'Long-Term Rules'), facts.length ? h('span', { className: 'dnb-seg-dot' }, String(facts.length)) : null),
+            { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
+            h(Icon, { name: 'sparkles', size: 13, style: { color: 'var(--dnb-accent)', flexShrink: 0 } }),
+            h('span', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } }, bi('参谋总览', 'Chief Overview')),
           ),
-          subTab === 'digest'
-            ? (() => {
-                const hState = (board && board.handoff) || {}
-                const hMeta = view.handoffMeta || {}
-                const isHandoffPinned = Boolean(hState.pinned || hMeta.pinned)
-                const syncOnDigest = Boolean(hState.syncOnDigest ?? hMeta.syncOnDigest)
-                const exportReport = (copyOnly = false) => {
-                  const md = buildSessionReportMarkdown({
-                    board,
-                    secView: sec,
-                    chiefMeta: view.chiefMeta,
-                    subagents: view.subagents,
-                    guardWalls: view.guardWalls,
-                    sessionId: view.sessionId,
-                  })
-                  if (copyOnly) {
-                    copyText(md, bi('📋 复盘报告已复制到剪贴板', '📋 Report copied to clipboard'))
-                    return
-                  }
-                  const dl = downloadSessionReportMarkdown(md, view.sessionId)
-                  if (dl && dl.ok) {
-                    patch({ notice: bi('📄 已导出复盘报告：', '📄 Exported report: ') + dl.filename })
-                  } else {
-                    copyText(md, bi('📄 复盘报告已复制到剪贴板', '📋 Report copied to clipboard'))
-                  }
-                }
-                const nextLangPref = () => {
-                  const cur = view.uiLangPref || getUiLangPref()
-                  return cur === 'auto' ? 'en' : (cur === 'en' ? 'zh' : 'auto')
-                }
-                return h(
-                  'div',
-                  { style: { display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' } },
-                  h('button', {
-                    type: 'button',
-                    className: 'dnb-pill',
-                    style: { height: 25, padding: '0 9px', fontSize: 11, gap: 4 },
-                    disabled: Boolean(view.secBusy),
-                    title: bi('问问参谋长现在进展顺不顺、卡在哪、接下来怎么走', 'Ask Chief how things are going, what is blocked, and what to do next'),
-                    onClick: () => void submitChiefBar(
-                      '请结合当前任务进展、对话上下文、边界红线与团队状态，给我坦诚、接地气的参谋建议：当前有什么需要关注的卡点或更好的推进方向？若一切顺利暂无建议，或涉及非参谋与会话能处理的事项，直接实话告诉我即可，不要强行凑执行项。',
-                      'consult_chief',
-                    ),
-                  }, h(Icon, { name: 'sparkles', size: 11 }), bi('咨询', 'Consult')),
-                  h('button', {
-                    className: 'dnb-pill',
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 25, padding: '0 9px', fontSize: 11, gap: 4 },
+              disabled: Boolean(view.secBusy),
+              title: bi('问问参谋长现在进展顺不顺、卡在哪、接下来怎么走', 'Ask Chief how things are going, what is blocked, and what to do next'),
+              onClick: () => void submitChiefBar(
+                '请结合当前任务进展、对话上下文、边界红线与团队状态，给我坦诚、接地气的参谋建议：当前有什么需要关注的卡点或更好的推进方向？若一切顺利暂无建议，或涉及非参谋与会话能处理的事项，直接实话告诉我即可，不要强行凑执行项。',
+                'consult_chief',
+              ),
+            }, h(Icon, { name: 'sparkles', size: 11 }), bi('咨询', 'Consult')),
+            h('button', {
+              className: 'dnb-pill',
+              style: {
+                height: 25,
+                padding: '0 10px',
+                fontSize: 11,
+                gap: 4,
+                color: (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
+                  ? 'var(--dnb-accent)'
+                  : undefined,
+              },
+              disabled: view.secRegenerating || narrative.summarizing,
+              title: narrative.hasUnsummarizedChanges
+                ? bi('对话有了新内容，点这里更新摘要（平时不后台自动跑，省 Token）', 'New chat updates found. Click to update the summary without extra background cost.')
+                : bi('让参谋长重新整理一份最新摘要', 'Update the summary now'),
+              onClick: () => void loadChiefView(true, { syncHandoff: !isHandoffPinned && syncOnDigest }),
+            },
+              (view.secRegenerating || narrative.summarizing)
+                ? h(Icon, { name: 'refresh', size: 11, style: { animation: 'dnb-spin 0.9s linear infinite' } })
+                : h(Icon, { name: 'sparkles', size: 11 }),
+              (view.secRegenerating || narrative.summarizing) ? bi('整理中…', 'Updating…') : bi('更新摘要', 'Update Summary'),
+              (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
+                ? h('span', {
                     style: {
-                      height: 25,
-                      padding: '0 10px',
-                      fontSize: 11,
-                      gap: 4,
-                      color: (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
-                        ? 'var(--dnb-accent)'
-                        : undefined,
+                      width: 5,
+                      height: 5,
+                      borderRadius: '50%',
+                      background: 'var(--dnb-accent)',
+                      flexShrink: 0,
                     },
-                    disabled: view.secRegenerating || narrative.summarizing,
-                    title: narrative.hasUnsummarizedChanges
-                      ? bi('对话有了新内容，点这里更新摘要（平时不后台自动跑，省 Token）', 'New chat updates found. Click to update the summary without extra background cost.')
-                      : bi('让参谋长重新整理一份最新摘要', 'Update the summary now'),
-                    onClick: () => void loadChiefView(true, { syncHandoff: !isHandoffPinned && syncOnDigest }),
-                  },
-                    (view.secRegenerating || narrative.summarizing)
-                      ? h(Icon, { name: 'refresh', size: 11, style: { animation: 'dnb-spin 0.9s linear infinite' } })
-                      : h(Icon, { name: 'sparkles', size: 11 }),
-                    (view.secRegenerating || narrative.summarizing) ? bi('整理中…', 'Updating…') : bi('更新摘要', 'Update Summary'),
-                    (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
-                      ? h('span', {
-                          style: {
-                            width: 5,
-                            height: 5,
-                            borderRadius: '50%',
-                            background: 'var(--dnb-accent)',
-                            flexShrink: 0,
-                          },
-                        })
-                      : null,
-                  ),
-                  h(
+                  })
+                : null,
+            ),
+            h(
+              'div',
+              { className: 'dnb-more-wrap', onClick: e => e.stopPropagation() },
+              h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 25, padding: '0 7px', fontSize: 11 },
+                'data-active': view.chiefMoreMenuOpen ? '1' : '0',
+                title: bi('导出报告、更新交接单或切换语言', 'Export report, sync handoff, or switch language'),
+                onClick: () => patch({ chiefMoreMenuOpen: !view.chiefMoreMenuOpen }),
+              }, '⋯'),
+              view.chiefMoreMenuOpen
+                ? h(
                     'div',
-                    { className: 'dnb-more-wrap', onClick: e => e.stopPropagation() },
+                    { className: 'dnb-more-menu', style: { minWidth: 212 } },
                     h('button', {
                       type: 'button',
-                      className: 'dnb-pill',
-                      style: { height: 25, padding: '0 7px', fontSize: 11 },
-                      'data-active': view.chiefMoreMenuOpen ? '1' : '0',
-                      title: bi('导出报告、更新交接单或切换语言', 'Export report, sync handoff, or switch language'),
-                      onClick: () => patch({ chiefMoreMenuOpen: !view.chiefMoreMenuOpen }),
-                    }, '⋯'),
-                    view.chiefMoreMenuOpen
-                      ? h(
-                          'div',
-                          { className: 'dnb-more-menu', style: { minWidth: 212 } },
-                          h('button', {
-                            type: 'button',
-                            className: 'dnb-more-item',
-                            onClick: () => {
-                              patch({ chiefMoreMenuOpen: false })
-                              exportReport(false)
-                            },
-                          }, h('span', null, bi('📄 导出复盘报告 (.md)', '📄 Export Report (.md)'))),
-                          h('button', {
-                            type: 'button',
-                            className: 'dnb-more-item',
-                            onClick: () => {
-                              patch({ chiefMoreMenuOpen: false })
-                              exportReport(true)
-                            },
-                          }, h('span', null, bi('📋 复制复盘报告 (Markdown)', '📋 Copy Report (Markdown)'))),
-                          h('div', { className: 'dnb-more-sep' }),
-                          h('button', {
-                            type: 'button',
-                            className: 'dnb-more-item',
-                            'data-active': (!isHandoffPinned && syncOnDigest) ? '1' : '0',
-                            disabled: isHandoffPinned,
-                            title: isHandoffPinned
-                              ? bi('交接单已被你定住防改，参谋长不会覆盖它', 'Handoff is pinned by you, so Chief will not overwrite it.')
-                              : bi('开启后，每次更新摘要时都会顺便更新交接单', 'Update the handoff card automatically whenever you refresh the summary.'),
-                            onClick: () => {
-                              patch({ chiefMoreMenuOpen: false })
-                              void toggleSyncHandoffOnDigest(!syncOnDigest)
-                            },
-                          },
-                            h('span', null, isHandoffPinned ? bi('🔒 交接单已定住', '🔒 Handoff Pinned') : bi('更新摘要时同步交接单', 'Auto-sync handoff on update')),
-                            h('span', { style: { fontSize: 10.5, opacity: 0.78 } }, isHandoffPinned ? bi('锁定', 'Locked') : (syncOnDigest ? bi('开', 'On') : bi('关', 'Off'))),
-                          ),
-                          h('button', {
-                            type: 'button',
-                            className: 'dnb-more-item',
-                            disabled: isHandoffPinned || view.secRegenerating || narrative.summarizing,
-                            title: isHandoffPinned ? bi('交接单已定住防改，不能覆盖', 'Handoff is pinned and cannot be overwritten.') : bi('把当前摘要写进交接单', 'Copy the current summary into the handoff card'),
-                            onClick: () => {
-                              patch({ chiefMoreMenuOpen: false })
-                              void loadChiefView(false, { syncHandoff: true })
-                            },
-                          }, h('span', null, isHandoffPinned ? bi('🔒 交接单已定住', '🔒 Handoff Pinned') : bi('↪ 立即更新交接单', '↪ Sync Handoff Now'))),
-                          h('div', { className: 'dnb-more-sep' }),
-                          h('button', {
-                            type: 'button',
-                            className: 'dnb-more-item',
-                            onClick: () => {
-                              patch({ chiefMoreMenuOpen: false })
-                              void updateSecConfig({ uiLang: nextLangPref() })
-                            },
-                          },
-                            h('span', null, bi('🌐 切换界面语言', '🌐 Switch Language')),
-                            h('span', { style: { fontSize: 10.5, opacity: 0.78 } }, (view.uiLangPref || getUiLangPref()).toUpperCase()),
-                          ),
-                        )
-                      : null,
-                  ),
-                )
-              })()
-            : null,
+                      className: 'dnb-more-item',
+                      onClick: () => {
+                        patch({ chiefMoreMenuOpen: false })
+                        exportReport(false)
+                      },
+                    }, h('span', null, bi('📄 导出复盘报告 (.md)', '📄 Export Report (.md)'))),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-more-item',
+                      onClick: () => {
+                        patch({ chiefMoreMenuOpen: false })
+                        exportReport(true)
+                      },
+                    }, h('span', null, bi('📋 复制复盘报告 (Markdown)', '📋 Copy Report (Markdown)'))),
+                    h('div', { className: 'dnb-more-sep' }),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-more-item',
+                      'data-active': (!isHandoffPinned && syncOnDigest) ? '1' : '0',
+                      disabled: isHandoffPinned,
+                      title: isHandoffPinned
+                        ? bi('交接单已被你定住防改，参谋长不会覆盖它', 'Handoff is pinned by you, so Chief will not overwrite it.')
+                        : bi('开启后，每次更新摘要时都会顺便更新交接单', 'Update the handoff card automatically whenever you refresh the summary.'),
+                      onClick: () => {
+                        patch({ chiefMoreMenuOpen: false })
+                        void toggleSyncHandoffOnDigest(!syncOnDigest)
+                      },
+                    },
+                      h('span', null, isHandoffPinned ? bi('🔒 交接单已定住', '🔒 Handoff Pinned') : bi('更新摘要时同步交接单', 'Auto-sync handoff on update')),
+                      h('span', { style: { fontSize: 10.5, opacity: 0.78 } }, isHandoffPinned ? bi('锁定', 'Locked') : (syncOnDigest ? bi('开', 'On') : bi('关', 'Off'))),
+                    ),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-more-item',
+                      disabled: isHandoffPinned || view.secRegenerating || narrative.summarizing,
+                      title: isHandoffPinned ? bi('交接单已定住防改，不能覆盖', 'Handoff is pinned and cannot be overwritten.') : bi('把当前摘要写进交接单', 'Copy the current summary into the handoff card'),
+                      onClick: () => {
+                        patch({ chiefMoreMenuOpen: false })
+                        void loadChiefView(false, { syncHandoff: true })
+                      },
+                    }, h('span', null, isHandoffPinned ? bi('🔒 交接单已定住', '🔒 Handoff Pinned') : bi('↪ 立即更新交接单', '↪ Sync Handoff Now'))),
+                    h('div', { className: 'dnb-more-sep' }),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-more-item',
+                      onClick: () => {
+                        patch({ chiefMoreMenuOpen: false })
+                        void updateSecConfig({ uiLang: nextLangPref() })
+                      },
+                    },
+                      h('span', null, bi('🌐 切换界面语言', '🌐 Switch Language')),
+                      h('span', { style: { fontSize: 10.5, opacity: 0.78 } }, (view.uiLangPref || getUiLangPref()).toUpperCase()),
+                    ),
+                  )
+                : null,
+            ),
+          ),
         ),
 
-        // Sub-view 1: Concise 6-Sentence Goal Brief or Standard Structured Digest
-        subTab === 'digest'
-          ? (() => {
-              const digestStatusText = (narrative.summarizing || view.secRegenerating)
-                ? bi('正在整理最新进展…', 'Updating summary…')
-                : narrative.isLiveZeroToken
-                  ? bi('实时状态（不额外耗 Token）', 'Live overview (no extra tokens)')
-                  : ((narrative.at ? bi('更新于 ', 'Updated ') + relativeTimeLabel(narrative.at) : bi('已更新', 'Updated'))
-                      + (narrative.hasUnsummarizedChanges ? bi(' · 有新进展', ' · New updates') : ''))
-              const digestPreview = sixGoalRows && sixGoalRows[0]
-                ? clampTitle(sixGoalRows[0].body, 28)
-                : digestStatusText
-              const chiefLedger = sec.llmLedger || (view.chiefMeta && view.chiefMeta.llmLedgerSummary) || null
-              const ledgerTotalCalls = chiefLedger ? (Number(chiefLedger.totalCalls) || 0) : 0
-              const ledgerTotalTok = chiefLedger ? (Number(chiefLedger.totalTokens) || 0) : 0
-              const ledgerChipLabel = ledgerTotalTok >= 1000
-                ? `${ledgerTotalCalls}${bi('次', 'x')} · ${(ledgerTotalTok / 1000).toFixed(1).replace(/\.0$/, '')}K`
-                : `${ledgerTotalCalls}${bi('次', 'x')} · ${ledgerTotalTok}`
-              return h(
-                React.Fragment,
-                null,
-                h(
-                  AccCard,
-                  {
-                    open: !view.chiefDigestCollapsed,
-                    onToggle: () => patch({ chiefDigestCollapsed: !view.chiefDigestCollapsed }),
-                    title: useSixBriefCards ? bi('⚡ 极简目标汇报', '⚡ Brief Goal Summary') : bi('当前进展摘要', 'Current Summary'),
-                    headTitle: view.chiefDigestCollapsed ? bi('点击展开摘要', 'Click to expand summary') : bi('点击收起摘要', 'Click to collapse summary'),
-                    preview: digestPreview,
-                    headerExtra: !view.chiefDigestCollapsed
-                      ? h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', whiteSpace: 'nowrap' } }, digestStatusText)
-                      : null,
-                    badges: h(
-                      React.Fragment,
-                      null,
-                      narrative.byModel
-                        ? h('span', {
-                            className: 'dnb-acc-badge',
-                            title: narrative.byModel,
-                          }, shortModelName(narrative.byModel, view.secModelsCatalog || (sec && sec.models), true))
-                        : null,
-                      ledgerTotalCalls > 0
-                        ? h('button', {
-                            type: 'button',
-                            className: 'dnb-acc-badge',
-                            style: { cursor: 'pointer', border: '1px solid var(--dnb-border)', background: 'var(--dnb-fill)' },
-                            title: bi('查看用量统计和托管模式上限', 'View usage stats and Managed mode limits'),
-                            onClick: e => {
-                              e.stopPropagation()
-                              patch({ settingsOpen: true })
-                            },
-                          }, '⚡ ' + ledgerChipLabel)
-                        : null,
+        // Concise 6-Sentence Goal Brief or Standard Structured Digest
+        h(
+          AccCard,
+          {
+            open: !view.chiefDigestCollapsed,
+            onToggle: () => patch({ chiefDigestCollapsed: !view.chiefDigestCollapsed }),
+            tone: 'blue',
+            title: useSixBriefCards ? bi('⚡ 极简目标汇报', '⚡ Brief Goal Summary') : bi('当前进展摘要', 'Current Summary'),
+            headTitle: view.chiefDigestCollapsed ? bi('点击展开摘要', 'Click to expand summary') : bi('点击收起摘要', 'Click to collapse summary'),
+            preview: digestPreview,
+            headerExtra: !view.chiefDigestCollapsed
+              ? h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', whiteSpace: 'nowrap' } }, digestStatusText)
+              : null,
+            badges: h(
+              React.Fragment,
+              null,
+              narrative.byModel
+                ? h('span', {
+                    className: 'dnb-acc-badge',
+                    title: narrative.byModel,
+                  }, shortModelName(narrative.byModel, view.secModelsCatalog || (sec && sec.models), true))
+                : null,
+              ledgerTotalCalls > 0
+                ? h('button', {
+                    type: 'button',
+                    className: 'dnb-acc-badge',
+                    style: { cursor: 'pointer', border: '1px solid var(--dnb-border)', background: 'var(--dnb-fill)' },
+                    title: bi('查看用量统计和托管模式上限', 'View usage stats and Managed mode limits'),
+                    onClick: e => {
+                      e.stopPropagation()
+                      patch({ settingsOpen: true })
+                    },
+                  }, '⚡ ' + ledgerChipLabel)
+                : null,
+            ),
+            bodyStyle: { padding: '10px 12px 12px' },
+          },
+          useSixBriefCards
+            ? h(
+                'div',
+                { className: 'dnb-six-brief' },
+                sixGoalRows.map(row =>
+                  h(
+                    'div',
+                    { key: row.key, className: 'dnb-six-row' },
+                    h(
+                      'span',
+                      {
+                        className: 'dnb-six-tag',
+                        style: { color: row.color, background: row.bg },
+                      },
+                      row.key,
                     ),
-                    bodyStyle: { padding: '10px 12px 12px' },
+                    h('span', { style: { flex: 1, fontSize: 12.2, color: 'var(--dnb-text)', lineHeight: 1.5 } }, row.body),
+                  ),
+                ),
+              )
+            : blocks.length
+              ? blocks.map((blk, i) =>
+                  h(
+                    'div',
+                    { key: i, style: { marginTop: i === 0 ? 0 : 12 } },
+                    blk.heading ? renderStructuredHeading(blk.heading, false) : null,
+                    (blk.items || []).map((it, j) => renderStructuredItem(it, `${i}-${j}`)),
+                  ),
+                )
+              : h('p', { className: 'dnb-prose-p' },
+                  '目前还没有生成总结。你可以在下面的输入框存资料、设拦截规则，或让参谋长去干活。'),
+        ),
+
+        // Partitioned Chief Q&A Turn Collections vs System / Execution Receipts
+        chat.length > 0
+          ? (() => {
+              const turns = groupChatHistoryTurnsNewestFirst(chat.slice(-32))
+              const qaCount = turns.filter(t => t.kind === 'turn').length
+              const receiptCount = turns.filter(t => t.replies.some(r => isReceiptChatItem(r))).length
+              const filteredTurns = chatFilter === 'receipt'
+                ? turns.filter(t => t.replies.some(r => isReceiptChatItem(r)))
+                : (chatFilter === 'qa' ? turns.filter(t => t.kind === 'turn') : turns)
+
+              const formatChiefReplyEffortBadge = (it) => {
+                const eff = String((it && it.thinkingEffort) || '').trim().toLowerCase()
+                if (!eff) return ''
+                const opt = THINKING_EFFORT_OPTIONS.find(o => o.key === eff)
+                const label = opt ? opt.shortLabel : eff
+                return (it && it.thinkingEffortMode === 'auto') ? `🪄 自动→${label}` : `🧠 ${label}`
+              }
+
+              const renderTurnReplyCard = (item) => {
+                const isReceipt = isReceiptChatItem(item)
+                const effortBadge = formatChiefReplyEffortBadge(item)
+                return h(
+                  'div',
+                  {
+                    key: item.id,
+                    className: 'dnb-turn-reply-item',
+                    'data-role': isReceipt ? 'receipt' : (item.role === 'chief' ? 'chief' : 'user'),
                   },
-                  useSixBriefCards
+                  h(
+                    'div',
+                    { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6, flexWrap: 'wrap' } },
+                    h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+                      isReceipt
+                        ? h('span', { className: 'dnb-receipt-badge' },
+                            item.isOneStopReport
+                              ? '🏁 一站式战报回执'
+                              : (item.resumeTaskId ? '⚡ 授权后继续结果' : '📋 操作记录'))
+                        : h('span', { className: 'dnb-qa-badge', 'data-role': 'chief' }, '✦ 参谋回答'),
+                    ),
+                    h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+                      effortBadge
+                        ? h('span', {
+                            className: 'dnb-chat-effort-badge',
+                            title: item.thinkingEffortMode === 'auto' ? '这次回答自动选的思考深度' : '这次回答手动设的思考深度',
+                          }, effortBadge)
+                        : null,
+                      h('span', null, timeLabel(item.at)),
+                    ),
+                  ),
+                  renderStructuredText(item.text),
+                  Array.isArray(item.actions) && item.actions.length
                     ? h(
                         'div',
-                        { className: 'dnb-six-brief' },
-                        sixGoalRows.map(row =>
-                          h(
-                            'div',
-                            { key: row.key, className: 'dnb-six-row' },
-                            h(
-                              'span',
-                              {
-                                className: 'dnb-six-tag',
-                                style: { color: row.color, background: row.bg },
-                              },
-                              row.key,
-                            ),
-                            h('span', { style: { flex: 1, fontSize: 12.2, color: 'var(--dnb-text)', lineHeight: 1.5 } }, row.body),
-                          ),
-                        ),
+                        { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2 } },
+                        item.actions.map((actTag, idx) =>
+                          h('span', { key: idx, className: 'dnb-tag', style: { color: isReceipt ? '#34d399' : 'var(--dnb-accent)' } }, actTag)),
                       )
-                    : blocks.length
-                      ? blocks.map((blk, i) =>
-                          h(
-                            'div',
-                            { key: i, style: { marginTop: i === 0 ? 0 : 12 } },
-                            blk.heading ? renderStructuredHeading(blk.heading, false) : null,
-                            (blk.items || []).map((it, j) => renderStructuredItem(it, `${i}-${j}`)),
-                          ),
-                        )
-                      : h('p', { className: 'dnb-prose-p' },
-                          '目前还没有记下长期规矩或总结。你可以在下面的输入框立规矩、存资料、设拦截规则，或让参谋长去干活。'),
-                ),
+                    : null,
+                )
+              }
 
-                // Partitioned Chief Q&A Turn Collections vs System / Execution Receipts
-                chat.length > 0
-                  ? (() => {
-                      const turns = groupChatHistoryTurnsNewestFirst(chat.slice(-32))
-                      const qaCount = turns.filter(t => t.kind === 'turn').length
-                      const receiptCount = turns.filter(t => t.replies.some(r => isReceiptChatItem(r))).length
-                      const filteredTurns = chatFilter === 'receipt'
-                        ? turns.filter(t => t.replies.some(r => isReceiptChatItem(r)))
-                        : (chatFilter === 'qa' ? turns.filter(t => t.kind === 'turn') : turns)
+              const collapsedMap = view.qaCollapsedTurnIds || {}
+              const allTurnsCollapsed = showHistory && filteredTurns.length > 0 && filteredTurns.every(t => Boolean(collapsedMap[t.id]))
 
-                      const formatChiefReplyEffortBadge = (it) => {
-                        const eff = String((it && it.thinkingEffort) || '').trim().toLowerCase()
-                        if (!eff) return ''
-                        const opt = THINKING_EFFORT_OPTIONS.find(o => o.key === eff)
-                        const label = opt ? opt.shortLabel : eff
-                        return (it && it.thinkingEffortMode === 'auto') ? `🪄 自动→${label}` : `🧠 ${label}`
-                      }
-
-                      const renderTurnReplyCard = (item) => {
-                        const isReceipt = isReceiptChatItem(item)
-                        const effortBadge = formatChiefReplyEffortBadge(item)
+              return h(
+                AccCard,
+                {
+                  open: showHistory,
+                  onToggle: () => setShowHistory(v => !v),
+                  tone: 'violet',
+                  title: bi('问答与操作记录', 'Q&A & Action Log'),
+                  count: `${turns.length}`,
+                  bodyStyle: { padding: 0 },
+                  actions: h(
+                    'div',
+                    { className: 'dnb-text-filter-bar', style: { padding: 0, gap: 3 } },
+                    [
+                      { key: 'all', label: `${bi('全部', 'All')} ${turns.length}` },
+                      { key: 'qa', label: `${bi('问答', 'Q&A')} ${qaCount}` },
+                      { key: 'receipt', label: `${bi('记录', 'Log')} ${receiptCount}` },
+                    ].map(opt =>
+                      h('button', {
+                        key: opt.key,
+                        type: 'button',
+                        className: 'dnb-text-filter-btn',
+                        'data-active': chatFilter === opt.key ? '1' : '0',
+                        onClick: () => {
+                          setChatFilter(opt.key)
+                          if (!showHistory) setShowHistory(true)
+                        },
+                      }, opt.label),
+                    ),
+                    filteredTurns.length > 0
+                      ? h('button', {
+                          type: 'button',
+                          className: 'dnb-text-filter-btn',
+                          style: { marginLeft: 2 },
+                          title: allTurnsCollapsed ? bi('展开全部记录', 'Expand all items') : bi('收起全部记录', 'Collapse all items'),
+                          onClick: () => {
+                            if (!showHistory) {
+                              setShowHistory(true)
+                              patch({ qaCollapsedTurnIds: {} })
+                              return
+                            }
+                            if (allTurnsCollapsed) {
+                              patch({ qaCollapsedTurnIds: {} })
+                            } else {
+                              const nextMap = {}
+                              for (const t of filteredTurns) nextMap[t.id] = true
+                              patch({ qaCollapsedTurnIds: nextMap })
+                            }
+                          },
+                        }, allTurnsCollapsed ? bi('全展开', 'Expand') : bi('全收起', 'Collapse'))
+                      : null,
+                  ),
+                },
+                filteredTurns.length > 0
+                  ? h(
+                      'div',
+                      { className: 'dnb-qa-stream' },
+                      filteredTurns.map(turn => {
+                        const q = turn.question
+                        const repliesToShow = chatFilter === 'receipt' && turn.kind === 'system'
+                          ? turn.replies.filter(r => isReceiptChatItem(r))
+                          : turn.replies
+                        const isTurnCollapsed = Boolean(collapsedMap[turn.id])
+                        const toggleTurn = () => patch({
+                          qaCollapsedTurnIds: {
+                            ...(view.qaCollapsedTurnIds || {}),
+                            [turn.id]: !isTurnCollapsed,
+                          },
+                        })
                         return h(
                           'div',
                           {
-                            key: item.id,
-                            className: 'dnb-turn-reply-item',
-                            'data-role': isReceipt ? 'receipt' : (item.role === 'chief' ? 'chief' : 'user'),
+                            key: turn.id,
+                            className: 'dnb-qa-turn-box',
+                            'data-turn-kind': turn.kind,
+                            'data-collapsed': isTurnCollapsed ? '1' : '0',
                           },
-                          h(
-                            'div',
-                            { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6, flexWrap: 'wrap' } },
-                            h(
-                              'div',
-                              { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                              isReceipt
-                                ? h('span', { className: 'dnb-receipt-badge' },
-                                    item.isOneStopReport
-                                      ? '🏁 一站式战报回执'
-                                      : (item.resumeTaskId ? '⚡ 授权后继续结果' : '📋 操作记录'))
-                                : h('span', { className: 'dnb-qa-badge', 'data-role': 'chief' }, '✦ 参谋回答'),
-                            ),
-                            h(
-                              'div',
-                              { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                              effortBadge
-                                ? h('span', {
-                                    className: 'dnb-chat-effort-badge',
-                                    title: item.thinkingEffortMode === 'auto' ? '这次回答自动选的思考深度' : '这次回答手动设的思考深度',
-                                  }, effortBadge)
-                                : null,
-                              h('span', null, timeLabel(item.at)),
-                            ),
-                          ),
-                          renderStructuredText(item.text),
-                          Array.isArray(item.actions) && item.actions.length
+                          q
                             ? h(
                                 'div',
-                                { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2 } },
-                                item.actions.map((actTag, idx) =>
-                                  h('span', { key: idx, className: 'dnb-tag', style: { color: isReceipt ? '#34d399' : 'var(--dnb-accent)' } }, actTag)),
+                                {
+                                  className: 'dnb-turn-question',
+                                  title: isTurnCollapsed ? '点击展开这轮对话' : '点击收起这轮对话',
+                                  onClick: toggleTurn,
+                                },
+                                h(
+                                  'div',
+                                  { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6 } },
+                                  h(
+                                    'div',
+                                    { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+                                    h('span', { className: 'dnb-qa-badge', 'data-role': 'user' }, '🙋 你的提问'),
+                                    repliesToShow.length > 0
+                                      ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `${repliesToShow.length} 条回复`)
+                                      : null,
+                                  ),
+                                  h(
+                                    'div',
+                                    { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
+                                    h('span', null, timeLabel(q.at)),
+                                    h(Icon, {
+                                      name: 'chevron',
+                                      size: 12,
+                                      style: {
+                                        color: 'var(--dnb-text-3)',
+                                        transform: isTurnCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+                                        transition: 'transform 0.16s ease',
+                                      },
+                                    }),
+                                  ),
+                                ),
+                                !isTurnCollapsed && q.imageCount > 0
+                                  ? h(
+                                      'div',
+                                      {
+                                        style: {
+                                          display: 'inline-flex',
+                                          alignItems: 'center',
+                                          gap: 4,
+                                          padding: '1px 7px',
+                                          width: 'fit-content',
+                                          borderRadius: 999,
+                                          background: 'rgba(10, 132, 255, 0.15)',
+                                          color: '#409cff',
+                                          fontSize: 10.5,
+                                          fontWeight: 600,
+                                        },
+                                      },
+                                      `🖼 附图 ×${q.imageCount}`,
+                                    )
+                                  : null,
+                                q.text
+                                  ? h('div', {
+                                      style: isTurnCollapsed
+                                        ? {
+                                            fontSize: 12,
+                                            color: 'var(--dnb-text)',
+                                            lineHeight: 1.45,
+                                            overflow: 'hidden',
+                                            textOverflow: 'ellipsis',
+                                            whiteSpace: 'nowrap',
+                                          }
+                                        : { fontSize: 12, color: 'var(--dnb-text)', lineHeight: 1.5, whiteSpace: 'pre-wrap' },
+                                    }, q.text)
+                                  : null,
+                              )
+                            : h(
+                                'div',
+                                {
+                                  className: 'dnb-turn-question',
+                                  title: isTurnCollapsed ? '点击展开这组记录' : '点击收起这组记录',
+                                  onClick: toggleTurn,
+                                },
+                                h(
+                                  'div',
+                                  { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6 } },
+                                  h(
+                                    'div',
+                                    { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+                                    h('span', { className: 'dnb-receipt-badge' }, '📋 系统自动记录'),
+                                    repliesToShow.length > 0
+                                      ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `${repliesToShow.length} 条记录`)
+                                      : null,
+                                  ),
+                                  h(
+                                    'div',
+                                    { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
+                                    turn.at ? h('span', null, timeLabel(turn.at)) : null,
+                                    h(Icon, {
+                                      name: 'chevron',
+                                      size: 12,
+                                      style: {
+                                        color: 'var(--dnb-text-3)',
+                                        transform: isTurnCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+                                        transition: 'transform 0.16s ease',
+                                      },
+                                    }),
+                                  ),
+                                ),
+                              ),
+                          !isTurnCollapsed && repliesToShow.length > 0
+                            ? h(
+                                'div',
+                                { className: 'dnb-turn-replies' },
+                                repliesToShow.map(renderTurnReplyCard),
                               )
                             : null,
                         )
-                      }
-
-                      const collapsedMap = view.qaCollapsedTurnIds || {}
-                      const allTurnsCollapsed = showHistory && filteredTurns.length > 0 && filteredTurns.every(t => Boolean(collapsedMap[t.id]))
-
-                      return h(
-                        AccCard,
-                        {
-                          open: showHistory,
-                          onToggle: () => setShowHistory(v => !v),
-                          title: bi('问答与操作记录', 'Q&A & Action Log'),
-                          count: `${turns.length}`,
-                          bodyStyle: { padding: 0 },
-                          actions: h(
-                            'div',
-                            { className: 'dnb-text-filter-bar', style: { padding: 0, gap: 3 } },
-                            [
-                              { key: 'all', label: `${bi('全部', 'All')} ${turns.length}` },
-                              { key: 'qa', label: `${bi('问答', 'Q&A')} ${qaCount}` },
-                              { key: 'receipt', label: `${bi('记录', 'Log')} ${receiptCount}` },
-                            ].map(opt =>
-                              h('button', {
-                                key: opt.key,
-                                type: 'button',
-                                className: 'dnb-text-filter-btn',
-                                'data-active': chatFilter === opt.key ? '1' : '0',
-                                onClick: () => {
-                                  setChatFilter(opt.key)
-                                  if (!showHistory) setShowHistory(true)
-                                },
-                              }, opt.label),
-                            ),
-                            filteredTurns.length > 0
-                              ? h('button', {
-                                  type: 'button',
-                                  className: 'dnb-text-filter-btn',
-                                  style: { marginLeft: 2 },
-                                  title: allTurnsCollapsed ? bi('展开全部记录', 'Expand all items') : bi('收起全部记录', 'Collapse all items'),
-                                  onClick: () => {
-                                    if (!showHistory) {
-                                      setShowHistory(true)
-                                      patch({ qaCollapsedTurnIds: {} })
-                                      return
-                                    }
-                                    if (allTurnsCollapsed) {
-                                      patch({ qaCollapsedTurnIds: {} })
-                                    } else {
-                                      const nextMap = {}
-                                      for (const t of filteredTurns) nextMap[t.id] = true
-                                      patch({ qaCollapsedTurnIds: nextMap })
-                                    }
-                                  },
-                                }, allTurnsCollapsed ? bi('全展开', 'Expand') : bi('全收起', 'Collapse'))
-                              : null,
-                          ),
-                        },
-                        filteredTurns.length > 0
-                          ? h(
-                              'div',
-                              { className: 'dnb-qa-stream' },
-                              filteredTurns.map(turn => {
-                                const q = turn.question
-                                const repliesToShow = chatFilter === 'receipt' && turn.kind === 'system'
-                                  ? turn.replies.filter(r => isReceiptChatItem(r))
-                                  : turn.replies
-                                const isTurnCollapsed = Boolean(collapsedMap[turn.id])
-                                const toggleTurn = () => patch({
-                                  qaCollapsedTurnIds: {
-                                    ...(view.qaCollapsedTurnIds || {}),
-                                    [turn.id]: !isTurnCollapsed,
-                                  },
-                                })
-                                return h(
-                                  'div',
-                                  {
-                                    key: turn.id,
-                                    className: 'dnb-qa-turn-box',
-                                    'data-turn-kind': turn.kind,
-                                    'data-collapsed': isTurnCollapsed ? '1' : '0',
-                                  },
-                                  q
-                                    ? h(
-                                        'div',
-                                        {
-                                          className: 'dnb-turn-question',
-                                          title: isTurnCollapsed ? '点击展开这轮对话' : '点击收起这轮对话',
-                                          onClick: toggleTurn,
-                                        },
-                                        h(
-                                          'div',
-                                          { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6 } },
-                                          h(
-                                            'div',
-                                            { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                                            h('span', { className: 'dnb-qa-badge', 'data-role': 'user' }, '🙋 你的提问'),
-                                            repliesToShow.length > 0
-                                              ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `${repliesToShow.length} 条回复`)
-                                              : null,
-                                          ),
-                                          h(
-                                            'div',
-                                            { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
-                                            h('span', null, timeLabel(q.at)),
-                                            h(Icon, {
-                                              name: 'chevron',
-                                              size: 12,
-                                              style: {
-                                                color: 'var(--dnb-text-3)',
-                                                transform: isTurnCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
-                                                transition: 'transform 0.16s ease',
-                                              },
-                                            }),
-                                          ),
-                                        ),
-                                        !isTurnCollapsed && q.imageCount > 0
-                                          ? h(
-                                              'div',
-                                              {
-                                                style: {
-                                                  display: 'inline-flex',
-                                                  alignItems: 'center',
-                                                  gap: 4,
-                                                  padding: '1px 7px',
-                                                  width: 'fit-content',
-                                                  borderRadius: 999,
-                                                  background: 'rgba(10, 132, 255, 0.15)',
-                                                  color: '#409cff',
-                                                  fontSize: 10.5,
-                                                  fontWeight: 600,
-                                                },
-                                              },
-                                              `🖼 附图 ×${q.imageCount}`,
-                                            )
-                                          : null,
-                                        q.text
-                                          ? h('div', {
-                                              style: isTurnCollapsed
-                                                ? {
-                                                    fontSize: 12,
-                                                    color: 'var(--dnb-text)',
-                                                    lineHeight: 1.45,
-                                                    overflow: 'hidden',
-                                                    textOverflow: 'ellipsis',
-                                                    whiteSpace: 'nowrap',
-                                                  }
-                                                : { fontSize: 12, color: 'var(--dnb-text)', lineHeight: 1.5, whiteSpace: 'pre-wrap' },
-                                            }, q.text)
-                                          : null,
-                                      )
-                                    : h(
-                                        'div',
-                                        {
-                                          className: 'dnb-turn-question',
-                                          title: isTurnCollapsed ? '点击展开这组记录' : '点击收起这组记录',
-                                          onClick: toggleTurn,
-                                        },
-                                        h(
-                                          'div',
-                                          { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6 } },
-                                          h(
-                                            'div',
-                                            { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                                            h('span', { className: 'dnb-receipt-badge' }, '📋 系统自动记录'),
-                                            repliesToShow.length > 0
-                                              ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `${repliesToShow.length} 条记录`)
-                                              : null,
-                                          ),
-                                          h(
-                                            'div',
-                                            { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
-                                            turn.at ? h('span', null, timeLabel(turn.at)) : null,
-                                            h(Icon, {
-                                              name: 'chevron',
-                                              size: 12,
-                                              style: {
-                                                color: 'var(--dnb-text-3)',
-                                                transform: isTurnCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
-                                                transition: 'transform 0.16s ease',
-                                              },
-                                            }),
-                                          ),
-                                        ),
-                                      ),
-                                  !isTurnCollapsed && repliesToShow.length > 0
-                                    ? h(
-                                        'div',
-                                        { className: 'dnb-turn-replies' },
-                                        repliesToShow.map(renderTurnReplyCard),
-                                      )
-                                    : null,
-                                )
-                              }),
-                            )
-                          : h('div', { className: 'dnb-cell', style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } },
-                              chatFilter === 'receipt' ? '还没有操作记录' : '还没有提问记录'),
-                      )
-                    })()
-                  : null,
+                      }),
+                    )
+                  : h('div', { className: 'dnb-cell', style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } },
+                      chatFilter === 'receipt' ? '还没有操作记录' : '还没有提问记录'),
               )
             })()
-          : h(
-              React.Fragment,
-              null,
-              h(
-                AccCard,
-                {
-                  open: !view.chiefFactsCollapsed,
-                  onToggle: () => patch({ chiefFactsCollapsed: !view.chiefFactsCollapsed }),
-                  title: bi('长期规矩与约定', 'Long-Term Rules & Notes'),
-                  count: facts.length ? String(facts.length) : '',
-                  preview: facts.length ? clampTitle(facts[0].text || '', 28) : bi('还没有长期规矩', 'No rules saved yet'),
-                  bodyStyle: { padding: 0 },
-                },
-                h(
-                  'div',
-                  { className: 'dnb-cell', style: { padding: '8px 10px', gap: 6 } },
-                  h('select', {
-                    className: 'dnb-input',
-                    style: { width: 74, height: 28, padding: '0 6px', borderRadius: 99, fontSize: 11.5, flexShrink: 0 },
-                    value: view.secNewFactCat || 'discipline',
-                    onChange: e => patch({ secNewFactCat: e.target.value }),
-                  }, FACT_CATEGORIES.map(c => h('option', { key: c.key, value: c.key }, factCatLabel(c.key) || c.label))),
-                  h('input', {
-                    className: 'dnb-input',
-                    style: { height: 28, borderRadius: 99, padding: '0 11px', fontSize: 12 },
-                    placeholder: bi('写一条长期规矩或约定…', 'Add a long-term rule or note…'),
-                    value: view.secNewFactText || '',
-                    onChange: e => patch({ secNewFactText: e.target.value }),
-                    onKeyDown: e => { if (e.key === 'Enter') submitNewFact() },
-                  }),
-                  (view.secNewFactText || '').trim()
-                    ? h('button', { className: 'dnb-primary-btn', style: { height: 28, padding: '0 10px' }, onClick: submitNewFact }, bi('记住', 'Save'))
-                    : null,
-                ),
-                facts.length
-                  ? facts.map(fact => {
-                      const isEditing = editingFactId === fact.id
-                      return h(
-                        'div',
-                        { key: fact.id, className: 'dnb-cell dnb-cell-hover', style: { flexDirection: 'column', alignItems: 'flex-start', gap: 5 } },
-                        h(
-                          'div',
-                          { style: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
-                          h(
-                            'div',
-                            { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                            fact.pinned ? h(Icon, { name: 'pin', size: 11.5, style: { color: 'var(--dnb-accent)' } }) : null,
-                            (() => {
-                              const ft = FACT_CAT_TONE[fact.category]
-                              return h('span', {
-                                className: 'dnb-tag',
-                                style: ft ? { background: ft.bg, color: ft.fg, border: '1px solid ' + ft.border } : undefined,
-                              }, FACT_CAT_LABEL[fact.category] || '条目')
-                            })(),
-                            h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, relativeTimeLabel(fact.updatedAt || fact.addedAt)),
-                          ),
-                          h(
-                            'div',
-                            { className: 'dnb-row-actions' },
-                            h('button', {
-                              className: 'dnb-icon-btn',
-                              style: { width: 22, height: 22, color: fact.pinned ? 'var(--dnb-accent)' : undefined },
-                              title: fact.pinned ? '取消固定（允许参谋长自动修改）' : '固定住，不让参谋长自动改',
-                              onClick: () => void mutateFact({ op: 'pin', id: fact.id, pinned: !fact.pinned }),
-                            }, h(Icon, { name: 'pin', size: 11.5 })),
-                            h('button', {
-                              className: 'dnb-icon-btn',
-                              style: { width: 22, height: 22 },
-                              title: '编辑',
-                              onClick: () => {
-                                setEditingFactId(isEditing ? '' : fact.id)
-                                setEditingFactText(fact.text || '')
-                              },
-                            }, h(Icon, { name: 'edit', size: 11.5 })),
-                            h('button', {
-                              className: 'dnb-icon-btn',
-                              style: { width: 22, height: 22, color: '#ff453a' },
-                              title: '删除',
-                              onClick: () => void mutateFact({ op: 'remove', id: fact.id }),
-                            }, h(Icon, { name: 'trash', size: 11.5 })),
-                          ),
-                        ),
-                        isEditing
-                          ? h(
-                              'div',
-                              { style: { display: 'flex', width: '100%', gap: 6, marginTop: 2 } },
-                              h('input', {
-                                className: 'dnb-input',
-                                style: { height: 28, fontSize: 12 },
-                                value: editingFactText,
-                                onChange: e => setEditingFactText(e.target.value),
-                                onKeyDown: e => {
-                                  if (e.key === 'Enter' && editingFactText.trim()) {
-                                    void mutateFact({ op: 'edit', id: fact.id, text: editingFactText.trim(), category: fact.category })
-                                    setEditingFactId('')
-                                  }
-                                },
-                              }),
-                              h('button', {
-                                className: 'dnb-primary-btn',
-                                style: { height: 28, padding: '0 10px' },
-                                onClick: () => {
-                                  if (!editingFactText.trim()) return
-                                  void mutateFact({ op: 'edit', id: fact.id, text: editingFactText.trim(), category: fact.category })
-                                  setEditingFactId('')
-                                },
-                              }, '保存'),
-                            )
-                          : h('div', { style: { fontSize: 12.5, color: 'var(--dnb-text)', lineHeight: 1.55, wordBreak: 'break-word' } }, fact.text),
-                      )
-                    })
-                  : h('div', { className: 'dnb-empty', style: { padding: '16px 12px', borderTop: '1px solid var(--dnb-border)' } }, '还没有长期规矩'),
-              ),
-
-              // Collapsible Raw Turn Memory (Original MemoryTab) inside unified AccCard
-              h(
-                AccCard,
-                {
-                  open: Boolean(view.secShowRawTurns),
-                  onToggle: () => patch({ secShowRawTurns: !view.secShowRawTurns }),
-                  title: '每轮对话的自动记录',
-                  count: view.memCount ? String(view.memCount) : '',
-                  preview: '按对话轮次查看以前记下的内容',
-                },
-                h(MemoryTab, { board }),
-              ),
-            ),
+          : null,
       )
     }
 
@@ -25495,9 +25630,12 @@ window.__ModuleLoader__.load({
 
     // === [module: src/client/tabs/peers.js] ===
     /**
-     * tabs/peers.js
+     * src/client/tabs/peers.js — 协同作战水泡、本机外协/待命池与协同消息记录流页签
      *
-     * Subagent and cross-session collaboration tab.
+     * 【核心职责】
+     *   1. `PeersTab`：展示 VisionOS 玻璃态液态融合协同水泡（主代理 + 子代理卫星胶囊 + 外部 Harness + 待命会话入队）、
+     *      内联外协快捷派单条与一键「↻ 刷新扫描」，以及分类折叠卡片流式「协同消息记录」。
+     *   2. 已清理旧版冗余「连接其他对话窗口」开关卡片（统一由上方协同水泡与待命池承接）。
      */
 
 
@@ -25845,7 +25983,8 @@ window.__ModuleLoader__.load({
         if (mail.detachedFromCluster) {
           ensureDrawer('detached', {
             kind: 'detached',
-            title: bi('已断开的历史（不发给主对话）', 'Disconnected History (Isolated)'),
+            channelTag: bi('已断开', 'Isolated'),
+            title: bi('已断开的历史消息（不发给主对话）', 'Disconnected History'),
             colors: [{ dot: '#8e8e93', bg: 'rgba(142,142,147,0.1)', border: 'rgba(142,142,147,0.3)' }],
             order: 99,
             defaultOpen: false,
@@ -25864,7 +26003,8 @@ window.__ModuleLoader__.load({
             .map(id => colorForRootSession(id, selfRootId))
           ensureDrawer('broadcast', {
             kind: 'broadcast',
-            title: bi('🌐 全体广播 (@全体)', '🌐 Broadcast (@All)'),
+            channelTag: bi('广播', 'Broadcast'),
+            title: bi('全体成员 (@全体)', 'All Members (@All)'),
             colors: cols.length ? cols : [SESSION_PALETTE[0], SESSION_PALETTE[1]],
             order: 0,
             defaultOpen: true,
@@ -25876,7 +26016,8 @@ window.__ModuleLoader__.load({
           const sorted = uniqueRoots.slice().sort()
           ensureDrawer('multi:' + sorted.join('|'), {
             kind: 'cross',
-            title: `🔀 ${sorted.slice(0, 3).map(labelForRoot).join(' · ')}${sorted.length > 3 ? bi(` 等${sorted.length}个窗口`, ` +${sorted.length}`) : ''} ${bi('多窗对话', 'Group Chat')}`,
+            channelTag: bi('多窗', 'Group'),
+            title: `${sorted.slice(0, 3).map(labelForRoot).join(' · ')}${sorted.length > 3 ? bi(` 等${sorted.length}窗`, ` +${sorted.length}`) : ''}`,
             colors: sorted.slice(0, 4).map(id => colorForRootSession(id, selfRootId)),
             order: 1,
             defaultOpen: true,
@@ -25888,7 +26029,8 @@ window.__ModuleLoader__.load({
           if (pair.length >= 2 && pair[0] !== pair[1]) {
             ensureDrawer('pair:' + pair.join('|'), {
               kind: 'cross',
-              title: `↔ ${labelForRoot(pair[0])} ↔ ${labelForRoot(pair[1])} ${bi('跨窗消息', 'Cross-Window')}`,
+              channelTag: bi('跨窗', 'Cross'),
+              title: `${labelForRoot(pair[0])} ↔ ${labelForRoot(pair[1])}`,
               colors: pair.map(id => colorForRootSession(id, selfRootId)),
               order: 2,
               defaultOpen: true,
@@ -25900,7 +26042,8 @@ window.__ModuleLoader__.load({
         const col = colorForRootSession(internalRoot, selfRootId)
         ensureDrawer('internal:' + internalRoot, {
           kind: 'internal',
-          title: `📁 ${labelForRoot(internalRoot)} ${bi('内部消息', 'Internal')}`,
+          channelTag: bi('内部', 'Internal'),
+          title: labelForRoot(internalRoot),
           colors: [col],
           order: internalRoot === selfRootId ? 3 : 4,
           defaultOpen: internalRoot === selfRootId,
@@ -25927,6 +26070,7 @@ window.__ModuleLoader__.load({
       const [dragOverZone, setDragOverZone] = React.useState('')
       const [linkLayout, setLinkLayout] = React.useState({ w: 0, h: 0, links: [] })
       const [refreshingDock, setRefreshingDock] = React.useState(false)
+      const [expandedMailIds, setExpandedMailIds] = React.useState({})
 
       const handleRefreshDock = async (e) => {
         if (e && typeof e.stopPropagation === 'function') e.stopPropagation()
@@ -26140,10 +26284,6 @@ window.__ModuleLoader__.load({
         ? (harnessWing.find(x => x.provider === dispatchTarget) || readyStandbyHarnesses.find(x => x.provider === dispatchTarget) || null)
         : null
 
-      const fedOpen = (view.peersFedCollapsed === null || view.peersFedCollapsed === undefined)
-        ? otherSessions.length > 0
-        : !view.peersFedCollapsed
-
       return h(
         'div',
         { className: 'dnb-view' },
@@ -26153,6 +26293,7 @@ window.__ModuleLoader__.load({
           {
             open: !view.peersNetCollapsed,
             onToggle: () => patch({ peersNetCollapsed: !view.peersNetCollapsed }),
+            tone: 'cyan',
             title: bi('🫧 协同作战水泡（实验）', '🫧 Collab Bubble Squad (Exp)'),
             headTitle: bubbleLocked
               ? bi('编队已锁定：运行期间禁止拆散会话或外部 Harness，仅可通过急停安全解体', 'Locked during work: structural edits blocked until settled or emergency stop')
@@ -26787,82 +26928,17 @@ window.__ModuleLoader__.load({
           ),
         ),
 
-        // Section 2: Cross-Window Federation Switches (locks alongside Bubble during active work)
-        h(
-          AccCard,
-          {
-            open: fedOpen,
-            onToggle: () => patch({ peersFedCollapsed: fedOpen }),
-            icon: h(Icon, { name: 'link', size: 12.5, style: { color: 'var(--dnb-text-2)' } }),
-            title: bi('连接其他对话窗口', 'Connect Other Windows'),
-            count: otherSessions.length ? `${otherSessions.filter(s => s.linked).length}/${otherSessions.length}` : '0',
-            preview: bubbleLocked
-              ? bi('🔒 编队工作中已锁定联动关系', '🔒 Federation locked during active work')
-              : bi('同时开了多个窗口时可在这里连接', 'Link multiple open chat windows here'),
-            bodyStyle: { padding: 0 },
-          },
-          otherSessions.length
-            ? otherSessions.map(sess => {
-                const col = colorForRootSession(sess.id, selfRootId)
-                return h(
-                  'div',
-                  {
-                    key: sess.id,
-                    className: 'dnb-cell',
-                    style: {
-                      justifyContent: 'space-between',
-                      gap: 10,
-                      borderLeft: `3px solid ${sess.linked ? col.dot : col.border}`,
-                    },
-                  },
-                  h(
-                    'div',
-                    { style: { flex: 1, minWidth: 0 } },
-                    h(
-                      'div',
-                      { style: { display: 'flex', alignItems: 'center', gap: 6 } },
-                      sess.status === 'running'
-                        ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: col.dot } })
-                        : h('span', {
-                            style: {
-                              width: 7.5,
-                              height: 7.5,
-                              borderRadius: '50%',
-                              background: col.dot,
-                              flexShrink: 0,
-                            },
-                          }),
-                      h('span', { style: { fontWeight: 500, fontSize: 12.5, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, sess.name),
-                      sess.openTasks ? h('span', { className: 'dnb-tag', style: { fontSize: 10, background: col.bg, color: col.text } }, sess.openTasks + ' 待办') : null,
-                    ),
-                    (sess.objective || sess.progressSummary)
-                      ? h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 2, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, sess.objective || sess.progressSummary)
-                      : null,
-                  ),
-                  h(Switch, {
-                    checked: Boolean(sess.linked),
-                    disabled: bubbleLocked,
-                    onChange: on => {
-                      if (bubbleLocked) { triggerLockedReject(); return }
-                      requestTogglePeerLink(sess, on)
-                    },
-                  }),
-                )
-              })
-            : h('div', { style: { padding: '12px 14px', fontSize: 11.5, color: 'var(--dnb-text-3)', lineHeight: 1.5 } },
-                '当你同时打开多个独立主对话窗口时，这里会出现联动开关——也可直接从上方水泡池拖入大水泡协同。'),
-        ),
-
-        // Section 3: Color-Coded Collapsible Drawer Mailbox
+        // Section 2: Clean Grouped Card-Stream Collaboration Mailbox
         h(
           AccCard,
           {
             open: !view.peersMailCollapsed,
             onToggle: () => patch({ peersMailCollapsed: !view.peersMailCollapsed }),
+            tone: 'indigo',
             icon: h(Icon, { name: 'mail', size: 12.5, style: { color: 'var(--dnb-text-2)' } }),
             title: bi('协同消息记录', 'Team Messages'),
             count: mailbox.length ? String(mailbox.length) : '',
-            preview: drawerList.length ? bi(`${drawerList.length} 组消息`, `${drawerList.length} groups`) : bi('还没有消息记录', 'No messages yet'),
+            preview: drawerList.length ? bi(`${drawerList.length} 组对话`, `${drawerList.length} threads`) : bi('还没有消息记录', 'No messages yet'),
             actions: h(
               'div',
               { className: 'dnb-text-filter-bar', style: { padding: 0, gap: 3 } },
@@ -26885,7 +26961,7 @@ window.__ModuleLoader__.load({
           drawerList.length
             ? h(
                 'div',
-                { style: { display: 'flex', flexDirection: 'column', gap: 7 } },
+                { className: 'dnb-mail-threads' },
                 drawerList.map(drawer => {
                   const hasExplicit = Object.prototype.hasOwnProperty.call(openDrawers, drawer.key)
                   const isOpen = hasExplicit ? Boolean(openDrawers[drawer.key]) : drawer.defaultOpen
@@ -26899,42 +26975,26 @@ window.__ModuleLoader__.load({
                     'div',
                     {
                       key: drawer.key,
-                      className: 'dnb-group',
-                      style: {
-                        marginBottom: 0,
-                        overflow: 'hidden',
-                        opacity: drawer.kind === 'detached' ? 0.72 : 1,
-                      },
+                      className: 'dnb-mail-thread',
+                      'data-open': isOpen ? '1' : '0',
+                      'data-kind': drawer.kind,
                     },
                     h(
                       'div',
                       {
-                        className: 'dnb-drawer-head',
-                        style: {
-                          borderLeft: 'none',
-                          boxShadow: drawer.colors.length > 1 ? undefined : `inset 3px 0 0 ${primaryColor.dot}`,
-                          position: 'relative',
-                          background: isOpen ? primaryColor.bg : undefined,
-                        },
+                        className: 'dnb-mail-thread-head',
+                        style: { '--dnb-thread-tint': primaryColor.bg },
                         onClick: () => patch({
                           mailOpenDrawers: { ...openDrawers, [drawer.key]: !isOpen },
                         }),
                       },
-                      drawer.colors.length > 1
-                        ? h('span', {
-                            style: {
-                              position: 'absolute',
-                              left: 0,
-                              top: 0,
-                              bottom: 0,
-                              width: 3,
-                              background: accentBorder,
-                            },
-                          })
-                        : null,
+                      h('span', {
+                        className: 'dnb-mail-thread-bar',
+                        style: { background: accentBorder },
+                      }),
                       h(
                         'div',
-                        { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 } },
+                        { className: 'dnb-mail-thread-meta' },
                         h(Icon, {
                           name: 'chevron',
                           size: 12,
@@ -26957,60 +27017,112 @@ window.__ModuleLoader__.load({
                                 borderRadius: '50%',
                                 background: c.dot,
                                 marginLeft: idx > 0 ? -2 : 0,
-                                border: '1px solid var(--dnb-card)',
+                                boxShadow: '0 0 0 1px var(--dnb-card)',
                               },
                             })),
                         ),
-                        h('span', {
-                          style: {
-                            fontSize: 12,
-                            fontWeight: 600,
-                            color: 'var(--dnb-text)',
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          },
-                        }, drawer.title),
+                        drawer.channelTag
+                          ? h('span', { className: 'dnb-mail-channel-pill', 'data-kind': drawer.kind }, drawer.channelTag)
+                          : null,
+                        h('span', { className: 'dnb-mail-thread-title' }, drawer.title),
                         h('span', { className: 'dnb-acc-count', style: { fontSize: 10 } }, `${drawer.items.length}`),
                       ),
                       h('span', { className: 'dnb-acc-pull-hint' }, isOpen ? bi('收起 ▴', 'Collapse ▴') : bi('展开 ▾', 'Expand ▾')),
                     ),
                     isOpen
-                      ? drawer.items.slice(0, 15).map(mail => {
-                          const modeLabel = mail.mode === 'steer' ? '⚡ 插话' : mail.mode === 'silent' ? '📌 备忘' : '📨 递话'
-                          const fColor = colorForRootSession(mail.fromRootId || mail.fromSession || selfRootId, selfRootId)
-                          const tRoot = mail.toRootId && mail.toRootId !== 'all' ? mail.toRootId : ''
-                          const tColor = tRoot ? colorForRootSession(tRoot, selfRootId) : primaryColor
-                          return h(
-                            'div',
-                            {
-                              key: mail.id,
-                              className: 'dnb-cell',
-                              style: {
-                                flexDirection: 'column',
-                                alignItems: 'flex-start',
-                                gap: 4,
-                                borderTop: '1px solid var(--dnb-border)',
-                              },
-                            },
-                            h(
+                      ? h(
+                          'div',
+                          { className: 'dnb-mail-feed' },
+                          drawer.items.slice(0, 15).map(mail => {
+                            const modeKey = mail.mode === 'steer' ? 'steer' : (mail.mode === 'silent' ? 'silent' : 'followup')
+                            const modeLabel = modeKey === 'steer'
+                              ? bi('⚡ 插话', '⚡ Steer')
+                              : (modeKey === 'silent' ? bi('📌 备忘', '📌 Silent') : bi('📨 递话', '📨 Follow-up'))
+                            const fromName = String(mail.from || '参谋长')
+                            const toName = String(mail.to || 'lead')
+                            const lowFrom = fromName.toLowerCase()
+                            const senderRole = drawer.kind === 'detached'
+                              ? 'detached'
+                              : (lowFrom.includes('参谋') || lowFrom.includes('chief')
+                                  ? 'chief'
+                                  : (lowFrom.includes('claude') || lowFrom.includes('codex') || lowFrom.includes('harness') || lowFrom.includes('外协')
+                                      ? 'harness'
+                                      : (lowFrom.includes('lead') || lowFrom.includes('主对话') || lowFrom === 'agent'
+                                          ? 'lead'
+                                          : 'subagent')))
+                            const fColor = colorForRootSession(mail.fromRootId || mail.fromSession || selfRootId, selfRootId)
+                            const rawBody = String(mail.text || '')
+                            const cleanSubject = String(mail.subject || '').trim()
+                            const showSubject = Boolean(cleanSubject && !rawBody.trim().startsWith(cleanSubject))
+                            const isLongBody = rawBody.length > 180 || rawBody.split(/\r?\n/).length > 4
+                            const isBodyExpanded = Boolean(expandedMailIds[mail.id])
+
+                            return h(
                               'div',
-                              { style: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+                              {
+                                key: mail.id,
+                                className: 'dnb-mail-msg',
+                                'data-role': senderRole,
+                              },
                               h(
                                 'div',
-                                { style: { display: 'flex', alignItems: 'center', gap: 5, fontSize: 11.5, fontWeight: 600 } },
-                                h('span', { style: { width: 6, height: 6, borderRadius: '50%', background: fColor.dot, flexShrink: 0 } }),
-                                h('span', { style: { color: fColor.text || 'var(--dnb-text-2)' } }, mail.from || '参谋长'),
-                                h('span', { style: { color: 'var(--dnb-text-3)' } }, '→'),
-                                h('span', { style: { color: mail.to === 'all' ? 'var(--dnb-accent)' : tColor.text } }, '@' + (mail.to || 'lead')),
-                                h('span', { className: 'dnb-tag', style: { fontSize: 10, fontWeight: 500 } }, modeLabel),
+                                { className: 'dnb-mail-msg-head' },
+                                h(
+                                  'div',
+                                  { className: 'dnb-mail-msg-route' },
+                                  h(
+                                    'span',
+                                    { className: 'dnb-mail-sender' },
+                                    h('span', { className: 'dnb-mail-dot', style: { background: fColor.dot } }),
+                                    h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, fromName),
+                                  ),
+                                  h('span', { className: 'dnb-mail-arrow' }, '→'),
+                                  h(
+                                    'span',
+                                    { className: 'dnb-mail-target', 'data-all': toName === 'all' ? '1' : '0' },
+                                    '@' + toName,
+                                  ),
+                                  h('span', { className: 'dnb-mail-mode', 'data-mode': modeKey }, modeLabel),
+                                ),
+                                h(
+                                  'div',
+                                  { className: 'dnb-mail-msg-meta' },
+                                  rawBody
+                                    ? h('button', {
+                                        type: 'button',
+                                        className: 'dnb-mail-copy-btn',
+                                        title: bi('复制消息正文', 'Copy message text'),
+                                        onClick: e => {
+                                          e.stopPropagation()
+                                          copyText(rawBody, bi('已复制消息内容', 'Message copied'))
+                                        },
+                                      }, h(Icon, { name: 'copy', size: 11 }))
+                                    : null,
+                                  h('span', { className: 'dnb-mail-time' }, relativeTimeLabel(mail.at)),
+                                ),
                               ),
-                              h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, relativeTimeLabel(mail.at)),
-                            ),
-                            mail.subject ? h('div', { style: { fontSize: 12, fontWeight: 600 } }, mail.subject) : null,
-                            h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5, whiteSpace: 'pre-wrap', wordBreak: 'break-word' } }, mail.text),
-                          )
-                        })
+                              showSubject ? h('div', { className: 'dnb-mail-subject' }, cleanSubject) : null,
+                              h(
+                                'div',
+                                {
+                                  className: 'dnb-mail-body',
+                                  'data-clamped': isLongBody && !isBodyExpanded ? '1' : '0',
+                                },
+                                rawBody,
+                              ),
+                              isLongBody
+                                ? h('button', {
+                                    type: 'button',
+                                    className: 'dnb-mail-expand-btn',
+                                    onClick: e => {
+                                      e.stopPropagation()
+                                      setExpandedMailIds(prev => ({ ...prev, [mail.id]: !isBodyExpanded }))
+                                    },
+                                  }, isBodyExpanded ? bi('收起正文 ▴', 'Collapse ▴') : bi('展开全文 ▾', 'Show full message ▾'))
+                                : null,
+                            )
+                          }),
+                        )
                       : null,
                   )
                 }),
@@ -27398,6 +27510,7 @@ window.__ModuleLoader__.load({
                   {
                     key: tab.key,
                     className: 'dnb-seg-btn',
+                    'data-tab': tab.key,
                     'data-active': !view.settingsOpen && (view.tab === tab.key || (tab.key === 'tasks' && view.tab === 'plan')) ? '1' : '0',
                     onClick: () => patch({ tab: tab.key, settingsOpen: false }),
                   },

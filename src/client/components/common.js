@@ -312,8 +312,6 @@ export function SearchDrawer({ view }) {
                     style: { cursor: 'pointer', padding: '7px 12px' },
                     onClick: () => {
                       const nextPatch = { tab: item.tab || 'chief', searchOpen: false }
-                      if (item.subTab) nextPatch.secSubTab = item.subTab
-                      if (item.showRawTurns) nextPatch.secShowRawTurns = true
                       if (item.tab === 'tasks') nextPatch.selectedTaskId = item.id
                       if (item.tab === 'archive' && item.archiveId) {
                         nextPatch.archiveOpenFolders = { ...(store.archiveOpenFolders || {}), ...(item.folderId ? { [item.folderId]: true } : {}) }
@@ -1283,6 +1281,7 @@ export function AccCard({
   title,
   icon = null,
   accentColor = '',
+  tone = '',
   preview = '',
   count = '',
   badges = null,
@@ -1312,6 +1311,7 @@ export function AccCard({
       ref: cardRef || undefined,
       className: cardCls,
       'data-open': open ? '1' : '0',
+      'data-tone': tone || undefined,
       style: mergedStyle,
     },
     h(

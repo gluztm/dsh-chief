@@ -10,7 +10,7 @@
  *   - 模块加载时向 `apiBridge.refresh` 注册回调供底层状态同步使用。
  */
 
-import { SIDE_ID, FACT_CAT_LABEL, SECTION_LABEL } from '../constants.js'
+import { SIDE_ID } from '../constants.js'
 import { store, patch, service, runtimeRefs } from '../store.js'
 import { shortSession, snippetOf, sessionIdFromUrl, truncationNotice } from '../utils.js'
 import { apiBridge, call, withChiefWorkFx } from './transport.js'
@@ -249,59 +249,6 @@ export async function transfer(target, opts = {}) {
   }
 }
 
-export async function loadMemory() {
-  patch({ memBusy: true, error: '' })
-  try {
-    const value = await call('memory' + (store.sessionId ? '?session=' + encodeURIComponent(store.sessionId) : ''))
-    patch({
-      memSections: (value && Array.isArray(value.sections)) ? value.sections : [],
-      memCount: Number(value && value.count) || 0,
-      memDigest: (value && value.digest) || '',
-    })
-  } catch (error) {
-    patch({ error: String((error && error.message) || error) })
-  } finally {
-    patch({ memBusy: false })
-  }
-}
-
-export async function askMemory(question) {
-  const text = String(question || '').trim()
-  if (!text) return
-  patch({ memBusy: true, memNote: '' })
-  try {
-    const value = await call('action', {
-      method: 'POST',
-      headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ action: 'memory.ask', question: text, session: store.sessionId, by: 'user' }),
-    })
-    patch({
-      memReply: (value && value.reply) || '',
-      memHits: (value && value.hits) || [],
-      memNote: value && value.terms && value.terms.length ? value.terms.join(' · ') : '',
-    })
-  } catch (error) {
-    patch({ memNote: String((error && error.message) || error) })
-  } finally {
-    patch({ memBusy: false })
-  }
-}
-
-export async function addMemory() {
-  const text = store.memText.trim()
-  const title = store.memTitle.trim()
-  const section = store.memSection
-  if (!text) return
-  patch({ memText: '', memTitle: '', memComposerOpen: false, notice: '已记下来' })
-  await act({ action: 'memory.add', text, title, section })
-  void loadMemory()
-}
-
-export async function removeMemory(id) {
-  await act({ action: 'memory.remove', id })
-  void loadMemory()
-}
-
 export function searchBoard(term) {
   const needle = String(term || '').trim().toLowerCase()
   if (!needle) return []
@@ -309,11 +256,6 @@ export function searchBoard(term) {
   const sec = store.secView || {}
   const hits = []
   const hit = text => String(text || '').toLowerCase().includes(needle)
-  for (const fact of sec.facts || []) {
-    if (hit(fact.text)) {
-      hits.push({ kind: '纪律/记忆', tab: 'chief', subTab: 'facts', id: fact.id, title: FACT_CAT_LABEL[fact.category] || '记忆条目', snippet: snippetOf(fact.text, needle, 36) })
-    }
-  }
   for (const task of board.tasks || []) {
     if (hit(task.title) || hit(task.note) || hit(task.intent) || hit(task.evidence)) {
       hits.push({ kind: '任务', tab: 'tasks', id: task.id, title: task.title, snippet: snippetOf(task.note || task.evidence || task.title, needle, 34) })
@@ -348,11 +290,6 @@ export function searchBoard(term) {
     if (hit(step.text)) hits.push({ kind: '规划', tab: 'tasks', id: step.id, title: step.text, snippet: '' })
   }
   if (hit(board.objective)) hits.push({ kind: '目标', tab: 'tasks', id: 'objective', title: '当前目标', snippet: snippetOf(board.objective, needle, 36) })
-  for (const item of board.memory || []) {
-    if (hit(item.title) || hit(item.text)) {
-      hits.push({ kind: '回合记录', tab: 'chief', subTab: 'facts', showRawTurns: true, id: item.id, title: item.title || SECTION_LABEL[item.section] || '记忆', snippet: snippetOf(item.text || item.title, needle, 36) })
-    }
-  }
   return hits
 }
 

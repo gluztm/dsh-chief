@@ -836,4 +836,299 @@ export const CSS_BUBBLE = `
     background: rgba(2, 132, 199, 0.10);
     border-color: rgba(2, 132, 199, 0.28);
   }
+
+  /* Redesigned Grouped Card-Stream Team Mailbox */
+  .dnb-mail-threads {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .dnb-mail-thread {
+    border-radius: 11px;
+    border: 1px solid var(--dnb-border);
+    background: rgba(15, 23, 42, 0.16);
+    overflow: hidden;
+    transition: border-color 0.15s ease;
+  }
+  .dnb-mail-thread:hover {
+    border-color: var(--dnb-border-strong);
+  }
+  .dnb-mail-thread[data-kind="detached"] {
+    opacity: 0.72;
+  }
+  .dnb-mail-thread-head {
+    position: relative;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 8px 11px 8px 12px;
+    cursor: pointer;
+    user-select: none;
+    background: transparent;
+    transition: background 0.14s ease;
+  }
+  .dnb-mail-thread[data-open="1"] > .dnb-mail-thread-head {
+    background: var(--dnb-thread-tint, rgba(99, 102, 241, 0.08));
+    border-bottom: 1px solid var(--dnb-border);
+  }
+  .dnb-mail-thread-head:hover {
+    background: var(--dnb-card-hover);
+  }
+  .dnb-mail-thread-bar {
+    position: absolute;
+    left: 0;
+    top: 0;
+    bottom: 0;
+    width: 3px;
+  }
+  .dnb-mail-thread-meta {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    min-width: 0;
+    flex: 1;
+  }
+  .dnb-mail-channel-pill {
+    font-size: 10px;
+    font-weight: 600;
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.24);
+    background: rgba(148, 163, 184, 0.10);
+    color: var(--dnb-text-2);
+    flex-shrink: 0;
+  }
+  .dnb-mail-channel-pill[data-kind="broadcast"] {
+    color: #38bdf8;
+    background: rgba(56, 189, 248, 0.12);
+    border-color: rgba(56, 189, 248, 0.30);
+  }
+  .dnb-mail-channel-pill[data-kind="cross"] {
+    color: #c084fc;
+    background: rgba(168, 85, 247, 0.12);
+    border-color: rgba(168, 85, 247, 0.30);
+  }
+  .dnb-mail-channel-pill[data-kind="internal"] {
+    color: #93c5fd;
+    background: rgba(59, 130, 246, 0.12);
+    border-color: rgba(59, 130, 246, 0.28);
+  }
+  .dnb-mail-thread-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--dnb-text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+  .dnb-mail-feed {
+    padding: 8px;
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+  }
+  .dnb-mail-msg {
+    position: relative;
+    padding: 8px 10px 8px 11px;
+    border-radius: 9px;
+    border: 1px solid rgba(148, 163, 184, 0.14);
+    border-left: 2.5px solid #6366f1;
+    background: rgba(255, 255, 255, 0.025);
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    transition: border-color 0.14s ease, background 0.14s ease;
+  }
+  .dnb-mail-msg:hover {
+    border-color: var(--dnb-border-strong);
+    background: rgba(255, 255, 255, 0.045);
+  }
+  .dnb-mail-msg[data-role="chief"] { border-left-color: #6366f1; }
+  .dnb-mail-msg[data-role="harness"] { border-left-color: #f59e0b; }
+  .dnb-mail-msg[data-role="lead"] { border-left-color: #0ea5e9; }
+  .dnb-mail-msg[data-role="subagent"] { border-left-color: #06b6d4; }
+  .dnb-mail-msg[data-role="detached"] { border-left-color: #64748b; }
+  .dnb-mail-msg-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+  }
+  .dnb-mail-msg-route {
+    display: flex;
+    align-items: center;
+    gap: 4px;
+    min-width: 0;
+    flex: 1;
+    flex-wrap: wrap;
+  }
+  .dnb-mail-sender {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 1px 6px;
+    border-radius: 6px;
+    background: var(--dnb-fill);
+    font-size: 11px;
+    font-weight: 600;
+    color: var(--dnb-text);
+    max-width: 170px;
+  }
+  .dnb-mail-dot {
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    flex-shrink: 0;
+  }
+  .dnb-mail-arrow {
+    font-size: 10.5px;
+    color: var(--dnb-text-3);
+  }
+  .dnb-mail-target {
+    font-size: 11px;
+    font-weight: 600;
+    color: #93c5fd;
+  }
+  .dnb-mail-target[data-all="1"] {
+    color: var(--dnb-accent);
+  }
+  .dnb-mail-mode {
+    font-size: 10px;
+    font-weight: 500;
+    padding: 1px 6px;
+    border-radius: 999px;
+    border: 1px solid rgba(148, 163, 184, 0.22);
+    color: var(--dnb-text-2);
+    background: rgba(148, 163, 184, 0.08);
+  }
+  .dnb-mail-mode[data-mode="steer"] {
+    color: #fbbf24;
+    background: rgba(245, 158, 11, 0.11);
+    border-color: rgba(245, 158, 11, 0.28);
+  }
+  .dnb-mail-mode[data-mode="followup"] {
+    color: #60a5fa;
+    background: rgba(59, 130, 246, 0.11);
+    border-color: rgba(59, 130, 246, 0.28);
+  }
+  .dnb-mail-msg-meta {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    flex-shrink: 0;
+  }
+  .dnb-mail-copy-btn {
+    border: none;
+    background: transparent;
+    color: var(--dnb-text-3);
+    width: 20px;
+    height: 20px;
+    border-radius: 5px;
+    padding: 0;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+    opacity: 0;
+    transition: opacity 0.14s ease, background 0.14s ease, color 0.14s ease;
+  }
+  .dnb-mail-msg:hover .dnb-mail-copy-btn,
+  .dnb-mail-copy-btn:focus-visible {
+    opacity: 1;
+  }
+  .dnb-mail-copy-btn:hover {
+    color: var(--dnb-text);
+    background: var(--dnb-fill);
+  }
+  .dnb-mail-time {
+    font-size: 10.5px;
+    color: var(--dnb-text-3);
+    white-space: nowrap;
+  }
+  .dnb-mail-subject {
+    font-size: 11.8px;
+    font-weight: 600;
+    color: var(--dnb-text);
+    line-height: 1.4;
+  }
+  .dnb-mail-body {
+    font-size: 11.8px;
+    color: var(--dnb-text-2);
+    line-height: 1.55;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .dnb-mail-body[data-clamped="1"] {
+    display: -webkit-box;
+    -webkit-box-orient: vertical;
+    -webkit-line-clamp: 3;
+    overflow: hidden;
+  }
+  .dnb-mail-expand-btn {
+    align-self: flex-start;
+    border: none;
+    background: transparent;
+    padding: 1px 0 0;
+    color: var(--dnb-accent);
+    font: inherit;
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .dnb-mail-expand-btn:hover {
+    text-decoration: underline;
+  }
+  html[data-ds-theme-source="light"] .dnb-mail-thread {
+    background: #f8fafc;
+    border-color: rgba(15, 23, 42, 0.10);
+  }
+  html[data-ds-theme-source="light"] .dnb-mail-thread[data-open="1"] > .dnb-mail-thread-head {
+    background: linear-gradient(90deg, rgba(79, 70, 229, 0.07), #f8fafc 60%);
+    border-bottom-color: rgba(15, 23, 42, 0.08);
+  }
+  html[data-ds-theme-source="light"] .dnb-mail-channel-pill[data-kind="broadcast"] {
+    color: #0284c7;
+    background: #e0f2fe;
+    border-color: rgba(2, 132, 199, 0.26);
+  }
+  html[data-ds-theme-source="light"] .dnb-mail-channel-pill[data-kind="cross"] {
+    color: #7e22ce;
+    background: #f3e8ff;
+    border-color: rgba(126, 34, 206, 0.24);
+  }
+  html[data-ds-theme-source="light"] .dnb-mail-channel-pill[data-kind="internal"] {
+    color: #1d4ed8;
+    background: #eff6ff;
+    border-color: rgba(37, 99, 235, 0.24);
+  }
+  html[data-ds-theme-source="light"] .dnb-mail-msg {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.08);
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.03);
+  }
+  html[data-ds-theme-source="light"] .dnb-mail-msg:hover {
+    background: #ffffff;
+    border-color: rgba(15, 23, 42, 0.16);
+  }
+  html[data-ds-theme-source="light"] .dnb-mail-sender {
+    background: rgba(15, 23, 42, 0.05);
+    color: #0f172a;
+  }
+  html[data-ds-theme-source="light"] .dnb-mail-target {
+    color: #1d4ed8;
+  }
+  html[data-ds-theme-source="light"] .dnb-mail-mode[data-mode="steer"] {
+    color: #b45309;
+    background: #fffbeb;
+    border-color: rgba(217, 119, 6, 0.28);
+  }
+  html[data-ds-theme-source="light"] .dnb-mail-mode[data-mode="followup"] {
+    color: #1d4ed8;
+    background: #eff6ff;
+    border-color: rgba(37, 99, 235, 0.24);
+  }
+  html[data-ds-theme-source="light"] .dnb-mail-body {
+    color: #334155;
+  }
 `

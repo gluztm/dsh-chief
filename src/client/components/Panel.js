@@ -445,6 +445,7 @@ function PanelInner(props) {
               {
                 key: tab.key,
                 className: 'dnb-seg-btn',
+                'data-tab': tab.key,
                 'data-active': !view.settingsOpen && (view.tab === tab.key || (tab.key === 'tasks' && view.tab === 'plan')) ? '1' : '0',
                 onClick: () => patch({ tab: tab.key, settingsOpen: false }),
               },

@@ -5,7 +5,6 @@
  */
 
 import { React, h } from '../react-runtime.js'
-import { MEMORY_SECTIONS } from '../constants.js'
 import { bi, getUiLangPref, presetList } from '../i18n.js'
 import { store, patch } from '../store.js'
 import { clampTitle, shortSession, timeLabel } from '../utils.js'
@@ -23,10 +22,6 @@ import {
   toggleHandoffPin,
   resetHandoffAuto,
   requestTransferWithGuard,
-  loadMemory,
-  askMemory,
-  addMemory,
-  removeMemory,
   askLeadModel,
   copyText,
 } from '../api.js'
@@ -1148,140 +1143,6 @@ export function PlanTab({
   )
 }
 
-/* ----------------------------------------------------------- Memory Tab */
-
-function MemoryCard({ item }) {
-  const open = store.memOpen === item.id
-  const body = String(item.text || '')
-  return h(
-    'div',
-    { className: 'dnb-cell dnb-cell-hover', style: { alignItems: 'flex-start', flexDirection: 'column', gap: 4 } },
-    h(
-      'div',
-      { style: { display: 'flex', width: '100%', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
-      h(
-        'div',
-        { style: { display: 'flex', alignItems: 'center', gap: 6 } },
-        h('span', { className: 'dnb-tag' }, item.turn ? '第 ' + item.turn + ' 轮' : '手动'),
-        h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, timeLabel(item.at)),
-      ),
-      h(
-        'div',
-        { className: 'dnb-row-actions' },
-        body.length > 140
-          ? h('button', {
-              className: 'dnb-pill',
-              style: { height: 22, padding: '0 7px', fontSize: 11 },
-              onClick: () => patch({ memOpen: open ? '' : item.id }),
-            }, open ? '收起' : '展开')
-          : null,
-        h('button', {
-          className: 'dnb-icon-btn',
-          style: { width: 22, height: 22, color: '#ff453a' },
-          onClick: () => void removeMemory(item.id),
-        }, h(Icon, { name: 'trash', size: 12 })),
-      ),
-    ),
-    item.title ? h('div', { style: { fontWeight: 600, fontSize: 12.5 } }, item.title) : null,
-    h(
-      'div',
-      { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.5, whiteSpace: 'pre-wrap' } },
-      open || body.length <= 140 ? body : body.slice(0, 140) + '…',
-    ),
-  )
-}
-
-export function MemoryTab() {
-  React.useEffect(() => {
-    if (!store.memSections.length && !store.memBusy) void loadMemory()
-  }, [store.sessionId])
-
-  const runAsk = () => {
-    if (!(store.memAsk || '').trim()) return
-    void askMemory(store.memAsk)
-  }
-
-  const sections = Array.isArray(store.memSections) ? store.memSections : []
-
-  return h(
-    'div',
-    { className: 'dnb-view' },
-    // Top Search & Add Bar
-    h(
-      'div',
-      { style: { display: 'flex', gap: 6, alignItems: 'center', marginBottom: 10 } },
-      h('input', {
-        className: 'dnb-input',
-        style: { borderRadius: 99, paddingLeft: 12, height: 32 },
-        placeholder: '搜记忆…',
-        value: store.memAsk || '',
-        onChange: e => patch({ memAsk: e.target.value, memReply: '', memHits: null, memNote: '' }),
-        onKeyDown: e => { if (e.key === 'Enter') runAsk() },
-      }),
-      (store.memAsk || '').trim()
-        ? h('button', { className: 'dnb-primary-btn', style: { height: 30 }, onClick: runAsk }, '搜索')
-        : null,
-      h('button', {
-        className: 'dnb-pill',
-        style: { height: 30 },
-        'data-active': store.memComposerOpen ? '1' : '0',
-        onClick: () => patch({ memComposerOpen: !store.memComposerOpen }),
-      }, h(Icon, { name: 'plus', size: 13 }), '记录'),
-    ),
-
-    store.memReply
-      ? h('div', { className: 'dnb-group' }, h('pre', { className: 'dnb-pre' }, store.memReply))
-      : null,
-
-    // Collapsible New Memory Composer
-    store.memComposerOpen
-      ? h(
-          'div',
-          { className: 'dnb-group', style: { padding: 10, marginBottom: 12 } },
-          h(
-            'div',
-            { style: { display: 'flex', gap: 6, marginBottom: 6 } },
-            h('input', {
-              className: 'dnb-input',
-              placeholder: '标题（选填）',
-              value: store.memTitle || '',
-              onChange: e => patch({ memTitle: e.target.value }),
-            }),
-            h('select', {
-              className: 'dnb-input',
-              style: { width: 118, flexShrink: 0 },
-              value: store.memSection || 'other',
-              onChange: e => patch({ memSection: e.target.value }),
-            }, MEMORY_SECTIONS.map(s => h('option', { key: s.key, value: s.key }, s.label))),
-          ),
-          h('textarea', {
-            className: 'dnb-area',
-            placeholder: '写下要长期记住的要求或结论…',
-            value: store.memText || '',
-            onChange: e => patch({ memText: e.target.value }),
-          }),
-          h(
-            'div',
-            { style: { display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 8 } },
-            h('button', { className: 'dnb-pill', onClick: () => patch({ memComposerOpen: false }) }, '取消'),
-            h('button', { className: 'dnb-primary-btn', disabled: !(store.memText || '').trim(), onClick: () => void addMemory() }, '保存'),
-          ),
-        )
-      : null,
-
-    sections.length
-      ? sections.map(section =>
-          h(
-            'div',
-            { key: section.key, style: { marginBottom: 10 } },
-            h('div', { className: 'dnb-section-head' }, h('span', null, section.label), h('span', null, (section.items || []).length)),
-            h('div', { className: 'dnb-group' }, (section.items || []).map(item => h(MemoryCard, { item, key: item.id }))),
-          ),
-        )
-      : h('div', { className: 'dnb-empty' }, '还没有记住任何内容'),
-  )
-}
-
 /* ------------------------------------------------------------ Notes Tab */
 
 function NoteEditor({ note }) {
@@ -1496,6 +1357,7 @@ export function HandoffTab({ view }) {
       {
         open: presetsOpen,
         onToggle: () => setPresetsOpen(v => !v),
+        tone: 'cyan',
         title: bi('🚀 常用场景预设', '🚀 Scenario Presets'),
         badges: h('span', { className: 'dnb-acc-badge', 'data-tone': activePreset ? 'accent' : undefined },
           activePreset
@@ -1533,6 +1395,7 @@ export function HandoffTab({ view }) {
       {
         open: notifyOpen,
         onToggle: () => setNotifyOpen(v => !v),
+        tone: 'amber',
         title: bi('🔔 离开电脑时的提醒和声音', '🔔 Away Alerts & Sound'),
         badges: h('span', { className: 'dnb-acc-badge', 'data-tone': notifPerm === 'granted' ? 'green' : undefined }, notifPermLabel),
         preview: meta.notifyEnabled !== false ? bi('重要节点会通知你', 'Alerts on') : bi('通知已关', 'Alerts off'),
@@ -1601,6 +1464,7 @@ export function HandoffTab({ view }) {
       {
         open: ledgerOpen,
         onToggle: () => setLedgerOpen(v => !v),
+        tone: 'violet',
         title: bi('📊 参谋花费统计与托管上限', '📊 Chief Usage & Budget Cap'),
         badges: mr.tripped
           ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'red' }, bi('🛑 已到上限停下', '🛑 Cap Reached'))
@@ -1730,6 +1594,7 @@ export function HandoffTab({ view }) {
       {
         open: langOpen,
         onToggle: () => setLangOpen(v => !v),
+        tone: 'blue',
         title: bi('🌐 界面语言 / Interface Language', '🌐 Interface Language / 界面语言'),
         preview: uiLangVal === 'en' ? 'English' : (uiLangVal === 'zh' ? '简体中文' : bi('自动跟随主界面', 'Auto (Follow App)')),
         bodyStyle: { padding: '8px 11px' },
@@ -1760,6 +1625,7 @@ export function HandoffTab({ view }) {
       {
         open: guardPrefOpen,
         onToggle: () => setGuardPrefOpen(v => !v),
+        tone: 'emerald',
         title: bi('自动化设置', 'Automation Settings'),
         showPullHint: false,
         headerExtra: h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } },

@@ -77,6 +77,7 @@ function GuardWallsCard({ view }) {
       open: !collapsed,
       onToggle: () => patch({ wallCollapsed: !collapsed }),
       className: 'dnb-wall-box',
+      tone: 'rose',
       icon: h(Icon, { name: 'shieldSentinel', size: 13.5, style: { color: activeCount > 0 ? '#ef4444' : '#f87171', flexShrink: 0 } }),
       title: bi('物理驻墙 · 执行前拦截', 'Guard Wall · Pre-Tool Block'),
       preview: walls.length
@@ -367,12 +368,13 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
       : label === '注意事项'
         ? bi('注意事项', 'Watchouts')
         : label
+  const boundTone = field === 'allowed' ? 'emerald' : (field === 'forbidden' ? 'rose' : 'amber')
   return h(
     AccCard,
     {
       open: !isColCollapsed,
       onToggle: toggleColCollapsed,
-      accentColor: dot,
+      tone: boundTone,
       title: uiLabel,
       headTitle: isColCollapsed ? bi(`展开「${uiLabel}」`, `Expand ${uiLabel}`) : bi(`收起「${uiLabel}」`, `Collapse ${uiLabel}`),
       icon: h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: dot, flexShrink: 0 } }),
@@ -658,6 +660,7 @@ export function BoundariesTab({ store: view }) {
       {
         open: showEnv,
         onToggle: () => setShowEnv(v => !v),
+        tone: 'slate',
         title: bi('运行环境', 'Runtime Info'),
         count: rows.length ? String(rows.length) : '',
         preview: info.workspaceRoot || info.sessionWorkingDirectory || info.workingDirectory || '',
