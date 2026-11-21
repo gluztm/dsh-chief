@@ -9099,38 +9099,31 @@ window.__ModuleLoader__.load({
       .dnb-bubble-stage {
         display: flex;
         flex-direction: column;
-        gap: 9px;
-      }
-      .dnb-bubble-bar {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
         gap: 8px;
-        flex-wrap: wrap;
       }
       .dnb-bubble-status {
         display: inline-flex;
         align-items: center;
         gap: 6px;
-        font-size: 11.5px;
+        font-size: 11px;
         font-weight: 600;
         color: #34d399;
-        padding: 3px 10px;
+        padding: 3px 9px;
         border-radius: 999px;
         corner-shape: round;
         background: rgba(16, 185, 129, 0.11);
-        border: 1px solid rgba(16, 185, 129, 0.32);
+        border: 1px solid rgba(16, 185, 129, 0.30);
         max-width: 100%;
         min-width: 0;
       }
       .dnb-bubble-status[data-locked="1"] {
         color: #fcd34d;
-        background: rgba(245, 158, 11, 0.13);
+        background: rgba(245, 158, 11, 0.14);
         border-color: rgba(245, 158, 11, 0.44);
       }
       .dnb-bubble-status-dot {
-        width: 7px;
-        height: 7px;
+        width: 6.5px;
+        height: 6.5px;
         border-radius: 50%;
         corner-shape: round;
         background: currentColor;
@@ -9148,241 +9141,370 @@ window.__ModuleLoader__.load({
         color: #fee2e2 !important;
       }
 
-      /* Organic Bubble-Shaped Squad Membrane */
-      .dnb-squad-membrane {
+      /* Option A: Unified Liquid Fusion Bubble Canvas (VisionOS Glass Style) */
+      .dnb-liquid-canvas {
         position: relative;
-        padding: 12px 14px 14px;
+        min-height: 236px;
+        padding: 11px 14px 26px;
         border-radius: 26px;
         corner-shape: round;
+        overflow: hidden;
         background:
-          radial-gradient(ellipse 90% 48% at 50% 0%, rgba(56, 189, 248, 0.14), transparent 70%),
-          radial-gradient(circle at 18% 82%, rgba(45, 212, 191, 0.08), transparent 55%),
-          radial-gradient(circle at 86% 78%, rgba(99, 102, 241, 0.07), transparent 55%),
-          rgba(15, 28, 46, 0.72);
-        border: 1.5px solid rgba(103, 232, 249, 0.34);
+          linear-gradient(175deg, rgba(16, 28, 46, 0.90) 0%, rgba(12, 21, 36, 0.94) 100%);
+        border: 1px solid rgba(125, 211, 252, 0.24);
         box-shadow:
-          inset 0 1px 0 rgba(224, 242, 254, 0.24),
-          inset 0 -10px 26px rgba(14, 165, 233, 0.07),
-          0 8px 24px rgba(0, 0, 0, 0.22);
+          inset 0 1px 0 rgba(224, 242, 254, 0.16),
+          0 8px 24px rgba(0, 0, 0, 0.20);
+        display: flex;
+        flex-direction: column;
+        justify-content: space-between;
+        gap: 8px;
         transition: border-color 0.2s ease, box-shadow 0.2s ease;
       }
-      .dnb-squad-membrane[data-locked="1"] {
-        border-color: rgba(245, 158, 11, 0.62);
+      .dnb-liquid-canvas[data-locked="1"] {
+        border-color: rgba(245, 158, 11, 0.56);
         background:
-          radial-gradient(ellipse 90% 48% at 50% 0%, rgba(245, 158, 11, 0.13), transparent 72%),
-          radial-gradient(circle at 82% 80%, rgba(56, 189, 248, 0.07), transparent 56%),
-          rgba(22, 26, 40, 0.80);
+          linear-gradient(175deg, rgba(26, 26, 40, 0.92) 0%, rgba(16, 20, 34, 0.95) 100%);
         box-shadow:
-          inset 0 1px 0 rgba(254, 243, 199, 0.22),
-          0 0 0 1px rgba(245, 158, 11, 0.16),
+          inset 0 1px 0 rgba(254, 243, 199, 0.18),
+          0 0 0 1px rgba(245, 158, 11, 0.14),
           0 8px 24px rgba(0, 0, 0, 0.24);
       }
-      .dnb-squad-membrane[data-dragover="1"] {
+      .dnb-liquid-canvas[data-dragover="1"] {
         border-style: dashed;
         border-color: #38bdf8;
         box-shadow:
-          inset 0 0 0 1px rgba(56, 189, 248, 0.32),
-          0 0 22px rgba(56, 189, 248, 0.18);
+          inset 0 0 0 1.5px rgba(56, 189, 248, 0.34),
+          0 0 24px rgba(56, 189, 248, 0.20);
       }
-      .dnb-squad-membrane[data-shake="1"] {
+      .dnb-liquid-canvas[data-shake="1"] {
         animation: dnb-bubble-shake 0.36s ease;
       }
-      .dnb-squad-links-svg {
+      .dnb-liquid-bg-svg {
+        position: absolute;
+        inset: 0;
+        width: 100%;
+        height: 100%;
+        pointer-events: none;
+        z-index: 1;
+      }
+      .dnb-liquid-contour {
+        stroke: rgba(103, 232, 249, 0.42);
+        stroke-width: 1.45;
+      }
+      .dnb-liquid-canvas[data-locked="1"] .dnb-liquid-contour {
+        stroke: rgba(251, 191, 36, 0.66);
+        stroke-width: 1.85;
+      }
+      .dnb-liquid-specular {
+        stroke: rgba(224, 242, 254, 0.34);
+        stroke-width: 1.8;
+        stroke-linecap: round;
+      }
+      .dnb-liquid-links-svg {
         position: absolute;
         inset: 0;
         pointer-events: none;
-        z-index: 4;
+        z-index: 2;
       }
       .dnb-squad-link-pill-bg {
-        fill: #0f1d30;
+        fill: #0f1c2e;
         fill-opacity: 1;
       }
+      .dnb-liquid-canvas[data-locked="1"] .dnb-squad-link-pill-bg {
+        fill: #181a2a;
+      }
       .dnb-squad-link-pill-txt {
-        font-size: 9.5px;
+        font-size: 9px;
         font-weight: 700;
         font-family: "Microsoft YaHei UI", sans-serif;
       }
-      .dnb-squad-membrane-head {
+
+      .dnb-liquid-topbar {
         position: relative;
-        z-index: 3;
+        z-index: 4;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
         flex-wrap: wrap;
-        margin-bottom: 10px;
       }
-      .dnb-squad-membrane-title {
-        font-size: 11px;
+
+      /* Central Floating Coordinator Pill */
+      .dnb-liquid-hub-wrap {
+        position: relative;
+        z-index: 4;
+        display: flex;
+        justify-content: center;
+        margin-bottom: 12px;
+      }
+      .dnb-liquid-hub {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        padding: 4px 12px;
+        border-radius: 999px;
+        corner-shape: round;
+        backdrop-filter: blur(12px);
+        -webkit-backdrop-filter: blur(12px);
+        background: rgba(14, 26, 46, 0.94);
+        border: 1px solid rgba(103, 232, 249, 0.50);
+        box-shadow: 0 3px 12px rgba(14, 165, 233, 0.18);
+      }
+      .dnb-liquid-hub[data-locked="1"] {
+        background: rgba(26, 25, 38, 0.95);
+        border-color: rgba(251, 191, 36, 0.62);
+        box-shadow: 0 3px 12px rgba(245, 158, 11, 0.20);
+      }
+      .dnb-liquid-hub-star {
+        font-size: 12px;
+        font-weight: 800;
+        color: #38bdf8;
+        line-height: 1;
+      }
+      .dnb-liquid-hub[data-locked="1"] .dnb-liquid-hub-star {
+        color: #fbbf24;
+      }
+      .dnb-liquid-hub-name {
+        font-size: 11.5px;
         font-weight: 700;
-        color: rgba(186, 230, 253, 0.92);
-        letter-spacing: 0.01em;
+        color: var(--dnb-text);
       }
-      .dnb-squad-membrane[data-locked="1"] .dnb-squad-membrane-title {
-        color: #fde68a;
+      .dnb-liquid-hub-meta {
+        font-size: 11px;
+        color: var(--dnb-text-3);
       }
-      .dnb-squad-summary-pills {
+      .dnb-liquid-run-badge {
+        font-size: 10px;
+        font-weight: 700;
+        padding: 1px 6px;
+        border-radius: 999px;
+        corner-shape: round;
+        background: rgba(16, 185, 129, 0.18);
+        color: #6ee7b7;
+        border: 1px solid rgba(52, 211, 153, 0.40);
+      }
+
+      /* Two-Lobe Fusion Layout (Solo centers smoothly; Dual balances Left Core & Right Glass Allies) */
+      .dnb-liquid-body {
+        position: relative;
+        z-index: 4;
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 40px;
+        flex: 1;
+        padding: 2px 4px 4px;
+      }
+      .dnb-liquid-body[data-dual="1"] {
+        justify-content: space-between;
+        padding: 2px 12px 4px;
+      }
+      @media (max-width: 520px) {
+        .dnb-liquid-body[data-dual="1"] {
+          flex-direction: column;
+          gap: 24px;
+        }
+      }
+
+      /* Left Primary Lead Core & Satellite Pearls */
+      .dnb-liquid-lead-cluster {
+        display: flex;
+        flex-direction: column;
+        align-items: center;
+        gap: 10px;
+        max-width: 100%;
+      }
+      .dnb-liquid-lead-orb {
+        display: inline-flex;
+        align-items: center;
+        gap: 7px;
+        padding: 7px 12px 7px 11px;
+        border-radius: 999px;
+        corner-shape: round;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        background:
+          radial-gradient(ellipse 80% 50% at 25% 0%, rgba(56, 189, 248, 0.24), transparent 72%),
+          rgba(15, 29, 48, 0.84);
+        border: 1.5px solid rgba(56, 189, 248, 0.62);
+        box-shadow:
+          inset 0 1px 0 rgba(224, 242, 254, 0.24),
+          0 6px 18px rgba(14, 165, 233, 0.18);
+      }
+      .dnb-liquid-lead-orb[data-running="1"] {
+        box-shadow:
+          inset 0 1px 0 rgba(224, 242, 254, 0.24),
+          0 0 0 2px rgba(52, 211, 153, 0.30),
+          0 6px 18px rgba(14, 165, 233, 0.22);
+      }
+      .dnb-liquid-lead-name {
+        font-size: 13px;
+        font-weight: 700;
+        color: var(--dnb-text);
+        white-space: nowrap;
+      }
+
+      /* Close Satellite Pearls for Subagents (light, borderless feel, single crisp row/wrap) */
+      .dnb-liquid-satellites {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        gap: 5px;
+        flex-wrap: wrap;
+        max-width: 344px;
+      }
+      .dnb-liquid-satellites[data-compact="1"] {
+        justify-content: flex-start;
+        padding-left: 10px;
+      }
+      .dnb-liquid-sat-prefix {
+        font-size: 10.5px;
+        font-weight: 600;
+        color: var(--dnb-text-3);
+        margin-right: 1px;
+      }
+      .dnb-liquid-sat-pill {
         display: inline-flex;
         align-items: center;
         gap: 5px;
-        flex-wrap: wrap;
-      }
-      .dnb-squad-mini-stat {
-        font-size: 10px;
-        font-weight: 600;
-        padding: 1px 7px;
+        padding: 3px 6px 3px 8px;
         border-radius: 999px;
         corner-shape: round;
-        background: rgba(255, 255, 255, 0.08);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-        color: var(--dnb-text-2);
+        backdrop-filter: blur(10px);
+        background: rgba(15, 27, 45, 0.72);
+        border: 1px solid rgba(148, 163, 184, 0.28);
+        transition: border-color 0.16s ease, background 0.16s ease;
       }
-      .dnb-squad-mini-stat[data-running="1"] {
-        background: rgba(16, 185, 129, 0.16);
-        border-color: rgba(52, 211, 153, 0.42);
-        color: #6ee7b7;
+      .dnb-liquid-sat-pill:hover {
+        border-color: rgba(125, 211, 252, 0.52);
+        background: rgba(20, 38, 62, 0.85);
+      }
+      .dnb-liquid-sat-pill[data-running="1"] {
+        border-color: rgba(52, 211, 153, 0.48);
+      }
+      .dnb-liquid-sat-name {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--dnb-text);
+        white-space: nowrap;
+      }
+      .dnb-sat-acts {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+      }
+      .dnb-sat-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 2px;
+        height: 17px;
+        padding: 0 5px;
+        border-radius: 999px;
+        corner-shape: round;
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--dnb-text-3);
+        font: inherit;
+        font-size: 9.5px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.14s ease, color 0.14s ease, border-color 0.14s ease;
+      }
+      .dnb-sat-btn:hover {
+        background: rgba(56, 189, 248, 0.18);
+        border-color: rgba(56, 189, 248, 0.48);
+        color: var(--dnb-text);
       }
 
-      /* Coordinator Top Anchor Hub */
-      .dnb-squad-hub-wrap {
-        position: relative;
-        z-index: 3;
+      /* Right Wing Glass Ally Pills (Floating freely without outer wrapper frame) */
+      .dnb-liquid-ally-cluster {
         display: flex;
-        justify-content: center;
-        margin-bottom: 30px;
-      }
-      .dnb-squad-hub {
-        display: inline-flex;
-        align-items: center;
-        gap: 9px;
-        padding: 7px 15px;
-        border-radius: 999px;
-        corner-shape: round;
-        background:
-          radial-gradient(ellipse at 30% 15%, rgba(255, 255, 255, 0.22), transparent 60%),
-          linear-gradient(135deg, rgba(14, 165, 233, 0.26), rgba(45, 212, 191, 0.16));
-        border: 1.5px solid rgba(103, 232, 249, 0.62);
-        box-shadow: 0 4px 14px rgba(14, 165, 233, 0.20);
-      }
-      .dnb-squad-hub[data-locked="1"] {
-        background:
-          radial-gradient(ellipse at 30% 15%, rgba(255, 255, 255, 0.20), transparent 60%),
-          linear-gradient(135deg, rgba(245, 158, 11, 0.26), rgba(217, 119, 6, 0.14));
-        border-color: rgba(251, 191, 36, 0.72);
-        box-shadow: 0 4px 14px rgba(245, 158, 11, 0.22);
-      }
-      .dnb-squad-hub-star {
-        width: 24px;
-        height: 24px;
-        border-radius: 50%;
-        corner-shape: round;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 13px;
-        font-weight: 800;
-        background: rgba(56, 189, 248, 0.25);
-        border: 1px solid rgba(125, 211, 252, 0.55);
-        color: #e0f2fe;
+        flex-direction: column;
+        align-items: stretch;
+        gap: 8px;
+        min-width: 210px;
+        max-width: 252px;
         flex-shrink: 0;
       }
-      .dnb-squad-hub[data-locked="1"] .dnb-squad-hub-star {
-        background: rgba(245, 158, 11, 0.28);
-        border-color: rgba(251, 191, 36, 0.64);
-        color: #fef3c7;
+      .dnb-liquid-peer-block {
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
       }
-      .dnb-squad-hub-text {
+      .dnb-liquid-ally-pill {
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 6px 8px 6px 8px;
+        border-radius: 999px;
+        corner-shape: round;
+        backdrop-filter: blur(14px);
+        -webkit-backdrop-filter: blur(14px);
+        background: rgba(15, 26, 44, 0.80);
+        border: 1.2px solid rgba(148, 163, 184, 0.34);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.14),
+          0 5px 16px rgba(0, 0, 0, 0.20);
+        cursor: grab;
+        min-width: 0;
+      }
+      .dnb-liquid-ally-pill:active {
+        cursor: grabbing;
+      }
+      .dnb-liquid-ally-pill[data-tier="harness"] {
+        border-style: dashed;
+        border-color: rgba(217, 119, 87, 0.50);
+      }
+      .dnb-liquid-ally-pill[data-tier="harness"][data-provider="codex"] {
+        border-color: rgba(56, 189, 248, 0.52);
+      }
+      .dnb-liquid-ally-pill[data-tier="peer"] {
+        border-color: var(--pod-border, rgba(167, 139, 250, 0.52));
+      }
+      .dnb-liquid-ally-pill[data-running="1"] {
+        border-style: solid;
+        border-color: rgba(52, 211, 153, 0.62);
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.18),
+          0 0 0 2px rgba(52, 211, 153, 0.20),
+          0 5px 16px rgba(0, 0, 0, 0.22);
+      }
+      .dnb-ally-info {
+        flex: 1;
+        min-width: 0;
         display: flex;
         flex-direction: column;
         gap: 1px;
       }
-      .dnb-squad-hub-name {
+      .dnb-ally-name-row {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        min-width: 0;
+      }
+      .dnb-ally-name {
         font-size: 12px;
         font-weight: 700;
         color: var(--dnb-text);
-        line-height: 1.2;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
-      .dnb-squad-hub-sub {
+      .dnb-ally-sub {
         font-size: 10px;
         color: var(--dnb-text-3);
-        line-height: 1.2;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
-
-      /* Tiered Squad Branches Grid */
-      .dnb-squad-branches {
-        position: relative;
-        z-index: 3;
-        display: grid;
-        grid-template-columns: minmax(0, 1fr);
-        column-gap: 44px;
-        row-gap: 32px;
-        align-items: start;
-      }
-      .dnb-squad-branches[data-cols="2"] {
-        grid-template-columns: repeat(2, minmax(0, 1fr));
-      }
-      @media (max-width: 500px) {
-        .dnb-squad-branches[data-cols="2"] {
-          grid-template-columns: minmax(0, 1fr);
-        }
-      }
-
-      /* Primary & Linked Peer Pod Bubbles */
-      .dnb-squad-pod {
-        position: relative;
-        padding: 10px 11px;
-        border-radius: 20px;
-        corner-shape: round;
-        background:
-          radial-gradient(ellipse 80% 45% at 18% 0%, rgba(255, 255, 255, 0.08), transparent 65%),
-          rgba(255, 255, 255, 0.045);
-        border: 1.5px solid var(--pod-border, rgba(125, 211, 252, 0.44));
-        box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.14),
-          0 4px 14px rgba(0, 0, 0, 0.18);
-        display: flex;
-        flex-direction: column;
-        gap: 6px;
-        min-width: 0;
-      }
-      .dnb-squad-pod[data-tier="primary"] {
-        background:
-          radial-gradient(ellipse 80% 50% at 15% 0%, rgba(56, 189, 248, 0.16), transparent 68%),
-          rgba(18, 38, 62, 0.72);
-        border-color: rgba(56, 189, 248, 0.60);
-        box-shadow:
-          inset 0 1px 0 rgba(224, 242, 254, 0.22),
-          0 6px 18px rgba(14, 165, 233, 0.14);
-      }
-      .dnb-squad-pod[data-tier="peer"] {
-        cursor: grab;
-        background:
-          radial-gradient(ellipse 80% 50% at 15% 0%, var(--pod-bg, rgba(167, 139, 250, 0.14)), transparent 70%),
-          rgba(22, 30, 50, 0.70);
-      }
-      .dnb-squad-pod[data-tier="peer"]:active {
-        cursor: grabbing;
-      }
-      .dnb-squad-pod[data-running="1"] {
-        box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.20),
-          0 0 0 1.5px rgba(52, 211, 153, 0.35),
-          0 6px 18px rgba(0, 0, 0, 0.20);
-      }
-      .dnb-squad-pod-head {
-        display: flex;
-        align-items: flex-start;
-        justify-content: space-between;
-        gap: 6px;
-      }
-      .dnb-squad-pod-ident {
-        display: flex;
+      .dnb-ally-acts {
+        display: inline-flex;
         align-items: center;
-        gap: 6px;
-        flex: 1;
-        min-width: 0;
-        flex-wrap: wrap;
+        gap: 4px;
+        flex-shrink: 0;
       }
+
       .dnb-squad-dot {
         width: 7px;
         height: 7px;
@@ -9390,29 +9512,6 @@ window.__ModuleLoader__.load({
         corner-shape: round;
         flex-shrink: 0;
       }
-      .dnb-squad-pod-name {
-        font-size: 12.5px;
-        font-weight: 700;
-        color: var(--dnb-text);
-        line-height: 1.25;
-        word-break: break-word;
-      }
-      .dnb-squad-pod-acts {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        flex-shrink: 0;
-      }
-      .dnb-squad-pod-sub {
-        font-size: 11px;
-        line-height: 1.4;
-        color: var(--dnb-text-3);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-
-      /* Unmistakable Tier Role Badges: 主 / 联动主窗 / 次 / 外协 */
       .dnb-tier-badge {
         display: inline-flex;
         align-items: center;
@@ -9433,245 +9532,35 @@ window.__ModuleLoader__.load({
         border: 1px solid rgba(125, 211, 252, 0.55);
       }
       .dnb-tier-badge[data-tier="peer"] {
+        height: 15px;
+        padding: 0 5px;
+        font-size: 9px;
         background: var(--pod-bg, rgba(167, 139, 250, 0.20));
         color: var(--pod-text, #c4b5fd);
         border: 1px solid var(--pod-border, rgba(167, 139, 250, 0.45));
       }
-      .dnb-tier-badge[data-tier="secondary"] {
-        height: 15px;
-        padding: 0 5px;
-        font-size: 9px;
-        background: rgba(148, 163, 184, 0.16);
-        color: var(--dnb-text-2);
-        border: 1px solid rgba(148, 163, 184, 0.28);
-      }
-      .dnb-tier-badge[data-tier="harness"] {
-        background: rgba(245, 158, 11, 0.16);
-        color: #fcd34d;
-        border: 1px solid rgba(245, 158, 11, 0.44);
-      }
-      .dnb-tier-badge[data-tier="standby"] {
-        height: 15px;
-        padding: 0 5px;
-        font-size: 9px;
-        background: rgba(148, 163, 184, 0.14);
-        color: var(--dnb-text-3);
-        border: 1px solid rgba(148, 163, 184, 0.25);
-      }
-
-      /* Nested Secondary Subagent Cluster inside Owner Pod */
-      .dnb-sub-cluster {
-        margin-top: 3px;
-        padding: 7px 8px 7px 9px;
-        border-radius: 14px;
-        corner-shape: round;
-        background: rgba(6, 16, 30, 0.42);
-        border: 1px solid rgba(148, 163, 184, 0.22);
-        display: flex;
-        flex-direction: column;
-        gap: 5px;
-      }
-      .dnb-sub-cluster-head {
-        font-size: 10px;
-        font-weight: 600;
-        color: var(--dnb-text-3);
-        line-height: 1.2;
-      }
-      .dnb-sub-list {
-        display: flex;
-        flex-direction: column;
-        gap: 4px;
-        padding-left: 7px;
-        border-left: 1.5px solid rgba(125, 211, 252, 0.28);
-      }
-      .dnb-sub-pill {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        gap: 6px;
-        padding: 4px 7px;
-        border-radius: 10px;
-        corner-shape: round;
-        background: rgba(255, 255, 255, 0.045);
-        border: 1px solid rgba(255, 255, 255, 0.09);
-        min-width: 0;
-      }
-      .dnb-sub-pill[data-running="1"] {
-        border-color: rgba(52, 211, 153, 0.45);
-        background: rgba(16, 185, 129, 0.09);
-      }
-      .dnb-sub-pill-main {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        flex: 1;
-        min-width: 0;
-      }
-      .dnb-sub-name {
-        font-size: 11px;
-        font-weight: 600;
-        color: var(--dnb-text);
-        white-space: nowrap;
-        flex-shrink: 0;
-      }
-      .dnb-sub-task {
-        font-size: 10px;
-        color: var(--dnb-text-3);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        min-width: 0;
-      }
-      .dnb-sub-pill-acts {
-        display: inline-flex;
-        align-items: center;
-        gap: 3px;
-        flex-shrink: 0;
-      }
       .dnb-mini-btn {
         display: inline-flex;
         align-items: center;
-        gap: 3px;
-        height: 18px;
-        padding: 0 5px;
+        justify-content: center;
+        gap: 2px;
+        height: 20px;
+        padding: 0 6px;
         border-radius: 999px;
         corner-shape: round;
-        border: 1px solid rgba(255, 255, 255, 0.14);
+        border: 1px solid rgba(255, 255, 255, 0.15);
         background: rgba(255, 255, 255, 0.06);
         color: var(--dnb-text-2);
         font: inherit;
-        font-size: 9.5px;
+        font-size: 10px;
         font-weight: 600;
         cursor: pointer;
         transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
       }
       .dnb-mini-btn:hover {
-        background: rgba(56, 189, 248, 0.16);
-        border-color: rgba(56, 189, 248, 0.45);
+        background: rgba(56, 189, 248, 0.18);
+        border-color: rgba(56, 189, 248, 0.48);
         color: var(--dnb-text);
-      }
-
-      /* Dispatched External Harness Wing Bubble */
-      .dnb-harness-pod {
-        padding: 9px 11px;
-        border-radius: 20px;
-        corner-shape: round;
-        border: 1.5px dashed rgba(245, 158, 11, 0.48);
-        background:
-          radial-gradient(ellipse 80% 50% at 50% 0%, rgba(245, 158, 11, 0.10), transparent 72%),
-          rgba(22, 24, 38, 0.66);
-        display: flex;
-        flex-direction: column;
-        gap: 7px;
-        min-width: 0;
-      }
-      .dnb-harness-pod[data-span="full"] {
-        grid-column: 1 / -1;
-      }
-      .dnb-harness-pod-head {
-        display: flex;
-        align-items: center;
-        gap: 6px;
-        flex-wrap: wrap;
-      }
-      .dnb-harness-pod-title {
-        font-size: 11.5px;
-        font-weight: 700;
-        color: var(--dnb-text);
-      }
-      .dnb-harness-pod-note {
-        font-size: 10px;
-        color: var(--dnb-text-3);
-        margin-left: auto;
-      }
-      .dnb-harness-cards {
-        display: flex;
-        flex-wrap: wrap;
-        gap: 7px;
-      }
-      .dnb-harness-card {
-        flex: 1 1 250px;
-        display: flex;
-        align-items: center;
-        gap: 8px;
-        padding: 7px 9px;
-        border-radius: 15px;
-        corner-shape: round;
-        background: rgba(255, 255, 255, 0.05);
-        border: 1px solid rgba(255, 255, 255, 0.14);
-        cursor: grab;
-        min-width: 0;
-      }
-      .dnb-harness-card:active {
-        cursor: grabbing;
-      }
-      .dnb-harness-card[data-running="1"] {
-        border-color: rgba(52, 211, 153, 0.58);
-        background: rgba(16, 185, 129, 0.10);
-      }
-      .dnb-harness-card-info {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
-      }
-      .dnb-harness-card-top {
-        display: flex;
-        align-items: center;
-        gap: 5px;
-        flex-wrap: wrap;
-      }
-      .dnb-harness-card-name {
-        font-size: 12px;
-        font-weight: 700;
-        color: var(--dnb-text);
-        white-space: nowrap;
-      }
-      .dnb-harness-state-tag {
-        display: inline-flex;
-        align-items: center;
-        gap: 3px;
-        height: 15px;
-        padding: 0 5px;
-        border-radius: 999px;
-        corner-shape: round;
-        font-size: 9px;
-        font-weight: 700;
-        background: rgba(56, 189, 248, 0.14);
-        color: #7dd3fc;
-        border: 1px solid rgba(56, 189, 248, 0.32);
-      }
-      .dnb-harness-state-tag[data-running="1"] {
-        background: rgba(16, 185, 129, 0.18);
-        color: #6ee7b7;
-        border-color: rgba(52, 211, 153, 0.44);
-      }
-      .dnb-harness-cfg-tag {
-        display: inline-flex;
-        align-items: center;
-        height: 15px;
-        padding: 0 5px;
-        border-radius: 999px;
-        corner-shape: round;
-        font-size: 9px;
-        font-weight: 600;
-        background: rgba(255, 255, 255, 0.06);
-        color: var(--dnb-text-3);
-        border: 1px solid rgba(255, 255, 255, 0.12);
-      }
-      .dnb-harness-card-role {
-        font-size: 10.5px;
-        color: var(--dnb-text-3);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .dnb-harness-card-acts {
-        display: inline-flex;
-        align-items: center;
-        gap: 4px;
-        flex-shrink: 0;
       }
 
       /* Official Brand Logo Circular Badges */
@@ -9694,17 +9583,17 @@ window.__ModuleLoader__.load({
         color: #f8fafc;
       }
       .dnb-brand-badge[data-provider="claude-code"] {
-        background: rgba(217, 119, 87, 0.15);
-        border-color: rgba(217, 119, 87, 0.42);
+        background: rgba(217, 119, 87, 0.16);
+        border-color: rgba(217, 119, 87, 0.44);
       }
 
-      /* Dispatch Input Bar & Standby Pool */
+      /* Inline Dispatch Input Bar */
       .dnb-bubble-dispatch-bar {
         display: flex;
         align-items: center;
         gap: 6px;
-        padding: 7px 9px;
-        border-radius: 14px;
+        padding: 7px 10px;
+        border-radius: 16px;
         corner-shape: round;
         background: rgba(56, 189, 248, 0.08);
         border: 1px solid rgba(56, 189, 248, 0.34);
@@ -9719,97 +9608,132 @@ window.__ModuleLoader__.load({
         color: #7dd3fc;
         white-space: nowrap;
       }
-      .dnb-standby-zone {
-        padding: 9px 11px;
+
+      /* Compact Shared Standby Pill Dock (replaces oversized card grid) */
+      .dnb-liquid-dock {
+        padding: 8px 11px;
         border-radius: 18px;
         corner-shape: round;
         background: rgba(255, 255, 255, 0.03);
         border: 1px dashed var(--dnb-border-strong);
         display: flex;
         flex-direction: column;
-        gap: 7px;
+        gap: 6px;
         transition: border-color 0.18s ease, background 0.18s ease;
       }
-      .dnb-standby-zone[data-dragover="1"] {
+      .dnb-liquid-dock[data-dragover="1"] {
         border-color: #f59e0b;
         background: rgba(245, 158, 11, 0.08);
       }
-      .dnb-standby-head {
+      .dnb-dock-head {
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
         flex-wrap: wrap;
       }
-      .dnb-standby-title {
+      .dnb-dock-title {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
         font-size: 11px;
         font-weight: 700;
         color: var(--dnb-text-2);
       }
-      .dnb-standby-hint {
+      .dnb-dock-dot {
+        width: 6px;
+        height: 6px;
+        border-radius: 50%;
+        corner-shape: round;
+        background: #34d399;
+        flex-shrink: 0;
+      }
+      .dnb-dock-hint {
         font-size: 10px;
         color: var(--dnb-text-3);
       }
-      .dnb-standby-grid {
-        display: grid;
-        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
-        gap: 7px;
-      }
-      .dnb-standby-card {
+      .dnb-dock-flow {
         display: flex;
         align-items: center;
-        gap: 8px;
-        padding: 6px 9px;
-        border-radius: 14px;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .dnb-dock-pill {
+        display: inline-flex;
+        align-items: center;
+        gap: 6px;
+        height: 28px;
+        padding: 0 9px 0 6px;
+        border-radius: 999px;
         corner-shape: round;
         background: var(--dnb-card);
         border: 1px solid var(--dnb-border);
-        border-left-width: 3px;
-        cursor: grab;
-        min-width: 0;
+        cursor: pointer;
+        user-select: none;
+        max-width: 100%;
+        transition: border-color 0.15s ease, background 0.15s ease, transform 0.12s ease;
       }
-      .dnb-standby-card:active {
-        cursor: grabbing;
-      }
-      .dnb-standby-card:hover {
-        border-color: var(--dnb-border-strong);
+      .dnb-dock-pill:hover {
+        border-color: rgba(56, 189, 248, 0.56);
         background: var(--dnb-card-hover);
       }
-      .dnb-standby-card-body {
-        flex: 1;
-        min-width: 0;
-        display: flex;
-        flex-direction: column;
-        gap: 2px;
+      .dnb-dock-pill:active {
+        cursor: grabbing;
+        transform: scale(0.98);
       }
-      .dnb-standby-card-top {
-        display: flex;
+      .dnb-dock-pill[data-kind="standby-session"] {
+        padding-left: 9px;
+      }
+      .dnb-dock-pill .dnb-brand-badge {
+        width: 20px;
+        height: 20px;
+      }
+      .dnb-dock-pill-name {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--dnb-text);
+        max-width: 152px;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dnb-dock-bolt-btn {
+        display: inline-flex;
         align-items: center;
-        gap: 5px;
-        flex-wrap: wrap;
+        justify-content: center;
+        width: 18px;
+        height: 18px;
+        padding: 0;
+        border-radius: 50%;
+        corner-shape: round;
+        border: 1px solid rgba(56, 189, 248, 0.36);
+        background: rgba(56, 189, 248, 0.14);
+        color: #7dd3fc;
+        font-size: 10px;
+        line-height: 1;
+        cursor: pointer;
+        flex-shrink: 0;
       }
-      .dnb-standby-card-name {
+      .dnb-dock-bolt-btn[data-active="1"],
+      .dnb-dock-bolt-btn:hover {
+        background: var(--dnb-primary-bg, #2563eb);
+        color: #fff;
+        border-color: transparent;
+      }
+      .dnb-dock-plus {
         font-size: 11.5px;
         font-weight: 700;
-        color: var(--dnb-text);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
+        color: var(--dnb-accent, #38bdf8);
+        line-height: 1;
+        flex-shrink: 0;
       }
-      .dnb-standby-card-desc {
-        font-size: 10px;
-        color: var(--dnb-text-3);
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .dnb-standby-empty {
+      .dnb-dock-empty {
         font-size: 11px;
         color: var(--dnb-text-3);
-        line-height: 1.45;
+        line-height: 1.4;
       }
 
-      /* Light Theme Overrides for Collab Squad Bubble */
+      /* Light Theme Overrides for Option A Liquid Fusion Bubble */
       html[data-ds-theme-source="light"] .dnb-bubble-status,
       html[data-ds-theme="light"] .dnb-bubble-status,
       [data-ds-theme-source="light"] .dnb-bubble-status {
@@ -9830,35 +9754,35 @@ window.__ModuleLoader__.load({
         color: #b91c1c !important;
         background: rgba(239, 68, 68, 0.10) !important;
       }
-      html[data-ds-theme-source="light"] .dnb-squad-membrane,
-      html[data-ds-theme="light"] .dnb-squad-membrane,
-      [data-ds-theme-source="light"] .dnb-squad-membrane {
-        background:
-          radial-gradient(ellipse 90% 48% at 50% 0%, rgba(255, 255, 255, 0.88), transparent 72%),
-          radial-gradient(circle at 20% 80%, rgba(14, 165, 233, 0.08), transparent 58%),
-          #eef7fd;
-        border-color: rgba(2, 132, 199, 0.36);
+      html[data-ds-theme-source="light"] .dnb-liquid-canvas,
+      html[data-ds-theme="light"] .dnb-liquid-canvas,
+      [data-ds-theme-source="light"] .dnb-liquid-canvas {
+        background: linear-gradient(175deg, #f0f9ff 0%, #eaf5fd 100%);
+        border-color: rgba(2, 132, 199, 0.30);
         box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.95),
+          inset 0 1px 0 rgba(255, 255, 255, 0.92),
           0 6px 18px rgba(15, 23, 42, 0.06);
       }
-      html[data-ds-theme-source="light"] .dnb-squad-membrane[data-locked="1"],
-      html[data-ds-theme="light"] .dnb-squad-membrane[data-locked="1"],
-      [data-ds-theme-source="light"] .dnb-squad-membrane[data-locked="1"] {
-        background:
-          radial-gradient(ellipse 90% 48% at 50% 0%, rgba(254, 243, 199, 0.72), transparent 72%),
-          #fffbeb;
-        border-color: rgba(217, 119, 6, 0.54);
+      html[data-ds-theme-source="light"] .dnb-liquid-canvas[data-locked="1"],
+      html[data-ds-theme="light"] .dnb-liquid-canvas[data-locked="1"],
+      [data-ds-theme-source="light"] .dnb-liquid-canvas[data-locked="1"] {
+        background: linear-gradient(175deg, #fffbeb 0%, #fef7dc 100%);
+        border-color: rgba(217, 119, 6, 0.52);
       }
-      html[data-ds-theme-source="light"] .dnb-squad-membrane-title,
-      html[data-ds-theme="light"] .dnb-squad-membrane-title,
-      [data-ds-theme-source="light"] .dnb-squad-membrane-title {
-        color: #0369a1;
+      html[data-ds-theme-source="light"] .dnb-liquid-contour,
+      html[data-ds-theme="light"] .dnb-liquid-contour,
+      [data-ds-theme-source="light"] .dnb-liquid-contour {
+        stroke: rgba(2, 132, 199, 0.34);
       }
-      html[data-ds-theme-source="light"] .dnb-squad-membrane[data-locked="1"] .dnb-squad-membrane-title,
-      html[data-ds-theme="light"] .dnb-squad-membrane[data-locked="1"] .dnb-squad-membrane-title,
-      [data-ds-theme-source="light"] .dnb-squad-membrane[data-locked="1"] .dnb-squad-membrane-title {
-        color: #b45309;
+      html[data-ds-theme-source="light"] .dnb-liquid-canvas[data-locked="1"] .dnb-liquid-contour,
+      html[data-ds-theme="light"] .dnb-liquid-canvas[data-locked="1"] .dnb-liquid-contour,
+      [data-ds-theme-source="light"] .dnb-liquid-canvas[data-locked="1"] .dnb-liquid-contour {
+        stroke: rgba(217, 119, 6, 0.62);
+      }
+      html[data-ds-theme-source="light"] .dnb-liquid-specular,
+      html[data-ds-theme="light"] .dnb-liquid-specular,
+      [data-ds-theme-source="light"] .dnb-liquid-specular {
+        stroke: rgba(255, 255, 255, 0.85);
       }
       html[data-ds-theme-source="light"] .dnb-squad-link-pill-bg,
       html[data-ds-theme="light"] .dnb-squad-link-pill-bg,
@@ -9866,84 +9790,49 @@ window.__ModuleLoader__.load({
         fill: #ffffff;
         fill-opacity: 1;
       }
-      html[data-ds-theme-source="light"] .dnb-squad-mini-stat,
-      html[data-ds-theme="light"] .dnb-squad-mini-stat,
-      [data-ds-theme-source="light"] .dnb-squad-mini-stat {
-        background: rgba(15, 23, 42, 0.05);
-        border-color: rgba(15, 23, 42, 0.12);
+      html[data-ds-theme-source="light"] .dnb-liquid-hub,
+      html[data-ds-theme="light"] .dnb-liquid-hub,
+      [data-ds-theme-source="light"] .dnb-liquid-hub {
+        background: rgba(255, 255, 255, 0.88);
+        border-color: rgba(2, 132, 199, 0.42);
+        box-shadow: 0 3px 10px rgba(15, 23, 42, 0.06);
       }
-      html[data-ds-theme-source="light"] .dnb-squad-mini-stat[data-running="1"],
-      html[data-ds-theme="light"] .dnb-squad-mini-stat[data-running="1"],
-      [data-ds-theme-source="light"] .dnb-squad-mini-stat[data-running="1"] {
-        background: rgba(16, 185, 129, 0.12);
+      html[data-ds-theme-source="light"] .dnb-liquid-hub-star,
+      html[data-ds-theme="light"] .dnb-liquid-hub-star,
+      [data-ds-theme-source="light"] .dnb-liquid-hub-star {
+        color: #0284c7;
+      }
+      html[data-ds-theme-source="light"] .dnb-liquid-run-badge,
+      html[data-ds-theme="light"] .dnb-liquid-run-badge,
+      [data-ds-theme-source="light"] .dnb-liquid-run-badge {
         color: #047857;
+        background: rgba(16, 185, 129, 0.14);
       }
-      html[data-ds-theme-source="light"] .dnb-squad-hub,
-      html[data-ds-theme="light"] .dnb-squad-hub,
-      [data-ds-theme-source="light"] .dnb-squad-hub {
-        background: linear-gradient(135deg, rgba(224, 242, 254, 0.92), rgba(204, 251, 241, 0.85));
-        border-color: rgba(2, 132, 199, 0.48);
+      html[data-ds-theme-source="light"] .dnb-liquid-lead-orb,
+      html[data-ds-theme="light"] .dnb-liquid-lead-orb,
+      [data-ds-theme-source="light"] .dnb-liquid-lead-orb {
+        background: linear-gradient(180deg, rgba(224, 242, 254, 0.86), rgba(255, 255, 255, 0.96));
+        border-color: rgba(2, 132, 199, 0.56);
+        box-shadow: 0 4px 14px rgba(2, 132, 199, 0.12);
       }
-      html[data-ds-theme-source="light"] .dnb-squad-hub-star,
-      html[data-ds-theme="light"] .dnb-squad-hub-star,
-      [data-ds-theme-source="light"] .dnb-squad-hub-star {
-        background: rgba(2, 132, 199, 0.14);
-        color: #0369a1;
+      html[data-ds-theme-source="light"] .dnb-liquid-sat-pill,
+      html[data-ds-theme="light"] .dnb-liquid-sat-pill,
+      [data-ds-theme-source="light"] .dnb-liquid-sat-pill {
+        background: rgba(255, 255, 255, 0.90);
+        border-color: rgba(15, 23, 42, 0.14);
       }
-      html[data-ds-theme-source="light"] .dnb-squad-pod,
-      html[data-ds-theme="light"] .dnb-squad-pod,
-      [data-ds-theme-source="light"] .dnb-squad-pod {
-        background: rgba(255, 255, 255, 0.86);
-        box-shadow: 0 3px 12px rgba(15, 23, 42, 0.06);
-      }
-      html[data-ds-theme-source="light"] .dnb-squad-pod[data-tier="primary"],
-      html[data-ds-theme="light"] .dnb-squad-pod[data-tier="primary"],
-      [data-ds-theme-source="light"] .dnb-squad-pod[data-tier="primary"] {
-        background: linear-gradient(180deg, rgba(224, 242, 254, 0.72), rgba(255, 255, 255, 0.94));
-        border-color: rgba(2, 132, 199, 0.45);
-      }
-      html[data-ds-theme-source="light"] .dnb-sub-cluster,
-      html[data-ds-theme="light"] .dnb-sub-cluster,
-      [data-ds-theme-source="light"] .dnb-sub-cluster {
-        background: rgba(241, 245, 249, 0.88);
-        border-color: rgba(15, 23, 42, 0.12);
-      }
-      html[data-ds-theme-source="light"] .dnb-sub-pill,
-      html[data-ds-theme="light"] .dnb-sub-pill,
-      [data-ds-theme-source="light"] .dnb-sub-pill {
-        background: #ffffff;
-        border-color: rgba(15, 23, 42, 0.10);
-      }
-      html[data-ds-theme-source="light"] .dnb-mini-btn,
+      html[data-ds-theme-source="light"] .dnb-sat-btn,
+      html[data-ds-theme-source="light"] .dnb-sat-btn,
       html[data-ds-theme="light"] .dnb-mini-btn,
-      [data-ds-theme-source="light"] .dnb-mini-btn {
+      html[data-ds-theme-source="light"] .dnb-mini-btn {
         background: rgba(15, 23, 42, 0.05);
         border-color: rgba(15, 23, 42, 0.14);
       }
-      html[data-ds-theme-source="light"] .dnb-harness-pod,
-      html[data-ds-theme="light"] .dnb-harness-pod,
-      [data-ds-theme-source="light"] .dnb-harness-pod {
-        background: rgba(255, 251, 235, 0.84);
-        border-color: rgba(217, 119, 6, 0.46);
-      }
-      html[data-ds-theme-source="light"] .dnb-harness-card,
-      html[data-ds-theme="light"] .dnb-harness-card,
-      [data-ds-theme-source="light"] .dnb-harness-card {
-        background: #ffffff;
-        border-color: rgba(15, 23, 42, 0.13);
-      }
-      html[data-ds-theme-source="light"] .dnb-harness-state-tag,
-      html[data-ds-theme="light"] .dnb-harness-state-tag,
-      [data-ds-theme-source="light"] .dnb-harness-state-tag {
-        background: rgba(2, 132, 199, 0.10);
-        color: #0369a1;
-        border-color: rgba(2, 132, 199, 0.28);
-      }
-      html[data-ds-theme-source="light"] .dnb-harness-cfg-tag,
-      html[data-ds-theme="light"] .dnb-harness-cfg-tag,
-      [data-ds-theme-source="light"] .dnb-harness-cfg-tag {
-        background: rgba(15, 23, 42, 0.05);
-        border-color: rgba(15, 23, 42, 0.14);
+      html[data-ds-theme-source="light"] .dnb-liquid-ally-pill,
+      html[data-ds-theme="light"] .dnb-liquid-ally-pill,
+      [data-ds-theme-source="light"] .dnb-liquid-ally-pill {
+        background: rgba(255, 255, 255, 0.90);
+        box-shadow: 0 4px 12px rgba(15, 23, 42, 0.07);
       }
       html[data-ds-theme-source="light"] .dnb-brand-badge[data-provider="codex"],
       html[data-ds-theme="light"] .dnb-brand-badge[data-provider="codex"],
@@ -9952,22 +9841,22 @@ window.__ModuleLoader__.load({
         border-color: rgba(15, 23, 42, 0.18);
         color: #0f172a;
       }
-      html[data-ds-theme-source="light"] .dnb-tier-badge[data-tier="harness"],
-      html[data-ds-theme="light"] .dnb-tier-badge[data-tier="harness"],
-      [data-ds-theme-source="light"] .dnb-tier-badge[data-tier="harness"] {
-        background: rgba(217, 119, 6, 0.12);
-        color: #b45309;
-        border-color: rgba(217, 119, 6, 0.36);
-      }
       html[data-ds-theme-source="light"] .dnb-dispatch-target-tag,
       html[data-ds-theme="light"] .dnb-dispatch-target-tag,
       [data-ds-theme-source="light"] .dnb-dispatch-target-tag {
         color: #0369a1;
       }
-      html[data-ds-theme-source="light"] .dnb-standby-zone,
-      html[data-ds-theme="light"] .dnb-standby-zone,
-      [data-ds-theme-source="light"] .dnb-standby-zone {
+      html[data-ds-theme-source="light"] .dnb-liquid-dock,
+      html[data-ds-theme="light"] .dnb-liquid-dock,
+      [data-ds-theme-source="light"] .dnb-liquid-dock {
         background: rgba(15, 23, 42, 0.02);
+      }
+      html[data-ds-theme-source="light"] .dnb-dock-bolt-btn,
+      html[data-ds-theme="light"] .dnb-dock-bolt-btn,
+      [data-ds-theme-source="light"] .dnb-dock-bolt-btn {
+        color: #0284c7;
+        background: rgba(2, 132, 199, 0.10);
+        border-color: rgba(2, 132, 199, 0.28);
       }
     `
 
@@ -24853,27 +24742,31 @@ window.__ModuleLoader__.load({
       return n
     }
 
-    function computeSquadConnectorPaths(membraneEl, hubEl, podElsMap, branches, hasHarnessWing) {
-      if (!membraneEl || !hubEl) return { w: 0, h: 0, links: [] }
-      const mRect = membraneEl.getBoundingClientRect()
-      const hubRect = hubEl.getBoundingClientRect()
-      if (!mRect.width || !mRect.height || !hubRect.width) return { w: 0, h: 0, links: [] }
+    function computeLiquidLinks(stageEl, hubEl, leadEl, allyElsMap, allies) {
+      if (!stageEl || !hubEl || !leadEl) return { w: 0, h: 0, links: [] }
+      const sRect = stageEl.getBoundingClientRect()
+      const hRect = hubEl.getBoundingClientRect()
+      const lRect = leadEl.getBoundingClientRect()
+      if (!sRect.width || !sRect.height || !hRect.width || !lRect.width) return { w: 0, h: 0, links: [] }
 
       const hubBottom = {
-        x: hubRect.left - mRect.left + hubRect.width / 2,
-        y: hubRect.bottom - mRect.top,
+        x: hRect.left - sRect.left + hRect.width / 2,
+        y: hRect.bottom - sRect.top,
       }
-      const links = []
-      const podBoxes = []
+      const leadBox = {
+        left: lRect.left - sRect.left,
+        right: lRect.right - sRect.left,
+        top: lRect.top - sRect.top,
+        bottom: lRect.bottom - sRect.top,
+        cx: lRect.left - sRect.left + lRect.width / 2,
+        cy: lRect.top - sRect.top + lRect.height / 2,
+      }
 
-      const addCurve = (id, kind, p1, p2, color, dashed, label, labelAnchor = null) => {
+      const links = []
+      const addCurve = (id, kind, p1, p2, color, dashed, label) => {
         const dy = p2.y - p1.y
-        const spread = Math.max(22, Math.abs(dy) * 0.46)
-        const c1x = p1.x
-        const c1y = p1.y + spread
-        const c2x = p2.x
-        const c2y = p2.y - spread
-        const d = `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+        const spread = Math.max(18, Math.abs(dy) * 0.48)
+        const d = `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} C ${p1.x.toFixed(1)} ${(p1.y + spread).toFixed(1)}, ${p2.x.toFixed(1)} ${(p2.y - spread).toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
         links.push({
           id,
           kind,
@@ -24882,94 +24775,86 @@ window.__ModuleLoader__.load({
           y1: p1.y,
           x2: p2.x,
           y2: p2.y,
-          mx: labelAnchor ? labelAnchor.x : (p1.x + p2.x) / 2,
-          my: labelAnchor ? labelAnchor.y : (p1.y + p2.y) / 2,
+          mx: (p1.x + p2.x) / 2,
+          my: (p1.y + p2.y) / 2,
           color,
           dashed,
           label,
         })
       }
 
-      for (const branch of branches) {
-        const el = podElsMap.get(branch.podKey)
+      addCurve(
+        'hub-lead',
+        'primary',
+        hubBottom,
+        { x: leadBox.cx, y: leadBox.top },
+        '#38bdf8',
+        false,
+        allies.length > 0 ? '主控' : '',
+      )
+
+      const allyBoxes = []
+      let firstHarnessLabeled = false
+      let firstPeerLabeled = false
+
+      for (const ally of allies) {
+        const el = allyElsMap.get(ally.uid)
         if (!el) continue
         const r = el.getBoundingClientRect()
         if (!r.width) continue
         const box = {
-          key: branch.podKey,
-          roleTier: branch.roleTier,
-          left: r.left - mRect.left,
-          right: r.right - mRect.left,
-          top: r.top - mRect.top,
-          bottom: r.bottom - mRect.top,
-          cx: r.left - mRect.left + r.width / 2,
-          cy: r.top - mRect.top + r.height / 2,
-          color: branch.roleTier === 'primary' ? '#38bdf8' : branch.accent.dot,
+          uid: ally.uid,
+          kind: ally.kind,
+          left: r.left - sRect.left,
+          top: r.top - sRect.top,
+          cx: r.left - sRect.left + r.width / 2,
+          cy: r.top - sRect.top + r.height / 2,
+          color: ally.color,
         }
-        podBoxes.push(box)
+        allyBoxes.push(box)
+        let lbl = ''
+        if (ally.kind === 'harness' && !firstHarnessLabeled) {
+          firstHarnessLabeled = true
+          lbl = '派单'
+        } else if (ally.kind === 'peer' && !firstPeerLabeled) {
+          firstPeerLabeled = true
+          lbl = '联动'
+        }
         addCurve(
-          `hub-${branch.podKey}`,
-          branch.roleTier,
+          `hub-${ally.uid}`,
+          ally.kind,
           hubBottom,
           { x: box.cx, y: box.top },
           box.color,
-          false,
-          branch.roleTier === 'primary' ? '主控' : '协同',
+          ally.kind === 'harness',
+          lbl,
         )
       }
 
-      // Horizontal collaboration link between primary branch and peer-session branches
-      const primaryBox = podBoxes.find(b => b.roleTier === 'primary')
-      const peerBoxes = podBoxes.filter(b => b.roleTier === 'peer')
-      if (primaryBox && peerBoxes.length > 0) {
-        for (const pb of peerBoxes) {
-          const sameRow = Math.abs(primaryBox.top - pb.top) < 42 && pb.left > primaryBox.right - 8
-          if (sameRow) {
-            const yMid = primaryBox.top + 30
-            const x1 = primaryBox.right
-            const x2 = pb.left
-            const mx = (x1 + x2) / 2
-            links.push({
-              id: `collab-${pb.key}`,
-              kind: 'collab-sync',
-              d: `M ${x1.toFixed(1)} ${yMid.toFixed(1)} L ${x2.toFixed(1)} ${yMid.toFixed(1)}`,
-              x1,
-              y1: yMid,
-              x2,
-              y2: yMid,
-              mx,
-              my: yMid,
-              color: pb.color,
-              dashed: true,
-              label: '⇄联动',
-            })
-          }
+      if (allyBoxes.length > 0) {
+        const topAlly = allyBoxes[0]
+        if (topAlly.left > leadBox.right + 18) {
+          const yMid = Math.round((leadBox.cy + topAlly.cy) / 2)
+          const x1 = leadBox.right
+          const x2 = topAlly.left
+          links.push({
+            id: 'lead-ally-sync',
+            kind: 'collab-sync',
+            d: `M ${x1.toFixed(1)} ${leadBox.cy.toFixed(1)} C ${((x1 + x2) / 2).toFixed(1)} ${yMid.toFixed(1)}, ${((x1 + x2) / 2).toFixed(1)} ${yMid.toFixed(1)}, ${x2.toFixed(1)} ${topAlly.cy.toFixed(1)}`,
+            x1,
+            y1: leadBox.cy,
+            x2,
+            y2: topAlly.cy,
+            mx: (x1 + x2) / 2,
+            my: yMid,
+            color: topAlly.color,
+            dashed: true,
+            label: '⇄协同',
+          })
         }
       }
 
-      if (hasHarnessWing) {
-        const hwEl = podElsMap.get('harness-wing')
-        if (hwEl) {
-          const r = hwEl.getBoundingClientRect()
-          if (r.width) {
-            const hwTop = r.top - mRect.top
-            const hwCx = r.left - mRect.left + r.width / 2
-            const onSecondRow = primaryBox && hwTop > primaryBox.bottom + 4
-            addCurve(
-              'hub-harness-wing',
-              'harness',
-              hubBottom,
-              { x: hwCx, y: hwTop },
-              '#f59e0b',
-              true,
-              '派单+红线',
-              onSecondRow ? { x: hwCx, y: hwTop - 14 } : null,
-            )
-          }
-        }
-      }
-
-      return { w: Math.round(mRect.width), h: Math.round(mRect.height), links }
+      return { w: Math.round(sRect.width), h: Math.round(sRect.height), links }
     }
 
     function PeersTab({ view }) {
@@ -25099,9 +24984,10 @@ window.__ModuleLoader__.load({
       const [dragOverZone, setDragOverZone] = React.useState('')
       const [linkLayout, setLinkLayout] = React.useState({ w: 0, h: 0, links: [] })
 
-      const membraneRef = React.useRef(null)
+      const stageRef = React.useRef(null)
       const hubRef = React.useRef(null)
-      const podElsRef = React.useRef(new Map())
+      const leadRef = React.useRef(null)
+      const allyClusterRef = React.useRef(null)
       const dragPayloadRef = React.useRef(null)
 
       React.useEffect(() => {
@@ -25125,8 +25011,29 @@ window.__ModuleLoader__.load({
         otherSessions,
       })
       const { branches, harnessWing, readyStandbyHarnesses, counts } = squad
+      const primaryBranch = branches.find(b => b.roleTier === 'primary') || branches[0] || null
+      const peerBranches = branches.filter(b => b && b !== primaryBranch)
+      const hasRightAllies = peerBranches.length > 0 || harnessWing.length > 0
       const hasStandby = squad.standbySessions.length > 0 || readyStandbyHarnesses.length > 0
-      const branchCols = (branches.length + (harnessWing.length > 0 ? 1 : 0)) > 1 ? 2 : 1
+
+      const rightAlliesList = []
+      if (hasRightAllies) {
+        const hasH = harnessWing.length > 0
+        const hasP = peerBranches.length > 0
+        const accentColor = bubbleLocked
+          ? '#f59e0b'
+          : (hasH && harnessWing[0].provider === 'claude-code'
+              ? '#D97757'
+              : (hasH ? '#38bdf8' : peerBranches[0].accent.dot))
+        const linkKind = hasH ? 'harness' : 'peer'
+        const linkLbl = hasH && hasP ? bi('派单/联动', 'Ext/Link') : (hasH ? bi('派单', 'Dispatch') : bi('联动', 'Linked'))
+        rightAlliesList.push({
+          uid: 'ally-cluster',
+          kind: linkKind,
+          color: accentColor,
+          label: linkLbl,
+        })
+      }
 
       const layoutSig = [
         view.peersNetCollapsed ? '1' : '0',
@@ -25138,19 +25045,21 @@ window.__ModuleLoader__.load({
       React.useLayoutEffect(() => {
         if (view.peersNetCollapsed) return undefined
         const measure = () => {
-          const next = computeSquadConnectorPaths(
-            membraneRef.current,
+          const allyMap = new Map()
+          if (allyClusterRef.current) allyMap.set('ally-cluster', allyClusterRef.current)
+          const next = computeLiquidLinks(
+            stageRef.current,
             hubRef.current,
-            podElsRef.current,
-            branches,
-            harnessWing.length > 0,
+            leadRef.current,
+            allyMap,
+            rightAlliesList,
           )
           setLinkLayout(prev => {
             if (
               prev.w === next.w
               && prev.h === next.h
               && prev.links.length === next.links.length
-              && prev.links.every((l, idx) => l.d === next.links[idx].d)
+              && prev.links.every((l, idx) => l.d === next.links[idx].d && l.color === next.links[idx].color && l.label === next.links[idx].label)
             ) {
               return prev
             }
@@ -25159,9 +25068,9 @@ window.__ModuleLoader__.load({
         }
         measure()
         let ro = null
-        if (typeof ResizeObserver !== 'undefined' && membraneRef.current) {
+        if (typeof ResizeObserver !== 'undefined' && stageRef.current) {
           ro = new ResizeObserver(measure)
-          ro.observe(membraneRef.current)
+          ro.observe(stageRef.current)
         }
         return () => {
           if (ro) ro.disconnect()
@@ -25203,7 +25112,7 @@ window.__ModuleLoader__.load({
           return
         }
         if (kind === 'peer-session') {
-          const bObj = branch || branches.find(b => b.rootId === id && b.roleTier === 'peer')
+          const bObj = branch || peerBranches.find(b => b.rootId === id)
           const sessObj = (bObj && bObj.linkedSessObj) || {
             id,
             name: (bObj && bObj.raw && bObj.raw.name) || shortSession(id),
@@ -25325,84 +25234,71 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'dnb-bubble-stage' },
-            // Status & Structural Work-Lock Control Strip
-            h(
-              'div',
-              { className: 'dnb-bubble-bar' },
-              h(
-                'div',
-                { className: 'dnb-bubble-status', 'data-locked': bubbleLocked ? '1' : '0' },
-                h('span', { className: 'dnb-bubble-status-dot' }),
-                h(
-                  'span',
-                  { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-                  bubbleLocked
-                    ? bi(`🔒 工作中已锁死${bubbleLockReason ? ' · ' + bubbleLockReason : ''}`, `🔒 Locked${bubbleLockReason ? ' · ' + bubbleLockReason : ''}`)
-                    : bi('🫧 编队整备中 · 拖入或点选组建水泡', '🫧 Staging · Drag or click to form Bubble'),
-                ),
-              ),
-              h(
-                'div',
-                { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-pill',
-                  disabled: bubbleAutoLocked && bubbleLocked,
-                  'data-active': bubble.manualLocked ? '1' : '0',
-                  style: { height: 22, padding: '0 8px', fontSize: 10.5 },
-                  title: (bubbleAutoLocked && bubbleLocked)
-                    ? bi('有成员运行中，自动锁生效中；请先急停或等完工后再解锁', 'Auto-locked by active workers; finish or Emergency Stop first')
-                    : (bubbleLocked ? bi('点击解除手动编队锁', 'Unlock manual squad lock') : bi('开干前手动锁死当前编队结构，防误拆', 'Manually lock squad structure before starting work')),
-                  onClick: () => {
-                    if (bubbleAutoLocked && bubbleLocked) {
-                      triggerLockedReject()
-                      return
-                    }
-                    void toggleBubbleLock(!bubble.manualLocked)
-                  },
-                }, (bubbleAutoLocked && bubbleLocked)
-                  ? bi('🔒 自动锁定中', '🔒 Auto-Locked')
-                  : (bubble.manualLocked ? bi('🔓 解锁', '🔓 Unlock') : bi('🔒 锁死编队', '🔒 Lock'))),
-                bubbleLocked
-                  ? h('button', {
-                      type: 'button',
-                      className: 'dnb-pill dnb-bubble-estop-btn',
-                      'data-confirm': confirmStop ? '1' : '0',
-                      style: { height: 22, padding: '0 8px', fontSize: 10.5 },
-                      title: bi('安全急停所有在途子代理、跨窗与外部 Harness，并解锁水泡', 'Interrupt all running workers & Harnesses and unlock Bubble'),
-                      onClick: () => {
-                        if (!confirmStop) {
-                          setConfirmStop(true)
-                          return
-                        }
-                        setConfirmStop(false)
-                        setDispatchTarget('')
-                        void emergencyStopBubble()
-                      },
-                    }, confirmStop ? bi('确认急停全员?', 'Confirm Stop?') : bi('⏹ 急停解体', '⏹ Stop & Unlock'))
-                  : null,
-              ),
-            ),
-
-            // Main Organic Bubble-Shaped Squad Enclosure
+            // Option A: Unified Liquid Fusion Bubble Canvas (zero nested rigid box stack)
             h(
               'div',
               {
-                ref: membraneRef,
-                className: 'dnb-squad-membrane',
+                ref: stageRef,
+                className: 'dnb-liquid-canvas',
                 'data-locked': bubbleLocked ? '1' : '0',
                 'data-shake': lockShake ? '1' : '0',
+                'data-dual': hasRightAllies ? '1' : '0',
                 'data-dragover': dragOverZone === 'inside' ? '1' : '0',
                 onDragOver: e => handleZoneDragOver(e, 'outside', 'inside'),
                 onDragLeave: () => { if (dragOverZone === 'inside') setDragOverZone('') },
                 onDrop: handleMembraneDrop,
               },
-              // Adaptive SVG Directed Collaboration & Hierarchy Connectors (paths layer + top label pills layer)
+              // Layer 0: Organic Liquid Membrane Contour & Soft Glow Backdrop
+              h(
+                'svg',
+                {
+                  className: 'dnb-liquid-bg-svg',
+                  viewBox: '0 0 640 240',
+                  preserveAspectRatio: 'none',
+                  'aria-hidden': 'true',
+                },
+                h(
+                  'defs',
+                  null,
+                  h(
+                    'radialGradient',
+                    { id: 'dnb-liq-glow-a', cx: hasRightAllies ? '30%' : '50%', cy: '58%', r: '46%' },
+                    h('stop', { offset: '0%', stopColor: bubbleLocked ? '#f59e0b' : '#38bdf8', stopOpacity: '0.20' }),
+                    h('stop', { offset: '100%', stopColor: bubbleLocked ? '#f59e0b' : '#38bdf8', stopOpacity: '0' }),
+                  ),
+                  hasRightAllies
+                    ? h(
+                        'radialGradient',
+                        { id: 'dnb-liq-glow-b', cx: '73%', cy: '58%', r: '40%' },
+                        h('stop', { offset: '0%', stopColor: bubbleLocked ? '#f59e0b' : '#2dd4bf', stopOpacity: '0.15' }),
+                        h('stop', { offset: '100%', stopColor: '#2dd4bf', stopOpacity: '0' }),
+                      )
+                    : null,
+                ),
+                h('rect', { width: 640, height: 240, fill: 'url(#dnb-liq-glow-a)' }),
+                hasRightAllies ? h('rect', { width: 640, height: 240, fill: 'url(#dnb-liq-glow-b)' }) : null,
+                h('path', {
+                  className: 'dnb-liquid-contour',
+                  d: hasRightAllies
+                    ? 'M 18 134 C 18 42, 150 32, 286 50 C 310 53, 330 53, 354 50 C 490 32, 622 42, 622 134 C 622 218, 496 232, 352 215 C 330 212, 310 212, 288 215 C 144 232, 18 218, 18 134 Z'
+                    : 'M 94 132 C 94 42, 206 32, 320 32 C 434 32, 546 42, 546 132 C 546 218, 434 228, 320 228 C 206 228, 94 218, 94 132 Z',
+                  fill: 'none',
+                }),
+                h('path', {
+                  className: 'dnb-liquid-specular',
+                  d: hasRightAllies
+                    ? 'M 64 53 Q 160 35 256 48'
+                    : 'M 176 47 Q 320 30 464 47',
+                  fill: 'none',
+                }),
+              ),
+
+              // Layer 1: Adaptive Optical Filament Connectors (paths first, top labels second)
               (linkLayout.w > 0 && linkLayout.h > 0 && linkLayout.links.length > 0)
                 ? h(
                     'svg',
                     {
-                      className: 'dnb-squad-links-svg',
+                      className: 'dnb-liquid-links-svg',
                       width: linkLayout.w,
                       height: linkLayout.h,
                       viewBox: `0 0 ${linkLayout.w} ${linkLayout.h}`,
@@ -25421,25 +25317,13 @@ window.__ModuleLoader__.load({
                             d: lk.d,
                             fill: 'none',
                             stroke: lk.color,
-                            strokeWidth: lk.kind === 'collab-sync' ? 1.6 : 1.9,
-                            strokeDasharray: lk.dashed ? '5 4' : undefined,
+                            strokeWidth: lk.kind === 'collab-sync' ? 1.4 : 1.7,
+                            strokeDasharray: lk.dashed ? '4 4' : undefined,
                             strokeLinecap: 'round',
-                            opacity: lk.kind === 'collab-sync' ? 0.85 : 0.72,
+                            opacity: lk.kind === 'collab-sync' ? 0.72 : 0.65,
                           }),
-                          h('circle', {
-                            cx: lk.x1,
-                            cy: lk.y1,
-                            r: 2.6,
-                            fill: lk.color,
-                            opacity: 0.85,
-                          }),
-                          h('circle', {
-                            cx: lk.x2,
-                            cy: lk.y2,
-                            r: 3.1,
-                            fill: lk.color,
-                            opacity: 0.92,
-                          }),
+                          h('circle', { cx: lk.x1, cy: lk.y1, r: 2.3, fill: lk.color, opacity: 0.85 }),
+                          h('circle', { cx: lk.x2, cy: lk.y2, r: 2.8, fill: lk.color, opacity: 0.92 }),
                         ),
                       ),
                     ),
@@ -25448,25 +25332,25 @@ window.__ModuleLoader__.load({
                       { className: 'dnb-squad-links-labels' },
                       linkLayout.links.map((lk) => {
                         if (!lk.label) return null
-                        const pillW = Math.max(32, Math.round(lk.label.split('').reduce((s, ch) => s + (/[\u4e00-\u9fa5]/.test(ch) ? 10.2 : 6.2), 12)))
+                        const pillW = Math.max(30, Math.round(lk.label.split('').reduce((s, ch) => s + (/[\u4e00-\u9fa5]/.test(ch) ? 9.8 : 6.0), 12)))
                         return h(
                           'g',
                           { key: 'l-' + lk.id, transform: `translate(${lk.mx.toFixed(1)}, ${lk.my.toFixed(1)})` },
                           h('rect', {
                             x: -(pillW / 2),
-                            y: -8.5,
+                            y: -8,
                             width: pillW,
-                            height: 17,
-                            rx: 8.5,
+                            height: 16,
+                            rx: 8,
                             className: 'dnb-squad-link-pill-bg',
                             stroke: lk.color,
-                            strokeWidth: 0.95,
+                            strokeWidth: 0.85,
                           }),
                           h(
                             'text',
                             {
                               x: 0,
-                              y: 3.2,
+                              y: 3.1,
                               textAnchor: 'middle',
                               className: 'dnb-squad-link-pill-txt',
                               fill: lk.color,
@@ -25479,292 +25363,342 @@ window.__ModuleLoader__.load({
                   )
                 : null,
 
-              // Membrane Top Summary Strip
+              // Layer 2a: Integrated Minimal Floating Top Bar (merged cleanly inside bubble)
               h(
                 'div',
-                { className: 'dnb-squad-membrane-head' },
+                { className: 'dnb-liquid-topbar' },
                 h(
-                  'span',
-                  { className: 'dnb-squad-membrane-title' },
-                  bubbleLocked ? '🛡️' : '🫧',
-                  ' ',
-                  bi('当前协同队伍水泡', 'Active Collab Squad Bubble'),
+                  'div',
+                  { className: 'dnb-bubble-status', 'data-locked': bubbleLocked ? '1' : '0' },
+                  h('span', { className: 'dnb-bubble-status-dot' }),
+                  h(
+                    'span',
+                    { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
+                    bubbleLocked
+                      ? bi(`🔒 工作中已锁死${bubbleLockReason ? ' · ' + bubbleLockReason : ''}`, `🔒 Locked${bubbleLockReason ? ' · ' + bubbleLockReason : ''}`)
+                      : bi('整备协同中 · 拖或点入泡', 'Staging · Drag or click to join'),
+                  ),
                 ),
                 h(
-                  'span',
-                  { className: 'dnb-squad-summary-pills' },
-                  summaryParts.map((txt, idx) => h('span', { key: idx, className: 'dnb-squad-mini-stat' }, txt)),
-                  counts.running > 0
-                    ? h('span', { className: 'dnb-squad-mini-stat', 'data-running': '1' }, `${counts.running} ${bi('执行中', 'Active')}`)
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-pill',
+                    disabled: bubbleAutoLocked && bubbleLocked,
+                    'data-active': bubble.manualLocked ? '1' : '0',
+                    style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+                    title: (bubbleAutoLocked && bubbleLocked)
+                      ? bi('有成员运行中，自动锁生效中；请先急停或等完工后再解锁', 'Auto-locked by active workers; finish or Emergency Stop first')
+                      : (bubbleLocked ? bi('点击解除手动编队锁', 'Unlock manual squad lock') : bi('开干前手动锁死当前编队结构，防误拆', 'Manually lock squad structure before starting work')),
+                    onClick: () => {
+                      if (bubbleAutoLocked && bubbleLocked) {
+                        triggerLockedReject()
+                        return
+                      }
+                      void toggleBubbleLock(!bubble.manualLocked)
+                    },
+                  }, (bubbleAutoLocked && bubbleLocked)
+                    ? bi('🔒 自动锁定中', '🔒 Auto-Locked')
+                    : (bubble.manualLocked ? bi('🔓 解锁', '🔓 Unlock') : bi('🔒 锁死编队', '🔒 Lock'))),
+                  bubbleLocked
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-pill dnb-bubble-estop-btn',
+                        'data-confirm': confirmStop ? '1' : '0',
+                        style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+                        title: bi('安全急停所有在途子代理、跨窗与外部 Harness，并解锁水泡', 'Interrupt all running workers & Harnesses and unlock Bubble'),
+                        onClick: () => {
+                          if (!confirmStop) {
+                            setConfirmStop(true)
+                            return
+                          }
+                          setConfirmStop(false)
+                          setDispatchTarget('')
+                          void emergencyStopBubble()
+                        },
+                      }, confirmStop ? bi('确认急停全员?', 'Confirm Stop?') : bi('⏹ 急停解体', '⏹ Stop & Unlock'))
                     : null,
                 ),
               ),
 
-              // Tier 0: Chief Coordinator Center Capsule
+              // Layer 2b: Floating Central Coordinator Micro-Hub
               h(
                 'div',
-                { className: 'dnb-squad-hub-wrap' },
+                { className: 'dnb-liquid-hub-wrap' },
                 h(
                   'div',
                   {
                     ref: hubRef,
-                    className: 'dnb-squad-hub',
+                    className: 'dnb-liquid-hub',
                     'data-locked': bubbleLocked ? '1' : '0',
                     title: bi('DSH 参谋长作为统一总调度枢纽，串联主对话、下属子代理、联动主窗与外部 Harness', 'DSH Chief orchestrates Primary Lead, Subagents, Linked Windows & Harnesses'),
                   },
-                  h('span', { className: 'dnb-squad-hub-star' }, '✦'),
-                  h(
-                    'div',
-                    { className: 'dnb-squad-hub-text' },
-                    h('span', { className: 'dnb-squad-hub-name' }, bi('DSH 参谋长 · 总调度核心', 'DSH Chief · Coordinator')),
-                    h('span', { className: 'dnb-squad-hub-sub' },
-                      bubbleLocked
-                        ? bi(`结构锁定中 · 共 ${counts.total} 位在编`, `Locked · ${counts.total} enrolled`)
-                        : bi(`统领编队 · 共 ${counts.total} 位在编`, `Orchestrating · ${counts.total} enrolled`)),
-                  ),
+                  h('span', { className: 'dnb-liquid-hub-star' }, '✦'),
+                  h('span', { className: 'dnb-liquid-hub-name' }, bi('DSH 参谋长', 'DSH Chief')),
+                  h('span', { className: 'dnb-liquid-hub-meta' }, `· ${counts.total} ${bi('在编', 'in squad')}`),
+                  counts.running > 0
+                    ? h('span', { className: 'dnb-liquid-run-badge' }, `${counts.running} ${bi('运行', 'run')}`)
+                    : null,
                 ),
               ),
 
-              // Tier 1 & Tier 2: Primary/Peer Branch Pods (with nested Secondary Subagents) + External Harness Wing
+              // Layer 2c: Liquid Core Body (Left Primary Core + Satellite Pearls | Right Glass Allies)
               h(
                 'div',
-                {
-                  className: 'dnb-squad-branches',
-                  'data-cols': String(branchCols),
-                },
-                branches.map((branch) => {
-                  const peer = branch.raw || {}
-                  const isPrimary = branch.roleTier === 'primary'
-                  const isPeer = branch.roleTier === 'peer'
-                  const isRunning = peer.status === 'running'
-                  const taskSummary = peer.taskTitle || peer.progressSummary || peer.objective || (isPrimary ? bi('主指挥核心会话', 'Primary coordinator session') : bi('已并入当前协同编队', 'Linked squad window'))
-                  return h(
-                    'div',
-                    {
-                      key: branch.uid,
-                      ref: (el) => {
-                        if (el) podElsRef.current.set(branch.podKey, el)
-                        else podElsRef.current.delete(branch.podKey)
-                      },
-                      className: 'dnb-squad-pod',
-                      'data-tier': branch.roleTier,
-                      'data-running': isRunning ? '1' : '0',
-                      draggable: isPeer,
-                      onDragStart: isPeer
-                        ? e => beginDragItem(e, { fromZone: 'inside', kind: 'peer-session', id: branch.rootId, branch })
-                        : undefined,
-                      onDragEnd: isPeer ? endDragItem : undefined,
-                      style: {
-                        '--pod-dot': branch.accent.dot,
-                        '--pod-bg': branch.accent.bg,
-                        '--pod-border': branch.accent.border,
-                        '--pod-text': branch.accent.text,
-                      },
-                    },
-                    // Pod Header: Status + Clear Role Badge (主 / 联动主窗) + Full Session Title + Actions
-                    h(
-                      'div',
-                      { className: 'dnb-squad-pod-head' },
-                      h(
+                { className: 'dnb-liquid-body', 'data-dual': hasRightAllies ? '1' : '0' },
+                // Left Core: Lead Bubble + Close Satellite Pearls
+                primaryBranch
+                  ? (() => {
+                      const leadPeer = primaryBranch.raw || {}
+                      const leadRunning = leadPeer.status === 'running'
+                      const leadTip = leadPeer.taskTitle || leadPeer.progressSummary || leadPeer.objective || bi('当前主指挥核心会话', 'Current primary coordinator session')
+                      return h(
                         'div',
-                        { className: 'dnb-squad-pod-ident' },
-                        isRunning
-                          ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9px', color: isPrimary ? '#38bdf8' : branch.accent.dot } })
-                          : h('span', { className: 'dnb-squad-dot', style: { background: isPrimary ? '#38bdf8' : branch.accent.dot } }),
-                        h('span', { className: 'dnb-tier-badge', 'data-tier': branch.roleTier }, branch.tierBadge),
-                        h('span', { className: 'dnb-squad-pod-name', title: peer.name || '' }, peer.name || (isPrimary ? bi('主对话', 'Main') : shortSession(branch.rootId))),
-                      ),
-                      h(
-                        'div',
-                        { className: 'dnb-squad-pod-acts' },
-                        peer.key
-                          ? h('button', {
-                              type: 'button',
-                              className: 'dnb-pill',
-                              style: { height: 20, padding: '0 6px', fontSize: 10 },
-                              title: bi('快速向该主会话递话调度', 'Send relay message'),
-                              onClick: () => {
-                                patch({
-                                  secTarget: peer.key,
-                                  secMode: isRunning ? 'steer' : 'followup',
-                                  notice: bi('已在下方锁定 @', 'Locked target @') + (peer.name || peer.key),
-                                })
-                                focusSecInput()
-                              },
-                            }, '@递话')
-                          : null,
-                        isPeer
-                          ? h('button', {
-                              type: 'button',
-                              className: 'dnb-pill',
-                              style: { height: 20, padding: '0 6px', fontSize: 10 },
-                              title: bubbleLocked ? bi('编队已锁，请先急停或等完工后移出', 'Locked while active') : bi('将该联动窗口移出编队水泡', 'Remove from Bubble'),
-                              onClick: () => performLeave({ kind: 'peer-session', id: branch.rootId, branch }),
-                            }, bubbleLocked ? '🔒' : '×')
-                          : null,
-                      ),
-                    ),
-
-                    h(
-                      'div',
-                      { className: 'dnb-squad-pod-sub', title: taskSummary },
-                      taskSummary,
-                    ),
-
-                    // Tier 2: Nested Secondary Subagent Sub-Bubble Cluster under this Primary/Peer
-                    branch.children.length > 0
-                      ? h(
+                        { className: 'dnb-liquid-lead-cluster' },
+                        h(
                           'div',
-                          { className: 'dnb-sub-cluster' },
-                          h(
-                            'div',
-                            { className: 'dnb-sub-cluster-head' },
-                            `↳ ${bi(`下属子代理（次 · ${branch.children.length}）`, `Subagents (Secondary · ${branch.children.length})`)}`,
-                          ),
-                          h(
-                            'div',
-                            { className: 'dnb-sub-list' },
-                            branch.children.map((sub) => {
-                              const sPeer = sub.raw || {}
-                              const sRun = sPeer.status === 'running'
-                              return h(
-                                'div',
-                                {
-                                  key: sub.uid,
-                                  className: 'dnb-sub-pill',
-                                  'data-tier': 'secondary',
-                                  'data-running': sRun ? '1' : '0',
+                          {
+                            ref: leadRef,
+                            className: 'dnb-liquid-lead-orb',
+                            'data-tier': 'primary',
+                            'data-running': leadRunning ? '1' : '0',
+                            title: leadTip,
+                          },
+                          leadRunning
+                            ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9px', color: '#38bdf8' } })
+                            : h('span', { className: 'dnb-squad-dot', style: { background: '#38bdf8', width: 8, height: 8 } }),
+                          h('span', { className: 'dnb-tier-badge', 'data-tier': 'primary' }, primaryBranch.tierBadge),
+                          h('span', { className: 'dnb-liquid-lead-name' }, leadPeer.name || bi('主对话', 'Main')),
+                          leadPeer.key
+                            ? h('button', {
+                                type: 'button',
+                                className: 'dnb-mini-btn',
+                                title: bi('快速向主对话递话调度', 'Send relay to Main'),
+                                onClick: () => {
+                                  patch({
+                                    secTarget: leadPeer.key,
+                                    secMode: leadRunning ? 'steer' : 'followup',
+                                    notice: bi('已在下方锁定 @', 'Locked target @') + (leadPeer.name || leadPeer.key),
+                                  })
+                                  focusSecInput()
                                 },
-                                h(
+                              }, '@递话')
+                            : null,
+                        ),
+                        primaryBranch.children.length > 0
+                          ? h(
+                              'div',
+                              { className: 'dnb-liquid-satellites' },
+                              h('span', { className: 'dnb-liquid-sat-prefix' }, `↳ ${bi('次', 'Sub')}`),
+                              primaryBranch.children.map((sub) => {
+                                const sPeer = sub.raw || {}
+                                const sRun = sPeer.status === 'running'
+                                const subName = sPeer.name || shortSession(sPeer.id)
+                                return h(
                                   'div',
-                                  { className: 'dnb-sub-pill-main' },
+                                  {
+                                    key: sub.uid,
+                                    className: 'dnb-liquid-sat-pill',
+                                    'data-tier': 'secondary',
+                                    'data-running': sRun ? '1' : '0',
+                                    title: `${subName}${sPeer.taskTitle ? ' — ' + sPeer.taskTitle : ''}`,
+                                  },
                                   sRun
-                                    ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: branch.accent.dot } })
-                                    : h('span', { className: 'dnb-squad-dot', style: { background: branch.accent.dot, width: 6, height: 6 } }),
-                                  h('span', { className: 'dnb-tier-badge', 'data-tier': 'secondary' }, sub.tierBadge),
-                                  h('span', { className: 'dnb-sub-name', title: sPeer.taskTitle || sPeer.name || '' }, sPeer.name || shortSession(sPeer.id)),
-                                  sPeer.taskTitle
-                                    ? h('span', { className: 'dnb-sub-task', title: sPeer.taskTitle }, sPeer.taskTitle)
-                                    : null,
-                                ),
-                                h(
-                                  'div',
-                                  { className: 'dnb-sub-pill-acts' },
-                                  sPeer.id
-                                    ? h('button', {
-                                        type: 'button',
-                                        className: 'dnb-mini-btn',
-                                        title: bi('分屏查看该子代理对话流', 'Open subagent split view'),
-                                        onClick: () => {
-                                          if (!openSubagentChat(sPeer)) patch({ notice: bi('该子代理暂无独立面板视图', 'No dedicated pane view for this subagent') })
-                                        },
-                                      }, h(Icon, { name: 'chat', size: 9.5 }), bi('分屏', 'Split'))
-                                    : null,
-                                  sPeer.key
-                                    ? h('button', {
-                                        type: 'button',
-                                        className: 'dnb-mini-btn',
-                                        title: bi('向该子代理直接递话', 'Relay to subagent'),
-                                        onClick: () => {
-                                          patch({
-                                            secTarget: sPeer.key,
-                                            secMode: sRun ? 'steer' : 'followup',
-                                            notice: bi('已在下方锁定 @', 'Locked target @') + (sPeer.name || sPeer.key),
-                                          })
-                                          focusSecInput()
-                                        },
-                                      }, '@递话')
-                                    : null,
-                                ),
-                              )
-                            }),
-                          ),
-                        )
-                      : null,
-                  )
-                }),
+                                    ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '7px', color: '#38bdf8' } })
+                                    : h('span', { className: 'dnb-squad-dot', style: { background: 'rgba(56, 189, 248, 0.78)', width: 5.5, height: 5.5 } }),
+                                  h('span', { className: 'dnb-liquid-sat-name' }, subName),
+                                  h(
+                                    'span',
+                                    { className: 'dnb-sat-acts' },
+                                    sPeer.id
+                                      ? h('button', {
+                                          type: 'button',
+                                          className: 'dnb-sat-btn',
+                                          title: bi('分屏查看该子代理对话流', 'Open subagent split view'),
+                                          onClick: () => {
+                                            if (!openSubagentChat(sPeer)) patch({ notice: bi('该子代理暂无独立面板视图', 'No dedicated pane view for this subagent') })
+                                          },
+                                        }, h(Icon, { name: 'chat', size: 9 }), bi('分屏', 'Split'))
+                                      : null,
+                                    sPeer.key
+                                      ? h('button', {
+                                          type: 'button',
+                                          className: 'dnb-sat-btn',
+                                          title: bi('向该子代理直接递话', 'Relay to subagent'),
+                                          onClick: () => {
+                                            patch({
+                                              secTarget: sPeer.key,
+                                              secMode: sRun ? 'steer' : 'followup',
+                                              notice: bi('已在下方锁定 @', 'Locked target @') + subName,
+                                            })
+                                            focusSecInput()
+                                          },
+                                        }, '@')
+                                      : null,
+                                  ),
+                                )
+                              }),
+                            )
+                          : null,
+                      )
+                    })()
+                  : null,
 
-                // External Harness Wing inside Squad Bubble (only rendered when enrolled installed Harnesses > 0)
-                harnessWing.length > 0
+                // Right Wing: Organic Glass Ally Pills (External Harnesses & Linked Peer Windows — zero extra wrapper box)
+                hasRightAllies
                   ? h(
                       'div',
                       {
-                        ref: (el) => {
-                          if (el) podElsRef.current.set('harness-wing', el)
-                          else podElsRef.current.delete('harness-wing')
-                        },
-                        className: 'dnb-harness-pod',
-                        'data-tier': 'harness',
-                        'data-span': branches.length > 1 ? 'full' : 'col',
+                        ref: allyClusterRef,
+                        className: 'dnb-liquid-ally-cluster',
                       },
-                      h(
-                        'div',
-                        { className: 'dnb-harness-pod-head' },
-                        h('span', { className: 'dnb-tier-badge', 'data-tier': 'harness' }, bi('外协执行', 'External')),
-                        h('span', { className: 'dnb-harness-pod-title' }, bi(`受差遣外部 Harness（${harnessWing.length}）`, `Dispatched External Harnesses (${harnessWing.length})`)),
-                        h('span', { className: 'dnb-harness-pod-note' }, bi('独立进程 · 派单自动附带红线与物理墙', 'Out-of-process · redlines & walls prepended')),
-                      ),
-                      h(
-                        'div',
-                        { className: 'dnb-harness-cards' },
-                        harnessWing.map((hItem) => {
-                          const roleText = hItem.role || hItem.roleHint || bi('外部独立执行进程', 'External Harness')
-                          const isLocal = hItem.transport === 'local-cli'
-                          const isSelTarget = dispatchTarget === hItem.provider
-                          return h(
+                      harnessWing.map((hItem) => {
+                        const roleText = hItem.role || hItem.roleHint || bi('外部独立执行进程', 'External Harness')
+                        const isLocal = hItem.transport === 'local-cli'
+                        const isSelTarget = dispatchTarget === hItem.provider
+                        const shortCfg = hItem.configLabel
+                          ? (hItem.configLabel.length > 10 ? bi('本机已配', 'Local Cfg') : hItem.configLabel)
+                          : ''
+                        const subInfo = hItem.running
+                          ? bi('执行中', 'Running')
+                          : `${isLocal ? bi('直连', 'Local') : bi('插件', 'Plugin')}${shortCfg ? ' · ' + shortCfg : ''}`
+                        return h(
+                          'div',
+                          {
+                            key: 'h-' + hItem.provider,
+                            className: 'dnb-liquid-ally-pill',
+                            'data-tier': 'harness',
+                            'data-uid': 'harness:' + hItem.provider,
+                            'data-provider': hItem.provider,
+                            'data-running': hItem.running ? '1' : '0',
+                            draggable: true,
+                            title: `${hItem.label || hItem.provider} — ${roleText}\n${bi('独立进程 · 派单自动附带当前红线与物理墙', 'Out-of-process · redlines & walls auto-prepended')}${hItem.binaryPath ? '\n' + hItem.binaryPath : ''}`,
+                            onDragStart: e => beginDragItem(e, { fromZone: 'inside', kind: 'harness', id: hItem.provider }),
+                            onDragEnd: endDragItem,
+                          },
+                          h(HarnessLogoIcon, { provider: hItem.provider, size: 18 }),
+                          h(
+                            'div',
+                            { className: 'dnb-ally-info' },
+                            h(
+                              'div',
+                              { className: 'dnb-ally-name-row' },
+                              h('span', { className: 'dnb-ally-name' }, hItem.label || hItem.provider),
+                              hItem.running ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '7px', color: '#34d399' } }) : null,
+                            ),
+                            h('div', { className: 'dnb-ally-sub' }, subInfo),
+                          ),
+                          h(
+                            'div',
+                            { className: 'dnb-ally-acts' },
+                            h('button', {
+                              type: 'button',
+                              className: 'dnb-pill dnb-pill-accent',
+                              'data-active': isSelTarget ? '1' : '0',
+                              style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+                              onClick: () => setDispatchTarget(d => (d === hItem.provider ? '' : hItem.provider)),
+                            }, bi('⚡ 调用', '⚡ Run')),
+                            h('button', {
+                              type: 'button',
+                              className: 'dnb-mini-btn',
+                              title: bubbleLocked ? bi('编队已锁，禁止移出', 'Locked while active') : bi('移回待命池', 'Move to standby'),
+                              onClick: () => performLeave({ kind: 'harness', id: hItem.provider }),
+                            }, bubbleLocked ? '🔒' : '×'),
+                          ),
+                        )
+                      }),
+                      peerBranches.map((branch) => {
+                        const pPeer = branch.raw || {}
+                        const pRun = pPeer.status === 'running'
+                        const pSummary = pPeer.taskTitle || pPeer.progressSummary || pPeer.objective || bi('已并入当前协同水泡', 'Linked in Bubble')
+                        return h(
+                          'div',
+                          { key: 'pwrap-' + branch.rootId, className: 'dnb-liquid-peer-block' },
+                          h(
                             'div',
                             {
-                              key: hItem.provider,
-                              className: 'dnb-harness-card',
-                              'data-uid': 'harness:' + hItem.provider,
-                              'data-provider': hItem.provider,
-                              'data-running': hItem.running ? '1' : '0',
+                              className: 'dnb-liquid-ally-pill',
+                              'data-tier': 'peer',
+                              'data-uid': 'peer:' + branch.rootId,
+                              'data-running': pRun ? '1' : '0',
                               draggable: true,
-                              onDragStart: e => beginDragItem(e, { fromZone: 'inside', kind: 'harness', id: hItem.provider }),
+                              title: `${pPeer.name || shortSession(branch.rootId)}\n${pSummary}`,
+                              style: {
+                                '--pod-dot': branch.accent.dot,
+                                '--pod-bg': branch.accent.bg,
+                                '--pod-border': branch.accent.border,
+                                '--pod-text': branch.accent.text,
+                              },
+                              onDragStart: e => beginDragItem(e, { fromZone: 'inside', kind: 'peer-session', id: branch.rootId, branch }),
                               onDragEnd: endDragItem,
                             },
-                            h(HarnessLogoIcon, { provider: hItem.provider, size: 20 }),
+                            pRun
+                              ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: branch.accent.dot } })
+                              : h('span', { className: 'dnb-squad-dot', style: { background: branch.accent.dot, width: 7.5, height: 7.5 } }),
                             h(
                               'div',
-                              { className: 'dnb-harness-card-info' },
+                              { className: 'dnb-ally-info' },
                               h(
                                 'div',
-                                { className: 'dnb-harness-card-top' },
-                                h('span', { className: 'dnb-harness-card-name' }, hItem.label || hItem.provider),
-                                h(
-                                  'span',
-                                  { className: 'dnb-harness-state-tag', 'data-running': hItem.running ? '1' : '0' },
-                                  hItem.running
-                                    ? h(React.Fragment, null, h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '7px' } }), bi('运行中', 'Running'))
-                                    : (isLocal ? bi('本机直连', 'Local CLI') : bi('DSH插件', 'Plugin')),
-                                ),
-                                hItem.configLabel
-                                  ? h('span', { className: 'dnb-harness-cfg-tag', title: hItem.binaryPath || hItem.configLabel }, `${bi('已配', 'Cfg')} ${hItem.configLabel}`)
-                                  : null,
+                                { className: 'dnb-ally-name-row' },
+                                h('span', { className: 'dnb-tier-badge', 'data-tier': 'peer' }, bi('联动', 'Link')),
+                                h('span', { className: 'dnb-ally-name' }, pPeer.name || shortSession(branch.rootId)),
                               ),
-                              h('div', { className: 'dnb-harness-card-role', title: hItem.binaryPath || roleText }, roleText),
+                              h('div', { className: 'dnb-ally-sub' }, pSummary),
                             ),
                             h(
                               'div',
-                              { className: 'dnb-harness-card-acts' },
+                              { className: 'dnb-ally-acts' },
+                              pPeer.key
+                                ? h('button', {
+                                    type: 'button',
+                                    className: 'dnb-mini-btn',
+                                    title: bi('向该联动窗口递话', 'Relay to linked window'),
+                                    onClick: () => {
+                                      patch({
+                                        secTarget: pPeer.key,
+                                        secMode: pRun ? 'steer' : 'followup',
+                                        notice: bi('已在下方锁定 @', 'Locked target @') + (pPeer.name || pPeer.key),
+                                      })
+                                      focusSecInput()
+                                    },
+                                  }, '@递话')
+                                : null,
                               h('button', {
                                 type: 'button',
-                                className: 'dnb-pill dnb-pill-accent',
-                                'data-active': isSelTarget ? '1' : '0',
-                                style: { height: 22, padding: '0 8px', fontSize: 10.5 },
-                                onClick: () => setDispatchTarget(d => (d === hItem.provider ? '' : hItem.provider)),
-                              }, bi('⚡ 调用', '⚡ Run')),
-                              h('button', {
-                                type: 'button',
-                                className: 'dnb-pill',
-                                style: { height: 22, padding: '0 6px', fontSize: 10.5 },
-                                title: bubbleLocked ? bi('编队已锁，禁止移出', 'Locked while active') : bi('将此工具移回待命池', 'Remove to standby'),
-                                onClick: () => performLeave({ kind: 'harness', id: hItem.provider }),
+                                className: 'dnb-mini-btn',
+                                title: bubbleLocked ? bi('编队已锁，请先急停或等完工后移出', 'Locked while active') : bi('移出当前水泡', 'Eject from Bubble'),
+                                onClick: () => performLeave({ kind: 'peer-session', id: branch.rootId, branch }),
                               }, bubbleLocked ? '🔒' : '×'),
                             ),
-                          )
-                        }),
-                      ),
+                          ),
+                          branch.children.length > 0
+                            ? h(
+                                'div',
+                                { className: 'dnb-liquid-satellites', 'data-compact': '1' },
+                                h('span', { className: 'dnb-liquid-sat-prefix' }, `↳ ${bi('次', 'Sub')}`),
+                                branch.children.map((sub) => {
+                                  const sPeer = sub.raw || {}
+                                  const sRun = sPeer.status === 'running'
+                                  const subName = sPeer.name || shortSession(sPeer.id)
+                                  return h(
+                                    'div',
+                                    {
+                                      key: sub.uid,
+                                      className: 'dnb-liquid-sat-pill',
+                                      'data-tier': 'secondary',
+                                      'data-running': sRun ? '1' : '0',
+                                      title: `${subName}${sPeer.taskTitle ? ' — ' + sPeer.taskTitle : ''}`,
+                                    },
+                                    h('span', { className: 'dnb-squad-dot', style: { background: branch.accent.dot, width: 5.5, height: 5.5 } }),
+                                    h('span', { className: 'dnb-liquid-sat-name' }, subName),
+                                  )
+                                }),
+                              )
+                            : null,
+                        )
+                      }),
                     )
                   : null,
               ),
@@ -25810,11 +25744,11 @@ window.__ModuleLoader__.load({
                 )
               : null,
 
-            // Outer Standby Pool (Strictly ONLY locally installed Harnesses & standalone open DSH sessions)
+            // Compact Standby Pill Dock (Strictly ONLY locally installed Harnesses & open DSH windows)
             h(
               'div',
               {
-                className: 'dnb-standby-zone',
+                className: 'dnb-liquid-dock',
                 'data-dragover': dragOverZone === 'outside' ? '1' : '0',
                 onDragOver: e => handleZoneDragOver(e, 'inside', 'outside'),
                 onDragLeave: () => { if (dragOverZone === 'outside') setDragOverZone('') },
@@ -25822,110 +25756,86 @@ window.__ModuleLoader__.load({
               },
               h(
                 'div',
-                { className: 'dnb-standby-head' },
-                h('span', { className: 'dnb-standby-title' }, bi('队外待命 · 本机已检测可用', 'Standby Pool · Detected Locally')),
-                h('span', { className: 'dnb-standby-hint' },
+                { className: 'dnb-dock-head' },
+                h(
+                  'span',
+                  { className: 'dnb-dock-title' },
+                  h('span', { className: 'dnb-dock-dot' }),
+                  bi('待命池 · 本机已检测可用', 'Standby · Local Ready'),
+                ),
+                h(
+                  'span',
+                  { className: 'dnb-dock-hint' },
                   hasStandby
-                    ? bi('拖入上方水泡协同或点 + 入队（未安装工具已自动隐藏）', 'Drag into Bubble above or click + Join (uninstalled tools hidden)')
-                    : bi('仅展示本机已配置的外部工具与独立窗口', 'Shows only locally configured tools & open sessions')),
+                    ? bi('拖入水泡或点 + 入队', 'Drag up or tap + to join')
+                    : bi('仅展示本机已配置的外部工具与独立窗口', 'Only locally configured tools & open sessions'),
+                ),
               ),
               hasStandby
                 ? h(
                     'div',
-                    { className: 'dnb-standby-grid' },
-                    squad.standbySessions.map((sess) => {
-                      const col = colorForRootSession(sess.id, selfRootId)
-                      const desc = sess.objective || sess.progressSummary || bi('已打开的独立会话窗口，可拖拽并入水泡', 'Standalone window ready to join Bubble')
-                      return h(
-                        'div',
-                        {
-                          key: 'sess:' + sess.id,
-                          className: 'dnb-standby-card',
-                          'data-kind': 'standby-session',
-                          'data-uid': 'standby-sess:' + sess.id,
-                          draggable: true,
-                          onDragStart: e => beginDragItem(e, { fromZone: 'outside', kind: 'standby-session', id: sess.id, item: sess }),
-                          onDragEnd: endDragItem,
-                          style: { borderLeftColor: col.dot },
-                        },
-                        h('span', { className: 'dnb-squad-dot', style: { background: col.dot, width: 8, height: 8 } }),
-                        h(
-                          'div',
-                          { className: 'dnb-standby-card-body' },
-                          h(
-                            'div',
-                            { className: 'dnb-standby-card-top' },
-                            h('span', { className: 'dnb-tier-badge', 'data-tier': 'standby' }, bi('独立窗', 'Window')),
-                            h('span', { className: 'dnb-standby-card-name' }, sess.name || shortSession(sess.id)),
-                          ),
-                          h('div', { className: 'dnb-standby-card-desc', title: desc }, desc),
-                        ),
-                        h('button', {
-                          type: 'button',
-                          className: 'dnb-pill dnb-pill-accent',
-                          style: { height: 22, padding: '0 8px', fontSize: 10.5, flexShrink: 0 },
-                          onClick: () => performJoin({ kind: 'standby-session', id: sess.id, item: sess }),
-                        }, bubbleLocked ? '🔒' : bi('+ 入队', '+ Join')),
-                      )
-                    }),
+                    { className: 'dnb-dock-flow' },
                     readyStandbyHarnesses.map((hItem) => {
                       const roleText = hItem.roleHint || hItem.role || bi('本机外部执行引擎', 'Local external Harness')
-                      const isLocal = hItem.transport === 'local-cli'
                       const isSelTarget = dispatchTarget === hItem.provider
                       return h(
                         'div',
                         {
                           key: 'harness:' + hItem.provider,
-                          className: 'dnb-standby-card',
+                          className: 'dnb-dock-pill',
                           'data-kind': 'standby-harness',
                           'data-uid': 'standby-harness:' + hItem.provider,
                           'data-provider': hItem.provider,
                           draggable: true,
+                          title: `${hItem.label || hItem.provider}（${hItem.configLabel || bi('已安装', 'Ready')}）\n${roleText}${hItem.binaryPath ? '\n' + hItem.binaryPath : ''}`,
                           onDragStart: e => beginDragItem(e, { fromZone: 'outside', kind: 'standby-harness', id: hItem.provider, item: hItem }),
                           onDragEnd: endDragItem,
+                          onClick: () => performJoin({ kind: 'standby-harness', id: hItem.provider, item: hItem }),
                         },
-                        h(HarnessLogoIcon, { provider: hItem.provider, size: 19 }),
-                        h(
-                          'div',
-                          { className: 'dnb-standby-card-body' },
-                          h(
-                            'div',
-                            { className: 'dnb-standby-card-top' },
-                            h('span', { className: 'dnb-standby-card-name' }, hItem.label || hItem.provider),
-                            h('span', { className: 'dnb-harness-state-tag' }, isLocal ? bi('本机直连', 'Local CLI') : bi('DSH插件', 'Plugin')),
-                            hItem.configLabel
-                              ? h('span', { className: 'dnb-harness-cfg-tag', title: hItem.binaryPath || hItem.configLabel }, `${bi('已配', 'Cfg')} ${hItem.configLabel}`)
-                              : null,
-                          ),
-                          h('div', { className: 'dnb-standby-card-desc', title: hItem.binaryPath || roleText }, roleText),
-                        ),
-                        h(
-                          'div',
-                          { style: { display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 } },
-                          h('button', {
-                            type: 'button',
-                            className: 'dnb-pill dnb-pill-accent',
-                            'data-active': isSelTarget ? '1' : '0',
-                            style: { height: 22, padding: '0 7px', fontSize: 10.5 },
-                            title: bi('一键直连调用并自动纳入水泡锁死', 'One-click run & lock in Bubble'),
-                            onClick: () => setDispatchTarget(d => (d === hItem.provider ? '' : hItem.provider)),
-                          }, bi('⚡ 调用', '⚡ Run')),
-                          h('button', {
-                            type: 'button',
-                            className: 'dnb-pill',
-                            style: { height: 22, padding: '0 7px', fontSize: 10.5 },
-                            onClick: () => performJoin({ kind: 'standby-harness', id: hItem.provider, item: hItem }),
-                          }, bubbleLocked ? '🔒' : bi('+ 入队', '+ Join')),
-                        ),
+                        h(HarnessLogoIcon, { provider: hItem.provider, size: 14 }),
+                        h('span', { className: 'dnb-dock-pill-name' }, hItem.label || hItem.provider),
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-dock-bolt-btn',
+                          'data-active': isSelTarget ? '1' : '0',
+                          title: bi('⚡ 一键调用并自动纳入水泡锁死', '⚡ One-click run & lock'),
+                          onClick: (e) => {
+                            e.stopPropagation()
+                            setDispatchTarget(d => (d === hItem.provider ? '' : hItem.provider))
+                          },
+                        }, '⚡'),
+                        h('span', { className: 'dnb-dock-plus' }, bubbleLocked ? '🔒' : '+'),
+                      )
+                    }),
+                    squad.standbySessions.map((sess) => {
+                      const col = colorForRootSession(sess.id, selfRootId)
+                      const sessTitle = sess.name || shortSession(sess.id)
+                      const desc = sess.objective || sess.progressSummary || bi('已打开的独立会话窗口，可拖拽或点击入队', 'Standalone window ready to join')
+                      return h(
+                        'div',
+                        {
+                          key: 'sess:' + sess.id,
+                          className: 'dnb-dock-pill',
+                          'data-kind': 'standby-session',
+                          'data-uid': 'standby-sess:' + sess.id,
+                          draggable: true,
+                          title: `${sessTitle}\n${desc}`,
+                          onDragStart: e => beginDragItem(e, { fromZone: 'outside', kind: 'standby-session', id: sess.id, item: sess }),
+                          onDragEnd: endDragItem,
+                          onClick: () => performJoin({ kind: 'standby-session', id: sess.id, item: sess }),
+                        },
+                        h('span', { className: 'dnb-squad-dot', style: { background: col.dot, width: 7, height: 7 } }),
+                        h('span', { className: 'dnb-dock-pill-name' }, sessTitle),
+                        h('span', { className: 'dnb-dock-plus' }, bubbleLocked ? '🔒' : '+'),
                       )
                     }),
                   )
                 : h(
                     'div',
-                    { className: 'dnb-standby-empty' },
-                    harnessWing.length > 0
-                      ? bi('所有已检测到的本机外部 Harness 与联动窗口均已入队协同。', 'All detected local Harnesses and standalone windows are inside the Bubble.')
-                      : bi('暂未检测到其他未入队的本机外部 Harness 或独立窗口（本机装有 Codex / Claude Code 时将自动出现）。', 'No additional local Harnesses or standalone windows detected on standby.'),
+                    { className: 'dnb-dock-empty' },
+                    hasRightAllies
+                      ? bi('已检测到的本机外协工具与独立窗口均已入队。', 'All detected local Harnesses and standalone windows are enrolled.')
+                      : bi('暂未检测到其他可加入的本机外部 Harness 或独立窗口。', 'No standby local Harnesses or standalone windows detected.'),
                   ),
             ),
           ),
