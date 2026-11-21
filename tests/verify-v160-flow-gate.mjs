@@ -1011,6 +1011,7 @@ try {
   assert.ok(wsW13.alertEvents.some(e => e.kind === 'hazard_halt'), 'W13 hazard_halt alert must persist')
 
   const notifyMod = await import(modUrl('src/client/notify.js'))
+  const i18nW13 = await import(modUrl('src/client/i18n.js'))
   notifyMod.resetAlertSessionBaselines()
 
   const hadWinDesc = Object.getOwnPropertyDescriptor(globalThis, 'window')
@@ -1079,6 +1080,7 @@ try {
       at: nowMs - 200_000,
       body: 'Expired alert outside recency window',
     }
+    i18nW13.setRuntimeUiLang('zh')
     const nextRes = notifyMod.processIncomingAlertEvents([...wsW13.alertEvents, freshAlert, staleAlert], {
       notifyEnabled: true,
       notifySound: true,
@@ -1090,7 +1092,27 @@ try {
     assert.equal(sentNotifs.length, 1)
     assert.ok(sentNotifs[0].title.includes('物理驻墙'), 'W13 desktop notification title must reflect localized guard wall copy')
     assert.ok(oscCreated >= 2, 'W13 optional chime must trigger WebAudio 2-note oscillator')
+
+    i18nW13.setRuntimeUiLang('en')
+    const freshAlertEn = {
+      id: 'alert-w13-en-' + nowMs,
+      kind: 'guard_wall_blocked',
+      level: 'warn',
+      title: '🧱 Guard Wall Blocked Call',
+      at: nowMs + 10,
+      body: 'Pre-tool wall intercepted rm -rf',
+    }
+    const nextEnRes = notifyMod.processIncomingAlertEvents([...wsW13.alertEvents, freshAlert, staleAlert, freshAlertEn], {
+      notifyEnabled: true,
+      notifySound: true,
+      sessionId: sidW13,
+      nowMs: nowMs + 60,
+    })
+    assert.equal(nextEnRes.fired.length, 1, 'W13 incremental unseen English alert must fire once')
+    assert.equal(sentNotifs.length, 2)
+    assert.ok(sentNotifs[1].title.includes('Guard Wall'), 'W13 English notification title must reflect localized guard wall copy')
   } finally {
+    i18nW13.setRuntimeUiLang('auto')
     if (hadWinDesc) Object.defineProperty(globalThis, 'window', hadWinDesc)
     else delete globalThis.window
     if (hadNotifDesc) Object.defineProperty(globalThis, 'Notification', hadNotifDesc)
