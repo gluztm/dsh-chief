@@ -704,11 +704,10 @@ export function PeersTab({ view }) {
       h(
         'div',
         { className: 'dnb-bubble-stage' },
-        // Option A: Unified Liquid Fusion Bubble Canvas (zero nested rigid box stack)
+        // Option A: Full-width Frosted Outer Canvas + Golden-Ratio Centered Liquid Bubble Frame
         h(
           'div',
           {
-            ref: stageRef,
             className: 'dnb-liquid-canvas',
             'data-locked': bubbleLocked ? '1' : '0',
             'data-shake': lockShake ? '1' : '0',
@@ -718,122 +717,7 @@ export function PeersTab({ view }) {
             onDragLeave: () => { if (dragOverZone === 'inside') setDragOverZone('') },
             onDrop: handleMembraneDrop,
           },
-          // Layer 0: Organic Liquid Membrane Contour & Soft Glow Backdrop
-          h(
-            'svg',
-            {
-              className: 'dnb-liquid-bg-svg',
-              viewBox: '0 0 640 240',
-              preserveAspectRatio: 'none',
-              'aria-hidden': 'true',
-            },
-            h(
-              'defs',
-              null,
-              h(
-                'radialGradient',
-                { id: 'dnb-liq-glow-a', cx: hasRightAllies ? '30%' : '50%', cy: '58%', r: '46%' },
-                h('stop', { offset: '0%', stopColor: bubbleLocked ? '#f59e0b' : '#38bdf8', stopOpacity: '0.20' }),
-                h('stop', { offset: '100%', stopColor: bubbleLocked ? '#f59e0b' : '#38bdf8', stopOpacity: '0' }),
-              ),
-              hasRightAllies
-                ? h(
-                    'radialGradient',
-                    { id: 'dnb-liq-glow-b', cx: '73%', cy: '58%', r: '40%' },
-                    h('stop', { offset: '0%', stopColor: bubbleLocked ? '#f59e0b' : '#2dd4bf', stopOpacity: '0.15' }),
-                    h('stop', { offset: '100%', stopColor: '#2dd4bf', stopOpacity: '0' }),
-                  )
-                : null,
-            ),
-            h('rect', { width: 640, height: 240, fill: 'url(#dnb-liq-glow-a)' }),
-            hasRightAllies ? h('rect', { width: 640, height: 240, fill: 'url(#dnb-liq-glow-b)' }) : null,
-            h('path', {
-              className: 'dnb-liquid-contour',
-              d: hasRightAllies
-                ? 'M 18 134 C 18 42, 150 32, 286 50 C 310 53, 330 53, 354 50 C 490 32, 622 42, 622 134 C 622 218, 496 232, 352 215 C 330 212, 310 212, 288 215 C 144 232, 18 218, 18 134 Z'
-                : 'M 94 132 C 94 42, 206 32, 320 32 C 434 32, 546 42, 546 132 C 546 218, 434 228, 320 228 C 206 228, 94 218, 94 132 Z',
-              fill: 'none',
-            }),
-            h('path', {
-              className: 'dnb-liquid-specular',
-              d: hasRightAllies
-                ? 'M 64 53 Q 160 35 256 48'
-                : 'M 176 47 Q 320 30 464 47',
-              fill: 'none',
-            }),
-          ),
-
-          // Layer 1: Adaptive Optical Filament Connectors (paths first, top labels second)
-          (linkLayout.w > 0 && linkLayout.h > 0 && linkLayout.links.length > 0)
-            ? h(
-                'svg',
-                {
-                  className: 'dnb-liquid-links-svg',
-                  width: linkLayout.w,
-                  height: linkLayout.h,
-                  viewBox: `0 0 ${linkLayout.w} ${linkLayout.h}`,
-                  'aria-hidden': 'true',
-                },
-                h(
-                  'g',
-                  { className: 'dnb-squad-links-paths' },
-                  linkLayout.links.map((lk) =>
-                    h(
-                      'g',
-                      { key: 'p-' + lk.id, className: 'dnb-squad-link-group', 'data-kind': lk.kind },
-                      h('path', {
-                        className: 'dnb-squad-link-path',
-                        'data-kind': lk.kind,
-                        d: lk.d,
-                        fill: 'none',
-                        stroke: lk.color,
-                        strokeWidth: lk.kind === 'collab-sync' ? 1.4 : 1.7,
-                        strokeDasharray: lk.dashed ? '4 4' : undefined,
-                        strokeLinecap: 'round',
-                        opacity: lk.kind === 'collab-sync' ? 0.72 : 0.65,
-                      }),
-                      h('circle', { cx: lk.x1, cy: lk.y1, r: 2.3, fill: lk.color, opacity: 0.85 }),
-                      h('circle', { cx: lk.x2, cy: lk.y2, r: 2.8, fill: lk.color, opacity: 0.92 }),
-                    ),
-                  ),
-                ),
-                h(
-                  'g',
-                  { className: 'dnb-squad-links-labels' },
-                  linkLayout.links.map((lk) => {
-                    if (!lk.label) return null
-                    const pillW = Math.max(30, Math.round(lk.label.split('').reduce((s, ch) => s + (/[\u4e00-\u9fa5]/.test(ch) ? 9.8 : 6.0), 12)))
-                    return h(
-                      'g',
-                      { key: 'l-' + lk.id, transform: `translate(${lk.mx.toFixed(1)}, ${lk.my.toFixed(1)})` },
-                      h('rect', {
-                        x: -(pillW / 2),
-                        y: -8,
-                        width: pillW,
-                        height: 16,
-                        rx: 8,
-                        className: 'dnb-squad-link-pill-bg',
-                        stroke: lk.color,
-                        strokeWidth: 0.85,
-                      }),
-                      h(
-                        'text',
-                        {
-                          x: 0,
-                          y: 3.1,
-                          textAnchor: 'middle',
-                          className: 'dnb-squad-link-pill-txt',
-                          fill: lk.color,
-                        },
-                        lk.label,
-                      ),
-                    )
-                  }),
-                ),
-              )
-            : null,
-
-          // Layer 2a: Integrated Minimal Floating Top Bar (merged cleanly inside bubble)
+          // Top Bar: Full-width across outer frosted canvas
           h(
             'div',
             { className: 'dnb-liquid-topbar' },
@@ -892,31 +776,154 @@ export function PeersTab({ view }) {
             ),
           ),
 
-          // Layer 2b: Floating Central Coordinator Micro-Hub
+          // Centered Golden-Ratio Liquid Bubble Stage (prevents ultra-wide horizontal stretching)
           h(
             'div',
-            { className: 'dnb-liquid-hub-wrap' },
+            {
+              ref: stageRef,
+              className: 'dnb-liquid-core-frame',
+              'data-dual': hasRightAllies ? '1' : '0',
+            },
+            // Layer 0: Organic Liquid Membrane Contour & Soft Glow Backdrop
+            h(
+              'svg',
+              {
+                className: 'dnb-liquid-bg-svg',
+                viewBox: '0 0 640 240',
+                preserveAspectRatio: 'none',
+                'aria-hidden': 'true',
+              },
+              h(
+                'defs',
+                null,
+                h(
+                  'radialGradient',
+                  { id: 'dnb-liq-glow-a', cx: hasRightAllies ? '30%' : '50%', cy: '54%', r: '46%' },
+                  h('stop', { offset: '0%', stopColor: bubbleLocked ? '#f59e0b' : '#38bdf8', stopOpacity: '0.20' }),
+                  h('stop', { offset: '100%', stopColor: bubbleLocked ? '#f59e0b' : '#38bdf8', stopOpacity: '0' }),
+                ),
+                hasRightAllies
+                  ? h(
+                      'radialGradient',
+                      { id: 'dnb-liq-glow-b', cx: '73%', cy: '54%', r: '40%' },
+                      h('stop', { offset: '0%', stopColor: bubbleLocked ? '#f59e0b' : '#2dd4bf', stopOpacity: '0.15' }),
+                      h('stop', { offset: '100%', stopColor: '#2dd4bf', stopOpacity: '0' }),
+                    )
+                  : null,
+              ),
+              h('rect', { width: 640, height: 240, fill: 'url(#dnb-liq-glow-a)' }),
+              hasRightAllies ? h('rect', { width: 640, height: 240, fill: 'url(#dnb-liq-glow-b)' }) : null,
+              h('path', {
+                className: 'dnb-liquid-contour',
+                d: hasRightAllies
+                  ? 'M 14 120 C 14 26, 152 14, 286 34 C 310 38, 330 38, 354 34 C 488 14, 626 26, 626 120 C 626 214, 496 228, 352 210 C 330 207, 310 207, 288 210 C 144 228, 14 214, 14 120 Z'
+                  : 'M 92 120 C 92 26, 206 16, 320 16 C 434 16, 548 26, 548 120 C 548 214, 434 224, 320 224 C 206 224, 92 214, 92 120 Z',
+                fill: 'none',
+              }),
+              h('path', {
+                className: 'dnb-liquid-specular',
+                d: hasRightAllies
+                  ? 'M 64 38 Q 160 19 258 33'
+                  : 'M 176 31 Q 320 15 464 31',
+                fill: 'none',
+              }),
+            ),
+
+            // Layer 1: Adaptive Optical Filament Connectors (paths first, top labels second)
+            (linkLayout.w > 0 && linkLayout.h > 0 && linkLayout.links.length > 0)
+              ? h(
+                  'svg',
+                  {
+                    className: 'dnb-liquid-links-svg',
+                    width: linkLayout.w,
+                    height: linkLayout.h,
+                    viewBox: `0 0 ${linkLayout.w} ${linkLayout.h}`,
+                    'aria-hidden': 'true',
+                  },
+                  h(
+                    'g',
+                    { className: 'dnb-squad-links-paths' },
+                    linkLayout.links.map((lk) =>
+                      h(
+                        'g',
+                        { key: 'p-' + lk.id, className: 'dnb-squad-link-group', 'data-kind': lk.kind },
+                        h('path', {
+                          className: 'dnb-squad-link-path',
+                          'data-kind': lk.kind,
+                          d: lk.d,
+                          fill: 'none',
+                          stroke: lk.color,
+                          strokeWidth: lk.kind === 'collab-sync' ? 1.4 : 1.7,
+                          strokeDasharray: lk.dashed ? '4 4' : undefined,
+                          strokeLinecap: 'round',
+                          opacity: lk.kind === 'collab-sync' ? 0.72 : 0.65,
+                        }),
+                        h('circle', { cx: lk.x1, cy: lk.y1, r: 2.3, fill: lk.color, opacity: 0.85 }),
+                        h('circle', { cx: lk.x2, cy: lk.y2, r: 2.8, fill: lk.color, opacity: 0.92 }),
+                      ),
+                    ),
+                  ),
+                  h(
+                    'g',
+                    { className: 'dnb-squad-links-labels' },
+                    linkLayout.links.map((lk) => {
+                      if (!lk.label) return null
+                      const pillW = Math.max(30, Math.round(lk.label.split('').reduce((s, ch) => s + (/[\u4e00-\u9fa5]/.test(ch) ? 9.8 : 6.0), 12)))
+                      return h(
+                        'g',
+                        { key: 'l-' + lk.id, transform: `translate(${lk.mx.toFixed(1)}, ${lk.my.toFixed(1)})` },
+                        h('rect', {
+                          x: -(pillW / 2),
+                          y: -8,
+                          width: pillW,
+                          height: 16,
+                          rx: 8,
+                          className: 'dnb-squad-link-pill-bg',
+                          stroke: lk.color,
+                          strokeWidth: 0.85,
+                        }),
+                        h(
+                          'text',
+                          {
+                            x: 0,
+                            y: 3.1,
+                            textAnchor: 'middle',
+                            className: 'dnb-squad-link-pill-txt',
+                            fill: lk.color,
+                          },
+                          lk.label,
+                        ),
+                      )
+                    }),
+                  ),
+                )
+              : null,
+
+            // Layer 2: Floating Central Coordinator Micro-Hub
             h(
               'div',
-              {
-                ref: hubRef,
-                className: 'dnb-liquid-hub',
-                'data-locked': bubbleLocked ? '1' : '0',
-                title: bi('DSH 参谋长作为统一总调度枢纽，串联主对话、下属子代理、联动主窗与外部 Harness', 'DSH Chief orchestrates Primary Lead, Subagents, Linked Windows & Harnesses'),
-              },
-              h('span', { className: 'dnb-liquid-hub-star' }, '✦'),
-              h('span', { className: 'dnb-liquid-hub-name' }, bi('DSH 参谋长', 'DSH Chief')),
-              h('span', { className: 'dnb-liquid-hub-meta' }, `· ${counts.total} ${bi('在编', 'in squad')}`),
-              counts.running > 0
-                ? h('span', { className: 'dnb-liquid-run-badge' }, `${counts.running} ${bi('运行', 'run')}`)
-                : null,
+              { className: 'dnb-liquid-hub-wrap' },
+              h(
+                'div',
+                {
+                  ref: hubRef,
+                  className: 'dnb-liquid-hub',
+                  'data-locked': bubbleLocked ? '1' : '0',
+                  title: bi('DSH 参谋长作为统一总调度枢纽，串联主对话、下属子代理、联动主窗与外部 Harness', 'DSH Chief orchestrates Primary Lead, Subagents, Linked Windows & Harnesses'),
+                },
+                h('span', { className: 'dnb-liquid-hub-star' }, '✦'),
+                h('span', { className: 'dnb-liquid-hub-name' }, bi('DSH 参谋长', 'DSH Chief')),
+                h('span', { className: 'dnb-liquid-hub-meta' }, `· ${counts.total} ${bi('在编', 'in squad')}`),
+                counts.running > 0
+                  ? h('span', { className: 'dnb-liquid-run-badge' }, `${counts.running} ${bi('运行', 'run')}`)
+                  : null,
+              ),
             ),
-          ),
 
-          // Layer 2c: Liquid Core Body (Left Primary Core + Satellite Pearls | Right Glass Allies)
-          h(
-            'div',
-            { className: 'dnb-liquid-body', 'data-dual': hasRightAllies ? '1' : '0' },
+            // Layer 3: Liquid Core Body (Left Primary Core + Satellite Pearls | Right Glass Allies)
+            h(
+              'div',
+              { className: 'dnb-liquid-body', 'data-dual': hasRightAllies ? '1' : '0' },
             // Left Core: Lead Bubble + Close Satellite Pearls
             primaryBranch
               ? (() => {
@@ -1171,6 +1178,7 @@ export function PeersTab({ view }) {
                   }),
                 )
               : null,
+            ),
           ),
         ),
 

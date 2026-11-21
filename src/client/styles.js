@@ -4725,8 +4725,7 @@ const CSS = `
   /* Option A: Unified Liquid Fusion Bubble Canvas (VisionOS Glass Style) */
   .dnb-liquid-canvas {
     position: relative;
-    min-height: 236px;
-    padding: 11px 14px 26px;
+    padding: 10px 14px 14px;
     border-radius: 26px;
     corner-shape: round;
     overflow: hidden;
@@ -4738,8 +4737,7 @@ const CSS = `
       0 8px 24px rgba(0, 0, 0, 0.20);
     display: flex;
     flex-direction: column;
-    justify-content: space-between;
-    gap: 8px;
+    gap: 4px;
     transition: border-color 0.2s ease, box-shadow 0.2s ease;
   }
   .dnb-liquid-canvas[data-locked="1"] {
@@ -4761,6 +4759,18 @@ const CSS = `
   .dnb-liquid-canvas[data-shake="1"] {
     animation: dnb-bubble-shake 0.36s ease;
   }
+  .dnb-liquid-core-frame {
+    position: relative;
+    width: 100%;
+    max-width: 680px;
+    min-height: 206px;
+    margin: 0 auto;
+    padding: 10px 28px 26px;
+    display: flex;
+    flex-direction: column;
+    justify-content: center;
+    gap: 14px;
+  }
   .dnb-liquid-bg-svg {
     position: absolute;
     inset: 0;
@@ -4772,6 +4782,7 @@ const CSS = `
   .dnb-liquid-contour {
     stroke: rgba(103, 232, 249, 0.42);
     stroke-width: 1.45;
+    vector-effect: non-scaling-stroke;
   }
   .dnb-liquid-canvas[data-locked="1"] .dnb-liquid-contour {
     stroke: rgba(251, 191, 36, 0.66);
@@ -4781,6 +4792,7 @@ const CSS = `
     stroke: rgba(224, 242, 254, 0.34);
     stroke-width: 1.8;
     stroke-linecap: round;
+    vector-effect: non-scaling-stroke;
   }
   .dnb-liquid-links-svg {
     position: absolute;
@@ -4817,7 +4829,7 @@ const CSS = `
     z-index: 4;
     display: flex;
     justify-content: center;
-    margin-bottom: 12px;
+    margin-bottom: 4px;
   }
   .dnb-liquid-hub {
     display: inline-flex;
@@ -4873,13 +4885,14 @@ const CSS = `
     display: flex;
     align-items: center;
     justify-content: center;
-    gap: 40px;
+    gap: 36px;
     flex: 1;
     padding: 2px 4px 4px;
   }
   .dnb-liquid-body[data-dual="1"] {
     justify-content: space-between;
-    padding: 2px 12px 4px;
+    gap: 36px;
+    padding: 2px 4px 4px;
   }
   @media (max-width: 520px) {
     .dnb-liquid-body[data-dual="1"] {
