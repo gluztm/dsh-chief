@@ -9096,14 +9096,10 @@ window.__ModuleLoader__.load({
         70% { transform: translateX(-3px); }
         90% { transform: translateX(2px); }
       }
-      @keyframes dnb-orb-pulse {
-        0%, 100% { opacity: 0.72; transform: scale(1); }
-        50% { opacity: 0.22; transform: scale(1.13); }
-      }
       .dnb-bubble-stage {
         display: flex;
         flex-direction: column;
-        gap: 8px;
+        gap: 9px;
       }
       .dnb-bubble-bar {
         display: flex;
@@ -9118,11 +9114,11 @@ window.__ModuleLoader__.load({
         gap: 6px;
         font-size: 11.5px;
         font-weight: 600;
-        color: #6ee7b7;
-        padding: 3px 9px;
+        color: #34d399;
+        padding: 3px 10px;
         border-radius: 999px;
         corner-shape: round;
-        background: rgba(16, 185, 129, 0.12);
+        background: rgba(16, 185, 129, 0.11);
         border: 1px solid rgba(16, 185, 129, 0.32);
         max-width: 100%;
         min-width: 0;
@@ -9130,7 +9126,7 @@ window.__ModuleLoader__.load({
       .dnb-bubble-status[data-locked="1"] {
         color: #fcd34d;
         background: rgba(245, 158, 11, 0.13);
-        border-color: rgba(245, 158, 11, 0.42);
+        border-color: rgba(245, 158, 11, 0.44);
       }
       .dnb-bubble-status-dot {
         width: 7px;
@@ -9141,7 +9137,7 @@ window.__ModuleLoader__.load({
         flex-shrink: 0;
       }
       .dnb-bubble-estop-btn {
-        border-color: rgba(239, 68, 68, 0.5) !important;
+        border-color: rgba(239, 68, 68, 0.52) !important;
         background: rgba(239, 68, 68, 0.14) !important;
         color: #fca5a5 !important;
         font-weight: 700 !important;
@@ -9151,337 +9147,827 @@ window.__ModuleLoader__.load({
         border-color: #ef4444 !important;
         color: #fee2e2 !important;
       }
-      .dnb-bubble-tank {
+
+      /* Organic Bubble-Shaped Squad Membrane */
+      .dnb-squad-membrane {
         position: relative;
-        width: 100%;
-        border-radius: 18px;
-        overflow: hidden;
-        touch-action: none;
-        user-select: none;
+        padding: 12px 14px 14px;
+        border-radius: 26px;
+        corner-shape: round;
         background:
-          radial-gradient(ellipse 84% 44% at 44% 0%, rgba(56, 189, 248, 0.22), transparent 72%),
-          radial-gradient(circle at 26% 62%, rgba(20, 184, 166, 0.14), transparent 56%),
-          radial-gradient(circle at 78% 78%, rgba(56, 189, 248, 0.12), transparent 58%),
-          linear-gradient(175deg, #071e30 0%, #081929 52%, #05111d 100%);
+          radial-gradient(ellipse 90% 48% at 50% 0%, rgba(56, 189, 248, 0.14), transparent 70%),
+          radial-gradient(circle at 18% 82%, rgba(45, 212, 191, 0.08), transparent 55%),
+          radial-gradient(circle at 86% 78%, rgba(99, 102, 241, 0.07), transparent 55%),
+          rgba(15, 28, 46, 0.72);
         border: 1.5px solid rgba(103, 232, 249, 0.34);
         box-shadow:
-          inset 0 1px 0 rgba(186, 230, 253, 0.20),
-          inset 0 -10px 24px rgba(2, 132, 199, 0.14),
-          inset 0 0 26px rgba(6, 24, 42, 0.72);
-        transition: border-color 0.2s ease;
+          inset 0 1px 0 rgba(224, 242, 254, 0.24),
+          inset 0 -10px 26px rgba(14, 165, 233, 0.07),
+          0 8px 24px rgba(0, 0, 0, 0.22);
+        transition: border-color 0.2s ease, box-shadow 0.2s ease;
       }
-      .dnb-bubble-tank[data-locked="1"] {
-        border-color: rgba(245, 158, 11, 0.56);
+      .dnb-squad-membrane[data-locked="1"] {
+        border-color: rgba(245, 158, 11, 0.62);
         background:
-          radial-gradient(ellipse 80% 42% at 38% 0%, rgba(245, 158, 11, 0.16), transparent 72%),
-          radial-gradient(circle at 78% 72%, rgba(56, 189, 248, 0.10), transparent 56%),
-          linear-gradient(175deg, #131c2a 0%, #0b1624 55%, #07101a 100%);
+          radial-gradient(ellipse 90% 48% at 50% 0%, rgba(245, 158, 11, 0.13), transparent 72%),
+          radial-gradient(circle at 82% 80%, rgba(56, 189, 248, 0.07), transparent 56%),
+          rgba(22, 26, 40, 0.80);
+        box-shadow:
+          inset 0 1px 0 rgba(254, 243, 199, 0.22),
+          0 0 0 1px rgba(245, 158, 11, 0.16),
+          0 8px 24px rgba(0, 0, 0, 0.24);
       }
-      .dnb-bubble-tank[data-shake="1"] {
+      .dnb-squad-membrane[data-dragover="1"] {
+        border-style: dashed;
+        border-color: #38bdf8;
+        box-shadow:
+          inset 0 0 0 1px rgba(56, 189, 248, 0.32),
+          0 0 22px rgba(56, 189, 248, 0.18);
+      }
+      .dnb-squad-membrane[data-shake="1"] {
         animation: dnb-bubble-shake 0.36s ease;
       }
-      .dnb-bubble-fx {
+      .dnb-squad-links-svg {
         position: absolute;
         inset: 0;
         pointer-events: none;
-        z-index: 1;
+        z-index: 4;
       }
-      .dnb-bubble-center-hub {
-        position: absolute;
-        left: 0;
-        top: 0;
-        width: 50px;
-        height: 50px;
-        border-radius: 50%;
-        corner-shape: round;
-        z-index: 3;
-        pointer-events: none;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 1px;
-        background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.26), rgba(56, 189, 248, 0.22) 60%, rgba(14, 165, 233, 0.14) 100%);
-        border: 1.5px solid rgba(125, 211, 252, 0.60);
-        box-shadow: 0 2px 10px rgba(14, 165, 233, 0.24);
-        color: #e0f2fe;
+      .dnb-squad-link-pill-bg {
+        fill: #0f1d30;
+        fill-opacity: 1;
       }
-      .dnb-bubble-center-hub[data-locked="1"] {
-        background: radial-gradient(circle at 32% 28%, rgba(255, 255, 255, 0.24), rgba(245, 158, 11, 0.22) 60%, rgba(217, 119, 6, 0.16) 100%);
-        border-color: rgba(251, 191, 36, 0.70);
-        box-shadow: 0 2px 10px rgba(245, 158, 11, 0.24);
-        color: #fef3c7;
-      }
-      .dnb-bubble-center-icon {
-        font-size: 13px;
-        line-height: 1;
-        font-weight: 800;
-      }
-      .dnb-bubble-center-count {
+      .dnb-squad-link-pill-txt {
         font-size: 9.5px;
-        line-height: 1;
         font-weight: 700;
-        opacity: 0.92;
+        font-family: "Microsoft YaHei UI", sans-serif;
       }
-      .dnb-orb {
-        position: absolute;
-        left: 0;
-        top: 0;
-        border-radius: 50%;
-        corner-shape: round;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        padding: 5px 4px 4px;
-        text-align: center;
-        cursor: grab;
-        user-select: none;
-        touch-action: none;
-        will-change: transform;
-        background:
-          radial-gradient(circle at 28% 24%, rgba(255, 255, 255, 0.34) 0%, rgba(255, 255, 255, 0.08) 24%, var(--orb-bg, rgba(56, 189, 248, 0.22)) 60%, rgba(255, 255, 255, 0.16) 100%);
-        border: 1.5px solid var(--orb-border, rgba(125, 211, 252, 0.62));
-        box-shadow:
-          inset 0 2px 6px rgba(255, 255, 255, 0.26),
-          inset 0 -3px 8px rgba(6, 32, 52, 0.30),
-          0 5px 14px rgba(0, 0, 0, 0.26);
-      }
-      .dnb-orb:active {
-        cursor: grabbing;
-      }
-      .dnb-orb::before {
-        content: "";
-        position: absolute;
-        top: 10%;
-        left: 18%;
-        width: 26%;
-        height: 13%;
-        border-radius: 50%;
-        corner-shape: round;
-        background: rgba(255, 255, 255, 0.40);
-        transform: rotate(-32deg);
-        pointer-events: none;
-      }
-      .dnb-orb[data-kind="harness"],
-      .dnb-orb[data-kind="standby-harness"] {
-        border-style: dashed;
-      }
-      .dnb-orb[data-logo="1"] {
-        padding: 4px 3px 3px;
-        gap: 2px;
-      }
-      .dnb-orb-logo {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        line-height: 0;
-        margin-top: 2px;
-        filter: drop-shadow(0 1px 4px rgba(0, 0, 0, 0.35));
-      }
-      .dnb-orb-run-pin {
-        position: absolute;
-        top: 5px;
-        right: 6px;
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-      }
-      .dnb-orb[data-installed="0"] {
-        opacity: 0.80;
-      }
-      .dnb-orb[data-installed="0"]:hover,
-      .dnb-orb[data-installed="0"][data-selected="1"] {
-        opacity: 1;
-      }
-      .dnb-orb[data-running="1"]::after {
-        content: "";
-        position: absolute;
-        inset: -5px;
-        border-radius: 50%;
-        corner-shape: round;
-        border: 1.5px solid var(--orb-dot, #38bdf8);
-        pointer-events: none;
-        animation: dnb-orb-pulse 1.8s ease-in-out infinite;
-      }
-      .dnb-orb[data-selected="1"] {
-        box-shadow:
-          0 0 0 2.5px var(--orb-dot, #38bdf8),
-          0 6px 16px rgba(0, 0, 0, 0.38);
-      }
-      .dnb-orb-top {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        height: 9px;
-        margin-bottom: 1px;
-      }
-      .dnb-orb-dot {
-        width: 6px;
-        height: 6px;
-        border-radius: 50%;
-        corner-shape: round;
-      }
-      .dnb-orb-label {
-        font-size: 10.5px;
-        font-weight: 700;
-        line-height: 1.12;
-        color: var(--dnb-text);
-        text-shadow: 0 1px 2px rgba(0, 0, 0, 0.42);
-        max-width: 100%;
-        overflow: hidden;
-        display: -webkit-box;
-        -webkit-line-clamp: 2;
-        -webkit-box-orient: vertical;
-        word-break: break-all;
-      }
-      .dnb-orb-badge {
-        margin-top: 2px;
-        font-size: 8.5px;
-        font-weight: 700;
-        line-height: 1.1;
-        padding: 1px 5px;
-        border-radius: 999px;
-        corner-shape: round;
-        background: rgba(15, 23, 42, 0.56);
-        color: var(--orb-text, #e2e8f0);
-        border: 1px solid var(--orb-border, rgba(255, 255, 255, 0.22));
-        max-width: 92%;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-      }
-      .dnb-bubble-inspector {
+      .dnb-squad-membrane-head {
+        position: relative;
+        z-index: 3;
         display: flex;
         align-items: center;
         justify-content: space-between;
         gap: 8px;
         flex-wrap: wrap;
-        padding: 7px 10px;
-        border-radius: 12px;
-        background: rgba(255, 255, 255, 0.04);
-        border: 1px solid var(--dnb-border);
+        margin-bottom: 10px;
       }
-      .dnb-bubble-inspector[data-empty="0"] {
-        background: rgba(56, 189, 248, 0.06);
-        border-color: rgba(56, 189, 248, 0.26);
+      .dnb-squad-membrane-title {
+        font-size: 11px;
+        font-weight: 700;
+        color: rgba(186, 230, 253, 0.92);
+        letter-spacing: 0.01em;
       }
-      .dnb-bubble-inspector-info {
+      .dnb-squad-membrane[data-locked="1"] .dnb-squad-membrane-title {
+        color: #fde68a;
+      }
+      .dnb-squad-summary-pills {
+        display: inline-flex;
+        align-items: center;
+        gap: 5px;
+        flex-wrap: wrap;
+      }
+      .dnb-squad-mini-stat {
+        font-size: 10px;
+        font-weight: 600;
+        padding: 1px 7px;
+        border-radius: 999px;
+        corner-shape: round;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+        color: var(--dnb-text-2);
+      }
+      .dnb-squad-mini-stat[data-running="1"] {
+        background: rgba(16, 185, 129, 0.16);
+        border-color: rgba(52, 211, 153, 0.42);
+        color: #6ee7b7;
+      }
+
+      /* Coordinator Top Anchor Hub */
+      .dnb-squad-hub-wrap {
+        position: relative;
+        z-index: 3;
+        display: flex;
+        justify-content: center;
+        margin-bottom: 30px;
+      }
+      .dnb-squad-hub {
+        display: inline-flex;
+        align-items: center;
+        gap: 9px;
+        padding: 7px 15px;
+        border-radius: 999px;
+        corner-shape: round;
+        background:
+          radial-gradient(ellipse at 30% 15%, rgba(255, 255, 255, 0.22), transparent 60%),
+          linear-gradient(135deg, rgba(14, 165, 233, 0.26), rgba(45, 212, 191, 0.16));
+        border: 1.5px solid rgba(103, 232, 249, 0.62);
+        box-shadow: 0 4px 14px rgba(14, 165, 233, 0.20);
+      }
+      .dnb-squad-hub[data-locked="1"] {
+        background:
+          radial-gradient(ellipse at 30% 15%, rgba(255, 255, 255, 0.20), transparent 60%),
+          linear-gradient(135deg, rgba(245, 158, 11, 0.26), rgba(217, 119, 6, 0.14));
+        border-color: rgba(251, 191, 36, 0.72);
+        box-shadow: 0 4px 14px rgba(245, 158, 11, 0.22);
+      }
+      .dnb-squad-hub-star {
+        width: 24px;
+        height: 24px;
+        border-radius: 50%;
+        corner-shape: round;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 13px;
+        font-weight: 800;
+        background: rgba(56, 189, 248, 0.25);
+        border: 1px solid rgba(125, 211, 252, 0.55);
+        color: #e0f2fe;
+        flex-shrink: 0;
+      }
+      .dnb-squad-hub[data-locked="1"] .dnb-squad-hub-star {
+        background: rgba(245, 158, 11, 0.28);
+        border-color: rgba(251, 191, 36, 0.64);
+        color: #fef3c7;
+      }
+      .dnb-squad-hub-text {
+        display: flex;
+        flex-direction: column;
+        gap: 1px;
+      }
+      .dnb-squad-hub-name {
+        font-size: 12px;
+        font-weight: 700;
+        color: var(--dnb-text);
+        line-height: 1.2;
+      }
+      .dnb-squad-hub-sub {
+        font-size: 10px;
+        color: var(--dnb-text-3);
+        line-height: 1.2;
+      }
+
+      /* Tiered Squad Branches Grid */
+      .dnb-squad-branches {
+        position: relative;
+        z-index: 3;
+        display: grid;
+        grid-template-columns: minmax(0, 1fr);
+        column-gap: 44px;
+        row-gap: 32px;
+        align-items: start;
+      }
+      .dnb-squad-branches[data-cols="2"] {
+        grid-template-columns: repeat(2, minmax(0, 1fr));
+      }
+      @media (max-width: 500px) {
+        .dnb-squad-branches[data-cols="2"] {
+          grid-template-columns: minmax(0, 1fr);
+        }
+      }
+
+      /* Primary & Linked Peer Pod Bubbles */
+      .dnb-squad-pod {
+        position: relative;
+        padding: 10px 11px;
+        border-radius: 20px;
+        corner-shape: round;
+        background:
+          radial-gradient(ellipse 80% 45% at 18% 0%, rgba(255, 255, 255, 0.08), transparent 65%),
+          rgba(255, 255, 255, 0.045);
+        border: 1.5px solid var(--pod-border, rgba(125, 211, 252, 0.44));
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.14),
+          0 4px 14px rgba(0, 0, 0, 0.18);
+        display: flex;
+        flex-direction: column;
+        gap: 6px;
+        min-width: 0;
+      }
+      .dnb-squad-pod[data-tier="primary"] {
+        background:
+          radial-gradient(ellipse 80% 50% at 15% 0%, rgba(56, 189, 248, 0.16), transparent 68%),
+          rgba(18, 38, 62, 0.72);
+        border-color: rgba(56, 189, 248, 0.60);
+        box-shadow:
+          inset 0 1px 0 rgba(224, 242, 254, 0.22),
+          0 6px 18px rgba(14, 165, 233, 0.14);
+      }
+      .dnb-squad-pod[data-tier="peer"] {
+        cursor: grab;
+        background:
+          radial-gradient(ellipse 80% 50% at 15% 0%, var(--pod-bg, rgba(167, 139, 250, 0.14)), transparent 70%),
+          rgba(22, 30, 50, 0.70);
+      }
+      .dnb-squad-pod[data-tier="peer"]:active {
+        cursor: grabbing;
+      }
+      .dnb-squad-pod[data-running="1"] {
+        box-shadow:
+          inset 0 1px 0 rgba(255, 255, 255, 0.20),
+          0 0 0 1.5px rgba(52, 211, 153, 0.35),
+          0 6px 18px rgba(0, 0, 0, 0.20);
+      }
+      .dnb-squad-pod-head {
+        display: flex;
+        align-items: flex-start;
+        justify-content: space-between;
+        gap: 6px;
+      }
+      .dnb-squad-pod-ident {
         display: flex;
         align-items: center;
         gap: 6px;
         flex: 1;
         min-width: 0;
+        flex-wrap: wrap;
       }
-      .dnb-bubble-inspector-sub {
+      .dnb-squad-dot {
+        width: 7px;
+        height: 7px;
+        border-radius: 50%;
+        corner-shape: round;
+        flex-shrink: 0;
+      }
+      .dnb-squad-pod-name {
+        font-size: 12.5px;
+        font-weight: 700;
+        color: var(--dnb-text);
+        line-height: 1.25;
+        word-break: break-word;
+      }
+      .dnb-squad-pod-acts {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
+        flex-shrink: 0;
+      }
+      .dnb-squad-pod-sub {
         font-size: 11px;
+        line-height: 1.4;
+        color: var(--dnb-text-3);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      /* Unmistakable Tier Role Badges: 主 / 联动主窗 / 次 / 外协 */
+      .dnb-tier-badge {
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        height: 17px;
+        padding: 0 6px;
+        border-radius: 999px;
+        corner-shape: round;
+        font-size: 9.5px;
+        font-weight: 700;
+        letter-spacing: 0.02em;
+        flex-shrink: 0;
+        line-height: 1;
+      }
+      .dnb-tier-badge[data-tier="primary"] {
+        background: linear-gradient(135deg, #0284c7, #2563eb);
+        color: #fff;
+        border: 1px solid rgba(125, 211, 252, 0.55);
+      }
+      .dnb-tier-badge[data-tier="peer"] {
+        background: var(--pod-bg, rgba(167, 139, 250, 0.20));
+        color: var(--pod-text, #c4b5fd);
+        border: 1px solid var(--pod-border, rgba(167, 139, 250, 0.45));
+      }
+      .dnb-tier-badge[data-tier="secondary"] {
+        height: 15px;
+        padding: 0 5px;
+        font-size: 9px;
+        background: rgba(148, 163, 184, 0.16);
+        color: var(--dnb-text-2);
+        border: 1px solid rgba(148, 163, 184, 0.28);
+      }
+      .dnb-tier-badge[data-tier="harness"] {
+        background: rgba(245, 158, 11, 0.16);
+        color: #fcd34d;
+        border: 1px solid rgba(245, 158, 11, 0.44);
+      }
+      .dnb-tier-badge[data-tier="standby"] {
+        height: 15px;
+        padding: 0 5px;
+        font-size: 9px;
+        background: rgba(148, 163, 184, 0.14);
+        color: var(--dnb-text-3);
+        border: 1px solid rgba(148, 163, 184, 0.25);
+      }
+
+      /* Nested Secondary Subagent Cluster inside Owner Pod */
+      .dnb-sub-cluster {
+        margin-top: 3px;
+        padding: 7px 8px 7px 9px;
+        border-radius: 14px;
+        corner-shape: round;
+        background: rgba(6, 16, 30, 0.42);
+        border: 1px solid rgba(148, 163, 184, 0.22);
+        display: flex;
+        flex-direction: column;
+        gap: 5px;
+      }
+      .dnb-sub-cluster-head {
+        font-size: 10px;
+        font-weight: 600;
+        color: var(--dnb-text-3);
+        line-height: 1.2;
+      }
+      .dnb-sub-list {
+        display: flex;
+        flex-direction: column;
+        gap: 4px;
+        padding-left: 7px;
+        border-left: 1.5px solid rgba(125, 211, 252, 0.28);
+      }
+      .dnb-sub-pill {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 6px;
+        padding: 4px 7px;
+        border-radius: 10px;
+        corner-shape: round;
+        background: rgba(255, 255, 255, 0.045);
+        border: 1px solid rgba(255, 255, 255, 0.09);
+        min-width: 0;
+      }
+      .dnb-sub-pill[data-running="1"] {
+        border-color: rgba(52, 211, 153, 0.45);
+        background: rgba(16, 185, 129, 0.09);
+      }
+      .dnb-sub-pill-main {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex: 1;
+        min-width: 0;
+      }
+      .dnb-sub-name {
+        font-size: 11px;
+        font-weight: 600;
+        color: var(--dnb-text);
+        white-space: nowrap;
+        flex-shrink: 0;
+      }
+      .dnb-sub-task {
+        font-size: 10px;
         color: var(--dnb-text-3);
         overflow: hidden;
         text-overflow: ellipsis;
         white-space: nowrap;
         min-width: 0;
       }
-      .dnb-bubble-inspector-acts {
+      .dnb-sub-pill-acts {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        flex-shrink: 0;
+      }
+      .dnb-mini-btn {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        height: 18px;
+        padding: 0 5px;
+        border-radius: 999px;
+        corner-shape: round;
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--dnb-text-2);
+        font: inherit;
+        font-size: 9.5px;
+        font-weight: 600;
+        cursor: pointer;
+        transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
+      }
+      .dnb-mini-btn:hover {
+        background: rgba(56, 189, 248, 0.16);
+        border-color: rgba(56, 189, 248, 0.45);
+        color: var(--dnb-text);
+      }
+
+      /* Dispatched External Harness Wing Bubble */
+      .dnb-harness-pod {
+        padding: 9px 11px;
+        border-radius: 20px;
+        corner-shape: round;
+        border: 1.5px dashed rgba(245, 158, 11, 0.48);
+        background:
+          radial-gradient(ellipse 80% 50% at 50% 0%, rgba(245, 158, 11, 0.10), transparent 72%),
+          rgba(22, 24, 38, 0.66);
+        display: flex;
+        flex-direction: column;
+        gap: 7px;
+        min-width: 0;
+      }
+      .dnb-harness-pod[data-span="full"] {
+        grid-column: 1 / -1;
+      }
+      .dnb-harness-pod-head {
+        display: flex;
+        align-items: center;
+        gap: 6px;
+        flex-wrap: wrap;
+      }
+      .dnb-harness-pod-title {
+        font-size: 11.5px;
+        font-weight: 700;
+        color: var(--dnb-text);
+      }
+      .dnb-harness-pod-note {
+        font-size: 10px;
+        color: var(--dnb-text-3);
+        margin-left: auto;
+      }
+      .dnb-harness-cards {
+        display: flex;
+        flex-wrap: wrap;
+        gap: 7px;
+      }
+      .dnb-harness-card {
+        flex: 1 1 250px;
+        display: flex;
+        align-items: center;
+        gap: 8px;
+        padding: 7px 9px;
+        border-radius: 15px;
+        corner-shape: round;
+        background: rgba(255, 255, 255, 0.05);
+        border: 1px solid rgba(255, 255, 255, 0.14);
+        cursor: grab;
+        min-width: 0;
+      }
+      .dnb-harness-card:active {
+        cursor: grabbing;
+      }
+      .dnb-harness-card[data-running="1"] {
+        border-color: rgba(52, 211, 153, 0.58);
+        background: rgba(16, 185, 129, 0.10);
+      }
+      .dnb-harness-card-info {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .dnb-harness-card-top {
         display: flex;
         align-items: center;
         gap: 5px;
-        flex-shrink: 0;
         flex-wrap: wrap;
       }
-      .dnb-droplet-dot {
-        width: 8px;
-        height: 8px;
-        border-radius: 50%;
-        corner-shape: round;
-        flex-shrink: 0;
-      }
-      .dnb-droplet-kind {
-        font-size: 9.5px;
+      .dnb-harness-card-name {
+        font-size: 12px;
         font-weight: 700;
-        padding: 1px 6px;
+        color: var(--dnb-text);
+        white-space: nowrap;
+      }
+      .dnb-harness-state-tag {
+        display: inline-flex;
+        align-items: center;
+        gap: 3px;
+        height: 15px;
+        padding: 0 5px;
         border-radius: 999px;
         corner-shape: round;
-        background: rgba(255, 255, 255, 0.07);
-        color: var(--dnb-text-2);
-        border: 1px solid var(--dnb-border);
+        font-size: 9px;
+        font-weight: 700;
+        background: rgba(56, 189, 248, 0.14);
+        color: #7dd3fc;
+        border: 1px solid rgba(56, 189, 248, 0.32);
+      }
+      .dnb-harness-state-tag[data-running="1"] {
+        background: rgba(16, 185, 129, 0.18);
+        color: #6ee7b7;
+        border-color: rgba(52, 211, 153, 0.44);
+      }
+      .dnb-harness-cfg-tag {
+        display: inline-flex;
+        align-items: center;
+        height: 15px;
+        padding: 0 5px;
+        border-radius: 999px;
+        corner-shape: round;
+        font-size: 9px;
+        font-weight: 600;
+        background: rgba(255, 255, 255, 0.06);
+        color: var(--dnb-text-3);
+        border: 1px solid rgba(255, 255, 255, 0.12);
+      }
+      .dnb-harness-card-role {
+        font-size: 10.5px;
+        color: var(--dnb-text-3);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dnb-harness-card-acts {
+        display: inline-flex;
+        align-items: center;
+        gap: 4px;
         flex-shrink: 0;
       }
+
+      /* Official Brand Logo Circular Badges */
+      .dnb-brand-badge {
+        width: 30px;
+        height: 30px;
+        border-radius: 50%;
+        corner-shape: round;
+        display: inline-flex;
+        align-items: center;
+        justify-content: center;
+        flex-shrink: 0;
+        background: rgba(255, 255, 255, 0.08);
+        border: 1px solid rgba(255, 255, 255, 0.18);
+        color: var(--dnb-text);
+      }
+      .dnb-brand-badge[data-provider="codex"] {
+        background: rgba(56, 189, 248, 0.14);
+        border-color: rgba(125, 211, 252, 0.36);
+        color: #f8fafc;
+      }
+      .dnb-brand-badge[data-provider="claude-code"] {
+        background: rgba(217, 119, 87, 0.15);
+        border-color: rgba(217, 119, 87, 0.42);
+      }
+
+      /* Dispatch Input Bar & Standby Pool */
       .dnb-bubble-dispatch-bar {
         display: flex;
         align-items: center;
         gap: 6px;
-      }
-      .dnb-bubble-catalog {
         padding: 7px 9px;
-        border-radius: 10px;
-        background: rgba(0, 0, 0, 0.22);
-        border: 1px solid var(--dnb-border);
+        border-radius: 14px;
+        corner-shape: round;
+        background: rgba(56, 189, 248, 0.08);
+        border: 1px solid rgba(56, 189, 248, 0.34);
+      }
+      .dnb-bubble-dispatch-bar .dnb-brand-badge {
+        width: 24px;
+        height: 24px;
+      }
+      .dnb-dispatch-target-tag {
+        font-size: 11px;
+        font-weight: 700;
+        color: #7dd3fc;
+        white-space: nowrap;
+      }
+      .dnb-standby-zone {
+        padding: 9px 11px;
+        border-radius: 18px;
+        corner-shape: round;
+        background: rgba(255, 255, 255, 0.03);
+        border: 1px dashed var(--dnb-border-strong);
         display: flex;
         flex-direction: column;
-        gap: 5px;
+        gap: 7px;
+        transition: border-color 0.18s ease, background 0.18s ease;
       }
-      .dnb-bubble-catalog-row {
+      .dnb-standby-zone[data-dragover="1"] {
+        border-color: #f59e0b;
+        background: rgba(245, 158, 11, 0.08);
+      }
+      .dnb-standby-head {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        gap: 8px;
+        flex-wrap: wrap;
+      }
+      .dnb-standby-title {
+        font-size: 11px;
+        font-weight: 700;
+        color: var(--dnb-text-2);
+      }
+      .dnb-standby-hint {
+        font-size: 10px;
+        color: var(--dnb-text-3);
+      }
+      .dnb-standby-grid {
+        display: grid;
+        grid-template-columns: repeat(auto-fit, minmax(230px, 1fr));
+        gap: 7px;
+      }
+      .dnb-standby-card {
         display: flex;
         align-items: center;
         gap: 8px;
+        padding: 6px 9px;
+        border-radius: 14px;
+        corner-shape: round;
+        background: var(--dnb-card);
+        border: 1px solid var(--dnb-border);
+        border-left-width: 3px;
+        cursor: grab;
+        min-width: 0;
       }
-      html[data-ds-theme-source="light"] .dnb-bubble-tank,
-      html[data-ds-theme="light"] .dnb-bubble-tank,
-      [data-ds-theme-source="light"] .dnb-bubble-tank {
+      .dnb-standby-card:active {
+        cursor: grabbing;
+      }
+      .dnb-standby-card:hover {
+        border-color: var(--dnb-border-strong);
+        background: var(--dnb-card-hover);
+      }
+      .dnb-standby-card-body {
+        flex: 1;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+        gap: 2px;
+      }
+      .dnb-standby-card-top {
+        display: flex;
+        align-items: center;
+        gap: 5px;
+        flex-wrap: wrap;
+      }
+      .dnb-standby-card-name {
+        font-size: 11.5px;
+        font-weight: 700;
+        color: var(--dnb-text);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dnb-standby-card-desc {
+        font-size: 10px;
+        color: var(--dnb-text-3);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+      .dnb-standby-empty {
+        font-size: 11px;
+        color: var(--dnb-text-3);
+        line-height: 1.45;
+      }
+
+      /* Light Theme Overrides for Collab Squad Bubble */
+      html[data-ds-theme-source="light"] .dnb-bubble-status,
+      html[data-ds-theme="light"] .dnb-bubble-status,
+      [data-ds-theme-source="light"] .dnb-bubble-status {
+        color: #047857;
+        background: rgba(16, 185, 129, 0.12);
+        border-color: rgba(5, 150, 105, 0.34);
+      }
+      html[data-ds-theme-source="light"] .dnb-bubble-status[data-locked="1"],
+      html[data-ds-theme="light"] .dnb-bubble-status[data-locked="1"],
+      [data-ds-theme-source="light"] .dnb-bubble-status[data-locked="1"] {
+        color: #b45309;
+        background: rgba(245, 158, 11, 0.14);
+        border-color: rgba(217, 119, 6, 0.42);
+      }
+      html[data-ds-theme-source="light"] .dnb-bubble-estop-btn,
+      html[data-ds-theme="light"] .dnb-bubble-estop-btn,
+      [data-ds-theme-source="light"] .dnb-bubble-estop-btn {
+        color: #b91c1c !important;
+        background: rgba(239, 68, 68, 0.10) !important;
+      }
+      html[data-ds-theme-source="light"] .dnb-squad-membrane,
+      html[data-ds-theme="light"] .dnb-squad-membrane,
+      [data-ds-theme-source="light"] .dnb-squad-membrane {
         background:
-          radial-gradient(ellipse 84% 44% at 44% 0%, rgba(255, 255, 255, 0.88), transparent 70%),
-          radial-gradient(circle at 26% 62%, rgba(20, 184, 166, 0.12), transparent 56%),
-          linear-gradient(175deg, #dcf4ff 0%, #eaf8ff 52%, #d4eefc 100%);
-        border-color: rgba(2, 132, 199, 0.40);
+          radial-gradient(ellipse 90% 48% at 50% 0%, rgba(255, 255, 255, 0.88), transparent 72%),
+          radial-gradient(circle at 20% 80%, rgba(14, 165, 233, 0.08), transparent 58%),
+          #eef7fd;
+        border-color: rgba(2, 132, 199, 0.36);
         box-shadow:
-          inset 0 1px 0 rgba(255, 255, 255, 0.92),
-          inset 0 -8px 20px rgba(14, 165, 233, 0.12),
-          inset 0 0 22px rgba(14, 165, 233, 0.08);
+          inset 0 1px 0 rgba(255, 255, 255, 0.95),
+          0 6px 18px rgba(15, 23, 42, 0.06);
       }
-      html[data-ds-theme-source="light"] .dnb-orb-logo,
-      html[data-ds-theme="light"] .dnb-orb-logo,
-      [data-ds-theme-source="light"] .dnb-orb-logo {
-        filter: none;
+      html[data-ds-theme-source="light"] .dnb-squad-membrane[data-locked="1"],
+      html[data-ds-theme="light"] .dnb-squad-membrane[data-locked="1"],
+      [data-ds-theme-source="light"] .dnb-squad-membrane[data-locked="1"] {
+        background:
+          radial-gradient(ellipse 90% 48% at 50% 0%, rgba(254, 243, 199, 0.72), transparent 72%),
+          #fffbeb;
+        border-color: rgba(217, 119, 6, 0.54);
       }
-      html[data-ds-theme-source="light"] .dnb-bubble-tank[data-locked="1"],
-      html[data-ds-theme="light"] .dnb-bubble-tank[data-locked="1"],
-      [data-ds-theme-source="light"] .dnb-bubble-tank[data-locked="1"] {
-        background: radial-gradient(circle at 38% 48%, rgba(217, 119, 6, 0.09), transparent 62%), #fffbeb;
-        border-color: rgba(217, 119, 6, 0.48);
-      }
-      html[data-ds-theme-source="light"] .dnb-bubble-center-hub,
-      html[data-ds-theme="light"] .dnb-bubble-center-hub,
-      [data-ds-theme-source="light"] .dnb-bubble-center-hub {
+      html[data-ds-theme-source="light"] .dnb-squad-membrane-title,
+      html[data-ds-theme="light"] .dnb-squad-membrane-title,
+      [data-ds-theme-source="light"] .dnb-squad-membrane-title {
         color: #0369a1;
       }
-      html[data-ds-theme-source="light"] .dnb-orb,
-      html[data-ds-theme="light"] .dnb-orb,
-      [data-ds-theme-source="light"] .dnb-orb {
-        box-shadow:
-          inset 0 2px 6px rgba(255, 255, 255, 0.85),
-          inset 0 -3px 8px rgba(15, 23, 42, 0.10),
-          0 5px 14px rgba(15, 23, 42, 0.12);
+      html[data-ds-theme-source="light"] .dnb-squad-membrane[data-locked="1"] .dnb-squad-membrane-title,
+      html[data-ds-theme="light"] .dnb-squad-membrane[data-locked="1"] .dnb-squad-membrane-title,
+      [data-ds-theme-source="light"] .dnb-squad-membrane[data-locked="1"] .dnb-squad-membrane-title {
+        color: #b45309;
       }
-      html[data-ds-theme-source="light"] .dnb-orb-label,
-      html[data-ds-theme="light"] .dnb-orb-label,
-      [data-ds-theme-source="light"] .dnb-orb-label {
-        color: #0f172a;
-        text-shadow: 0 1px 1px rgba(255, 255, 255, 0.85);
+      html[data-ds-theme-source="light"] .dnb-squad-link-pill-bg,
+      html[data-ds-theme="light"] .dnb-squad-link-pill-bg,
+      [data-ds-theme-source="light"] .dnb-squad-link-pill-bg {
+        fill: #ffffff;
+        fill-opacity: 1;
       }
-      html[data-ds-theme-source="light"] .dnb-orb-badge,
-      html[data-ds-theme="light"] .dnb-orb-badge,
-      [data-ds-theme-source="light"] .dnb-orb-badge {
+      html[data-ds-theme-source="light"] .dnb-squad-mini-stat,
+      html[data-ds-theme="light"] .dnb-squad-mini-stat,
+      [data-ds-theme-source="light"] .dnb-squad-mini-stat {
+        background: rgba(15, 23, 42, 0.05);
+        border-color: rgba(15, 23, 42, 0.12);
+      }
+      html[data-ds-theme-source="light"] .dnb-squad-mini-stat[data-running="1"],
+      html[data-ds-theme="light"] .dnb-squad-mini-stat[data-running="1"],
+      [data-ds-theme-source="light"] .dnb-squad-mini-stat[data-running="1"] {
+        background: rgba(16, 185, 129, 0.12);
+        color: #047857;
+      }
+      html[data-ds-theme-source="light"] .dnb-squad-hub,
+      html[data-ds-theme="light"] .dnb-squad-hub,
+      [data-ds-theme-source="light"] .dnb-squad-hub {
+        background: linear-gradient(135deg, rgba(224, 242, 254, 0.92), rgba(204, 251, 241, 0.85));
+        border-color: rgba(2, 132, 199, 0.48);
+      }
+      html[data-ds-theme-source="light"] .dnb-squad-hub-star,
+      html[data-ds-theme="light"] .dnb-squad-hub-star,
+      [data-ds-theme-source="light"] .dnb-squad-hub-star {
+        background: rgba(2, 132, 199, 0.14);
+        color: #0369a1;
+      }
+      html[data-ds-theme-source="light"] .dnb-squad-pod,
+      html[data-ds-theme="light"] .dnb-squad-pod,
+      [data-ds-theme-source="light"] .dnb-squad-pod {
         background: rgba(255, 255, 255, 0.86);
+        box-shadow: 0 3px 12px rgba(15, 23, 42, 0.06);
       }
-      html[data-ds-theme-source="light"] .dnb-bubble-inspector,
-      html[data-ds-theme="light"] .dnb-bubble-inspector,
-      [data-ds-theme-source="light"] .dnb-bubble-inspector {
-        background: rgba(15, 23, 42, 0.03);
+      html[data-ds-theme-source="light"] .dnb-squad-pod[data-tier="primary"],
+      html[data-ds-theme="light"] .dnb-squad-pod[data-tier="primary"],
+      [data-ds-theme-source="light"] .dnb-squad-pod[data-tier="primary"] {
+        background: linear-gradient(180deg, rgba(224, 242, 254, 0.72), rgba(255, 255, 255, 0.94));
+        border-color: rgba(2, 132, 199, 0.45);
       }
-      html[data-ds-theme-source="light"] .dnb-bubble-catalog,
-      html[data-ds-theme="light"] .dnb-bubble-catalog,
-      [data-ds-theme-source="light"] .dnb-bubble-catalog {
-        background: rgba(15, 23, 42, 0.04);
+      html[data-ds-theme-source="light"] .dnb-sub-cluster,
+      html[data-ds-theme="light"] .dnb-sub-cluster,
+      [data-ds-theme-source="light"] .dnb-sub-cluster {
+        background: rgba(241, 245, 249, 0.88);
+        border-color: rgba(15, 23, 42, 0.12);
+      }
+      html[data-ds-theme-source="light"] .dnb-sub-pill,
+      html[data-ds-theme="light"] .dnb-sub-pill,
+      [data-ds-theme-source="light"] .dnb-sub-pill {
+        background: #ffffff;
+        border-color: rgba(15, 23, 42, 0.10);
+      }
+      html[data-ds-theme-source="light"] .dnb-mini-btn,
+      html[data-ds-theme="light"] .dnb-mini-btn,
+      [data-ds-theme-source="light"] .dnb-mini-btn {
+        background: rgba(15, 23, 42, 0.05);
+        border-color: rgba(15, 23, 42, 0.14);
+      }
+      html[data-ds-theme-source="light"] .dnb-harness-pod,
+      html[data-ds-theme="light"] .dnb-harness-pod,
+      [data-ds-theme-source="light"] .dnb-harness-pod {
+        background: rgba(255, 251, 235, 0.84);
+        border-color: rgba(217, 119, 6, 0.46);
+      }
+      html[data-ds-theme-source="light"] .dnb-harness-card,
+      html[data-ds-theme="light"] .dnb-harness-card,
+      [data-ds-theme-source="light"] .dnb-harness-card {
+        background: #ffffff;
+        border-color: rgba(15, 23, 42, 0.13);
+      }
+      html[data-ds-theme-source="light"] .dnb-harness-state-tag,
+      html[data-ds-theme="light"] .dnb-harness-state-tag,
+      [data-ds-theme-source="light"] .dnb-harness-state-tag {
+        background: rgba(2, 132, 199, 0.10);
+        color: #0369a1;
+        border-color: rgba(2, 132, 199, 0.28);
+      }
+      html[data-ds-theme-source="light"] .dnb-harness-cfg-tag,
+      html[data-ds-theme="light"] .dnb-harness-cfg-tag,
+      [data-ds-theme-source="light"] .dnb-harness-cfg-tag {
+        background: rgba(15, 23, 42, 0.05);
+        border-color: rgba(15, 23, 42, 0.14);
+      }
+      html[data-ds-theme-source="light"] .dnb-brand-badge[data-provider="codex"],
+      html[data-ds-theme="light"] .dnb-brand-badge[data-provider="codex"],
+      [data-ds-theme-source="light"] .dnb-brand-badge[data-provider="codex"] {
+        background: rgba(15, 23, 42, 0.06);
+        border-color: rgba(15, 23, 42, 0.18);
+        color: #0f172a;
+      }
+      html[data-ds-theme-source="light"] .dnb-tier-badge[data-tier="harness"],
+      html[data-ds-theme="light"] .dnb-tier-badge[data-tier="harness"],
+      [data-ds-theme-source="light"] .dnb-tier-badge[data-tier="harness"] {
+        background: rgba(217, 119, 6, 0.12);
+        color: #b45309;
+        border-color: rgba(217, 119, 6, 0.36);
+      }
+      html[data-ds-theme-source="light"] .dnb-dispatch-target-tag,
+      html[data-ds-theme="light"] .dnb-dispatch-target-tag,
+      [data-ds-theme-source="light"] .dnb-dispatch-target-tag {
+        color: #0369a1;
+      }
+      html[data-ds-theme-source="light"] .dnb-standby-zone,
+      html[data-ds-theme="light"] .dnb-standby-zone,
+      [data-ds-theme-source="light"] .dnb-standby-zone {
+        background: rgba(15, 23, 42, 0.02);
       }
     `
 
@@ -24182,697 +24668,309 @@ window.__ModuleLoader__.load({
      */
 
 
-    function HarnessLogoIcon({ provider, size = 24, color = 'currentColor' }) {
-      const commonSvg = {
-        width: size,
-        height: size,
-        viewBox: '0 0 24 24',
-        fill: 'none',
-        'aria-hidden': 'true',
-        style: { display: 'block', flexShrink: 0, color },
-      }
+    const CODEX_OFFICIAL_SVG_PATH =
+      'M11.6475 18.3409C11.0975 18.3409 10.575 18.2364 10.08 18.0274C9.58502 17.8184 9.14502 17.5269 8.76002 17.1529C8.34202 17.2959 7.90751 17.3674 7.45651 17.3674C6.71951 17.3674 6.03751 17.1859 5.41051 16.8229C4.78351 16.4599 4.27751 15.9649 3.89251 15.3379C3.51851 14.7109 3.33151 14.0124 3.33151 13.2424C3.33151 12.9234 3.37551 12.5769 3.46351 12.2029C3.02351 11.7959 2.68251 11.3284 2.44051 10.8004C2.19851 10.2614 2.07751 9.70044 2.07751 9.11744C2.07751 8.52344 2.20401 7.95144 2.45701 7.40144C2.71001 6.85144 3.06201 6.37844 3.51301 5.98244C3.97501 5.57544 4.50851 5.29494 5.11351 5.14094C5.23451 4.51394 5.48751 3.95294 5.87251 3.45794C6.26851 2.95194 6.75252 2.55594 7.32452 2.26994C7.89652 1.98394 8.50702 1.84094 9.15602 1.84094C9.70602 1.84094 10.2285 1.94544 10.7235 2.15444C11.2185 2.36344 11.6585 2.65494 12.0435 3.02894C12.4615 2.88594 12.896 2.81444 13.347 2.81444C14.084 2.81444 14.766 2.99594 15.393 3.35894C16.02 3.72194 16.5205 4.21694 16.8945 4.84394C17.2795 5.47094 17.472 6.16944 17.472 6.93944C17.472 7.25844 17.428 7.60494 17.34 7.97894C17.78 8.38594 18.121 8.85894 18.363 9.39794C18.605 9.92594 18.726 10.4814 18.726 11.0644C18.726 11.6584 18.5995 12.2304 18.3465 12.7804C18.0935 13.3304 17.736 13.8089 17.274 14.2159C16.823 14.6119 16.295 14.8869 15.69 15.0409C15.569 15.6679 15.3105 16.2289 14.9145 16.7239C14.5295 17.2299 14.051 17.6259 13.479 17.9119C12.907 18.1979 12.2965 18.3409 11.6475 18.3409ZM7.57201 16.2784C8.12201 16.2784 8.60051 16.1629 9.00751 15.9319L12.1095 14.1499C12.2195 14.0729 12.2745 13.9684 12.2745 13.8364V12.4174L8.28152 14.7109C8.03952 14.8539 7.79751 14.8539 7.55552 14.7109L4.43701 12.9124C4.43701 12.9454 4.43151 12.9839 4.42051 13.0279C4.42051 13.0719 4.42051 13.1379 4.42051 13.2259C4.42051 13.7869 4.55252 14.3039 4.81651 14.7769C5.09152 15.2389 5.47101 15.6019 5.95501 15.8659C6.43901 16.1409 6.97801 16.2784 7.57201 16.2784ZM7.73701 13.5889C7.80301 13.6219 7.86351 13.6384 7.91851 13.6384C7.97351 13.6384 8.02852 13.6219 8.08352 13.5889L9.32101 12.8794L5.34451 10.5694C5.10251 10.4264 4.98151 10.2119 4.98151 9.92594V6.34544C4.43151 6.58744 3.99151 6.96144 3.66151 7.46744C3.33151 7.96244 3.16651 8.51244 3.16651 9.11744C3.16651 9.65644 3.30401 10.1734 3.57901 10.6684C3.85401 11.1634 4.21151 11.5374 4.65151 11.7904L7.73701 13.5889ZM11.6475 17.2519C12.2305 17.2519 12.7585 17.1199 13.2315 16.8559C13.7045 16.5919 14.0785 16.2289 14.3535 15.7669C14.6285 15.3049 14.766 14.7879 14.766 14.2159V10.6519C14.766 10.5199 14.711 10.4209 14.601 10.3549L13.347 9.62894V14.2324C13.347 14.5184 13.226 14.7329 12.984 14.8759L9.86551 16.6744C10.4045 17.0594 10.9985 17.2519 11.6475 17.2519ZM12.2745 11.2129V8.96894L10.41 7.91294L8.52902 8.96894V11.2129L10.41 12.2689L12.2745 11.2129ZM7.45651 5.94944C7.45651 5.66344 7.57752 5.44894 7.81952 5.30594L10.938 3.50744C10.399 3.12244 9.80502 2.92994 9.15602 2.92994C8.57302 2.92994 8.04501 3.06194 7.57201 3.32594C7.09902 3.58994 6.72502 3.95294 6.45002 4.41494C6.18602 4.87694 6.05401 5.39394 6.05401 5.96594V9.51344C6.05401 9.64544 6.10901 9.74994 6.21902 9.82694L7.45651 10.5529V5.94944ZM15.8385 13.8364C16.3885 13.5944 16.823 13.2204 17.142 12.7144C17.472 12.2084 17.637 11.6584 17.637 11.0644C17.637 10.5254 17.4995 10.0084 17.2245 9.51344C16.9495 9.01844 16.592 8.64444 16.152 8.39144L13.0665 6.60944C13.0005 6.56544 12.94 6.54894 12.885 6.55994C12.83 6.55994 12.775 6.57644 12.72 6.60944L11.4825 7.30244L15.4755 9.62894C15.5965 9.69494 15.6845 9.78294 15.7395 9.89294C15.8055 9.99194 15.8385 10.1129 15.8385 10.2559V13.8364ZM12.522 5.45444C12.764 5.30044 13.006 5.30044 13.248 5.45444L16.383 7.28594C16.383 7.20894 16.383 7.10994 16.383 6.98894C16.383 6.46094 16.251 5.96044 15.987 5.48744C15.734 5.00344 15.3655 4.61844 14.8815 4.33244C14.4085 4.04644 13.8585 3.90344 13.2315 3.90344C12.6815 3.90344 12.203 4.01894 11.796 4.24994L8.69402 6.03194C8.58402 6.10894 8.52902 6.21344 8.52902 6.34544V7.76444L12.522 5.45444Z'
+
+    const CLAUDE_OFFICIAL_SVG_PATH =
+      'M52.4285 162.873L98.7844 136.879L99.5485 134.602L98.7844 133.334H96.4921L88.7237 132.862L62.2346 132.153L39.3113 131.207L17.0249 130.026L11.4214 128.844L6.2 121.873L6.7094 118.447L11.4214 115.257L18.171 115.847L33.0711 116.911L55.485 118.447L71.6586 119.392L95.728 121.873H99.5485L100.058 120.337L98.7844 119.392L97.7656 118.447L74.5877 102.732L49.4995 86.1905L36.3823 76.62L29.3779 71.7757L25.8121 67.2858L24.2839 57.3608L30.6515 50.2716L39.3113 50.8623L41.4763 51.4531L50.2636 58.1879L68.9842 72.7209L93.4357 90.6804L97.0015 93.6343L98.4374 92.6652L98.6571 91.9801L97.0015 89.2625L83.757 65.2772L69.621 40.8192L63.2534 30.6579L61.5978 24.632C60.9565 22.1032 60.579 20.0111 60.579 17.4246L67.8381 7.49965L71.9133 6.19995L81.7193 7.49965L85.7946 11.0443L91.9074 24.9865L101.714 46.8451L116.996 76.62L121.453 85.4816L123.873 93.6343L124.764 96.1155H126.292V94.6976L127.566 77.9197L129.858 57.3608L132.15 30.8942L132.915 23.4505L136.608 14.4708L143.994 9.62643L149.725 12.344L154.437 19.0788L153.8 23.4505L150.998 41.6463L145.522 70.1215L141.957 89.2625H143.994L146.414 86.7813L156.093 74.0206L172.266 53.698L179.398 45.6635L187.803 36.802L193.152 32.5484H203.34L210.726 43.6549L207.415 55.1159L196.972 68.3492L188.312 79.5739L175.896 96.2095L168.191 109.585L168.882 110.689L170.738 110.53L198.755 104.504L213.91 101.787L231.994 98.7149L240.144 102.496L241.036 106.395L237.852 114.311L218.495 119.037L195.826 123.645L162.07 131.592L161.696 131.893L162.137 132.547L177.36 133.925L183.855 134.279H199.774L229.447 136.524L237.215 141.605L241.8 147.867L241.036 152.711L229.065 158.737L213.019 154.956L175.45 145.977L162.587 142.787H160.805V143.85L171.502 154.366L191.242 172.089L215.82 195.011L217.094 200.682L213.91 205.172L210.599 204.699L188.949 188.394L180.544 181.069L161.696 165.118H160.422V166.772L164.752 173.152L187.803 207.771L188.949 218.405L187.294 221.832L181.308 223.959L174.813 222.777L161.187 203.754L147.305 182.486L136.098 163.345L134.745 164.2L128.075 235.42L125.019 239.082L117.887 241.8L111.902 237.31L108.718 229.984L111.902 215.452L115.722 196.547L118.779 181.541L121.58 162.873L123.291 156.636L123.14 156.219L121.773 156.449L107.699 175.752L86.304 204.699L69.3663 222.777L65.291 224.431L58.2867 220.768L58.9235 214.27L62.8713 208.48L86.304 178.705L100.44 160.155L109.551 149.507L109.462 147.967L108.959 147.924L46.6977 188.512L35.6182 189.93L30.7788 185.44L31.4156 178.115L33.7079 175.752L52.4285 162.873Z'
+
+    function HarnessLogoIcon({ provider, size = 18 }) {
       if (provider === 'codex') {
         return h(
-          'svg',
-          commonSvg,
-          Array.from({ length: 6 }, (_, i) =>
-            h('path', {
-              key: i,
-              d: 'M12 3.1 A 3.4 3.4 0 0 1 15.4 6.5 L 15.4 10.6 A 3.4 3.4 0 0 1 12 14',
-              transform: `rotate(${i * 60} 12 12)`,
-              stroke: 'currentColor',
-              strokeWidth: 1.65,
-              strokeLinecap: 'round',
-            }),
+          'span',
+          { className: 'dnb-brand-badge', 'data-provider': 'codex' },
+          h(
+            'svg',
+            {
+              width: size,
+              height: size,
+              viewBox: '0 0 21 21',
+              fill: 'none',
+              'data-official-logo': '1',
+              'data-provider': 'codex',
+              'aria-hidden': 'true',
+              style: { display: 'block', flexShrink: 0 },
+            },
+            h('path', { d: CODEX_OFFICIAL_SVG_PATH, fill: 'currentColor' }),
           ),
         )
       }
       if (provider === 'claude-code') {
         return h(
-          'svg',
-          commonSvg,
-          Array.from({ length: 12 }, (_, i) => {
-            const ang = (i * Math.PI) / 6
-            const r1 = 3.1
-            const r2 = i % 2 === 0 ? 10.1 : 8.4
-            const x1 = 12 + Math.cos(ang) * r1
-            const y1 = 12 + Math.sin(ang) * r1
-            const x2 = 12 + Math.cos(ang) * r2
-            const y2 = 12 + Math.sin(ang) * r2
-            return h('line', {
-              key: i,
-              x1: x1.toFixed(2),
-              y1: y1.toFixed(2),
-              x2: x2.toFixed(2),
-              y2: y2.toFixed(2),
-              stroke: 'currentColor',
-              strokeWidth: i % 2 === 0 ? 1.9 : 1.55,
-              strokeLinecap: 'round',
-            })
-          }),
-          h('circle', { cx: 12, cy: 12, r: 1.65, fill: 'currentColor' }),
-        )
-      }
-      if (provider === 'acp') {
-        return h(
-          'svg',
-          commonSvg,
-          h('circle', {
-            cx: 12,
-            cy: 12,
-            r: 7.4,
-            stroke: 'currentColor',
-            strokeWidth: 1.35,
-            strokeDasharray: '10 4',
-            opacity: 0.72,
-          }),
-          h('path', {
-            d: 'M12 5.4 L17.6 15.5 L6.4 15.5 Z',
-            stroke: 'currentColor',
-            strokeWidth: 1.45,
-            strokeLinejoin: 'round',
-            opacity: 0.85,
-          }),
-          h('circle', { cx: 12, cy: 5.2, r: 2.2, fill: 'currentColor' }),
-          h('circle', { cx: 17.8, cy: 15.6, r: 2.2, fill: 'currentColor' }),
-          h('circle', { cx: 6.2, cy: 15.6, r: 2.2, fill: 'currentColor' }),
-        )
-      }
-      if (provider === 'dsh-sdk') {
-        return h(
-          'svg',
-          commonSvg,
-          h('path', {
-            d: 'M12 2.8 L19.8 7.3 L19.8 16.7 L12 21.2 L4.2 16.7 L4.2 7.3 Z',
-            stroke: 'currentColor',
-            strokeWidth: 1.45,
-            strokeLinejoin: 'round',
-            opacity: 0.82,
-          }),
-          h('path', {
-            d: 'M12 6.4 Q12.6 11.4 17.6 12 Q12.6 12.6 12 17.6 Q11.4 12.6 6.4 12 Q11.4 11.4 12 6.4 Z',
-            fill: 'currentColor',
-          }),
+          'span',
+          { className: 'dnb-brand-badge', 'data-provider': 'claude-code' },
+          h(
+            'svg',
+            {
+              width: size,
+              height: size,
+              viewBox: '0 0 248 248',
+              fill: 'none',
+              'data-official-logo': '1',
+              'data-provider': 'claude-code',
+              'aria-hidden': 'true',
+              style: { display: 'block', flexShrink: 0 },
+            },
+            h('path', { d: CLAUDE_OFFICIAL_SVG_PATH, fill: '#D97757' }),
+          ),
         )
       }
       return h(
-        'svg',
-        commonSvg,
-        h('rect', { x: 5.5, y: 5.5, width: 13, height: 13, rx: 3.5, stroke: 'currentColor', strokeWidth: 1.6 }),
-        h('circle', { cx: 12, cy: 12, r: 2.4, fill: 'currentColor' }),
+        'span',
+        { className: 'dnb-brand-badge', 'data-provider': provider || 'custom' },
+        h(
+          'svg',
+          {
+            width: size,
+            height: size,
+            viewBox: '0 0 24 24',
+            fill: 'none',
+            'data-official-logo': '1',
+            'data-provider': provider || 'custom',
+            'aria-hidden': 'true',
+            style: { display: 'block', flexShrink: 0 },
+          },
+          h('rect', { x: 5.5, y: 5.5, width: 13, height: 13, rx: 3.5, stroke: 'currentColor', strokeWidth: 1.7 }),
+          h('circle', { cx: 12, cy: 12, r: 2.5, fill: 'currentColor' }),
+        ),
       )
     }
 
-    function hashStrSeed(str) {
-      let hVal = 2166136261
-      const s = String(str || '')
-      for (let i = 0; i < s.length; i += 1) {
-        hVal ^= s.charCodeAt(i)
-        hVal = Math.imul(hVal, 16777619)
-      }
-      return (hVal >>> 0) % 10000
-    }
-
-    function clampNum(v, lo, hi) {
-      return v < lo ? lo : (v > hi ? hi : v)
-    }
-
-    function computeTankGeometry(width, height, hasOutside) {
-      const W = Math.max(280, Number(width) || 540)
-      const H = Math.max(280, Number(height) || 326)
-      const cx = hasOutside ? Math.round(W * 0.35) : Math.round(W * 0.5)
-      const cy = Math.round(H * 0.5)
-      const R = hasOutside
-        ? Math.max(88, Math.min(H * 0.42, W * 0.29))
-        : Math.max(106, Math.min(H * 0.44, W * 0.40))
-      return { W, H, cx, cy, R, hubR: 25, hasOutside }
-    }
-
-    function shortOrbLabel(name, kind) {
-      const raw = String(name || '').trim()
-      if (!raw) return kind === 'lead' ? '主对话' : '会话'
-      if (raw.length <= 7) return raw
-      return raw.slice(0, 6) + '…'
-    }
-
-    function harnessInstallCmdFor(provider, itemCmd) {
-      if (itemCmd) return itemCmd
-      const p = String(provider || '').trim()
-      return p ? `dsh plugin --profile desktop add @deepseek-ai/dsh-subagent-${p}` : ''
-    }
-
-    function buildBubbleOrbs({
+    function buildSquadHierarchy({
       peers,
       enrolledHarnesses,
       standbySessions,
       availableHarnesses,
-      catalogHarnesses,
       selfRootId,
       otherSessions,
-      bubbleLocked,
     }) {
-      const list = []
-      const enrolledProviders = new Set()
-      const availableProviders = new Set()
-      const catalogByProvider = new Map()
-      for (const item of (catalogHarnesses || [])) {
-        if (item && item.provider) catalogByProvider.set(item.provider, item)
-      }
+      const peerList = Array.isArray(peers) ? peers.filter(Boolean) : []
+      const branchMap = new Map()
+      const branches = []
+      const orphanSubs = []
 
-      for (const peer of peers) {
-        if (!peer) continue
-        const isLinkedPeer = peer.kind === 'peer-session'
-        const peerRootId = isLinkedPeer ? (peer.id || peer.rootSessionId) : (peer.rootSessionId || selfRootId)
-        const col = colorForRootSession(peerRootId, selfRootId)
-        const linkedSessObj = isLinkedPeer ? otherSessions.find(s => s && s.id === peerRootId) : null
-        const subText = peer.taskTitle || peer.progressSummary || (peer.kind === 'lead' ? '当前主指挥核心会话' : '泡内协同成员')
-        const r = peer.kind === 'lead' ? 34 : (isLinkedPeer ? 30 : 26)
-        const tagText = peer.kind === 'lead' ? '主' : (isLinkedPeer ? '窗' : '子')
-        list.push({
-          uid: 'peer:' + peer.key,
-          zone: 'inside',
-          kind: peer.kind,
-          label: peer.name || (peer.kind === 'lead' ? '主对话' : shortSession(peer.id)),
-          shortLabel: shortOrbLabel(peer.name, peer.kind),
-          badge: tagText,
-          kindName: peer.kind === 'lead' ? bi('主对话', 'Lead') : (isLinkedPeer ? bi('联动窗口', 'Linked') : bi('子代理', 'Subagent')),
-          subText,
-          r,
-          installed: true,
-          installCmd: '',
-          running: peer.status === 'running',
-          canLeave: isLinkedPeer,
-          canJoin: false,
-          draggable: !bubbleLocked || isLinkedPeer,
-          accent: col,
+      const getRootKey = (p) => String((p && (p.rootId || p.rootSessionId)) || selfRootId || 'lead')
+
+      // First pass: primary lead and linked peer-session roots
+      for (const peer of peerList) {
+        if (peer.kind === 'subagent') continue
+        const isPeer = peer.kind === 'peer-session'
+        const rid = isPeer ? String(peer.id || getRootKey(peer)) : getRootKey(peer)
+        const accent = colorForRootSession(rid, selfRootId)
+        const linkedSessObj = isPeer ? (otherSessions || []).find(s => s && s.id === rid) || null : null
+        const branch = {
+          uid: isPeer ? `peer:${rid}` : 'primary:lead',
+          podKey: isPeer ? `branch:peer:${rid}` : 'branch:lead',
+          roleTier: isPeer ? 'peer' : 'primary',
+          tierBadge: isPeer ? bi('联动主窗', 'Linked') : bi('主', 'Lead'),
+          rootId: rid,
           raw: peer,
           linkedSessObj,
-          peerRootId,
-        })
-      }
-      for (const hItem of enrolledHarnesses) {
-        if (!hItem || !hItem.provider) continue
-        enrolledProviders.add(hItem.provider)
-        const acc = hItem.accent || '#38bdf8'
-        const roleText = hItem.role || hItem.roleHint || bi('外部独立执行进程', 'External Harness')
-        const catItem = catalogByProvider.get(hItem.provider)
-        const isLocalCli = hItem.transport === 'local-cli'
-        const hBadge = hItem.running
-          ? bi('运行', 'Run')
-          : (hItem.installed ? (isLocalCli ? bi('直连', 'Local') : bi('就绪', 'Ready')) : bi('未装', 'Setup'))
-        list.push({
-          uid: 'harness:' + hItem.provider,
-          zone: 'inside',
-          kind: 'harness',
-          provider: hItem.provider,
-          isLogoOrb: true,
-          label: hItem.label || hItem.provider,
-          shortLabel: shortOrbLabel(hItem.label || hItem.provider, 'harness'),
-          badge: hBadge,
-          kindName: hItem.installed ? (isLocalCli ? bi('Harness · 本机直连', 'Harness · Local') : 'Harness') : bi('未安装后端', 'Not Installed'),
-          subText: `${hItem.provider} · ${roleText}`,
-          r: 31,
-          installed: Boolean(hItem.installed),
-          transport: hItem.transport || '',
-          installCmd: hItem.installed ? '' : harnessInstallCmdFor(hItem.provider, catItem && catItem.installCmd),
-          running: Boolean(hItem.running),
-          canLeave: true,
-          canJoin: false,
-          draggable: true,
-          accent: {
-            dot: acc,
-            bg: `${acc}26`,
-            border: `${acc}7a`,
-            text: acc,
-          },
-          raw: hItem,
-        })
-      }
-      for (const sess of standbySessions) {
-        if (!sess || !sess.id) continue
-        const col = colorForRootSession(sess.id, selfRootId)
-        list.push({
-          uid: 'standby-sess:' + sess.id,
-          zone: 'outside',
-          kind: 'standby-session',
-          label: sess.name || shortSession(sess.id),
-          shortLabel: shortOrbLabel(sess.name || shortSession(sess.id), 'peer-session'),
-          badge: '待命',
-          kindName: bi('独立会话', 'Session'),
-          subText: sess.objective || sess.progressSummary || bi('未加入水泡的独立会话，可直接抓入水泡', 'Standalone session ready to drag into Bubble'),
-          r: 28,
-          installed: true,
-          installCmd: '',
-          running: sess.status === 'running',
-          canLeave: false,
-          canJoin: true,
-          draggable: true,
-          accent: col,
-          raw: sess,
-        })
-      }
-      for (const hItem of availableHarnesses) {
-        if (!hItem || !hItem.provider || enrolledProviders.has(hItem.provider)) continue
-        availableProviders.add(hItem.provider)
-        const acc = hItem.accent || '#38bdf8'
-        const roleText = hItem.roleHint || hItem.role || bi('外部独立执行进程', 'External Harness')
-        const isLocalCli = hItem.transport === 'local-cli'
-        list.push({
-          uid: 'standby-harness:' + hItem.provider,
-          zone: 'outside',
-          kind: 'standby-harness',
-          provider: hItem.provider,
-          isLogoOrb: true,
-          label: hItem.label || hItem.provider,
-          shortLabel: shortOrbLabel(hItem.label || hItem.provider, 'harness'),
-          badge: isLocalCli ? bi('直连', 'Local') : bi('就绪', 'Ready'),
-          kindName: isLocalCli ? bi('Harness · 本机直连', 'Harness · Local') : bi('Harness · 已安装', 'Harness · Ready'),
-          subText: `${hItem.provider} · ${roleText}`,
-          r: 28,
-          installed: true,
-          transport: hItem.transport || '',
-          installCmd: '',
-          running: false,
-          canLeave: false,
-          canJoin: true,
-          draggable: true,
-          accent: {
-            dot: acc,
-            bg: `${acc}24`,
-            border: `${acc}75`,
-            text: acc,
-          },
-          raw: hItem,
-        })
-      }
-      for (const hItem of (catalogHarnesses || [])) {
-        if (!hItem || !hItem.provider) continue
-        if (enrolledProviders.has(hItem.provider) || availableProviders.has(hItem.provider)) continue
-        const acc = hItem.accent || '#38bdf8'
-        const roleText = hItem.roleHint || bi('外部 Harness 执行进程', 'External Harness')
-        list.push({
-          uid: 'standby-harness:' + hItem.provider,
-          zone: 'outside',
-          kind: 'standby-harness',
-          provider: hItem.provider,
-          isLogoOrb: true,
-          label: hItem.label || hItem.provider,
-          shortLabel: shortOrbLabel(hItem.label || hItem.provider, 'harness'),
-          badge: bi('未装', 'Setup'),
-          kindName: bi('Harness · 待安装', 'Harness · Setup'),
-          subText: `${hItem.provider} · ${roleText}`,
-          r: 28,
-          installed: false,
-          installCmd: harnessInstallCmdFor(hItem.provider, hItem.installCmd),
-          running: false,
-          canLeave: false,
-          canJoin: true,
-          draggable: true,
-          accent: {
-            dot: acc,
-            bg: `${acc}16`,
-            border: `${acc}58`,
-            text: acc,
-          },
-          raw: hItem,
-        })
-      }
-      return list
-    }
-
-    function initialBodyPos(orb, idxInZone, countInZone, geo) {
-      const seed = hashStrSeed(orb.uid)
-      const baseAngle = ((idxInZone + 0.5) / Math.max(1, countInZone)) * Math.PI * 2 + (seed % 100) * 0.01
-      const velAngle = baseAngle + 1.15
-      const spd = orb.running ? 32 : 20
-      if (orb.zone === 'inside') {
-        const orbit = clampNum(geo.R * 0.54, geo.hubR + orb.r + 6, Math.max(geo.hubR + orb.r + 8, geo.R - orb.r - 6))
-        return {
-          x: geo.cx + Math.cos(baseAngle) * orbit,
-          y: geo.cy + Math.sin(baseAngle) * orbit,
-          vx: Math.cos(velAngle) * spd,
-          vy: Math.sin(velAngle) * spd,
-          seed,
+          accent,
+          children: [],
         }
+        branches.push(branch)
+        branchMap.set(rid, branch)
       }
-      const minX = geo.cx + geo.R + orb.r + 14
-      const maxX = Math.max(minX + 12, geo.W - orb.r - 12)
-      const colSpan = Math.max(12, maxX - minX)
-      const colIdx = idxInZone % 2
-      const rowCount = Math.max(1, Math.ceil(countInZone / 2))
-      const rowIdx = Math.floor(idxInZone / 2)
-      const rx = minX + ((colIdx === 0 ? 0.25 : 0.78) * colSpan)
-      const ry = clampNum(((rowIdx + 0.5) / rowCount) * (geo.H - 42) + 21, orb.r + 12, geo.H - orb.r - 12)
+
+      // Ensure a primary branch always exists when lead hasn't been enumerated yet
+      let primaryBranch = branches.find(b => b.roleTier === 'primary') || branches[0] || null
+      if (!primaryBranch) {
+        const rid = String(selfRootId || 'lead')
+        primaryBranch = {
+          uid: 'primary:lead',
+          podKey: 'branch:lead',
+          roleTier: 'primary',
+          tierBadge: bi('主', 'Lead'),
+          rootId: rid,
+          raw: {
+            key: 'lead',
+            id: rid,
+            kind: 'lead',
+            name: bi('主对话', 'Main'),
+            status: 'idle',
+            taskTitle: bi('当前主指挥核心会话', 'Current Lead Session'),
+          },
+          linkedSessObj: null,
+          accent: colorForRootSession(rid, selfRootId),
+          children: [],
+        }
+        branches.unshift(primaryBranch)
+        branchMap.set(rid, primaryBranch)
+      }
+
+      // Second pass: attach secondary subagents under their owning root branch
+      for (const peer of peerList) {
+        if (peer.kind !== 'subagent') continue
+        const rid = getRootKey(peer)
+        const ownerBranch = branchMap.get(rid) || primaryBranch
+        const accent = colorForRootSession(rid, selfRootId)
+        const item = {
+          uid: `sub:${peer.key || peer.id || ownerBranch.children.length}`,
+          roleTier: 'secondary',
+          tierBadge: bi('次', 'Sub'),
+          raw: peer,
+          accent,
+        }
+        if (ownerBranch) ownerBranch.children.push(item)
+        else orphanSubs.push(item)
+      }
+      for (const sub of orphanSubs) primaryBranch.children.push(sub)
+
+      // Strictly include ONLY locally installed/ready external Harnesses (never uninstalled catalog entries)
+      const activeEnrolledHarnesses = (enrolledHarnesses || [])
+        .filter(hItem => hItem && hItem.provider && (hItem.installed !== false || hItem.running))
+      const enrolledProviders = new Set(activeEnrolledHarnesses.map(hItem => hItem.provider))
+      const readyStandbyHarnesses = (availableHarnesses || [])
+        .filter(hItem => hItem && hItem.provider && hItem.installed !== false && !enrolledProviders.has(hItem.provider))
+
+      const secondaryCount = branches.reduce((sum, b) => sum + b.children.length, 0)
+      const peerCount = branches.filter(b => b.roleTier === 'peer').length
+      const totalInBubble = peersCountSafe(branches) + activeEnrolledHarnesses.length
+      const runningCount = peerList.filter(p => p.status === 'running').length
+        + activeEnrolledHarnesses.filter(hItem => hItem.running).length
+
       return {
-        x: clampNum(rx, minX, geo.W - orb.r - 10),
-        y: ry,
-        vx: Math.cos(velAngle) * spd,
-        vy: Math.sin(velAngle) * spd,
-        seed,
+        branches,
+        harnessWing: activeEnrolledHarnesses,
+        standbySessions: (standbySessions || []).filter(Boolean),
+        readyStandbyHarnesses,
+        counts: {
+          primary: branches.filter(b => b.roleTier === 'primary').length,
+          secondary: secondaryCount,
+          peer: peerCount,
+          harness: activeEnrolledHarnesses.length,
+          total: totalInBubble,
+          running: runningCount,
+        },
       }
     }
 
-    function syncPhysicsBodies(bodiesMap, orbs, geo) {
-      const activeUids = new Set(orbs.map(o => o.uid))
-      for (const key of bodiesMap.keys()) {
-        if (!activeUids.has(key)) bodiesMap.delete(key)
+    function peersCountSafe(branches) {
+      let n = 0
+      for (const b of branches) {
+        n += 1 + (b.children ? b.children.length : 0)
       }
-      const insideOrbs = orbs.filter(o => o.zone === 'inside')
-      const outsideOrbs = orbs.filter(o => o.zone === 'outside')
-      orbs.forEach((orb) => {
-        const prev = bodiesMap.get(orb.uid)
-        if (!prev) {
-          const idx = orb.zone === 'inside'
-            ? insideOrbs.findIndex(o => o.uid === orb.uid)
-            : outsideOrbs.findIndex(o => o.uid === orb.uid)
-          const cnt = orb.zone === 'inside' ? insideOrbs.length : outsideOrbs.length
-          const init = initialBodyPos(orb, idx, cnt, geo)
-          bodiesMap.set(orb.uid, {
-            ...init,
-            uid: orb.uid,
-            zone: orb.zone,
-            r: orb.r,
-            hovered: false,
-            running: orb.running,
-            color: orb.accent.dot,
-          })
-          return
-        }
-        prev.zone = orb.zone
-        prev.r = orb.r
-        prev.running = orb.running
-        prev.color = orb.accent.dot
-      })
+      return n
     }
 
-    function stepBubblePhysics(bodiesMap, orbs, geo, { dt, drag, paused, locked }) {
-      if (paused) return
-      const bodies = orbs.map(o => bodiesMap.get(o.uid)).filter(Boolean)
-      for (const b of bodies) {
-        const isDragged = drag && drag.uid === b.uid && drag.moved
-        if (isDragged) {
-          let nx = drag.x
-          let ny = drag.y
-          if (locked) {
-            const dx = nx - geo.cx
-            const dy = ny - geo.cy
-            const dist = Math.hypot(dx, dy) || 0.001
-            if (b.zone === 'inside') {
-              const maxD = Math.max(8, geo.R - b.r - 2)
-              if (dist > maxD) {
-                nx = geo.cx + (dx / dist) * (maxD + 4)
-                ny = geo.cy + (dy / dist) * (maxD + 4)
-              }
-            } else {
-              const minD = geo.R + b.r + 4
-              if (dist < minD) {
-                nx = geo.cx + (dx / dist) * Math.max(8, minD - 4)
-                ny = geo.cy + (dy / dist) * Math.max(8, minD - 4)
-              }
-            }
-          }
-          b.x = clampNum(nx, b.r + 4, geo.W - b.r - 4)
-          b.y = clampNum(ny, b.r + 4, geo.H - b.r - 4)
-          continue
+    function computeSquadConnectorPaths(membraneEl, hubEl, podElsMap, branches, hasHarnessWing) {
+      if (!membraneEl || !hubEl) return { w: 0, h: 0, links: [] }
+      const mRect = membraneEl.getBoundingClientRect()
+      const hubRect = hubEl.getBoundingClientRect()
+      if (!mRect.width || !mRect.height || !hubRect.width) return { w: 0, h: 0, links: [] }
+
+      const hubBottom = {
+        x: hubRect.left - mRect.left + hubRect.width / 2,
+        y: hubRect.bottom - mRect.top,
+      }
+      const links = []
+      const podBoxes = []
+
+      const addCurve = (id, kind, p1, p2, color, dashed, label, labelAnchor = null) => {
+        const dy = p2.y - p1.y
+        const spread = Math.max(22, Math.abs(dy) * 0.46)
+        const c1x = p1.x
+        const c1y = p1.y + spread
+        const c2x = p2.x
+        const c2y = p2.y - spread
+        const d = `M ${p1.x.toFixed(1)} ${p1.y.toFixed(1)} C ${c1x.toFixed(1)} ${c1y.toFixed(1)}, ${c2x.toFixed(1)} ${c2y.toFixed(1)}, ${p2.x.toFixed(1)} ${p2.y.toFixed(1)}`
+        links.push({
+          id,
+          kind,
+          d,
+          x1: p1.x,
+          y1: p1.y,
+          x2: p2.x,
+          y2: p2.y,
+          mx: labelAnchor ? labelAnchor.x : (p1.x + p2.x) / 2,
+          my: labelAnchor ? labelAnchor.y : (p1.y + p2.y) / 2,
+          color,
+          dashed,
+          label,
+        })
+      }
+
+      for (const branch of branches) {
+        const el = podElsMap.get(branch.podKey)
+        if (!el) continue
+        const r = el.getBoundingClientRect()
+        if (!r.width) continue
+        const box = {
+          key: branch.podKey,
+          roleTier: branch.roleTier,
+          left: r.left - mRect.left,
+          right: r.right - mRect.left,
+          top: r.top - mRect.top,
+          bottom: r.bottom - mRect.top,
+          cx: r.left - mRect.left + r.width / 2,
+          cy: r.top - mRect.top + r.height / 2,
+          color: branch.roleTier === 'primary' ? '#38bdf8' : branch.accent.dot,
         }
-
-        if (b.hovered) {
-          b.vx *= Math.pow(0.06, dt)
-          b.vy *= Math.pow(0.06, dt)
-        } else {
-          const spd = Math.hypot(b.vx, b.vy) || 0.001
-          const minSpd = b.running ? 24 : 15
-          const maxSpd = b.running ? 44 : 28
-          if (spd > maxSpd * 1.4) {
-            const damp = Math.pow(0.22, dt)
-            b.vx *= damp
-            b.vy *= damp
-          } else if (spd > maxSpd) {
-            const s = maxSpd / spd
-            b.vx *= s
-            b.vy *= s
-          } else if (spd < minSpd) {
-            const s = minSpd / spd
-            b.vx *= s
-            b.vy *= s
-          }
-        }
-
-        b.x += b.vx * dt
-        b.y += b.vy * dt
-
-        if (b.zone === 'inside') {
-          const hdx = b.x - geo.cx
-          const hdy = b.y - geo.cy
-          const hDist = Math.hypot(hdx, hdy) || 0.001
-          const minHubDist = geo.hubR + b.r + 5
-          if (hDist < minHubDist) {
-            const nx = hdx / hDist
-            const ny = hdy / hDist
-            b.x = geo.cx + nx * minHubDist
-            b.y = geo.cy + ny * minHubDist
-            const vn = b.vx * nx + b.vy * ny
-            if (vn < 0) {
-              b.vx -= 1.9 * vn * nx
-              b.vy -= 1.9 * vn * ny
-            }
-          }
-
-          const dx = b.x - geo.cx
-          const dy = b.y - geo.cy
-          const dist = Math.hypot(dx, dy) || 0.001
-          const maxDist = Math.max(8, geo.R - b.r - 4)
-          if (dist > maxDist) {
-            const nx = dx / dist
-            const ny = dy / dist
-            b.x = geo.cx + nx * maxDist
-            b.y = geo.cy + ny * maxDist
-            const vn = b.vx * nx + b.vy * ny
-            if (vn > 0) {
-              b.vx -= 1.92 * vn * nx
-              b.vy -= 1.92 * vn * ny
-            }
-          }
-        } else {
-          const minX = b.r + 8
-          const maxX = Math.max(minX + 4, geo.W - b.r - 8)
-          const minY = b.r + 8
-          const maxY = Math.max(minY + 4, geo.H - b.r - 8)
-          if (b.x < minX) { b.x = minX; if (b.vx < 0) b.vx = -b.vx * 0.94 }
-          else if (b.x > maxX) { b.x = maxX; if (b.vx > 0) b.vx = -b.vx * 0.94 }
-          if (b.y < minY) { b.y = minY; if (b.vy < 0) b.vy = -b.vy * 0.94 }
-          else if (b.y > maxY) { b.y = maxY; if (b.vy > 0) b.vy = -b.vy * 0.94 }
-
-          const dx = b.x - geo.cx
-          const dy = b.y - geo.cy
-          const dist = Math.hypot(dx, dy) || 0.001
-          const minOuter = geo.R + b.r + 8
-          if (dist < minOuter) {
-            const nx = dx / dist
-            const ny = dy / dist
-            b.x = geo.cx + nx * minOuter
-            b.y = geo.cy + ny * minOuter
-            const vn = b.vx * nx + b.vy * ny
-            if (vn < 0) {
-              b.vx -= 1.92 * vn * nx
-              b.vy -= 1.92 * vn * ny
-            }
-          }
-        }
-      }
-
-      for (let i = 0; i < bodies.length; i += 1) {
-        const a = bodies[i]
-        for (let j = i + 1; j < bodies.length; j += 1) {
-          const b = bodies[j]
-          if (a.zone !== b.zone) continue
-          const aDragged = drag && drag.uid === a.uid && drag.moved
-          const bDragged = drag && drag.uid === b.uid && drag.moved
-          const dx = b.x - a.x
-          const dy = b.y - a.y
-          const dist = Math.hypot(dx, dy) || 0.001
-          const minD = a.r + b.r + 4
-          if (dist < minD) {
-            const nx = dx / dist
-            const ny = dy / dist
-            const overlap = minD - dist
-            if (aDragged && !bDragged) {
-              b.x += nx * overlap
-              b.y += ny * overlap
-            } else if (bDragged && !aDragged) {
-              a.x -= nx * overlap
-              a.y -= ny * overlap
-            } else {
-              a.x -= nx * overlap * 0.5
-              a.y -= ny * overlap * 0.5
-              b.x += nx * overlap * 0.5
-              b.y += ny * overlap * 0.5
-            }
-            const rvx = b.vx - a.vx
-            const rvy = b.vy - a.vy
-            const relVel = rvx * nx + rvy * ny
-            if (relVel < 0) {
-              const impulse = -0.94 * relVel
-              if (!aDragged) { a.vx -= impulse * nx; a.vy -= impulse * ny }
-              if (!bDragged) { b.vx += impulse * nx; b.vy += impulse * ny }
-            }
-          }
-        }
-      }
-    }
-
-    function drawBubbleTankCanvas(ctx, dpr, geo, bodiesMap, orbs, { tNow, locked, paused, isLight }) {
-      if (!ctx) return
-      ctx.save()
-      ctx.scale(dpr, dpr)
-      ctx.clearRect(0, 0, geo.W, geo.H)
-
-      const t = paused ? 1.2 : tNow
-
-      // Layer 1: Soft drifting underwater caustic light patches
-      const causticPalette = locked
-        ? (isLight ? ['rgba(251, 191, 36, 0.16)', 'rgba(56, 189, 248, 0.10)'] : ['rgba(245, 158, 11, 0.08)', 'rgba(56, 189, 248, 0.06)'])
-        : (isLight ? ['rgba(255, 255, 255, 0.36)', 'rgba(14, 165, 233, 0.10)'] : ['rgba(56, 189, 248, 0.09)', 'rgba(20, 184, 166, 0.07)'])
-      for (let i = 0; i < 4; i += 1) {
-        const px = geo.W * (0.18 + i * 0.22) + Math.sin(t * (0.34 + i * 0.07) + i * 1.9) * 26
-        const py = geo.H * (0.28 + (i % 2) * 0.38) + Math.cos(t * (0.28 + i * 0.06) + i * 1.3) * 18
-        const rw = geo.R * (0.48 + (i % 2) * 0.16)
-        const cg = ctx.createRadialGradient(px, py, 2, px, py, rw)
-        cg.addColorStop(0, causticPalette[i % 2])
-        cg.addColorStop(1, 'rgba(0, 0, 0, 0)')
-        ctx.fillStyle = cg
-        ctx.beginPath()
-        ctx.ellipse(px, py, rw, rw * 0.62, Math.sin(t * 0.2 + i) * 0.35, 0, Math.PI * 2)
-        ctx.fill()
-      }
-
-      // Layer 2: Gentle translucent water refraction wave arcs
-      for (let wIdx = 0; wIdx < 3; wIdx += 1) {
-        const baseY = geo.H * (0.24 + wIdx * 0.26)
-        ctx.beginPath()
-        for (let x = 0; x <= geo.W; x += 18) {
-          const y = baseY + Math.sin(x * 0.015 + t * (0.65 + wIdx * 0.18) + wIdx * 1.7) * 5.5
-          if (x === 0) ctx.moveTo(x, y)
-          else ctx.lineTo(x, y)
-        }
-        ctx.lineWidth = 1.1
-        ctx.strokeStyle = isLight ? 'rgba(2, 132, 199, 0.09)' : 'rgba(125, 211, 252, 0.07)'
-        ctx.stroke()
-      }
-
-      // Layer 3: Slow-rising hollow micro water bubbles with tiny specular glints
-      for (let i = 0; i < 10; i += 1) {
-        const xBase = ((i * 89 + 37) % Math.max(40, geo.W - 32)) + 16
-        const bx = xBase + Math.sin(t * (0.9 + (i % 3) * 0.2) + i) * 5
-        const spd = 8 + (i % 4) * 3.5
-        const by = geo.H - (((t * spd + i * 41) % (geo.H + 16)) - 8)
-        const br = 1.7 + (i % 3) * 0.85
-        ctx.beginPath()
-        ctx.arc(bx, by, br, 0, Math.PI * 2)
-        ctx.strokeStyle = isLight ? 'rgba(2, 132, 199, 0.24)' : 'rgba(186, 230, 253, 0.22)'
-        ctx.lineWidth = 0.9
-        ctx.stroke()
-        ctx.beginPath()
-        ctx.arc(bx - br * 0.35, by - br * 0.35, 0.65, 0, Math.PI * 2)
-        ctx.fillStyle = isLight ? 'rgba(255, 255, 255, 0.72)' : 'rgba(224, 242, 254, 0.50)'
-        ctx.fill()
-      }
-
-      if (geo.hasOutside) {
-        ctx.save()
-        ctx.font = '600 10.5px "Microsoft YaHei UI", sans-serif'
-        ctx.fillStyle = isLight ? 'rgba(71, 85, 105, 0.62)' : 'rgba(186, 230, 253, 0.56)'
-        ctx.textAlign = 'right'
-        ctx.fillText('外围待命域 · 拖入左泡协同', geo.W - 14, 21)
-        ctx.restore()
-      }
-
-      // Layer 4: Main aqueous soap-bubble dome / amber work-lock shell
-      const grad = ctx.createRadialGradient(
-        geo.cx - geo.R * 0.30,
-        geo.cy - geo.R * 0.32,
-        geo.R * 0.06,
-        geo.cx,
-        geo.cy,
-        geo.R,
-      )
-      if (locked) {
-        grad.addColorStop(0, isLight ? 'rgba(254, 243, 199, 0.36)' : 'rgba(245, 158, 11, 0.14)')
-        grad.addColorStop(0.7, isLight ? 'rgba(251, 191, 36, 0.14)' : 'rgba(217, 119, 6, 0.08)')
-        grad.addColorStop(1, isLight ? 'rgba(217, 119, 6, 0.24)' : 'rgba(245, 158, 11, 0.26)')
-      } else {
-        grad.addColorStop(0, isLight ? 'rgba(255, 255, 255, 0.42)' : 'rgba(186, 230, 253, 0.18)')
-        grad.addColorStop(0.68, isLight ? 'rgba(56, 189, 248, 0.09)' : 'rgba(14, 165, 233, 0.08)')
-        grad.addColorStop(1, isLight ? 'rgba(20, 184, 166, 0.22)' : 'rgba(45, 212, 191, 0.24)')
-      }
-
-      ctx.beginPath()
-      ctx.arc(geo.cx, geo.cy, geo.R, 0, Math.PI * 2)
-      ctx.fillStyle = grad
-      ctx.fill()
-
-      if (locked) {
-        ctx.lineWidth = 2.3
-        ctx.strokeStyle = isLight ? 'rgba(217, 119, 6, 0.76)' : 'rgba(251, 191, 36, 0.76)'
-        ctx.stroke()
-        ctx.save()
-        ctx.setLineDash([7, 5])
-        ctx.lineWidth = 1.2
-        ctx.strokeStyle = isLight ? 'rgba(217, 119, 6, 0.46)' : 'rgba(245, 158, 11, 0.48)'
-        ctx.beginPath()
-        ctx.arc(geo.cx, geo.cy, geo.R + 5, 0, Math.PI * 2)
-        ctx.stroke()
-        ctx.restore()
-      } else {
-        const rimGrad = ctx.createLinearGradient(
-          geo.cx - geo.R,
-          geo.cy - geo.R,
-          geo.cx + geo.R,
-          geo.cy + geo.R,
+        podBoxes.push(box)
+        addCurve(
+          `hub-${branch.podKey}`,
+          branch.roleTier,
+          hubBottom,
+          { x: box.cx, y: box.top },
+          box.color,
+          false,
+          branch.roleTier === 'primary' ? '主控' : '协同',
         )
-        rimGrad.addColorStop(0, isLight ? 'rgba(2, 132, 199, 0.65)' : 'rgba(103, 232, 249, 0.70)')
-        rimGrad.addColorStop(0.55, isLight ? 'rgba(13, 148, 136, 0.50)' : 'rgba(94, 234, 212, 0.56)')
-        rimGrad.addColorStop(1, isLight ? 'rgba(99, 102, 241, 0.44)' : 'rgba(165, 180, 252, 0.52)')
-        ctx.lineWidth = 1.9
-        ctx.strokeStyle = rimGrad
-        ctx.stroke()
-
-        // Dual aqueous specular highlight arcs
-        ctx.save()
-        ctx.beginPath()
-        ctx.arc(geo.cx, geo.cy, geo.R - 6, -Math.PI * 0.82, -Math.PI * 0.52)
-        ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.88)' : 'rgba(224, 242, 254, 0.48)'
-        ctx.lineWidth = 2.4
-        ctx.lineCap = 'round'
-        ctx.stroke()
-
-        ctx.beginPath()
-        ctx.arc(geo.cx, geo.cy, geo.R - 7, Math.PI * 0.14, Math.PI * 0.30)
-        ctx.strokeStyle = isLight ? 'rgba(255, 255, 255, 0.56)' : 'rgba(165, 243, 252, 0.24)'
-        ctx.lineWidth = 1.6
-        ctx.lineCap = 'round'
-        ctx.stroke()
-        ctx.restore()
       }
 
-      for (const orb of orbs) {
-        if (orb.zone !== 'inside' || !orb.running) continue
-        const b = bodiesMap.get(orb.uid)
-        if (!b) continue
-        ctx.save()
-        ctx.setLineDash([4, 4])
-        ctx.lineDashOffset = -(t * 24)
-        ctx.lineWidth = 1.3
-        ctx.strokeStyle = orb.accent.dot
-        ctx.globalAlpha = 0.54
-        ctx.beginPath()
-        ctx.moveTo(geo.cx, geo.cy)
-        ctx.lineTo(b.x, b.y)
-        ctx.stroke()
-        ctx.restore()
+      // Horizontal collaboration link between primary branch and peer-session branches
+      const primaryBox = podBoxes.find(b => b.roleTier === 'primary')
+      const peerBoxes = podBoxes.filter(b => b.roleTier === 'peer')
+      if (primaryBox && peerBoxes.length > 0) {
+        for (const pb of peerBoxes) {
+          const sameRow = Math.abs(primaryBox.top - pb.top) < 42 && pb.left > primaryBox.right - 8
+          if (sameRow) {
+            const yMid = primaryBox.top + 30
+            const x1 = primaryBox.right
+            const x2 = pb.left
+            const mx = (x1 + x2) / 2
+            links.push({
+              id: `collab-${pb.key}`,
+              kind: 'collab-sync',
+              d: `M ${x1.toFixed(1)} ${yMid.toFixed(1)} L ${x2.toFixed(1)} ${yMid.toFixed(1)}`,
+              x1,
+              y1: yMid,
+              x2,
+              y2: yMid,
+              mx,
+              my: yMid,
+              color: pb.color,
+              dashed: true,
+              label: '⇄联动',
+            })
+          }
+        }
       }
 
-      ctx.restore()
+      if (hasHarnessWing) {
+        const hwEl = podElsMap.get('harness-wing')
+        if (hwEl) {
+          const r = hwEl.getBoundingClientRect()
+          if (r.width) {
+            const hwTop = r.top - mRect.top
+            const hwCx = r.left - mRect.left + r.width / 2
+            const onSecondRow = primaryBox && hwTop > primaryBox.bottom + 4
+            addCurve(
+              'hub-harness-wing',
+              'harness',
+              hubBottom,
+              { x: hwCx, y: hwTop },
+              '#f59e0b',
+              true,
+              '派单+红线',
+              onSecondRow ? { x: hwCx, y: hwTop - 14 } : null,
+            )
+          }
+        }
+      }
+
+      return { w: Math.round(mRect.width), h: Math.round(mRect.height), links }
     }
 
     function PeersTab({ view }) {
@@ -24993,31 +25091,19 @@ window.__ModuleLoader__.load({
       const bubbleLockReason = String(bubble.lockReason || '')
       const enrolledHarnesses = Array.isArray(bubble.enrolledHarnesses) ? bubble.enrolledHarnesses : []
       const availableHarnesses = Array.isArray(bubble.availableHarnesses) ? bubble.availableHarnesses : []
-      const catalogHarnesses = Array.isArray(bubble.catalogHarnesses) ? bubble.catalogHarnesses : []
       const standbySessions = otherSessions.filter(s => s && !s.linked)
-      const totalInBubble = peers.length + enrolledHarnesses.length
 
       const [confirmStop, setConfirmStop] = React.useState(false)
       const [dispatchTarget, setDispatchTarget] = React.useState('')
       const [dispatchText, setDispatchText] = React.useState('')
-      const [showCatalog, setShowCatalog] = React.useState(false)
       const [lockShake, setLockShake] = React.useState(false)
-      const [selectedUid, setSelectedUid] = React.useState('')
-      const [physicsPaused, setPhysicsPaused] = React.useState(() => {
-        try {
-          return Boolean(typeof window !== 'undefined' && window.matchMedia && window.matchMedia('(prefers-reduced-motion: reduce)').matches)
-        } catch {
-          return false
-        }
-      })
+      const [dragOverZone, setDragOverZone] = React.useState('')
+      const [linkLayout, setLinkLayout] = React.useState({ w: 0, h: 0, links: [] })
 
-      const tankRef = React.useRef(null)
-      const canvasRef = React.useRef(null)
-      const bodiesRef = React.useRef(new Map())
-      const nodeElsRef = React.useRef(new Map())
-      const dragRef = React.useRef(null)
-      const tankSizeRef = React.useRef({ w: 540, h: 326 })
-      const latestSimRef = React.useRef({ orbs: [], locked: false, paused: false, hasOutside: false, tankHeight: 326 })
+      const membraneRef = React.useRef(null)
+      const hubRef = React.useRef(null)
+      const podElsRef = React.useRef(new Map())
+      const dragPayloadRef = React.useRef(null)
 
       React.useEffect(() => {
         if (!confirmStop) return undefined
@@ -25031,113 +25117,57 @@ window.__ModuleLoader__.load({
         return () => clearTimeout(timer)
       }, [lockShake])
 
-      const orbs = buildBubbleOrbs({
+      const squad = buildSquadHierarchy({
         peers,
         enrolledHarnesses,
         standbySessions,
         availableHarnesses,
-        catalogHarnesses,
         selfRootId,
         otherSessions,
-        bubbleLocked,
       })
-      const hasOutside = orbs.some(o => o.zone === 'outside')
-      const tankHeight = orbs.length > 6 ? 350 : 326
-      const curW = (tankRef.current && tankRef.current.clientWidth) || tankSizeRef.current.w || 540
-      const geoNow = computeTankGeometry(curW, tankHeight, hasOutside)
-      syncPhysicsBodies(bodiesRef.current, orbs, geoNow)
-      latestSimRef.current = {
-        orbs,
-        locked: bubbleLocked,
-        paused: physicsPaused,
-        hasOutside,
-        tankHeight,
-      }
+      const { branches, harnessWing, readyStandbyHarnesses, counts } = squad
+      const hasStandby = squad.standbySessions.length > 0 || readyStandbyHarnesses.length > 0
+      const branchCols = (branches.length + (harnessWing.length > 0 ? 1 : 0)) > 1 ? 2 : 1
 
-      React.useEffect(() => {
-        if (selectedUid && !orbs.some(o => o.uid === selectedUid)) {
-          setSelectedUid('')
+      const layoutSig = [
+        view.peersNetCollapsed ? '1' : '0',
+        branches.map(b => `${b.uid}:${b.children.length}`).join(','),
+        harnessWing.map(hItem => `${hItem.provider}:${hItem.running ? 1 : 0}`).join(','),
+        bubbleLocked ? 'L' : 'U',
+      ].join('|')
+
+      React.useLayoutEffect(() => {
+        if (view.peersNetCollapsed) return undefined
+        const measure = () => {
+          const next = computeSquadConnectorPaths(
+            membraneRef.current,
+            hubRef.current,
+            podElsRef.current,
+            branches,
+            harnessWing.length > 0,
+          )
+          setLinkLayout(prev => {
+            if (
+              prev.w === next.w
+              && prev.h === next.h
+              && prev.links.length === next.links.length
+              && prev.links.every((l, idx) => l.d === next.links[idx].d)
+            ) {
+              return prev
+            }
+            return next
+          })
         }
-      }, [selectedUid, orbs.length])
-
-      React.useEffect(() => {
-        const tankEl = tankRef.current
-        if (!tankEl) return undefined
+        measure()
         let ro = null
-        if (typeof ResizeObserver !== 'undefined') {
-          ro = new ResizeObserver((entries) => {
-            for (const ent of entries) {
-              const nw = Math.round(ent.contentRect.width || tankEl.clientWidth || 540)
-              if (nw > 120) tankSizeRef.current.w = nw
-            }
-          })
-          ro.observe(tankEl)
+        if (typeof ResizeObserver !== 'undefined' && membraneRef.current) {
+          ro = new ResizeObserver(measure)
+          ro.observe(membraneRef.current)
         }
-
-        let rafId = 0
-        let lastTs = performance.now()
-        const startTs = lastTs
-
-        const frame = (now) => {
-          const dt = Math.min(0.032, Math.max(0.004, (now - lastTs) / 1000))
-          lastTs = now
-          const tNow = (now - startTs) / 1000
-          const sim = latestSimRef.current
-          const w = Math.max(280, tankEl.clientWidth || tankSizeRef.current.w || 540)
-          tankSizeRef.current.w = w
-          const geo = computeTankGeometry(w, sim.tankHeight, sim.hasOutside)
-
-          syncPhysicsBodies(bodiesRef.current, sim.orbs, geo)
-          stepBubblePhysics(bodiesRef.current, sim.orbs, geo, {
-            dt,
-            drag: dragRef.current,
-            paused: sim.paused,
-            locked: sim.locked,
-          })
-
-          for (const orb of sim.orbs) {
-            const b = bodiesRef.current.get(orb.uid)
-            const el = nodeElsRef.current.get(orb.uid)
-            if (!b || !el) continue
-            const x0 = b.x - b.r
-            const y0 = b.y - b.r
-            const isDragging = Boolean(dragRef.current && dragRef.current.uid === orb.uid && dragRef.current.moved)
-            el.style.transform = `translate3d(${x0.toFixed(2)}px, ${y0.toFixed(2)}px, 0)`
-            el.style.zIndex = isDragging ? '12' : (b.hovered ? '8' : (orb.zone === 'inside' ? '4' : '3'))
-          }
-
-          const canvas = canvasRef.current
-          if (canvas) {
-            const dpr = Math.min(2, (typeof window !== 'undefined' && window.devicePixelRatio) || 1)
-            const tw = Math.round(geo.W * dpr)
-            const th = Math.round(geo.H * dpr)
-            if (canvas.width !== tw || canvas.height !== th) {
-              canvas.width = tw
-              canvas.height = th
-              canvas.style.width = geo.W + 'px'
-              canvas.style.height = geo.H + 'px'
-            }
-            const ctx2d = canvas.getContext('2d')
-            const rootEl = typeof document !== 'undefined' ? document.documentElement : null
-            const themeAttr = rootEl && (rootEl.getAttribute('data-ds-theme-source') || rootEl.getAttribute('data-ds-theme'))
-            const isLight = themeAttr === 'light'
-            drawBubbleTankCanvas(ctx2d, dpr, geo, bodiesRef.current, sim.orbs, {
-              tNow,
-              locked: sim.locked,
-              paused: sim.paused,
-              isLight,
-            })
-          }
-
-          rafId = requestAnimationFrame(frame)
-        }
-
-        rafId = requestAnimationFrame(frame)
         return () => {
-          if (rafId) cancelAnimationFrame(rafId)
           if (ro) ro.disconnect()
         }
-      }, [view.peersNetCollapsed])
+      }, [layoutSig])
 
       const triggerLockedReject = (reasonHint) => {
         setLockShake(true)
@@ -25149,141 +25179,103 @@ window.__ModuleLoader__.load({
         })
       }
 
-      const performOrbJoin = (orb) => {
+      const performJoin = ({ kind, id, item }) => {
         if (bubbleLocked) {
           triggerLockedReject()
           return
         }
-        if (orb.kind === 'standby-session' && orb.raw) {
-          requestTogglePeerLink(orb.raw, true)
-        } else if (orb.kind === 'standby-harness' && orb.raw) {
-          void toggleBubbleHarness(orb.raw.provider, true, {
-            label: orb.raw.label,
-            role: orb.raw.roleHint || orb.raw.role,
-          })
+        if (kind === 'standby-session') {
+          const sess = item || squad.standbySessions.find(s => s.id === id)
+          if (sess) requestTogglePeerLink(sess, true)
+        } else if (kind === 'standby-harness') {
+          const hObj = item || readyStandbyHarnesses.find(x => x.provider === id)
+          if (hObj) {
+            void toggleBubbleHarness(hObj.provider, true, {
+              label: hObj.label,
+              role: hObj.roleHint || hObj.role,
+            })
+          }
         }
       }
 
-      const performOrbLeave = (orb) => {
+      const performLeave = ({ kind, id, branch }) => {
         if (bubbleLocked) {
           triggerLockedReject()
           return
         }
-        if (orb.kind === 'peer-session') {
-          requestTogglePeerLink(orb.linkedSessObj || { id: orb.peerRootId, name: orb.label, linked: true }, false)
-        } else if (orb.kind === 'harness' && orb.raw) {
-          if (dispatchTarget === orb.raw.provider) setDispatchTarget('')
-          void toggleBubbleHarness(orb.raw.provider, false, { label: orb.raw.label })
-        }
-      }
-
-      const handleOrbPointerDown = (e, orb) => {
-        if (e.button !== 0) return
-        if (e.target && e.target.closest && e.target.closest('button')) return
-        const tankEl = tankRef.current
-        if (!tankEl) return
-        const b = bodiesRef.current.get(orb.uid)
-        if (!b) return
-        const rect = tankEl.getBoundingClientRect()
-        const px = e.clientX - rect.left
-        const py = e.clientY - rect.top
-        try { e.currentTarget.setPointerCapture?.(e.pointerId) } catch {}
-        dragRef.current = {
-          uid: orb.uid,
-          pointerId: e.pointerId,
-          startX: e.clientX,
-          startY: e.clientY,
-          x: b.x,
-          y: b.y,
-          ox: b.x - px,
-          oy: b.y - py,
-          lastX: px,
-          lastY: py,
-          lastT: performance.now(),
-          vx: 0,
-          vy: 0,
-          moved: false,
-        }
-      }
-
-      const handleOrbPointerMove = (e, orb) => {
-        const d = dragRef.current
-        if (!d || d.uid !== orb.uid || d.pointerId !== e.pointerId) return
-        const tankEl = tankRef.current
-        if (!tankEl) return
-        const rect = tankEl.getBoundingClientRect()
-        const px = e.clientX - rect.left
-        const py = e.clientY - rect.top
-        if (!d.moved && Math.hypot(e.clientX - d.startX, e.clientY - d.startY) >= 6) {
-          d.moved = true
-        }
-        if (!d.moved) return
-        const nowT = performance.now()
-        const dt = Math.max(0.008, (nowT - d.lastT) / 1000)
-        const rawVx = clampNum((px - d.lastX) / dt, -140, 140)
-        const rawVy = clampNum((py - d.lastY) / dt, -140, 140)
-        d.vx = d.vx * 0.45 + rawVx * 0.55
-        d.vy = d.vy * 0.45 + rawVy * 0.55
-        d.lastX = px
-        d.lastY = py
-        d.lastT = nowT
-        d.x = px + d.ox
-        d.y = py + d.oy
-      }
-
-      const handleOrbPointerEnd = (e, orb) => {
-        const d = dragRef.current
-        if (!d || d.uid !== orb.uid || d.pointerId !== e.pointerId) return
-        try { e.currentTarget.releasePointerCapture?.(e.pointerId) } catch {}
-        dragRef.current = null
-        const b = bodiesRef.current.get(orb.uid)
-        if (!d.moved) {
-          setSelectedUid(cur => (cur === orb.uid ? '' : orb.uid))
-          return
-        }
-        if (!b) return
-        const w = (tankRef.current && tankRef.current.clientWidth) || tankSizeRef.current.w || 540
-        const geo = computeTankGeometry(w, tankHeight, hasOutside)
-        const dx = b.x - geo.cx
-        const dy = b.y - geo.cy
-        const dist = Math.hypot(dx, dy) || 0.001
-
-        if (orb.zone === 'outside' && orb.canJoin && dist < geo.R + b.r * 0.2) {
-          if (bubbleLocked) {
-            const nx = dx / dist
-            const ny = dy / dist
-            b.x = geo.cx + nx * (geo.R + b.r + 12)
-            b.y = geo.cy + ny * (geo.R + b.r + 12)
-            b.vx = nx * 42
-            b.vy = ny * 42
-            triggerLockedReject()
-            return
+        if (kind === 'peer-session') {
+          const bObj = branch || branches.find(b => b.rootId === id && b.roleTier === 'peer')
+          const sessObj = (bObj && bObj.linkedSessObj) || {
+            id,
+            name: (bObj && bObj.raw && bObj.raw.name) || shortSession(id),
+            linked: true,
           }
-          performOrbJoin(orb)
-          return
+          requestTogglePeerLink(sessObj, false)
+        } else if (kind === 'harness') {
+          if (dispatchTarget === id) setDispatchTarget('')
+          const hObj = harnessWing.find(x => x.provider === id)
+          void toggleBubbleHarness(id, false, { label: (hObj && hObj.label) || id })
         }
-
-        if (orb.zone === 'inside' && orb.canLeave && dist > geo.R + b.r * 0.35) {
-          if (bubbleLocked) {
-            const nx = dx / dist
-            const ny = dy / dist
-            const pullD = Math.max(geo.hubR + b.r + 6, geo.R - b.r - 8)
-            b.x = geo.cx + nx * pullD
-            b.y = geo.cy + ny * pullD
-            b.vx = -nx * 42
-            b.vy = -ny * 42
-            triggerLockedReject()
-            return
-          }
-          performOrbLeave(orb)
-          return
-        }
-
-        b.vx = clampNum(d.vx * 0.35, -36, 36)
-        b.vy = clampNum(d.vy * 0.35, -36, 36)
       }
 
-      const selectedOrb = selectedUid ? orbs.find(o => o.uid === selectedUid) || null : null
+      const beginDragItem = (e, payload) => {
+        dragPayloadRef.current = payload
+        try {
+          e.dataTransfer.effectAllowed = 'move'
+          e.dataTransfer.setData('text/plain', JSON.stringify(payload))
+        } catch {}
+      }
+
+      const endDragItem = () => {
+        dragPayloadRef.current = null
+        setDragOverZone('')
+      }
+
+      const readDragPayload = (e) => {
+        if (dragPayloadRef.current) return dragPayloadRef.current
+        try {
+          const raw = e.dataTransfer && e.dataTransfer.getData('text/plain')
+          return raw ? JSON.parse(raw) : null
+        } catch {
+          return null
+        }
+      }
+
+      const handleZoneDragOver = (e, acceptFromZone, zoneName) => {
+        const p = dragPayloadRef.current
+        if (p && p.fromZone !== acceptFromZone) return
+        e.preventDefault()
+        if (dragOverZone !== zoneName) setDragOverZone(zoneName)
+      }
+
+      const handleMembraneDrop = (e) => {
+        e.preventDefault()
+        setDragOverZone('')
+        const payload = readDragPayload(e)
+        dragPayloadRef.current = null
+        if (!payload || payload.fromZone !== 'outside') return
+        performJoin(payload)
+      }
+
+      const handleStandbyDrop = (e) => {
+        e.preventDefault()
+        setDragOverZone('')
+        const payload = readDragPayload(e)
+        dragPayloadRef.current = null
+        if (!payload || payload.fromZone !== 'inside') return
+        performLeave(payload)
+      }
+
+      const summaryParts = [
+        `${counts.primary} ${bi('主', 'Lead')}`,
+        counts.secondary > 0 ? `${counts.secondary} ${bi('次', 'Sub')}` : '',
+        counts.peer > 0 ? `${counts.peer} ${bi('联动', 'Peer')}` : '',
+        counts.harness > 0 ? `${counts.harness} ${bi('外协', 'Harness')}` : '',
+      ].filter(Boolean)
+
+      const dispatchHarnessMeta = dispatchTarget
+        ? (harnessWing.find(x => x.provider === dispatchTarget) || readyStandbyHarnesses.find(x => x.provider === dispatchTarget) || null)
+        : null
 
       const fedOpen = (view.peersFedCollapsed === null || view.peersFedCollapsed === undefined)
         ? otherSessions.length > 0
@@ -25292,7 +25284,7 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         { className: 'dnb-view' },
-        // Section 1: Real-Time 2D Physics Water Bubble Arena & External Harness Tank (Experimental)
+        // Section 1: Bubble-Shaped Collaboration Squad Topology (Experimental)
         h(
           AccCard,
           {
@@ -25300,12 +25292,12 @@ window.__ModuleLoader__.load({
             onToggle: () => patch({ peersNetCollapsed: !view.peersNetCollapsed }),
             title: bi('🫧 协同作战水泡（实验）', '🫧 Collab Bubble Squad (Exp)'),
             headTitle: bubbleLocked
-              ? bi('编队已锁定：运行期间禁止拆散会话或外部 Harness，仅可通过急停安全解体', 'Locked during work: member removal blocked until done or emergency stop')
-              : bi('直接按住水泡中的任意成员泡泡拖入或拖出大水泡，自由漂浮碰撞协同', 'Grab and drag any bubble orb directly into or out of the main Bubble'),
-            count: totalInBubble ? String(totalInBubble) : '',
+              ? bi('编队已锁定：运行期间禁止拆散会话或外部 Harness，仅可通过急停安全解体', 'Locked during work: structural edits blocked until settled or emergency stop')
+              : bi('水泡状编队清晰展示团队归属、主次层级与协作连线，支持拖入/点选组队', 'Organic bubble squad clearly shows membership, hierarchy, and collaboration links'),
+            count: counts.total ? String(counts.total) : '',
             preview: bubbleLocked
               ? `🔒 ${bubbleLockReason || bi('工作中已锁死', 'Locked while active')}`
-              : (peers.length ? peers.slice(0, 3).map(p => p.name).join(' · ') : bi('整备待命中…', 'Ready to form squad…')),
+              : summaryParts.join(' · '),
             bodyStyle: { padding: '10px' },
             actions: h(
               React.Fragment,
@@ -25334,7 +25326,7 @@ window.__ModuleLoader__.load({
           h(
             'div',
             { className: 'dnb-bubble-stage' },
-            // Status, Physics Motion & Structural Lock Control Strip
+            // Status & Structural Work-Lock Control Strip
             h(
               'div',
               { className: 'dnb-bubble-bar' },
@@ -25347,20 +25339,12 @@ window.__ModuleLoader__.load({
                   { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
                   bubbleLocked
                     ? bi(`🔒 工作中已锁死${bubbleLockReason ? ' · ' + bubbleLockReason : ''}`, `🔒 Locked${bubbleLockReason ? ' · ' + bubbleLockReason : ''}`)
-                    : bi('🫧 物理水泡域 · 抓泡泡拖入/拖出', '🫧 Physics Tank · Grab & drag orbs'),
+                    : bi('🫧 编队整备中 · 拖入或点选组建水泡', '🫧 Staging · Drag or click to form Bubble'),
                 ),
               ),
               h(
                 'div',
                 { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-pill',
-                  'data-active': physicsPaused ? '0' : '1',
-                  style: { height: 22, padding: '0 7px', fontSize: 10.5 },
-                  title: physicsPaused ? bi('恢复泡泡自由漂浮与弹性碰撞', 'Resume bubble floating physics') : bi('暂停漂浮方便逐个静态点选', 'Pause floating motion'),
-                  onClick: () => setPhysicsPaused(v => !v),
-                }, physicsPaused ? bi('⏸ 静止', '⏸ Paused') : bi('🫧 漂浮中', '🫧 Floating')),
                 h('button', {
                   type: 'button',
                   className: 'dnb-pill',
@@ -25401,122 +25385,393 @@ window.__ModuleLoader__.load({
               ),
             ),
 
-            // 2D Real-Time Physics Soap Bubble Tank
+            // Main Organic Bubble-Shaped Squad Enclosure
             h(
               'div',
               {
-                ref: tankRef,
-                className: 'dnb-bubble-tank dnb-bubble-arena',
+                ref: membraneRef,
+                className: 'dnb-squad-membrane',
                 'data-locked': bubbleLocked ? '1' : '0',
                 'data-shake': lockShake ? '1' : '0',
-                style: { height: tankHeight + 'px' },
+                'data-dragover': dragOverZone === 'inside' ? '1' : '0',
+                onDragOver: e => handleZoneDragOver(e, 'outside', 'inside'),
+                onDragLeave: () => { if (dragOverZone === 'inside') setDragOverZone('') },
+                onDrop: handleMembraneDrop,
               },
-              h('canvas', {
-                ref: canvasRef,
-                className: 'dnb-bubble-fx',
-                'aria-hidden': 'true',
-              }),
-              // Central Coordinator Micro-Hub pinned at (geoNow.cx, geoNow.cy)
+              // Adaptive SVG Directed Collaboration & Hierarchy Connectors (paths layer + top label pills layer)
+              (linkLayout.w > 0 && linkLayout.h > 0 && linkLayout.links.length > 0)
+                ? h(
+                    'svg',
+                    {
+                      className: 'dnb-squad-links-svg',
+                      width: linkLayout.w,
+                      height: linkLayout.h,
+                      viewBox: `0 0 ${linkLayout.w} ${linkLayout.h}`,
+                      'aria-hidden': 'true',
+                    },
+                    h(
+                      'g',
+                      { className: 'dnb-squad-links-paths' },
+                      linkLayout.links.map((lk) =>
+                        h(
+                          'g',
+                          { key: 'p-' + lk.id, className: 'dnb-squad-link-group', 'data-kind': lk.kind },
+                          h('path', {
+                            className: 'dnb-squad-link-path',
+                            'data-kind': lk.kind,
+                            d: lk.d,
+                            fill: 'none',
+                            stroke: lk.color,
+                            strokeWidth: lk.kind === 'collab-sync' ? 1.6 : 1.9,
+                            strokeDasharray: lk.dashed ? '5 4' : undefined,
+                            strokeLinecap: 'round',
+                            opacity: lk.kind === 'collab-sync' ? 0.85 : 0.72,
+                          }),
+                          h('circle', {
+                            cx: lk.x1,
+                            cy: lk.y1,
+                            r: 2.6,
+                            fill: lk.color,
+                            opacity: 0.85,
+                          }),
+                          h('circle', {
+                            cx: lk.x2,
+                            cy: lk.y2,
+                            r: 3.1,
+                            fill: lk.color,
+                            opacity: 0.92,
+                          }),
+                        ),
+                      ),
+                    ),
+                    h(
+                      'g',
+                      { className: 'dnb-squad-links-labels' },
+                      linkLayout.links.map((lk) => {
+                        if (!lk.label) return null
+                        const pillW = Math.max(32, Math.round(lk.label.split('').reduce((s, ch) => s + (/[\u4e00-\u9fa5]/.test(ch) ? 10.2 : 6.2), 12)))
+                        return h(
+                          'g',
+                          { key: 'l-' + lk.id, transform: `translate(${lk.mx.toFixed(1)}, ${lk.my.toFixed(1)})` },
+                          h('rect', {
+                            x: -(pillW / 2),
+                            y: -8.5,
+                            width: pillW,
+                            height: 17,
+                            rx: 8.5,
+                            className: 'dnb-squad-link-pill-bg',
+                            stroke: lk.color,
+                            strokeWidth: 0.95,
+                          }),
+                          h(
+                            'text',
+                            {
+                              x: 0,
+                              y: 3.2,
+                              textAnchor: 'middle',
+                              className: 'dnb-squad-link-pill-txt',
+                              fill: lk.color,
+                            },
+                            lk.label,
+                          ),
+                        )
+                      }),
+                    ),
+                  )
+                : null,
+
+              // Membrane Top Summary Strip
+              h(
+                'div',
+                { className: 'dnb-squad-membrane-head' },
+                h(
+                  'span',
+                  { className: 'dnb-squad-membrane-title' },
+                  bubbleLocked ? '🛡️' : '🫧',
+                  ' ',
+                  bi('当前协同队伍水泡', 'Active Collab Squad Bubble'),
+                ),
+                h(
+                  'span',
+                  { className: 'dnb-squad-summary-pills' },
+                  summaryParts.map((txt, idx) => h('span', { key: idx, className: 'dnb-squad-mini-stat' }, txt)),
+                  counts.running > 0
+                    ? h('span', { className: 'dnb-squad-mini-stat', 'data-running': '1' }, `${counts.running} ${bi('执行中', 'Active')}`)
+                    : null,
+                ),
+              ),
+
+              // Tier 0: Chief Coordinator Center Capsule
+              h(
+                'div',
+                { className: 'dnb-squad-hub-wrap' },
+                h(
+                  'div',
+                  {
+                    ref: hubRef,
+                    className: 'dnb-squad-hub',
+                    'data-locked': bubbleLocked ? '1' : '0',
+                    title: bi('DSH 参谋长作为统一总调度枢纽，串联主对话、下属子代理、联动主窗与外部 Harness', 'DSH Chief orchestrates Primary Lead, Subagents, Linked Windows & Harnesses'),
+                  },
+                  h('span', { className: 'dnb-squad-hub-star' }, '✦'),
+                  h(
+                    'div',
+                    { className: 'dnb-squad-hub-text' },
+                    h('span', { className: 'dnb-squad-hub-name' }, bi('DSH 参谋长 · 总调度核心', 'DSH Chief · Coordinator')),
+                    h('span', { className: 'dnb-squad-hub-sub' },
+                      bubbleLocked
+                        ? bi(`结构锁定中 · 共 ${counts.total} 位在编`, `Locked · ${counts.total} enrolled`)
+                        : bi(`统领编队 · 共 ${counts.total} 位在编`, `Orchestrating · ${counts.total} enrolled`)),
+                  ),
+                ),
+              ),
+
+              // Tier 1 & Tier 2: Primary/Peer Branch Pods (with nested Secondary Subagents) + External Harness Wing
               h(
                 'div',
                 {
-                  className: 'dnb-bubble-center-hub',
-                  'data-locked': bubbleLocked ? '1' : '0',
-                  style: {
-                    transform: `translate3d(${(geoNow.cx - 25).toFixed(1)}px, ${(geoNow.cy - 25).toFixed(1)}px, 0)`,
-                  },
-                  title: bi('DSH 参谋长核心调度枢纽', 'DSH Chief Core Hub'),
+                  className: 'dnb-squad-branches',
+                  'data-cols': String(branchCols),
                 },
-                h('span', { className: 'dnb-bubble-center-icon' }, '✦'),
-                h('span', { className: 'dnb-bubble-center-count' }, String(totalInBubble)),
-              ),
-
-              // Live Drifting & Bouncing Spherical Member Orbs
-              orbs.map((orb) => {
-                const body = bodiesRef.current.get(orb.uid)
-                const x0 = body ? (body.x - orb.r) : (geoNow.cx - orb.r)
-                const y0 = body ? (body.y - orb.r) : (geoNow.cy - orb.r)
-                const isSel = selectedUid === orb.uid
-                const showLockTag = bubbleLocked && (orb.canJoin || orb.canLeave)
-                return h(
-                  'div',
-                  {
-                    key: orb.uid,
-                    ref: (el) => {
-                      if (el) nodeElsRef.current.set(orb.uid, el)
-                      else nodeElsRef.current.delete(orb.uid)
+                branches.map((branch) => {
+                  const peer = branch.raw || {}
+                  const isPrimary = branch.roleTier === 'primary'
+                  const isPeer = branch.roleTier === 'peer'
+                  const isRunning = peer.status === 'running'
+                  const taskSummary = peer.taskTitle || peer.progressSummary || peer.objective || (isPrimary ? bi('主指挥核心会话', 'Primary coordinator session') : bi('已并入当前协同编队', 'Linked squad window'))
+                  return h(
+                    'div',
+                    {
+                      key: branch.uid,
+                      ref: (el) => {
+                        if (el) podElsRef.current.set(branch.podKey, el)
+                        else podElsRef.current.delete(branch.podKey)
+                      },
+                      className: 'dnb-squad-pod',
+                      'data-tier': branch.roleTier,
+                      'data-running': isRunning ? '1' : '0',
+                      draggable: isPeer,
+                      onDragStart: isPeer
+                        ? e => beginDragItem(e, { fromZone: 'inside', kind: 'peer-session', id: branch.rootId, branch })
+                        : undefined,
+                      onDragEnd: isPeer ? endDragItem : undefined,
+                      style: {
+                        '--pod-dot': branch.accent.dot,
+                        '--pod-bg': branch.accent.bg,
+                        '--pod-border': branch.accent.border,
+                        '--pod-text': branch.accent.text,
+                      },
                     },
-                    className: 'dnb-orb',
-                    'data-uid': orb.uid,
-                    'data-zone': orb.zone,
-                    'data-kind': orb.kind,
-                    'data-logo': orb.isLogoOrb ? '1' : '0',
-                    'data-installed': orb.installed ? '1' : '0',
-                    'data-running': orb.running ? '1' : '0',
-                    'data-selected': isSel ? '1' : '0',
-                    title: `${orb.label}（${orb.kindName}）\n${orb.subText}`,
-                    style: {
-                      width: (orb.r * 2) + 'px',
-                      height: (orb.r * 2) + 'px',
-                      transform: `translate3d(${x0.toFixed(2)}px, ${y0.toFixed(2)}px, 0)`,
-                      '--orb-dot': orb.accent.dot,
-                      '--orb-bg': orb.accent.bg,
-                      '--orb-border': orb.accent.border,
-                      '--orb-text': orb.accent.text,
-                    },
-                    onPointerEnter: () => {
-                      const b = bodiesRef.current.get(orb.uid)
-                      if (b) b.hovered = true
-                    },
-                    onPointerLeave: () => {
-                      const b = bodiesRef.current.get(orb.uid)
-                      if (b) b.hovered = false
-                    },
-                    onPointerDown: e => handleOrbPointerDown(e, orb),
-                    onPointerMove: e => handleOrbPointerMove(e, orb),
-                    onPointerUp: e => handleOrbPointerEnd(e, orb),
-                    onPointerCancel: e => handleOrbPointerEnd(e, orb),
-                  },
-                  orb.isLogoOrb
-                    ? h(
-                        React.Fragment,
-                        null,
-                        orb.running
-                          ? h(
-                              'span',
-                              { className: 'dnb-orb-run-pin' },
-                              h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: orb.accent.dot } }),
-                            )
-                          : null,
-                        h(
-                          'div',
-                          { className: 'dnb-orb-logo' },
-                          h(HarnessLogoIcon, {
-                            provider: orb.provider,
-                            size: orb.zone === 'inside' ? 26 : 23,
-                            color: orb.accent.text,
-                          }),
-                        ),
-                        h('div', { className: 'dnb-orb-badge' }, showLockTag ? `🔒 ${orb.badge}` : orb.badge),
-                      )
-                    : h(
-                        React.Fragment,
-                        null,
-                        h(
-                          'div',
-                          { className: 'dnb-orb-top' },
-                          orb.running
-                            ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: orb.accent.dot } })
-                            : h('span', { className: 'dnb-orb-dot', style: { background: orb.accent.dot } }),
-                        ),
-                        h('div', { className: 'dnb-orb-label' }, orb.shortLabel),
-                        h('div', { className: 'dnb-orb-badge' }, showLockTag ? `🔒 ${orb.badge}` : orb.badge),
+                    // Pod Header: Status + Clear Role Badge (主 / 联动主窗) + Full Session Title + Actions
+                    h(
+                      'div',
+                      { className: 'dnb-squad-pod-head' },
+                      h(
+                        'div',
+                        { className: 'dnb-squad-pod-ident' },
+                        isRunning
+                          ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9px', color: isPrimary ? '#38bdf8' : branch.accent.dot } })
+                          : h('span', { className: 'dnb-squad-dot', style: { background: isPrimary ? '#38bdf8' : branch.accent.dot } }),
+                        h('span', { className: 'dnb-tier-badge', 'data-tier': branch.roleTier }, branch.tierBadge),
+                        h('span', { className: 'dnb-squad-pod-name', title: peer.name || '' }, peer.name || (isPrimary ? bi('主对话', 'Main') : shortSession(branch.rootId))),
                       ),
-                )
-              }),
+                      h(
+                        'div',
+                        { className: 'dnb-squad-pod-acts' },
+                        peer.key
+                          ? h('button', {
+                              type: 'button',
+                              className: 'dnb-pill',
+                              style: { height: 20, padding: '0 6px', fontSize: 10 },
+                              title: bi('快速向该主会话递话调度', 'Send relay message'),
+                              onClick: () => {
+                                patch({
+                                  secTarget: peer.key,
+                                  secMode: isRunning ? 'steer' : 'followup',
+                                  notice: bi('已在下方锁定 @', 'Locked target @') + (peer.name || peer.key),
+                                })
+                                focusSecInput()
+                              },
+                            }, '@递话')
+                          : null,
+                        isPeer
+                          ? h('button', {
+                              type: 'button',
+                              className: 'dnb-pill',
+                              style: { height: 20, padding: '0 6px', fontSize: 10 },
+                              title: bubbleLocked ? bi('编队已锁，请先急停或等完工后移出', 'Locked while active') : bi('将该联动窗口移出编队水泡', 'Remove from Bubble'),
+                              onClick: () => performLeave({ kind: 'peer-session', id: branch.rootId, branch }),
+                            }, bubbleLocked ? '🔒' : '×')
+                          : null,
+                      ),
+                    ),
+
+                    h(
+                      'div',
+                      { className: 'dnb-squad-pod-sub', title: taskSummary },
+                      taskSummary,
+                    ),
+
+                    // Tier 2: Nested Secondary Subagent Sub-Bubble Cluster under this Primary/Peer
+                    branch.children.length > 0
+                      ? h(
+                          'div',
+                          { className: 'dnb-sub-cluster' },
+                          h(
+                            'div',
+                            { className: 'dnb-sub-cluster-head' },
+                            `↳ ${bi(`下属子代理（次 · ${branch.children.length}）`, `Subagents (Secondary · ${branch.children.length})`)}`,
+                          ),
+                          h(
+                            'div',
+                            { className: 'dnb-sub-list' },
+                            branch.children.map((sub) => {
+                              const sPeer = sub.raw || {}
+                              const sRun = sPeer.status === 'running'
+                              return h(
+                                'div',
+                                {
+                                  key: sub.uid,
+                                  className: 'dnb-sub-pill',
+                                  'data-tier': 'secondary',
+                                  'data-running': sRun ? '1' : '0',
+                                },
+                                h(
+                                  'div',
+                                  { className: 'dnb-sub-pill-main' },
+                                  sRun
+                                    ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: branch.accent.dot } })
+                                    : h('span', { className: 'dnb-squad-dot', style: { background: branch.accent.dot, width: 6, height: 6 } }),
+                                  h('span', { className: 'dnb-tier-badge', 'data-tier': 'secondary' }, sub.tierBadge),
+                                  h('span', { className: 'dnb-sub-name', title: sPeer.taskTitle || sPeer.name || '' }, sPeer.name || shortSession(sPeer.id)),
+                                  sPeer.taskTitle
+                                    ? h('span', { className: 'dnb-sub-task', title: sPeer.taskTitle }, sPeer.taskTitle)
+                                    : null,
+                                ),
+                                h(
+                                  'div',
+                                  { className: 'dnb-sub-pill-acts' },
+                                  sPeer.id
+                                    ? h('button', {
+                                        type: 'button',
+                                        className: 'dnb-mini-btn',
+                                        title: bi('分屏查看该子代理对话流', 'Open subagent split view'),
+                                        onClick: () => {
+                                          if (!openSubagentChat(sPeer)) patch({ notice: bi('该子代理暂无独立面板视图', 'No dedicated pane view for this subagent') })
+                                        },
+                                      }, h(Icon, { name: 'chat', size: 9.5 }), bi('分屏', 'Split'))
+                                    : null,
+                                  sPeer.key
+                                    ? h('button', {
+                                        type: 'button',
+                                        className: 'dnb-mini-btn',
+                                        title: bi('向该子代理直接递话', 'Relay to subagent'),
+                                        onClick: () => {
+                                          patch({
+                                            secTarget: sPeer.key,
+                                            secMode: sRun ? 'steer' : 'followup',
+                                            notice: bi('已在下方锁定 @', 'Locked target @') + (sPeer.name || sPeer.key),
+                                          })
+                                          focusSecInput()
+                                        },
+                                      }, '@递话')
+                                    : null,
+                                ),
+                              )
+                            }),
+                          ),
+                        )
+                      : null,
+                  )
+                }),
+
+                // External Harness Wing inside Squad Bubble (only rendered when enrolled installed Harnesses > 0)
+                harnessWing.length > 0
+                  ? h(
+                      'div',
+                      {
+                        ref: (el) => {
+                          if (el) podElsRef.current.set('harness-wing', el)
+                          else podElsRef.current.delete('harness-wing')
+                        },
+                        className: 'dnb-harness-pod',
+                        'data-tier': 'harness',
+                        'data-span': branches.length > 1 ? 'full' : 'col',
+                      },
+                      h(
+                        'div',
+                        { className: 'dnb-harness-pod-head' },
+                        h('span', { className: 'dnb-tier-badge', 'data-tier': 'harness' }, bi('外协执行', 'External')),
+                        h('span', { className: 'dnb-harness-pod-title' }, bi(`受差遣外部 Harness（${harnessWing.length}）`, `Dispatched External Harnesses (${harnessWing.length})`)),
+                        h('span', { className: 'dnb-harness-pod-note' }, bi('独立进程 · 派单自动附带红线与物理墙', 'Out-of-process · redlines & walls prepended')),
+                      ),
+                      h(
+                        'div',
+                        { className: 'dnb-harness-cards' },
+                        harnessWing.map((hItem) => {
+                          const roleText = hItem.role || hItem.roleHint || bi('外部独立执行进程', 'External Harness')
+                          const isLocal = hItem.transport === 'local-cli'
+                          const isSelTarget = dispatchTarget === hItem.provider
+                          return h(
+                            'div',
+                            {
+                              key: hItem.provider,
+                              className: 'dnb-harness-card',
+                              'data-uid': 'harness:' + hItem.provider,
+                              'data-provider': hItem.provider,
+                              'data-running': hItem.running ? '1' : '0',
+                              draggable: true,
+                              onDragStart: e => beginDragItem(e, { fromZone: 'inside', kind: 'harness', id: hItem.provider }),
+                              onDragEnd: endDragItem,
+                            },
+                            h(HarnessLogoIcon, { provider: hItem.provider, size: 20 }),
+                            h(
+                              'div',
+                              { className: 'dnb-harness-card-info' },
+                              h(
+                                'div',
+                                { className: 'dnb-harness-card-top' },
+                                h('span', { className: 'dnb-harness-card-name' }, hItem.label || hItem.provider),
+                                h(
+                                  'span',
+                                  { className: 'dnb-harness-state-tag', 'data-running': hItem.running ? '1' : '0' },
+                                  hItem.running
+                                    ? h(React.Fragment, null, h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '7px' } }), bi('运行中', 'Running'))
+                                    : (isLocal ? bi('本机直连', 'Local CLI') : bi('DSH插件', 'Plugin')),
+                                ),
+                                hItem.configLabel
+                                  ? h('span', { className: 'dnb-harness-cfg-tag', title: hItem.binaryPath || hItem.configLabel }, `${bi('已配', 'Cfg')} ${hItem.configLabel}`)
+                                  : null,
+                              ),
+                              h('div', { className: 'dnb-harness-card-role', title: hItem.binaryPath || roleText }, roleText),
+                            ),
+                            h(
+                              'div',
+                              { className: 'dnb-harness-card-acts' },
+                              h('button', {
+                                type: 'button',
+                                className: 'dnb-pill dnb-pill-accent',
+                                'data-active': isSelTarget ? '1' : '0',
+                                style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+                                onClick: () => setDispatchTarget(d => (d === hItem.provider ? '' : hItem.provider)),
+                              }, bi('⚡ 调用', '⚡ Run')),
+                              h('button', {
+                                type: 'button',
+                                className: 'dnb-pill',
+                                style: { height: 22, padding: '0 6px', fontSize: 10.5 },
+                                title: bubbleLocked ? bi('编队已锁，禁止移出', 'Locked while active') : bi('将此工具移回待命池', 'Remove to standby'),
+                                onClick: () => performLeave({ kind: 'harness', id: hItem.provider }),
+                              }, bubbleLocked ? '🔒' : '×'),
+                            ),
+                          )
+                        }),
+                      ),
+                    )
+                  : null,
+              ),
             ),
 
-            // Inline External Harness Dispatch Input Bar (when ⚡ 派活 clicked)
+            // Inline External Harness One-Click Dispatch Bar
             dispatchTarget
               ? h(
                   'form',
@@ -25532,12 +25787,14 @@ window.__ModuleLoader__.load({
                       await dispatchBubbleHarness(p, txt)
                     },
                   },
+                  h(HarnessLogoIcon, { provider: dispatchTarget, size: 16 }),
+                  h('span', { className: 'dnb-dispatch-target-tag' }, '@' + ((dispatchHarnessMeta && dispatchHarnessMeta.label) || dispatchTarget)),
                   h('input', {
                     type: 'text',
                     className: 'dnb-input',
                     style: { flex: 1, height: 28, fontSize: 11.5 },
                     value: dispatchText,
-                    placeholder: bi(`向 @${dispatchTarget} 下达自包含任务（自动带当前红线与物理墙约束）…`, `Task for @${dispatchTarget} (constraints auto-prepended)…`),
+                    placeholder: bi(`向 @${dispatchTarget} 下达任务（自动入队锁定并附带红线与物理墙）…`, `Task for @${dispatchTarget} (auto-enrolls, locks & prepends redlines)…`),
                     onChange: e => setDispatchText(e.target.value),
                   }),
                   h('button', {
@@ -25554,133 +25811,124 @@ window.__ModuleLoader__.load({
                 )
               : null,
 
-            // Selected Orb Action Inspector Strip + Official Harness Install Toggle
+            // Outer Standby Pool (Strictly ONLY locally installed Harnesses & standalone open DSH sessions)
             h(
               'div',
-              { className: 'dnb-bubble-inspector', 'data-empty': selectedOrb ? '0' : '1' },
-              selectedOrb
+              {
+                className: 'dnb-standby-zone',
+                'data-dragover': dragOverZone === 'outside' ? '1' : '0',
+                onDragOver: e => handleZoneDragOver(e, 'inside', 'outside'),
+                onDragLeave: () => { if (dragOverZone === 'outside') setDragOverZone('') },
+                onDrop: handleStandbyDrop,
+              },
+              h(
+                'div',
+                { className: 'dnb-standby-head' },
+                h('span', { className: 'dnb-standby-title' }, bi('队外待命 · 本机已检测可用', 'Standby Pool · Detected Locally')),
+                h('span', { className: 'dnb-standby-hint' },
+                  hasStandby
+                    ? bi('拖入上方水泡协同或点 + 入队（未安装工具已自动隐藏）', 'Drag into Bubble above or click + Join (uninstalled tools hidden)')
+                    : bi('仅展示本机已配置的外部工具与独立窗口', 'Shows only locally configured tools & open sessions')),
+              ),
+              hasStandby
                 ? h(
-                    React.Fragment,
-                    null,
-                    h(
-                      'div',
-                      { className: 'dnb-bubble-inspector-info' },
-                      selectedOrb.isLogoOrb
-                        ? h(HarnessLogoIcon, { provider: selectedOrb.provider, size: 15, color: selectedOrb.accent.text })
-                        : h('span', { className: 'dnb-droplet-dot', style: { background: selectedOrb.accent.dot } }),
-                      h('span', { style: { fontWeight: 700, fontSize: 12, whiteSpace: 'nowrap' } }, selectedOrb.label),
-                      h('span', { className: 'dnb-droplet-kind', style: { color: selectedOrb.accent.text, borderColor: selectedOrb.accent.border } }, selectedOrb.kindName),
-                      h('span', { className: 'dnb-bubble-inspector-sub', title: selectedOrb.subText }, selectedOrb.subText),
-                    ),
-                    h(
-                      'div',
-                      { className: 'dnb-bubble-inspector-acts' },
-                      (selectedOrb.kind === 'subagent' && selectedOrb.raw && selectedOrb.raw.id)
-                        ? h('button', {
-                            type: 'button',
-                            className: 'dnb-pill',
-                            style: { height: 21, padding: '0 7px', fontSize: 10.5 },
-                            onClick: () => {
-                              if (!openSubagentChat(selectedOrb.raw)) patch({ notice: bi('该子代理暂无独立面板视图', 'No dedicated pane view for this subagent') })
-                            },
-                          }, h(Icon, { name: 'chat', size: 10 }), bi('分屏', 'Split'))
-                        : null,
-                      (selectedOrb.zone === 'inside' && selectedOrb.kind !== 'harness' && selectedOrb.raw)
-                        ? h('button', {
-                            type: 'button',
-                            className: 'dnb-pill',
-                            style: { height: 21, padding: '0 7px', fontSize: 10.5 },
-                            onClick: () => {
-                              patch({
-                                secTarget: selectedOrb.raw.key,
-                                secMode: selectedOrb.running ? 'steer' : 'followup',
-                                notice: bi('已在下方锁定 @', 'Locked target @') + selectedOrb.label,
-                              })
-                              focusSecInput()
-                            },
-                          }, bi('@递话', '@Relay'))
-                        : null,
-                      ((selectedOrb.kind === 'harness' || selectedOrb.kind === 'standby-harness') && selectedOrb.installed && selectedOrb.raw)
-                        ? h('button', {
+                    'div',
+                    { className: 'dnb-standby-grid' },
+                    squad.standbySessions.map((sess) => {
+                      const col = colorForRootSession(sess.id, selfRootId)
+                      const desc = sess.objective || sess.progressSummary || bi('已打开的独立会话窗口，可拖拽并入水泡', 'Standalone window ready to join Bubble')
+                      return h(
+                        'div',
+                        {
+                          key: 'sess:' + sess.id,
+                          className: 'dnb-standby-card',
+                          'data-kind': 'standby-session',
+                          'data-uid': 'standby-sess:' + sess.id,
+                          draggable: true,
+                          onDragStart: e => beginDragItem(e, { fromZone: 'outside', kind: 'standby-session', id: sess.id, item: sess }),
+                          onDragEnd: endDragItem,
+                          style: { borderLeftColor: col.dot },
+                        },
+                        h('span', { className: 'dnb-squad-dot', style: { background: col.dot, width: 8, height: 8 } }),
+                        h(
+                          'div',
+                          { className: 'dnb-standby-card-body' },
+                          h(
+                            'div',
+                            { className: 'dnb-standby-card-top' },
+                            h('span', { className: 'dnb-tier-badge', 'data-tier': 'standby' }, bi('独立窗', 'Window')),
+                            h('span', { className: 'dnb-standby-card-name' }, sess.name || shortSession(sess.id)),
+                          ),
+                          h('div', { className: 'dnb-standby-card-desc', title: desc }, desc),
+                        ),
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-pill dnb-pill-accent',
+                          style: { height: 22, padding: '0 8px', fontSize: 10.5, flexShrink: 0 },
+                          onClick: () => performJoin({ kind: 'standby-session', id: sess.id, item: sess }),
+                        }, bubbleLocked ? '🔒' : bi('+ 入队', '+ Join')),
+                      )
+                    }),
+                    readyStandbyHarnesses.map((hItem) => {
+                      const roleText = hItem.roleHint || hItem.role || bi('本机外部执行引擎', 'Local external Harness')
+                      const isLocal = hItem.transport === 'local-cli'
+                      const isSelTarget = dispatchTarget === hItem.provider
+                      return h(
+                        'div',
+                        {
+                          key: 'harness:' + hItem.provider,
+                          className: 'dnb-standby-card',
+                          'data-kind': 'standby-harness',
+                          'data-uid': 'standby-harness:' + hItem.provider,
+                          'data-provider': hItem.provider,
+                          draggable: true,
+                          onDragStart: e => beginDragItem(e, { fromZone: 'outside', kind: 'standby-harness', id: hItem.provider, item: hItem }),
+                          onDragEnd: endDragItem,
+                        },
+                        h(HarnessLogoIcon, { provider: hItem.provider, size: 19 }),
+                        h(
+                          'div',
+                          { className: 'dnb-standby-card-body' },
+                          h(
+                            'div',
+                            { className: 'dnb-standby-card-top' },
+                            h('span', { className: 'dnb-standby-card-name' }, hItem.label || hItem.provider),
+                            h('span', { className: 'dnb-harness-state-tag' }, isLocal ? bi('本机直连', 'Local CLI') : bi('DSH插件', 'Plugin')),
+                            hItem.configLabel
+                              ? h('span', { className: 'dnb-harness-cfg-tag', title: hItem.binaryPath || hItem.configLabel }, `${bi('已配', 'Cfg')} ${hItem.configLabel}`)
+                              : null,
+                          ),
+                          h('div', { className: 'dnb-standby-card-desc', title: hItem.binaryPath || roleText }, roleText),
+                        ),
+                        h(
+                          'div',
+                          { style: { display: 'flex', alignItems: 'center', gap: 4, flexShrink: 0 } },
+                          h('button', {
                             type: 'button',
                             className: 'dnb-pill dnb-pill-accent',
-                            'data-active': dispatchTarget === selectedOrb.raw.provider ? '1' : '0',
-                            style: { height: 21, padding: '0 8px', fontSize: 10.5 },
-                            onClick: () => setDispatchTarget(d => (d === selectedOrb.raw.provider ? '' : selectedOrb.raw.provider)),
-                          }, bi('⚡ 一键调用', '⚡ Run Now'))
-                        : null,
-                      selectedOrb.installCmd
-                        ? h('button', {
+                            'data-active': isSelTarget ? '1' : '0',
+                            style: { height: 22, padding: '0 7px', fontSize: 10.5 },
+                            title: bi('一键直连调用并自动纳入水泡锁死', 'One-click run & lock in Bubble'),
+                            onClick: () => setDispatchTarget(d => (d === hItem.provider ? '' : hItem.provider)),
+                          }, bi('⚡ 调用', '⚡ Run')),
+                          h('button', {
                             type: 'button',
                             className: 'dnb-pill',
-                            style: { height: 21, padding: '0 7px', fontSize: 10.5 },
-                            title: selectedOrb.installCmd,
-                            onClick: () => {
-                              try { navigator.clipboard?.writeText(selectedOrb.installCmd) } catch {}
-                              patch({ notice: bi('已复制安装命令：', 'Copied install command: ') + selectedOrb.installCmd })
-                            },
-                          }, bi('复制安装命令', 'Copy Install Cmd'))
-                        : null,
-                      selectedOrb.canJoin
-                        ? h('button', {
-                            type: 'button',
-                            className: 'dnb-pill dnb-pill-accent',
-                            style: { height: 21, padding: '0 8px', fontSize: 10.5 },
-                            onClick: () => performOrbJoin(selectedOrb),
-                          }, bubbleLocked ? '🔒' : bi('+ 入泡', '+ Join'))
-                        : null,
-                      selectedOrb.canLeave
-                        ? h('button', {
-                            type: 'button',
-                            className: 'dnb-pill',
-                            style: { height: 21, padding: '0 7px', fontSize: 10.5 },
-                            onClick: () => performOrbLeave(selectedOrb),
-                          }, bubbleLocked ? '🔒' : bi('× 移出', '× Eject'))
-                        : null,
-                    ),
+                            style: { height: 22, padding: '0 7px', fontSize: 10.5 },
+                            onClick: () => performJoin({ kind: 'standby-harness', id: hItem.provider, item: hItem }),
+                          }, bubbleLocked ? '🔒' : bi('+ 入队', '+ Join')),
+                        ),
+                      )
+                    }),
                   )
                 : h(
                     'div',
-                    { style: { fontSize: 11, color: 'var(--dnb-text-3)', flex: 1, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-                    hasOutside
-                      ? bi('💡 悬停泡泡即刹停，按住直接拖入/拖出大水泡，轻点泡泡可展开专属操作', '💡 Hover to pause orb, drag across membrane to join/eject, tap to inspect')
-                      : bi('💡 悬停或按住甩动泡泡体验碰撞，再开 DSH 窗口或安装外部 Harness 即可跨端组泡', '💡 Drag orbs to play or open another DSH window / Harness to form a cross-tool squad'),
+                    { className: 'dnb-standby-empty' },
+                    harnessWing.length > 0
+                      ? bi('所有已检测到的本机外部 Harness 与联动窗口均已入队协同。', 'All detected local Harnesses and standalone windows are inside the Bubble.')
+                      : bi('暂未检测到其他未入队的本机外部 Harness 或独立窗口（本机装有 Codex / Claude Code 时将自动出现）。', 'No additional local Harnesses or standalone windows detected on standby.'),
                   ),
-              catalogHarnesses.length > 0
-                ? h('button', {
-                    type: 'button',
-                    className: 'dnb-pill',
-                    style: { height: 21, padding: '0 8px', fontSize: 10.5, flexShrink: 0 },
-                    onClick: () => setShowCatalog(v => !v),
-                  }, showCatalog ? bi('收起安装目录', 'Hide Catalog') : bi(`官方外部 Harness (${catalogHarnesses.length})`, `Official Harnesses (${catalogHarnesses.length})`))
-                : null,
             ),
-
-            showCatalog && catalogHarnesses.length > 0
-              ? h(
-                  'div',
-                  { className: 'dnb-bubble-catalog' },
-                  h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginBottom: 4 } },
-                    bi('⚠️ 外部 Harness 运行在独立进程中（不经过主进程物理墙），派单前会自动附带当前禁止红线，并锁死水泡防误拆：', '⚠️ External Harnesses run out-of-process (active redlines are prepended to each dispatch while Bubble locks):')),
-                  catalogHarnesses.map(item =>
-                    h(
-                      'div',
-                      { key: item.provider, className: 'dnb-bubble-catalog-row' },
-                      h('span', { style: { fontWeight: 600, fontSize: 11 } }, `${item.label} (${item.provider})`),
-                      h('code', { className: 'dnb-mono', style: { fontSize: 10, color: 'var(--dnb-text-2)', flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, item.installCmd),
-                      h('button', {
-                        type: 'button',
-                        className: 'dnb-pill',
-                        style: { height: 20, padding: '0 6px', fontSize: 10 },
-                        onClick: () => {
-                          try { navigator.clipboard?.writeText(item.installCmd) } catch {}
-                          patch({ notice: bi('已复制安装命令：', 'Copied install command: ') + item.installCmd })
-                        },
-                      }, bi('复制命令', 'Copy')),
-                    ),
-                  ),
-                )
-              : null,
           ),
         ),
 

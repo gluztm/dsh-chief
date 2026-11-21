@@ -1051,21 +1051,82 @@ function probeLocalClaudeBinary() {
   return ''
 }
 
+function isDirSafe(p) {
+  if (!p) return false
+  try {
+    return fs.statSync(p).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+function probeLocalCodexConfig() {
+  const customHome = String(process.env.CODEX_HOME || '').trim()
+  const candidates = [
+    customHome ? { dir: customHome, label: 'CODEX_HOME' } : null,
+    { dir: path.join(os.homedir(), '.codex'), label: '~/.codex' },
+  ].filter(Boolean)
+  for (const item of candidates) {
+    if (isRegularFileSafe(path.join(item.dir, 'config.toml')) || isRegularFileSafe(path.join(item.dir, 'auth.json')) || isDirSafe(item.dir)) {
+      return { configured: true, configLabel: item.label }
+    }
+  }
+  return { configured: false, configLabel: '' }
+}
+
+function probeLocalClaudeConfig() {
+  const customDir = String(process.env.CLAUDE_CONFIG_DIR || '').trim()
+  const home = os.homedir()
+  const appData = String(process.env.APPDATA || '')
+  const candidates = [
+    customDir ? { check: customDir, type: 'dir', label: 'CLAUDE_CONFIG_DIR' } : null,
+    { check: path.join(home, '.claude.json'), type: 'file', label: '~/.claude.json' },
+    { check: path.join(home, '.claude'), type: 'dir', label: '~/.claude' },
+    appData ? { check: path.join(appData, 'Claude', 'claude_desktop_config.json'), type: 'file', label: 'Claude Desktop' } : null,
+  ].filter(Boolean)
+  for (const item of candidates) {
+    const ok = item.type === 'file' ? isRegularFileSafe(item.check) : isDirSafe(item.check)
+    if (ok) {
+      return { configured: true, configLabel: item.label }
+    }
+  }
+  return { configured: false, configLabel: '' }
+}
+
 /** Pure filesystem detection of local external Harness CLIs (`codex.exe`, `claude.exe`) with 60s TTL cache. */
 export function detectLocalHarnessBinaries({ force = false } = {}) {
   const now = Date.now()
-  const envSig = `${process.env.DSH_CHIEF_CODEX_BIN || ''}|${process.env.DSH_CHIEF_CLAUDE_BIN || ''}`
+  const envSig = [
+    process.env.DSH_CHIEF_CODEX_BIN || '',
+    process.env.DSH_CHIEF_CLAUDE_BIN || '',
+    process.env.CODEX_HOME || '',
+    process.env.CLAUDE_CONFIG_DIR || '',
+  ].join('|')
   if (!force && envSig === localHarnessCache.envSig && (now - localHarnessCache.at) < 60_000) {
     return localHarnessCache.map
   }
   const found = new Map()
   const codexBin = probeLocalCodexBinary()
   if (codexBin) {
-    found.set('codex', { provider: 'codex', binaryPath: codexBin, transport: 'local-cli' })
+    const codexCfg = probeLocalCodexConfig()
+    found.set('codex', {
+      provider: 'codex',
+      binaryPath: codexBin,
+      transport: 'local-cli',
+      configured: codexCfg.configured,
+      configLabel: codexCfg.configLabel,
+    })
   }
   const claudeBin = probeLocalClaudeBinary()
   if (claudeBin) {
-    found.set('claude-code', { provider: 'claude-code', binaryPath: claudeBin, transport: 'local-cli' })
+    const claudeCfg = probeLocalClaudeConfig()
+    found.set('claude-code', {
+      provider: 'claude-code',
+      binaryPath: claudeBin,
+      transport: 'local-cli',
+      configured: claudeCfg.configured,
+      configLabel: claudeCfg.configLabel,
+    })
   }
   localHarnessCache = { at: now, envSig, map: found }
   return found
@@ -1078,7 +1139,7 @@ export function discoverHarnessProviders(runtime, hostState = null) {
     || (hostState && hostState.activeSubprocess)
     || null
   const foundMap = new Map()
-  const addProv = (pname, prov, transport = 'dsh-subagent', binaryPath = '') => {
+  const addProv = (pname, prov, transport = 'dsh-subagent', binaryPath = '', meta = {}) => {
     const clean = String(pname || '').trim()
     if (!clean || clean === 'spawn' || clean === 'fork') return
     if (prov && typeof prov.prepareContinuable === 'function') return
@@ -1087,6 +1148,8 @@ export function discoverHarnessProviders(runtime, hostState = null) {
         prov: prov || { name: clean },
         transport,
         binaryPath,
+        configured: meta.configured !== undefined ? Boolean(meta.configured) : (transport === 'dsh-subagent'),
+        configLabel: meta.configLabel || (transport === 'dsh-subagent' ? 'DSH 插件' : ''),
       })
     }
   }
@@ -1110,7 +1173,10 @@ export function discoverHarnessProviders(runtime, hostState = null) {
   if (subprocessSvc && typeof subprocessSvc.spawn === 'function') {
     const localBins = detectLocalHarnessBinaries()
     for (const [pname, info] of localBins.entries()) {
-      addProv(pname, { name: pname }, 'local-cli', info.binaryPath)
+      addProv(pname, { name: pname }, 'local-cli', info.binaryPath, {
+        configured: info.configured,
+        configLabel: info.configLabel,
+      })
     }
   }
 
@@ -1129,6 +1195,8 @@ export function discoverHarnessProviders(runtime, hostState = null) {
       installed: true,
       transport: entry.transport,
       binaryPath: entry.binaryPath || '',
+      configured: Boolean(entry.configured),
+      configLabel: entry.configLabel || '',
       capabilities: {
         agentPreset: Boolean(caps.agentPreset),
         outputSchema: Boolean(caps.outputSchema),
@@ -1218,6 +1286,8 @@ export function computeBubbleState(deps, rootId, state, directory = null) {
         installed: Boolean(avail),
         transport: (avail && avail.transport) || h.transport || '',
         binaryPath: (avail && avail.binaryPath) || '',
+        configured: Boolean(avail && avail.configured),
+        configLabel: (avail && avail.configLabel) || '',
         running: activeExternalRuns.some(r => r.provider === h.provider),
       }
     }),
