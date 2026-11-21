@@ -934,6 +934,12 @@ function isRegularFileSafe(p) {
   }
 }
 
+function platformBinCandidates(baseName) {
+  return process.platform === 'win32'
+    ? [`${baseName}.exe`, `${baseName}.cmd`, `${baseName}.bat`, baseName]
+    : [baseName]
+}
+
 function findInSystemPath(candidates = []) {
   const rawPath = String(process.env.PATH || '')
   if (!rawPath) return ''
@@ -965,59 +971,82 @@ function resolveCodexFromAppAlias(aliasPath) {
   return ''
 }
 
+function posixFallbackPaths(baseName) {
+  const home = os.homedir()
+  return [
+    `/opt/homebrew/bin/${baseName}`,
+    `/usr/local/bin/${baseName}`,
+    path.join(home, '.local', 'bin', baseName),
+    path.join(home, '.npm-global', 'bin', baseName),
+    path.join(home, '.volta', 'bin', baseName),
+    path.join(home, '.bun', 'bin', baseName),
+    path.join(home, '.asdf', 'shims', baseName),
+  ]
+}
+
 function probeLocalCodexBinary() {
   const envBin = String(process.env.DSH_CHIEF_CODEX_BIN || '').trim()
   if (envBin && isRegularFileSafe(envBin)) return envBin
 
-  const fromPath = findInSystemPath(['codex.exe', 'codex.cmd', 'codex'])
+  const fromPath = findInSystemPath(platformBinCandidates('codex'))
   if (fromPath) return fromPath
 
-  const localApp = String(process.env.LOCALAPPDATA || '')
-  if (localApp) {
-    const aliasRoot = path.join(localApp, 'Microsoft', 'WindowsApps')
+  if (process.platform === 'win32') {
+    const localApp = String(process.env.LOCALAPPDATA || '')
+    if (localApp) {
+      const aliasRoot = path.join(localApp, 'Microsoft', 'WindowsApps')
+      try {
+        const entries = fs.readdirSync(aliasRoot, { withFileTypes: true })
+        for (const ent of entries) {
+          if (ent.isDirectory() && /^OpenAI\.Codex_/i.test(ent.name)) {
+            const pkgAliasDir = path.join(aliasRoot, ent.name)
+            try {
+              for (const sub of fs.readdirSync(pkgAliasDir, { withFileTypes: true })) {
+                if (!sub.name.toLowerCase().endsWith('.exe')) continue
+                const hit = resolveCodexFromAppAlias(path.join(pkgAliasDir, sub.name))
+                if (hit) return hit
+              }
+            } catch {}
+          } else if (/^codex.*\.exe$/i.test(ent.name)) {
+            const hit = resolveCodexFromAppAlias(path.join(aliasRoot, ent.name))
+            if (hit) return hit
+          }
+        }
+      } catch {}
+    }
+
+    // Direct Windows Store MSIX fallback when WindowsApps is readable
+    const winAppsDir = process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'WindowsApps') : 'C:\\Program Files\\WindowsApps'
     try {
-      const entries = fs.readdirSync(aliasRoot, { withFileTypes: true })
-      for (const ent of entries) {
-        if (ent.isDirectory() && /^OpenAI\.Codex_/i.test(ent.name)) {
-          const pkgAliasDir = path.join(aliasRoot, ent.name)
-          try {
-            for (const sub of fs.readdirSync(pkgAliasDir, { withFileTypes: true })) {
-              if (!sub.name.toLowerCase().endsWith('.exe')) continue
-              const hit = resolveCodexFromAppAlias(path.join(pkgAliasDir, sub.name))
-              if (hit) return hit
-            }
-          } catch {}
-        } else if (/^codex.*\.exe$/i.test(ent.name)) {
-          const hit = resolveCodexFromAppAlias(path.join(aliasRoot, ent.name))
-          if (hit) return hit
+      const dirs = fs.readdirSync(winAppsDir, { withFileTypes: true })
+        .filter(d => d.isDirectory() && /^OpenAI\.Codex_/i.test(d.name))
+        .map(d => d.name)
+        .sort()
+        .reverse()
+      for (const dirName of dirs) {
+        for (const rel of ['app\\resources\\codex.exe', 'resources\\codex.exe', 'app\\codex.exe']) {
+          const cand = path.join(winAppsDir, dirName, rel)
+          if (isRegularFileSafe(cand)) return cand
         }
       }
     } catch {}
+
+    const appData = String(process.env.APPDATA || '')
+    const home = os.homedir()
+    for (const cand of [
+      appData ? path.join(appData, 'npm', 'codex.cmd') : '',
+      localApp ? path.join(localApp, 'pnpm', 'codex.cmd') : '',
+      path.join(home, 'scoop', 'shims', 'codex.exe'),
+      path.join(home, 'scoop', 'shims', 'codex.cmd'),
+      path.join(home, '.local', 'bin', 'codex.exe'),
+      path.join(home, '.local', 'bin', 'codex'),
+    ]) {
+      if (isRegularFileSafe(cand)) return cand
+    }
+    return ''
   }
 
-  // Direct Windows Store MSIX fallback when WindowsApps is readable
-  const winAppsDir = process.env.ProgramFiles ? path.join(process.env.ProgramFiles, 'WindowsApps') : 'C:\\Program Files\\WindowsApps'
-  try {
-    const dirs = fs.readdirSync(winAppsDir, { withFileTypes: true })
-      .filter(d => d.isDirectory() && /^OpenAI\.Codex_/i.test(d.name))
-      .map(d => d.name)
-      .sort()
-      .reverse()
-    for (const dirName of dirs) {
-      for (const rel of ['app\\resources\\codex.exe', 'resources\\codex.exe', 'app\\codex.exe']) {
-        const cand = path.join(winAppsDir, dirName, rel)
-        if (isRegularFileSafe(cand)) return cand
-      }
-    }
-  } catch {}
-
-  const appData = String(process.env.APPDATA || '')
-  for (const cand of [
-    appData ? path.join(appData, 'npm', 'codex.cmd') : '',
-    localApp ? path.join(localApp, 'pnpm', 'codex.cmd') : '',
-    path.join(os.homedir(), '.local', 'bin', 'codex.exe'),
-    path.join(os.homedir(), '.local', 'bin', 'codex'),
-  ]) {
+  for (const cand of posixFallbackPaths('codex')) {
     if (isRegularFileSafe(cand)) return cand
   }
   return ''
@@ -1054,39 +1083,49 @@ function probeLocalClaudeBinary() {
   const envBin = String(process.env.DSH_CHIEF_CLAUDE_BIN || '').trim()
   if (envBin && isRegularFileSafe(envBin)) return envBin
 
-  const fromPath = findInSystemPath(['claude.exe', 'claude.cmd', 'claude'])
+  const fromPath = findInSystemPath(platformBinCandidates('claude'))
   if (fromPath) return fromPath
 
-  const localApp = String(process.env.LOCALAPPDATA || '')
-  const appData = String(process.env.APPDATA || '')
-  if (localApp) {
-    const claude3p = findVersionedClaudeExe(path.join(localApp, 'Claude-3p', 'claude-code'), true)
-      || findVersionedClaudeExe(path.join(localApp, 'Claude-3p', 'claude-code'), false)
-    if (claude3p) return claude3p
+  if (process.platform === 'win32') {
+    const localApp = String(process.env.LOCALAPPDATA || '')
+    const appData = String(process.env.APPDATA || '')
+    if (localApp) {
+      const claude3p = findVersionedClaudeExe(path.join(localApp, 'Claude-3p', 'claude-code'), true)
+        || findVersionedClaudeExe(path.join(localApp, 'Claude-3p', 'claude-code'), false)
+      if (claude3p) return claude3p
 
-    try {
-      const pkgsDir = path.join(localApp, 'Packages')
-      const claudePkgs = fs.readdirSync(pkgsDir, { withFileTypes: true })
-        .filter(d => d.isDirectory() && /^AnthropicPBC\.Claude_/i.test(d.name))
-      for (const pkg of claudePkgs) {
-        const base = path.join(pkgsDir, pkg.name, 'LocalCache', 'Roaming', 'Claude', 'claude-code')
-        const hit = findVersionedClaudeExe(base, true) || findVersionedClaudeExe(base, false)
-        if (hit) return hit
-      }
-    } catch {}
-  }
-  if (appData) {
-    const roamingHit = findVersionedClaudeExe(path.join(appData, 'Claude', 'claude-code'), true)
-      || findVersionedClaudeExe(path.join(appData, 'Claude', 'claude-code'), false)
-    if (roamingHit) return roamingHit
+      try {
+        const pkgsDir = path.join(localApp, 'Packages')
+        const claudePkgs = fs.readdirSync(pkgsDir, { withFileTypes: true })
+          .filter(d => d.isDirectory() && /^AnthropicPBC\.Claude_/i.test(d.name))
+        for (const pkg of claudePkgs) {
+          const base = path.join(pkgsDir, pkg.name, 'LocalCache', 'Roaming', 'Claude', 'claude-code')
+          const hit = findVersionedClaudeExe(base, true) || findVersionedClaudeExe(base, false)
+          if (hit) return hit
+        }
+      } catch {}
+    }
+    if (appData) {
+      const roamingHit = findVersionedClaudeExe(path.join(appData, 'Claude', 'claude-code'), true)
+        || findVersionedClaudeExe(path.join(appData, 'Claude', 'claude-code'), false)
+      if (roamingHit) return roamingHit
+    }
+
+    const home = os.homedir()
+    for (const cand of [
+      path.join(home, '.local', 'bin', 'claude.exe'),
+      path.join(home, '.local', 'bin', 'claude'),
+      appData ? path.join(appData, 'npm', 'claude.cmd') : '',
+      localApp ? path.join(localApp, 'pnpm', 'claude.cmd') : '',
+      path.join(home, 'scoop', 'shims', 'claude.exe'),
+      path.join(home, 'scoop', 'shims', 'claude.cmd'),
+    ]) {
+      if (isRegularFileSafe(cand)) return cand
+    }
+    return ''
   }
 
-  for (const cand of [
-    path.join(os.homedir(), '.local', 'bin', 'claude.exe'),
-    path.join(os.homedir(), '.local', 'bin', 'claude'),
-    appData ? path.join(appData, 'npm', 'claude.cmd') : '',
-    localApp ? path.join(localApp, 'pnpm', 'claude.cmd') : '',
-  ]) {
+  for (const cand of posixFallbackPaths('claude')) {
     if (isRegularFileSafe(cand)) return cand
   }
   return ''
@@ -1112,6 +1151,12 @@ function probeLocalCodexConfig() {
       return { configured: true, configLabel: item.label }
     }
   }
+  if (String(process.env.OPENAI_API_KEY || '').trim()) {
+    return { configured: true, configLabel: 'OPENAI_API_KEY' }
+  }
+  if (String(process.env.AZURE_OPENAI_API_KEY || '').trim()) {
+    return { configured: true, configLabel: 'AZURE_OPENAI' }
+  }
   return { configured: false, configLabel: '' }
 }
 
@@ -1131,10 +1176,25 @@ function probeLocalClaudeConfig() {
       return { configured: true, configLabel: item.label }
     }
   }
+  if (String(process.env.CLAUDE_CODE_OAUTH_TOKEN || '').trim()) {
+    return { configured: true, configLabel: 'OAuth Token' }
+  }
+  if (String(process.env.ANTHROPIC_API_KEY || '').trim()) {
+    return { configured: true, configLabel: 'ANTHROPIC_API_KEY' }
+  }
+  if (String(process.env.ANTHROPIC_AUTH_TOKEN || '').trim()) {
+    return { configured: true, configLabel: 'ANTHROPIC_AUTH_TOKEN' }
+  }
+  if (String(process.env.CLAUDE_CODE_USE_BEDROCK || '').trim()) {
+    return { configured: true, configLabel: 'Bedrock' }
+  }
+  if (String(process.env.CLAUDE_CODE_USE_VERTEX || '').trim()) {
+    return { configured: true, configLabel: 'Vertex' }
+  }
   return { configured: false, configLabel: '' }
 }
 
-/** Pure filesystem detection of local external Harness CLIs (`codex.exe`, `claude.exe`) with 60s TTL cache. */
+/** Pure filesystem detection of local external Harness CLIs (`codex`, `claude-code`) with 60s TTL cache. */
 export function detectLocalHarnessBinaries({ force = false } = {}) {
   const now = Date.now()
   const envSig = [
@@ -1142,6 +1202,13 @@ export function detectLocalHarnessBinaries({ force = false } = {}) {
     process.env.DSH_CHIEF_CLAUDE_BIN || '',
     process.env.CODEX_HOME || '',
     process.env.CLAUDE_CONFIG_DIR || '',
+    process.env.OPENAI_API_KEY ? '1' : '0',
+    process.env.AZURE_OPENAI_API_KEY ? '1' : '0',
+    process.env.ANTHROPIC_API_KEY ? '1' : '0',
+    process.env.ANTHROPIC_AUTH_TOKEN ? '1' : '0',
+    process.env.CLAUDE_CODE_OAUTH_TOKEN ? '1' : '0',
+    process.env.CLAUDE_CODE_USE_BEDROCK ? '1' : '0',
+    process.env.CLAUDE_CODE_USE_VERTEX ? '1' : '0',
   ].join('|')
   if (!force && envSig === localHarnessCache.envSig && (now - localHarnessCache.at) < 60_000) {
     return localHarnessCache.map
@@ -1344,6 +1411,7 @@ const CLAUDE_FORWARD_ENV_KEYS = [
   'ANTHROPIC_BASE_URL',
   'ANTHROPIC_API_KEY',
   'ANTHROPIC_AUTH_TOKEN',
+  'CLAUDE_CODE_OAUTH_TOKEN',
   'ANTHROPIC_MODEL',
   'ANTHROPIC_SMALL_FAST_MODEL',
   'ANTHROPIC_DEFAULT_SONNET_MODEL',
@@ -1351,8 +1419,18 @@ const CLAUDE_FORWARD_ENV_KEYS = [
   'ANTHROPIC_DEFAULT_HAIKU_MODEL',
   'CLAUDE_CODE_USE_BEDROCK',
   'CLAUDE_CODE_USE_VERTEX',
+  'CLAUDE_CODE_USE_FOUNDRY',
   'CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC',
   'API_TIMEOUT_MS',
+  'AWS_ACCESS_KEY_ID',
+  'AWS_SECRET_ACCESS_KEY',
+  'AWS_SESSION_TOKEN',
+  'AWS_BEARER_TOKEN_BEDROCK',
+  'AWS_REGION',
+  'AWS_PROFILE',
+  'ANTHROPIC_VERTEX_PROJECT_ID',
+  'CLOUD_ML_REGION',
+  'GOOGLE_APPLICATION_CREDENTIALS',
 ]
 
 const CODEX_FORWARD_ENV_KEYS = [
@@ -1361,7 +1439,49 @@ const CODEX_FORWARD_ENV_KEYS = [
   'OPENAI_BASE_URL',
   'OPENAI_ORG_ID',
   'OPENAI_PROJECT',
+  'AZURE_OPENAI_API_KEY',
+  'AZURE_OPENAI_ENDPOINT',
+  'AZURE_OPENAI_API_VERSION',
 ]
+
+function resolveLocalCliArgv(binaryPath, cliArgs = []) {
+  const bin = String(binaryPath || '').trim()
+  if (!bin) return cliArgs
+  if (process.platform === 'win32' && /\.(cmd|bat)$/i.test(bin)) {
+    try {
+      const fd = fs.openSync(bin, 'r')
+      const buf = Buffer.alloc(16384)
+      let bytes = 0
+      try {
+        bytes = fs.readSync(fd, buf, 0, buf.length, 0)
+      } finally {
+        fs.closeSync(fd)
+      }
+      const txt = buf.toString('utf8', 0, bytes)
+      const binDir = path.dirname(bin)
+      const dpRe = /(?:%dp0%|%~dp0)[\\/]*([^\r\n"'`<>|*?\t]+?\.(?:mjs|cjs|js|exe))(?=["'\s]|$)/gi
+      let m
+      while ((m = dpRe.exec(txt)) !== null) {
+        const rel = String(m[1] || '').replace(/[\\/]+/g, path.sep)
+        const resolved = path.resolve(binDir, rel)
+        const baseLower = path.basename(resolved).toLowerCase()
+        if (!baseLower || baseLower === 'node.exe' || !isRegularFileSafe(resolved)) continue
+        if (baseLower.endsWith('.exe')) return [resolved, ...cliArgs]
+        return [process.execPath, resolved, ...cliArgs]
+      }
+      const absRe = /(["'])([A-Za-z]:[\\/][^"'\r\n]+?\.(?:exe|mjs|cjs|js))\1/gi
+      while ((m = absRe.exec(txt)) !== null) {
+        const resolved = path.normalize(String(m[2] || ''))
+        const baseLower = path.basename(resolved).toLowerCase()
+        if (!baseLower || baseLower === 'node.exe' || !isRegularFileSafe(resolved)) continue
+        if (baseLower.endsWith('.exe')) return [resolved, ...cliArgs]
+        return [process.execPath, resolved, ...cliArgs]
+      }
+    } catch {}
+    return [process.env.ComSpec || 'cmd.exe', '/d', '/s', '/c', bin, ...cliArgs]
+  }
+  return [bin, ...cliArgs]
+}
 
 /** Build explicit opt-in child env for out-of-process external CLIs (passes dsh-subprocess scrub without leaking DEEPSEEK_* / DSH_*). */
 function buildExternalHarnessEnv(provider) {
@@ -1652,9 +1772,10 @@ export async function dispatchBubbleHarness(deps, {
     const tmpOutFile = cleanProvider === 'codex'
       ? path.join(os.tmpdir(), `dsh-bubble-${cleanProvider}-${runKey}.txt`)
       : ''
-    const argv = cleanProvider === 'codex'
-      ? [localHit.binaryPath, 'exec', '--skip-git-repo-check', '--color', 'never', '-C', actionCwd, '-s', 'workspace-write', '-o', tmpOutFile, '-']
-      : [localHit.binaryPath, '-p', '--output-format', 'text', '--no-session-persistence']
+    const cliArgs = cleanProvider === 'codex'
+      ? ['exec', '--skip-git-repo-check', '--color', 'never', '-C', actionCwd, '-s', 'workspace-write', '-o', tmpOutFile, '-']
+      : ['-p', '--output-format', 'text', '--no-session-persistence']
+    const argv = resolveLocalCliArgv(localHit.binaryPath, cliArgs)
 
     const envOverrides = buildExternalHarnessEnv(cleanProvider)
     const handle = subprocessSvc.spawn({

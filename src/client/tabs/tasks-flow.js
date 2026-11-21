@@ -13,6 +13,7 @@ import { store, patch, focusObjectiveInPyramid, openSubagentChat } from '../stor
 import { clampTitle, shortAgentName, isInternalProbeName } from '../utils.js'
 import { act } from '../api.js'
 import { Icon } from '../components/common.js'
+import { isHostLightTheme } from '../styles.js'
 
 const FLOW_CIRCLED = ['①', '②', '③', '④', '⑤', '⑥', '⑦', '⑧', '⑨', '⑩', '⑪', '⑫']
 
@@ -46,12 +47,7 @@ function flowCircledNum(idx) {
 }
 
 function flowDetectLightTheme() {
-  if (typeof document === 'undefined' || !document.documentElement) return false
-  const root = document.documentElement
-  const src = root.getAttribute('data-ds-theme-source') || root.getAttribute('data-ds-theme') || ''
-  if (src === 'light') return true
-  if (src === 'dark') return false
-  return Boolean(document.querySelector && document.querySelector('[data-ds-theme-source="light"]'))
+  return isHostLightTheme()
 }
 
 function flowTopoSortRoots(roots) {
@@ -1425,6 +1421,13 @@ export function TaskFlowCanvasView({
   onSelectStage,
 }) {
   const [hoveredKey, setHoveredKey] = React.useState('')
+  const [, setThemeTick] = React.useState(0)
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+    const onTheme = () => setThemeTick(n => n + 1)
+    window.addEventListener('dnb-theme-change', onTheme)
+    return () => window.removeEventListener('dnb-theme-change', onTheme)
+  }, [])
   const isLight = flowDetectLightTheme()
   const layout = flowLayout || computeFlowCanvasLayout(flowModel, isLR)
   const { stages, stageBoxes, agentBoxes, dispatchEdges, returnEdges, svgW, svgH } = layout

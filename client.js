@@ -4425,6 +4425,50 @@ window.__ModuleLoader__.load({
      */
 
 
+    /** Resolve active host UI color scheme across DSH Desktop (`body[data-ds-dark-theme]`, `color-scheme`) and legacy html attributes. */
+    function detectHostTheme() {
+      if (typeof document === 'undefined' || !document.documentElement) return 'dark'
+      const root = document.documentElement
+      const body = document.body
+      const attr = (
+        root.getAttribute('data-ds-theme-source')
+        || root.getAttribute('data-ds-theme')
+        || root.getAttribute('data-theme')
+        || ''
+      ).trim().toLowerCase()
+      if (attr === 'light' || attr === 'dark') return attr
+      if (body && body.hasAttribute('data-ds-dark-theme')) return 'dark'
+      const cs = (root.style && root.style.colorScheme) || ''
+      if (cs) {
+        const tokens = cs.toLowerCase().split(/\s+/)
+        if (tokens.includes('light') && !tokens.includes('dark')) return 'light'
+        if (tokens.includes('dark') && !tokens.includes('light')) return 'dark'
+      }
+      try {
+        if (typeof getComputedStyle === 'function') {
+          const rStyle = getComputedStyle(root)
+          const rCs = String((rStyle && rStyle.colorScheme) || '').toLowerCase().split(/\s+/)
+          if (rCs.includes('light') && !rCs.includes('dark')) return 'light'
+          if (rCs.includes('dark') && !rCs.includes('light')) return 'dark'
+          if (body) {
+            const bg = String(getComputedStyle(body).backgroundColor || '')
+            const m = bg.match(/rgba?\(\s*(\d+)\s*,\s*(\d+)\s*,\s*(\d+)(?:\s*[,/]\s*([\d.]+))?/i)
+            if (m && (m[4] === undefined || Number(m[4]) > 0.05)) {
+              const lum = (0.2126 * Number(m[1]) + 0.7152 * Number(m[2]) + 0.0722 * Number(m[3])) / 255
+              if (lum > 0.55) return 'light'
+              if (lum < 0.45) return 'dark'
+            }
+          }
+        }
+      } catch {}
+      if (body && !body.hasAttribute('data-ds-dark-theme')) return 'light'
+      return 'dark'
+    }
+
+    function isHostLightTheme() {
+      return detectHostTheme() === 'light'
+    }
+
     const CSS = `
       .dnb-panel {
         --dnb-card: var(--dsw-alias-card-fill, var(--dsw-alias-bg-layer-1, rgba(128,128,136,0.08)));
@@ -4465,7 +4509,7 @@ window.__ModuleLoader__.load({
         -webkit-font-smoothing: antialiased;
       }
 
-      /* Explicit DSH Light Theme overrides (independent of OS prefers-color-scheme) */
+      /* Explicit DSH Light Theme overrides (expanded to DSH Desktop body[data-ds-dark-theme] & html[data-dnb-theme="light"]) */
       html[data-ds-theme-source="light"] .dnb-panel,
       html[data-ds-theme="light"] .dnb-panel,
       [data-ds-theme-source="light"] .dnb-panel,
@@ -4474,14 +4518,14 @@ window.__ModuleLoader__.load({
       [data-ds-theme-source="light"] .dnb-menu {
         --dnb-popover: #ffffff;
         --dnb-card: #ffffff;
-        --dnb-card-hover: #f5f7fa;
-        --dnb-fill: rgba(15, 23, 42, 0.06);
+        --dnb-card-hover: #f8fafc;
+        --dnb-fill: rgba(15, 23, 42, 0.065);
         --dnb-elevated: #ffffff;
-        --dnb-text: #1f2329;
-        --dnb-text-2: #51565d;
-        --dnb-text-3: #8a9099;
-        --dnb-border: #e3e5e9;
-        --dnb-border-strong: #d3d6dc;
+        --dnb-text: #0f172a;
+        --dnb-text-2: #334155;
+        --dnb-text-3: #5b6472;
+        --dnb-border: #e2e8f0;
+        --dnb-border-strong: #cbd5e1;
       }
       html[data-ds-theme-source="light"] .dnb-panel:not(.dnb-main),
       html[data-ds-theme="light"] .dnb-panel:not(.dnb-main),
@@ -4500,7 +4544,80 @@ window.__ModuleLoader__.load({
       [data-ds-theme-source="light"] .dnb-more-menu {
         background-color: #ffffff;
         background-image: none;
-        box-shadow: 0 12px 32px rgba(15, 23, 42, 0.14), 0 0 0 1px rgba(15, 23, 42, 0.05);
+        border-color: #cbd5e1;
+        box-shadow: 0 16px 40px rgba(15, 23, 42, 0.14), 0 2px 8px rgba(15, 23, 42, 0.06);
+      }
+      html[data-ds-theme-source="light"] .dnb-tactical-pop {
+        border-color: rgba(37, 99, 235, 0.28);
+      }
+      html[data-ds-theme-source="light"] .dnb-tactical-head {
+        background: linear-gradient(90deg, #f8fafc 0%, #ffffff 100%);
+        border-bottom-color: #e2e8f0;
+      }
+      html[data-ds-theme-source="light"] .dnb-tactical-row {
+        border-radius: 8px;
+        padding: 6px;
+        border-bottom-color: #eef2f6;
+      }
+      html[data-ds-theme-source="light"] .dnb-tactical-row:hover {
+        background: #f8fafc;
+      }
+      html[data-ds-theme-source="light"] .dnb-modal-backdrop {
+        background: rgba(15, 23, 42, 0.28);
+      }
+      html[data-ds-theme-source="light"] .dnb-modal-card,
+      html[data-ds-theme-source="light"] .dnb-toast {
+        background-color: #ffffff;
+        background-image: none;
+        border-color: #cbd5e1;
+        box-shadow: 0 14px 36px rgba(15, 23, 42, 0.14);
+      }
+      html[data-ds-theme-source="light"] .dnb-switch {
+        background: #cbd5e1;
+        box-shadow: inset 0 1px 2px rgba(15, 23, 42, 0.14);
+      }
+      html[data-ds-theme-source="light"] .dnb-switch[data-on="1"] {
+        background: #16a34a;
+        box-shadow: none;
+      }
+      html[data-ds-theme-source="light"] .dnb-switch[data-on="1"][data-tone="red"] {
+        background: #dc2626;
+        box-shadow: 0 0 8px rgba(220, 38, 38, 0.24);
+      }
+      html[data-ds-theme-source="light"] .dnb-stepper {
+        background: #f8fafc;
+        border-color: #cbd5e1;
+        color: #0f172a;
+      }
+      html[data-ds-theme-source="light"] .dnb-mini-btn[data-tone="accent"] {
+        background: #eff6ff;
+        border-color: rgba(37, 99, 235, 0.34);
+        color: #1d4ed8;
+      }
+      html[data-ds-theme-source="light"] .dnb-mini-btn[data-tone="amber"] {
+        background: #fffbeb;
+        border-color: rgba(217, 119, 6, 0.38);
+        color: #b45309;
+      }
+      html[data-ds-theme-source="light"] .dnb-tac-chip[data-tone="amber"] {
+        background: #fffbeb;
+        border-color: rgba(217, 119, 6, 0.40);
+        color: #b45309;
+      }
+      html[data-ds-theme-source="light"] .dnb-tac-chip[data-tone="accent"] {
+        background: #eff6ff;
+        border-color: rgba(37, 99, 235, 0.38);
+        color: #1d4ed8;
+      }
+      html[data-ds-theme-source="light"] .dnb-tac-chip[data-tone="red"] {
+        background: #fef2f2;
+        border-color: rgba(220, 38, 38, 0.42);
+        color: #dc2626;
+        box-shadow: 0 1px 4px rgba(220, 38, 38, 0.12);
+      }
+      html[data-ds-theme-source="light"] .dnb-group,
+      html[data-ds-theme-source="light"] .dnb-acc-card {
+        box-shadow: 0 1px 3px rgba(15, 23, 42, 0.05);
       }
       html[data-ds-theme-source="light"] .dnb-menu,
       html[data-ds-theme="light"] .dnb-menu,
@@ -4519,6 +4636,7 @@ window.__ModuleLoader__.load({
       [data-ds-theme-source="light"] .dnb-fan-hub {
         background-color: #ffffff;
         background-image: none;
+        color: #0f172a;
         box-shadow: 0 3px 12px rgba(15, 23, 42, 0.12);
       }
       html[data-ds-theme-source="light"] .dnb-team-effort-seg,
@@ -9747,7 +9865,7 @@ window.__ModuleLoader__.load({
         color: var(--pod-text, #c4b5fd);
         border: 1px solid var(--pod-border, rgba(167, 139, 250, 0.45));
       }
-      .dnb-mini-btn {
+      .dnb-liquid-canvas .dnb-mini-btn {
         display: inline-flex;
         align-items: center;
         justify-content: center;
@@ -9765,7 +9883,7 @@ window.__ModuleLoader__.load({
         cursor: pointer;
         transition: background 0.14s ease, border-color 0.14s ease, color 0.14s ease;
       }
-      .dnb-mini-btn:hover {
+      .dnb-liquid-canvas .dnb-mini-btn:hover {
         background: rgba(56, 189, 248, 0.18);
         border-color: rgba(56, 189, 248, 0.48);
         color: var(--dnb-text);
@@ -10046,10 +10164,28 @@ window.__ModuleLoader__.load({
         background: rgba(2, 132, 199, 0.10);
         border-color: rgba(2, 132, 199, 0.28);
       }
-      html[data-ds-theme="light"] .dnb-mini-btn,
-      html[data-ds-theme-source="light"] .dnb-mini-btn {
-        background: rgba(15, 23, 42, 0.05);
-        border-color: rgba(15, 23, 42, 0.14);
+      html[data-ds-theme-source="light"] .dnb-liquid-canvas .dnb-mini-btn,
+      html[data-ds-theme="light"] .dnb-liquid-canvas .dnb-mini-btn {
+        background: rgba(255, 255, 255, 0.88);
+        border-color: rgba(15, 23, 42, 0.18);
+        color: #334155;
+      }
+      html[data-ds-theme-source="light"] .dnb-liquid-canvas .dnb-mini-btn:hover,
+      html[data-ds-theme="light"] .dnb-liquid-canvas .dnb-mini-btn:hover {
+        background: #e0f2fe;
+        border-color: rgba(2, 132, 199, 0.42);
+        color: #0369a1;
+      }
+      html[data-ds-theme-source="light"] .dnb-dock-pill,
+      html[data-ds-theme="light"] .dnb-dock-pill {
+        background: #ffffff;
+        border-color: #cbd5e1;
+        box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+      }
+      html[data-ds-theme-source="light"] .dnb-dock-pill:hover,
+      html[data-ds-theme="light"] .dnb-dock-pill:hover {
+        border-color: rgba(2, 132, 199, 0.45);
+        background: #f8fafc;
       }
       html[data-ds-theme-source="light"] .dnb-liquid-ally-pill,
       html[data-ds-theme="light"] .dnb-liquid-ally-pill,
@@ -10083,8 +10219,47 @@ window.__ModuleLoader__.load({
       }
     `
 
+    function expandLightThemeSelectors(cssText) {
+      return String(cssText || '').replace(
+        /^([ \t]*)html\[data-ds-theme-source="light"\]([^,{\n]+)(,|[ \t]*\{)/gm,
+        (_, indent, sel, tail) =>
+          `${indent}html[data-dnb-theme="light"]${sel},\n`
+          + `${indent}html:not([data-ds-theme="dark"]):not([data-ds-theme-source="dark"]):not([data-dnb-theme="dark"]) body:not([data-ds-dark-theme])${sel},\n`
+          + `${indent}html[data-ds-theme-source="light"]${sel}${tail}`,
+      )
+    }
+
+    const RESOLVED_CSS = expandLightThemeSelectors(CSS)
+
     function Style() {
-      return h('style', { 'data-dnb': '3' }, CSS)
+      if (typeof document !== 'undefined' && document.documentElement) {
+        const initial = detectHostTheme()
+        if (document.documentElement.getAttribute('data-dnb-theme') !== initial) {
+          document.documentElement.setAttribute('data-dnb-theme', initial)
+        }
+      }
+      React.useEffect(() => {
+        if (typeof document === 'undefined' || !document.documentElement) return undefined
+        const root = document.documentElement
+        const sync = () => {
+          const next = detectHostTheme()
+          if (root.getAttribute('data-dnb-theme') !== next) {
+            root.setAttribute('data-dnb-theme', next)
+            try {
+              window.dispatchEvent(new CustomEvent('dnb-theme-change', { detail: next }))
+            } catch {}
+          }
+        }
+        sync()
+        if (typeof MutationObserver !== 'function') return undefined
+        const obs = new MutationObserver(sync)
+        obs.observe(root, { attributes: true, attributeFilter: ['data-ds-theme', 'data-ds-theme-source', 'data-theme', 'class', 'style'] })
+        if (document.body) {
+          obs.observe(document.body, { attributes: true, attributeFilter: ['data-ds-dark-theme', 'class', 'style'] })
+        }
+        return () => obs.disconnect()
+      }, [])
+      return h('style', { 'data-dnb': '3' }, RESOLVED_CSS)
     }
 
     // === [module: src/client/components/common.js] ===
@@ -11193,7 +11368,7 @@ window.__ModuleLoader__.load({
                 fill: 'none',
                 stroke: step.color,
                 strokeWidth: isLit ? 9 : 7,
-                strokeOpacity: isAuto ? 0.24 : (isLit ? 0.28 : 0.14),
+                strokeOpacity: isAuto ? 0.30 : (isLit ? 0.36 : 0.20),
                 strokeLinecap: 'round',
               })
             }),
@@ -11251,8 +11426,8 @@ window.__ModuleLoader__.load({
                   cx: pt.x,
                   cy: pt.y,
                   r: isCur || isHover ? 4.4 : 2.6,
-                  fill: isCur || isHover ? step.color : 'var(--dnb-text-3)',
-                  fillOpacity: isCur || isHover ? 1 : 0.65,
+                  fill: isCur || isHover ? step.color : 'var(--dnb-text-2)',
+                  fillOpacity: isCur || isHover ? 1 : 0.80,
                   stroke: 'var(--dnb-popover)',
                   strokeWidth: isCur ? 1.5 : 0,
                 }),
@@ -11263,8 +11438,8 @@ window.__ModuleLoader__.load({
                     y: lpt.y + 3,
                     textAnchor: step.deg <= -155 ? 'end' : (step.deg >= -25 ? 'start' : 'middle'),
                     fontSize: compact ? 10 : 10.5,
-                    fontWeight: isCur || isHover ? 700 : 500,
-                    fill: isCur || isHover ? step.color : 'var(--dnb-text-3)',
+                    fontWeight: isCur || isHover ? 700 : 600,
+                    fill: isCur || isHover ? step.color : 'var(--dnb-text-2)',
                   },
                   step.label,
                 ),
@@ -13776,12 +13951,7 @@ window.__ModuleLoader__.load({
     }
 
     function flowDetectLightTheme() {
-      if (typeof document === 'undefined' || !document.documentElement) return false
-      const root = document.documentElement
-      const src = root.getAttribute('data-ds-theme-source') || root.getAttribute('data-ds-theme') || ''
-      if (src === 'light') return true
-      if (src === 'dark') return false
-      return Boolean(document.querySelector && document.querySelector('[data-ds-theme-source="light"]'))
+      return isHostLightTheme()
     }
 
     function flowTopoSortRoots(roots) {
@@ -15155,6 +15325,13 @@ window.__ModuleLoader__.load({
       onSelectStage,
     }) {
       const [hoveredKey, setHoveredKey] = React.useState('')
+      const [, setThemeTick] = React.useState(0)
+      React.useEffect(() => {
+        if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+        const onTheme = () => setThemeTick(n => n + 1)
+        window.addEventListener('dnb-theme-change', onTheme)
+        return () => window.removeEventListener('dnb-theme-change', onTheme)
+      }, [])
       const isLight = flowDetectLightTheme()
       const layout = flowLayout || computeFlowCanvasLayout(flowModel, isLR)
       const { stages, stageBoxes, agentBoxes, dispatchEdges, returnEdges, svgW, svgH } = layout
