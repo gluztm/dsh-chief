@@ -4856,6 +4856,26 @@ window.__ModuleLoader__.load({
         background: transparent;
       }
 
+      /* Main-page Chief view takes over the conversation scroll viewport and hides the host composer seat */
+      [data-conversation-scroll]:has([data-dnb-conv-view="1"]) {
+        display: flex !important;
+        flex-direction: column !important;
+        overflow: hidden !important;
+        scrollbar-gutter: auto !important;
+      }
+      [data-conversation-scroll]:has([data-dnb-conv-view="1"]) > [data-composer-seat] {
+        display: none !important;
+      }
+      [data-conversation-scroll]:has([data-dnb-conv-view="1"]) > :not([data-composer-seat]),
+      [data-conversation-scroll]:has([data-dnb-conv-view="1"]) > [data-slot="conversation.session"] > * {
+        flex: 1 1 0 !important;
+        min-height: 0 !important;
+        height: 100% !important;
+        display: flex !important;
+        flex-direction: column !important;
+        overflow: hidden !important;
+      }
+
       .dnb-dock {
         height: 100%;
         flex: 1 1 auto;
@@ -28451,6 +28471,8 @@ window.__ModuleLoader__.load({
           'div',
           {
             className: 'dnb-page dnb-conv-page',
+            'data-conversation-composer-overlay': '',
+            'data-dnb-conv-view': '1',
             style: { alignItems: 'center', justifyContent: 'center', padding: 24 },
           },
           h(Style, null),
@@ -28486,7 +28508,11 @@ window.__ModuleLoader__.load({
 
       return h(
         'div',
-        { className: 'dnb-page dnb-conv-page' },
+        {
+          className: 'dnb-page dnb-conv-page',
+          'data-conversation-composer-overlay': '',
+          'data-dnb-conv-view': '1',
+        },
         h(Panel, { variant: 'main', inConversationView: true, openView }),
       )
     }

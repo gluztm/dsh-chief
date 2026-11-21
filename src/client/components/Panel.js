@@ -816,6 +816,8 @@ export function ConversationChiefView(props) {
       'div',
       {
         className: 'dnb-page dnb-conv-page',
+        'data-conversation-composer-overlay': '',
+        'data-dnb-conv-view': '1',
         style: { alignItems: 'center', justifyContent: 'center', padding: 24 },
       },
       h(Style, null),
@@ -851,7 +853,11 @@ export function ConversationChiefView(props) {
 
   return h(
     'div',
-    { className: 'dnb-page dnb-conv-page' },
+    {
+      className: 'dnb-page dnb-conv-page',
+      'data-conversation-composer-overlay': '',
+      'data-dnb-conv-view': '1',
+    },
     h(Panel, { variant: 'main', inConversationView: true, openView }),
   )
 }

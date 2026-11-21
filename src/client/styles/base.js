@@ -232,6 +232,26 @@ export const CSS_BASE = `
     background: transparent;
   }
 
+  /* Main-page Chief view takes over the conversation scroll viewport and hides the host composer seat */
+  [data-conversation-scroll]:has([data-dnb-conv-view="1"]) {
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+    scrollbar-gutter: auto !important;
+  }
+  [data-conversation-scroll]:has([data-dnb-conv-view="1"]) > [data-composer-seat] {
+    display: none !important;
+  }
+  [data-conversation-scroll]:has([data-dnb-conv-view="1"]) > :not([data-composer-seat]),
+  [data-conversation-scroll]:has([data-dnb-conv-view="1"]) > [data-slot="conversation.session"] > * {
+    flex: 1 1 0 !important;
+    min-height: 0 !important;
+    height: 100% !important;
+    display: flex !important;
+    flex-direction: column !important;
+    overflow: hidden !important;
+  }
+
   .dnb-dock {
     height: 100%;
     flex: 1 1 auto;

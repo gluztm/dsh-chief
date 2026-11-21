@@ -131,6 +131,40 @@ export function collectClusterPeerProgress(deps, cluster = [], selfRootId = '') 
   return out
 }
 
+const BACKGROUND_SESSION_TITLE_RE = /^(?:mnemon\s*[·•:\-]|memory\s+maintenance\b|mnemon-(?:review|run|maint)|chief-probe\b|dsh-chief-probe\b)/i
+const BACKGROUND_SESSION_ID_RE = /^(?:mnemon|subagent|chief-probe|dsh-chief-probe)-/i
+const USER_SESSION_ORIGINS = new Set(['user', 'human', 'interactive'])
+
+function isSubagentHeader(hdr, agentObj = null) {
+  if (hdr && (hdr.origin === 'subagent' || hdr.parentSession || hdr.parentSessionId || Number(hdr.delegationDepth || 0) > 0)) {
+    return true
+  }
+  if (agentObj && (agentObj.origin === 'subagent' || agentObj.parentId || agentObj.parentSession || agentObj.parentSessionId || Number(agentObj.delegationDepth || 0) > 0)) {
+    return true
+  }
+  return false
+}
+
+function isHiddenOrNonUserSession({ sid = '', header = null, title = '', agent = null, liveSession = null } = {}) {
+  if (isSubagentHeader(header, agent)) return true
+  const trimmedSid = String(sid || '').trim()
+  if (trimmedSid && BACKGROUND_SESSION_ID_RE.test(trimmedSid)) return true
+  const hdrOrigin = String((header && header.origin) || '').trim().toLowerCase()
+  if (hdrOrigin && !USER_SESSION_ORIGINS.has(hdrOrigin)) return true
+  const agOrigin = String((agent && agent.origin) || '').trim().toLowerCase()
+  if (agOrigin && !USER_SESSION_ORIGINS.has(agOrigin)) return true
+  if (
+    (agent && agent.blank === true)
+    || (header && header.blank === true)
+    || (liveSession && (liveSession.blank === true || liveSession.seq === 0))
+  ) {
+    return true
+  }
+  const t = String(title || (agent && (agent.title || agent.name)) || '').trim()
+  if (t && BACKGROUND_SESSION_TITLE_RE.test(t)) return true
+  return false
+}
+
 /** Build complete addressable peer directory across lead, subagents, and federated root sessions. */
 export async function listPeerDirectory(deps, sessionId) {
   const rootId = deps.resolveRootSessionId(sessionId) || String(sessionId || '')
@@ -190,6 +224,16 @@ export async function listPeerDirectory(deps, sessionId) {
   }
 
   // Other top-level standalone sessions on this machine (live + dormant/unvisited) that can be linked into the federation
+  const liveSessBySid = new Map()
+  try {
+    const sessSvc = runtime && typeof runtime.get === 'function' ? runtime.get('sessions') : null
+    const sList = sessSvc && typeof sessSvc.list === 'function' ? sessSvc.list() : []
+    for (const s of Array.isArray(sList) ? sList : []) {
+      if (!s || !s.id) continue
+      liveSessBySid.set(String(s.id), s)
+    }
+  } catch {}
+
   const otherSessions = []
   const seenOtherIds = new Set()
   for (const ag of liveAgents) {
@@ -198,12 +242,16 @@ export async function listPeerDirectory(deps, sessionId) {
     const agRoot = deps.resolveRootSessionId(sid, ag) || sid
     if (agRoot !== sid) continue // skip child subagent sessions here
     if (agRoot === rootId || seenOtherIds.has(agRoot)) continue
+    const liveS = liveSessBySid.get(agRoot) || null
+    const hdr = (liveS && liveS.header) || (ag && ag.header) || null
+    const resolvedLiveName = deps.sessionName(runtime, ag) || ''
+    if (isHiddenOrNonUserSession({ sid: agRoot, header: hdr, title: resolvedLiveName, agent: ag, liveSession: liveS })) continue
     seenOtherIds.add(agRoot)
     const isLinked = cluster.includes(agRoot)
     const b = deps.loadBoard(deps.boardFileFor(agRoot))
     otherSessions.push({
       id: agRoot,
-      name: deps.sessionName(runtime, ag) || ('会话 ' + agRoot.replace(/^session-/, '').slice(0, 8)),
+      name: resolvedLiveName || ('会话 ' + agRoot.replace(/^session-/, '').slice(0, 8)),
       status: ag.status === 'running' ? 'running' : 'idle',
       dormant: false,
       linked: isLinked,
@@ -213,7 +261,7 @@ export async function listPeerDirectory(deps, sessionId) {
     })
   }
 
-  // Also discover dormant / unvisited root sessions from workspaceRegistry, sessions, and sessionQuery
+  // Also discover dormant / unvisited root sessions scoped strictly to active user workspaces (no orphan/background disk scan)
   const hostState = deps && deps.hostState && typeof deps.hostState === 'object' ? deps.hostState : null
   if (hostState && !(hostState.dormantTitleCache instanceof Map)) {
     hostState.dormantTitleCache = new Map()
@@ -222,56 +270,40 @@ export async function listPeerDirectory(deps, sessionId) {
 
   const dormantCandidates = []
   const seenCandidates = new Set()
-  const wsTitleBySid = new Map()
-  const liveSessBySid = new Map()
-  const pushCandidate = (rawSid, headerHint = null) => {
+  const pushCandidate = (rawSid, headerHint = null, liveSessionHint = null) => {
     const sid = String(rawSid || '').trim()
     if (!sid || sid === rootId || archived.has(sid) || seenOtherIds.has(sid) || seenCandidates.has(sid)) return
-    if (headerHint && (headerHint.origin === 'subagent' || headerHint.parentSessionId)) return
+    const liveS = liveSessionHint || liveSessBySid.get(sid) || null
+    const effHeader = headerHint || (liveS && liveS.header) || null
+    if (isHiddenOrNonUserSession({ sid, header: effHeader, liveSession: liveS })) return
     const agRoot = deps.resolveRootSessionId(sid) || sid
     if (agRoot !== sid) return
     seenCandidates.add(sid)
     dormantCandidates.push(sid)
   }
 
+  let hasWorkspaceRegistry = false
   try {
     const wr = runtime && typeof runtime.get === 'function' ? runtime.get('workspaceRegistry') : null
-    const wsList = wr && typeof wr.list === 'function' ? wr.list() : []
-    for (const ws of Array.isArray(wsList) ? wsList : []) {
-      if (!ws) continue
-      const fallbackWsLabel = String(ws.title || (ws.path ? path.basename(ws.path) : '') || '').trim()
-      for (const sid of Array.isArray(ws.sessionIds) ? ws.sessionIds : []) {
-        if (fallbackWsLabel && !wsTitleBySid.has(String(sid))) wsTitleBySid.set(String(sid), fallbackWsLabel)
-        pushCandidate(sid)
+    if (wr && typeof wr.list === 'function') {
+      hasWorkspaceRegistry = true
+      const wsList = wr.list()
+      for (const ws of Array.isArray(wsList) ? wsList : []) {
+        if (!ws) continue
+        for (const sid of Array.isArray(ws.sessionIds) ? ws.sessionIds : []) {
+          pushCandidate(sid)
+        }
       }
     }
   } catch {}
 
-  try {
-    const sessSvc = runtime && typeof runtime.get === 'function' ? runtime.get('sessions') : null
-    const sList = sessSvc && typeof sessSvc.list === 'function' ? sessSvc.list() : []
-    for (const s of Array.isArray(sList) ? sList : []) {
-      if (!s || !s.id) continue
-      liveSessBySid.set(String(s.id), s)
-      pushCandidate(s.id, s.header || null)
+  if (!hasWorkspaceRegistry) {
+    for (const s of liveSessBySid.values()) {
+      pushCandidate(s.id, s.header || null, s)
     }
-  } catch {}
-
-  const sessionQuery = runtime && typeof runtime.get === 'function' ? runtime.get('sessionQuery') : null
-  if (dormantCandidates.length < 40 && sessionQuery && typeof sessionQuery.listSessions === 'function') {
-    try {
-      const qSig = typeof AbortSignal !== 'undefined' && typeof AbortSignal.timeout === 'function'
-        ? AbortSignal.timeout(2000)
-        : undefined
-      const recs = await sessionQuery.listSessions(qSig)
-      for (const rec of Array.isArray(recs) ? recs : []) {
-        if (!rec || !rec.header || !rec.header.id) continue
-        pushCandidate(rec.header.id, rec.header)
-        if (dormantCandidates.length >= 40) break
-      }
-    } catch {}
   }
 
+  const sessionQuery = runtime && typeof runtime.get === 'function' ? runtime.get('sessionQuery') : null
   const boundedDormant = dormantCandidates.slice(0, 40)
   const uncachedIds = boundedDormant.filter(sid => !titleCache || !titleCache.has(sid))
   if (uncachedIds.length > 0 && sessionQuery && typeof sessionQuery.readTitleSnapshots === 'function') {
@@ -282,31 +314,46 @@ export async function listPeerDirectory(deps, sessionId) {
       const obsList = await sessionQuery.readTitleSnapshots(uncachedIds, tSig)
       if (Array.isArray(obsList)) {
         for (const obs of obsList) {
-          if (!obs || !obs.sessionId || obs.status !== 'fulfilled' || !obs.value) continue
+          if (!obs || !obs.sessionId) continue
+          const obsSid = String(obs.sessionId)
+          if (obs.status !== 'fulfilled' || !obs.value) {
+            if (titleCache) {
+              titleCache.set(obsSid, { title: '', isSubagent: false, isHidden: true, missing: true, blank: true })
+            }
+            continue
+          }
           const hdr = obs.value.session || null
-          const isSub = Boolean(hdr && (hdr.origin === 'subagent' || hdr.parentSessionId))
           const folded = String((obs.value.title && obs.value.title.title) || '').trim()
-          if (titleCache) titleCache.set(String(obs.sessionId), { title: folded, isSubagent: isSub })
+          const liveS = liveSessBySid.get(obsSid) || null
+          const isSub = isSubagentHeader(hdr)
+          const isHidden = isHiddenOrNonUserSession({ sid: obsSid, header: hdr, title: folded, liveSession: liveS })
+          if (titleCache) {
+            titleCache.set(obsSid, { title: folded, isSubagent: isSub, isHidden, missing: false, blank: !folded })
+          }
         }
       }
     } catch {}
   }
 
   for (const sid of boundedDormant) {
-    const cachedMeta = titleCache ? titleCache.get(sid) : null
-    if (cachedMeta && cachedMeta.isSubagent) continue
-    if (!cachedMeta && titleCache) {
-      const liveS = liveSessBySid.get(sid)
-      const isSub = Boolean(liveS && liveS.header && (liveS.header.origin === 'subagent' || liveS.header.parentSessionId))
-      titleCache.set(sid, { title: '', isSubagent: isSub })
-      if (isSub) continue
+    let cachedMeta = titleCache ? titleCache.get(sid) : null
+    if (!cachedMeta) {
+      const liveS = liveSessBySid.get(sid) || null
+      const hdr = liveS && liveS.header ? liveS.header : null
+      const isSub = isSubagentHeader(hdr)
+      const isHidden = isHiddenOrNonUserSession({ sid, header: hdr, liveSession: liveS })
+      cachedMeta = { title: '', isSubagent: isSub, isHidden, missing: false, blank: false }
+      if (titleCache) titleCache.set(sid, cachedMeta)
     }
+    if (cachedMeta.missing || cachedMeta.isSubagent || cachedMeta.isHidden) continue
     const b = deps.loadBoard(deps.boardFileFor(sid))
-    const foldedTitle = cachedMeta && cachedMeta.title ? cachedMeta.title : ''
-    const resolvedName = foldedTitle
-      || deps.sessionName(runtime, sid)
-      || wsTitleBySid.get(sid)
-      || ('会话 ' + sid.replace(/^session-/, '').slice(0, 8))
+    const hasBoardContent = Boolean(b && (b.objective || (Array.isArray(b.tasks) && b.tasks.length > 0)))
+    const foldedTitle = cachedMeta.title || ''
+    const namedTitle = foldedTitle || deps.sessionName(runtime, sid) || ''
+    if (!namedTitle && !hasBoardContent && !cluster.includes(sid)) continue
+    if (cachedMeta.blank && !hasBoardContent && !cluster.includes(sid)) continue
+    const resolvedName = namedTitle || ('会话 ' + sid.replace(/^session-/, '').slice(0, 8))
+    if (isHiddenOrNonUserSession({ sid, title: resolvedName })) continue
     seenOtherIds.add(sid)
     otherSessions.push({
       id: sid,
