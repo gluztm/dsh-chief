@@ -18,7 +18,7 @@
 
 <sub>Read-only by default · Asks before editing workspace · One-command install</sub>
 
-[简体中文 (`README.md`)](README.md) · **English** · [Changelog (`CHANGELOG.md`)](CHANGELOG.md) · [Architecture (`ARCHITECTURE.md`)](ARCHITECTURE.md)
+[简体中文 (`README.md`)](README.md) · **English** · [Evolution (`EVOLUTION.en.md`)](EVOLUTION.en.md) · [Changelog (`CHANGELOG.md`)](CHANGELOG.md) · [Architecture (`ARCHITECTURE.md`)](ARCHITECTURE.md)
 
 [What is this?](#what-is-this) · [Quick Start](#quick-start-3-minutes) · [Pick a Preset](#which-preset-should-i-pick) · [Interface](#what-the-panel-looks-like) · [Glossary](#glossary) · [FAQ](#faq) · [Going Deeper](#going-deeper)
 
@@ -221,9 +221,32 @@ Yes. You can type plain instructions in the composer, switch presets with one cl
 ## Going deeper
 
 <details>
+<summary>Architecture Evolution: From a Sidebar Notepad to a Multi-Agent Command Hub (v1.0 -> v1.7)</summary>
+
+What began as a shared-JSON sidebar scratchpad (`dnb-`) grew through real daily friction into a zero-dependency command hub with **44 backend modules + 39 frontend modules**:
+
+<div align="center">
+  <img src="assets/evolution-roadmap-en.gif" alt="dsh-chief v1.0 to v1.7 architecture evolution animation" width="840" />
+</div>
+
+```mermaid
+flowchart LR
+  A["v1.0–v1.1\nSidebar Co-Pilot\nCold vaults · Compaction rescue"] --> B["v1.2–v1.2.1\nHands + Cage\nExecutor · 4 permission tiers"]
+  B --> C["v1.3\nSplit Monoliths\n45 modules · File locks"]
+  C --> D["v1.4\nPre-Execute Gate\n9 safety modules · Guard Walls"]
+  D --> E["v1.5–v1.6\nAttention & Spend\nCognitive Desktop · Flow Canvas · Hard cap"]
+  E --> F["v1.7\nHub with Restraint\nMain tab · Local CLIs · Opt-in zero intrusion"]
+```
+
+Read the full engineering story and architectural tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md`)](EVOLUTION.en.md)**.
+
+</details>
+
+<details>
 <summary>What Changed in v1.7.0</summary>
 
 - **Opt-In Per Session & Zero-Intrusion Bypass**: All 8 backend runtime hooks check per-session activation (`sessionEnabled`), leaving unactivated plain chats and their subagents completely untouched (zero prompt injection, zero pre-execute blocking, zero stray board files) with an in-panel opt-in banner plus per-session & global default toggles in Settings and automatic backward compatibility for legacy sessions.
+- **Safety Guard Master Switches & False-Positive Fixes**: Adds human-only per-session and global Safety Guard toggles in Settings (confirm-gated and audited, independent of Redline Sentinel and custom Guard Walls), eliminates `destructive_command` false positives on non-executable heredocs and read-only queries, and normalizes benign `cursor.blocked` notes so resolved/approved remarks no longer trigger false red alarms.
 - **Main Page Tab (`conversation.view`) & Subagent Tab Routing**: Registers a clean top `Chief` / `参谋长` conversation tab that hides the host bottom composer, fills the viewport safely (`--dsh-conversation-viewport-height` fallback for `0.2.2-rc.3`), offers independent composer & floating corner button toggles, and opens subagent views in the active right sidebar as tabs by default (without spawning stacked split panes).
 - **Redesigned Collaboration System & Clean Standby Dock**: Native non-`ccSwitch` discovery & one-click dispatch for local `Codex` and `Claude Code` CLIs (with redlines + Guard Walls), cross-window `pair` mailbox classification, idle-static vs. active-breathing glow & flowing SVG links, one-click standby refresh scan, and strict filtering against `Mnemon` maintenance tasks, blank `DS Bot` shells, `.v4` subagents, and orphan dirs.
 - **Light Theme Unification & Monolith Split**: Unified 8-tint card accents across all 5 tabs, adapted DSH light theme surfaces across every canvas and popover, and split all monoliths cleanly into **44 backend modules and 39 frontend modules**.

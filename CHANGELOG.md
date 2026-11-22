@@ -13,6 +13,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **会话级按需启用与普通窗口零侵入（Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6), thanks `@iridiumgit`，`state-schema.js` / `chief-state.js` / `runtime-hooks.js` / `chief-view.js` / `api-routes.js` / `components/Panel.js` / `tabs/plan.js`）**：
   - 将参谋长运行从“进程级全盘接管”收口为**会话级按需激活 (`sessionEnabled`)**：全新普通聊天窗口及其拉起的子代理默认未启用，在 `systemPrompt.section`、`tools/pre-execute`、`agent/pre-step`、`tools/result`、`session/event`、`agent/turn-stopping`、`agent/created` 及 `watchdogTimer` 全 8 处后端钩子直接无害放行，不注入提示词、不触发安全卫兵越界拦截、不运行空转守卫，也不落盘多余看板与空白配置。
   - 在未启用会话打开面板时，顶部显示轻量提示条带与「在本会话启用」按钮；设置页新增「本会话启用参谋长」单窗开关与全局「新会话默认自动启用参谋长」（默认关闭），仅调整语言/通知等纯全局偏好绝不误激活当前普通会话；在会话内主动提问、建任务/边界/档案、连接跨窗或使用交接单部署时自动启用，升级前已配置或已沉淀数据的历史会话自动无损兼容。
+- **内置安全卫兵单会话 / 全局人类专控开关（Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6) comment, thanks `@iridiumgit`，`safety/invariant-guards.js` / `safety/guard-walls.js` / `safety/tool-gate.js` / `chief-executor.js` / `state-schema.js` / `chief-state.js` / `runtime-hooks.js` / `api-routes.js` / `tabs/plan.js` / `tabs/boundaries.js` / `modals/safety.js`）**：
+  - 设置页新增独立的「🛡️ 内置安全卫兵（越界 / 凭据 / 高危命令）」卡片，提供**本会话开关**与**全局总开关**（默认全部开启，与右侧栏「红线哨兵」及手工创建的「物理驻墙」相互独立）；关闭任一开关须经人类风险确认弹窗（非人类调用方或未勾选确认被后端硬拒绝并写入 `chief-audit.jsonl`），关闭状态时边界页顶部显示警示横幅与一键恢复按钮，且调整全局开关绝不误激活普通未启用会话。
 - **主页面大屏模式 (`conversation.view`) 与完整入口控制（Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5), thanks `@iridiumgit`，`entry.js` / `store.js` / `components/Panel.js` / `tabs/plan.js` / `styles/base.js`）**：
   - 将参谋长注册为对话顶部常驻主页面页签（`order: 1`，标签精简为 `参谋长 / Chief`），支持 1080px 宽屏居中排版、一键大屏/右侧栏切换、自动隐藏宿主底部原生主输入框与 `CC` 用量条（切回对话无痕恢复），并通过 `--dsh-conversation-viewport-height` 兜底兼容 DSH `0.2.2-rc.3` Web GUI 贴底显示。
   - 设置页新增「🖥️ 面板显示位置（主页面 / 右侧栏）」开关卡片：支持 `右侧栏 + 主页面` / `仅主页面` / `仅右侧栏`、独立关闭「输入框旁快捷按钮 (`showComposerEntry`)」与「右下角浮动按钮 (`showCornerTrigger`)」、以及「子代理窗口隐藏参谋长页面」并附友好返回引导卡片。
@@ -25,6 +27,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 修复 `openSubagentChat()` 因默认携带 `preferNewPane: true` 触发宿主 `planSplitPane` 不断叠出新侧边栏的问题；改为默认 `{ revealIfOpened: true }` 在现有右侧栏活动面板加 tab（重复点击自动聚焦去重），协同水泡子代理胶囊默认显示「查看」，同时在设置页「面板显示位置」保留「子代理对话打开方式：`现有栏加页签` / `新开分屏`」随时切换。
 - **清理待命池幽灵、后台维护与空白会话 (`chief-network.js`)**：
   - 移除 `listPeerDirectory` 全盘孤儿磁盘扫描，收口发现范围至有效 `workspaceRegistry` 会话；剔除 `Mnemon · Memory maintenance` 等插件后台任务、无标题无任务的空白空壳（如新建未对话的 `DS Bot`）、读取失败快照以及 `.v4` 新格式 `parentSession` / `delegationDepth` 子代理。
+- **修复 `destructive_command` 对文档 heredoc 与只读查询的上下文误判（Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6) comment B, thanks `@iridiumgit`，`safety/invariant-guards.js`）**：
+  - `isDestructiveShellCommand` 对无危险管道消费的纯非可执行文件 heredoc（如 `cat > ".../交付说明.md" <<'DOCEOF'`）、`grep`/`rg`、`git log/show/diff/status/commit`（排除 `-c` 等危险参数）及未接管道的 `echo`/`printf` 不再触发正文误杀；同时收紧 `shutdown`/`diskpart`/`mkfs` 上下文锚定、覆盖 `python3 -c "os.system('rm -rf /')"` 并继续 100% 拦截 `.sh` 可执行 heredoc 与 `| bash`/`mysql <<'EOF'` 真实高危注入。
+- **修复 `board.cursor.blocked` 红色「受阻」告警条误报（Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6) comment #7075636856, thanks `@iridiumgit`，`board-schema.js` / `board-actions.js` / `digest.js` / `model-tools.js` / `src/client/utils.js` / `components/Panel.js` / `components/common.js`）**：
+  - 新增 `normalizeCursorBlocked` 语义归一化与前端防御层，自动过滤「无」「无（已获用户批准执行）」「已解除」「用户已接受…」「None / N/A / Resolved」等非阻塞陈述，避免误渲染红色告警条，同时完整保留「无法 / 无权限 / 没有找到 / 等待用户批准 / 但仍缺少…」等真实阻塞提示并收紧 `cursor.set` 工具说明。
 - **外部 Agent 协同消息统一归类「跨窗」 (`network-harness.js` / `chief-state.js` / `chief-network.js` / `tabs/peers.js`)**：
   - 外部 Harness 派单与回执统一使用 `channelType: 'pair'` 与 `harness:<provider>` 虚拟根标记（豁免于断连集群隔离），并在前端将新版及历史外部 Harness 消息统一收拢在「跨窗 · 外协」折叠卡片流中（修复双 `@@` 前缀并全面重做消息流视觉）。
 - **全页浅色主题适配、减法瘦身与巨石模块化重构 (`src/` / `tools/`)**：
