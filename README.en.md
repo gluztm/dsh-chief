@@ -14,7 +14,7 @@
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-<img src="assets/chief-10s-compare.gif" alt="Comparison of plain long sessions vs dsh-chief v1.6.0: 5-tab panel, Flow Canvas, 15% Cognitive Desktop, 30-call budget cap, and pre-execute Guard Walls on the right" width="840" />
+<img src="assets/chief-10s-compare.gif" alt="Comparison of plain long sessions vs dsh-chief v1.7.0: stays off in plain chats by default, with Collaboration System for local Codex/Claude Code, Main Tab mode, Cognitive Desktop, and pre-execute safety guardrails" width="840" />
 
 <sub>Read-only by default · Asks before editing workspace · One-command install</sub>
 
@@ -141,7 +141,7 @@ The sidebar has 5 tabs plus a top-bar Settings page:
 - **Cross-Window Mail & Standby Scan**: One-click **Refresh Scan** discovers dormant DSH windows without tab-switching while filtering out background maintenance (`Mnemon`) and blank shells; external messages group cleanly under cross-window pairs, detaching clears caches, and pasted images save to `<cwd>/.dsh-chief/uploads/`.
 
 <div align="center">
-  <img src="assets/screenshots/05-cross-session-collab-bus.png" alt="05 - Cross-Window Linking and Mailbox" width="68%" />
+  <img src="assets/screenshots/05-cross-session-collab-bus.png" alt="05 - Collaboration System idle and active-locked views with local Codex/Claude Code dispatch and cross-window mailbox" width="88%" />
 </div>
 
 ### 06 · Guard Walls, Pinned Redlines & Must-Do Checks (`边界` Tab)
@@ -162,7 +162,7 @@ The sidebar has 5 tabs plus a top-bar Settings page:
 - **Session handoff**: `📌 Pin Lock` Session Handoff and redacted `.md` report export sit at the bottom of **Tasks**. Pick how much archive scope moves into a new window while Strong Intervention resets off for safety.
 
 <div align="center">
-  <img src="assets/screenshots/07-session-handoff-and-guard.png" alt="07 - Cross-Session Handoff and Deployment" width="68%" />
+  <img src="assets/screenshots/07-session-handoff-and-guard.png" alt="07 - Top-bar Settings: presets, placement, per-session opt-in, Safety Guard toggles, alerts, and budget caps" width="88%" />
 </div>
 
 ---

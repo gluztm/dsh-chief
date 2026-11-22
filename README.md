@@ -14,7 +14,7 @@
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-<img src="assets/chief-10s-compare.gif" alt="原生长会话与挂载 dsh-chief v1.6.0 对比：右侧显示 5 页签面板、流程画布、15% 认知桌面、30 次预算上限和执行前拦截规则" width="840" />
+<img src="assets/chief-10s-compare.gif" alt="原生长会话与挂载 dsh-chief v1.7.0 对比：普通窗口默认不打扰，支持协同系统连线本机 Codex/Claude Code、主页面大屏、认知桌面与执行前安全护栏" width="840" />
 
 <sub>新对话默认只读 · 改文件前先问你 · 一条命令安装</sub>
 
@@ -142,7 +142,7 @@ flowchart LR
 - **跨窗协同与待命池清理**：待命池支持「刷新扫描」免切窗发现工作区内的休眠 DSH 会话（已过滤后台维护任务与空白空壳）；外协往来与多窗消息统一收在「跨窗」信箱流，断开即清空缓存，粘贴进输入框的截图原图存入 `<cwd>/.dsh-chief/uploads/`。
 
 <div align="center">
-  <img src="assets/screenshots/05-cross-session-collab-bus.png" alt="05 - 跨窗口协同与信箱" width="68%" />
+  <img src="assets/screenshots/05-cross-session-collab-bus.png" alt="05 - 协同系统双态视图：空闲待命与工作中自动锁编、本机 Codex/Claude Code 直连与跨窗信箱" width="88%" />
 </div>
 
 ### 06 · 物理驻墙、必做项与全局红线（`边界` 页签）
@@ -163,7 +163,7 @@ flowchart LR
 - **跨会话交接部署**：跨会话交接单（`📌 定住防改`）与脱敏 `.md` 复盘报告在 `任务` 页底部；支持一键新开窗口并继承当前工作区 `workspaceId` 与选定范围的档案，搭配 `idle-guard` 防卡死。
 
 <div align="center">
-  <img src="assets/screenshots/07-session-handoff-and-guard.png" alt="07 - 跨会话交接单与新开窗口部署" width="68%" />
+  <img src="assets/screenshots/07-session-handoff-and-guard.png" alt="07 - 顶栏设置页：场景预设、面板显示位置、按需启用开关、内置安全卫兵开关、提醒与预算上限" width="88%" />
 </div>
 
 ---
