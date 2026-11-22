@@ -1,218 +1,194 @@
-# How `dsh-chief` Evolved: From a Right-Sidebar Notepad to a Multi-Agent Command Hub
+# How `dsh-chief` Evolved: From a Right-Sidebar Notepad to a Multi-Agent Management Hub
 
 [简体中文 (`EVOLUTION.md`)](EVOLUTION.md) · [Back to README (`README.en.md`)](README.en.md) · [Changelog (`CHANGELOG.md`)](CHANGELOG.md) · [Architecture (`ARCHITECTURE.md`)](ARCHITECTURE.md)
 
 ---
 
-Peek into `dsh-chief`'s frontend CSS and you will notice almost every class name starts with `dnb-`. Check line 119 of `runtime-hooks.js` and you will spot a one-time helper that migrates a legacy shared board into per-session boards.
+If you check `dsh-chief`'s CSS classes, almost all of them start with `dnb-`. On line 119 of `runtime-hooks.js`, there is still a migration helper that moves legacy shared boards into per-session boards.
 
-Neither is an accident. `dnb` stands for **DSH Notebook**.
+`dnb` stands for **DSH Notebook**.
 
-What is now a **44-backend-module (including a 9-module safety kernel) + 39-frontend-module** control hub for task topology, tiered memory, pre-execute guardrails, and cross-tool orchestration began with a simple idea: pin a scratchpad to the right sidebar of DeepSeek Harness (DSH), backed by one shared JSON file, so the AI stops forgetting things mid-task.
+What now runs as **44 backend modules (9 in `pkg/safety/`) + 39 frontend modules**—handling task graphs, tiered archives, pre-execute checks, and multi-agent coordination—started from a much simpler goal: hang a notepad in the right sidebar of DeepSeek Harness (DSH), backed by one shared JSON file, so the AI stops forgetting context mid-task.
 
-Between `v1.0.0` on November 14, 2026 and `v1.7.0` on November 22, 2026, nine releases shipped in nine days. `CHANGELOG.md` lists every commit in chronological order, which makes the big picture hard to follow. This page skips the raw ledger and tells the engineering story instead: **what real problems broke along the way, and why the architecture changed into what it is today.**
+Between `v1.0.0` on November 14, 2026 and `v1.7.0` on November 22, 2026, nine releases shipped in nine days. `CHANGELOG.md` lists changes commit by commit. This page steps back to explain what broke at each stage and why the code looks the way it does today.
 
 ---
 
 ## Nine Days at a Glance
 
 <div align="center">
-  <img src="assets/evolution-roadmap-en.gif" alt="dsh-chief v1.0 to v1.7 architecture evolution animation: from right-sidebar notepad to opt-in multi-agent command hub" width="900" />
+  <img src="assets/evolution-roadmap-en.gif" alt="dsh-chief v1.0 to v1.7 architecture evolution animation" width="900" />
 </div>
 
 ```mermaid
 flowchart TD
-  S0["Early Sketch (dnb- / notebook)\nGoal: Right-sidebar scratchpad sharing one JSON file"]
-  S1["Stage 1 · v1.0.0 ~ v1.1.0\nSidekick Copilot: Cold Vaults + Pre-Compaction Rescue\n8 source files · Read-only observer"]
-  S2["Stage 2 · v1.2.0 ~ v1.2.1\nGive It Hands, Build a Cage Next Day: Executor + 4 Tiers & 6-Stage Gate\n10 monoliths · client.js hits 16,749 lines"]
-  S3["Stage 3 · v1.3.0\nSwap the Engine Mid-Flight: Split Monoliths, File Locks & CI Gates\n29 backend + 16 frontend modules · Zero external runtime deps"]
-  S4["Stage 4 · v1.4.0\nGuard Every Execution Before It Lands: 9-Module Safety Kernel + Guard Walls\nLazy Chief delegation stops stepping on the main chat"]
-  S5["Stage 5 · v1.5.0 ~ v1.6.0\nGive Back Attention & Budget: 2,400-Token Desktop + 5 Tabs + Hard Caps\nSVG Flow Canvas · Budget Circuit Breaker · Away Loop"]
-  S6["Stage 6 · v1.7.0\nOutgrow the Sidebar and Learn Restraint: Main Tab + Local Codex/Claude CLI\nOpt-in Zero Intrusion · 44 backend + 39 frontend modules"]
+  S0["Early Idea (dnb- / notebook)\nRight-sidebar scratchpad backed by one JSON file"]
+  S1["Stage 1 · v1.0.0 ~ v1.1.0\nRead-Only Sidekick: Cold Vaults + Pre-Compaction Save\n8 source files · Does not touch workspace files"]
+  S2["Stage 2 · v1.2.0 ~ v1.2.1\nExecutor Tools, 4 Permission Tiers & 6-Stage Security Gate\n10 source files · client.js grows to 16,749 lines"]
+  S3["Stage 3 · v1.3.0\nSplit Oversized Files, Add O_EXCL Locks & CI Guardrails\n29 backend + 16 frontend modules · Zero external deps"]
+  S4["Stage 4 · v1.4.0\n9-Module Safety Kernel at tools/pre-execute\nMain chat edits code; Chief plans, reviews, and guards"]
+  S5["Stage 5 · v1.5.0 ~ v1.6.0\nToken & Spend Limits: 2,400-Token Desktop + 5 Tabs\nSVG Flow Canvas · Hard Budget Breaker · Away Alerts"]
+  S6["Stage 6 · v1.7.0\nMain Conversation Tab + Local Codex/Claude + Opt-In Sessions\nSafety Guard Toggles & False-Positive Fixes · 44 + 39 modules"]
 
   S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6
 ```
 
-### Size and Shape Across Stages
+### Size and Focus by Stage
 
-| Stage | Releases & Dates | Code Footprint | Primary Role | Top Problem Solved |
+| Stage | Versions & Dates | Code Structure | Primary Role | Core Problem Solved |
 | :--- | :--- | :--- | :--- | :--- |
-| Stage 1 | `v1.0.0` – `v1.1.0`<br>Nov 14 – 15 | 8 source files<br>(`client.js` 10,607 lines) | **Sidebar Note-Taker & Co-Pilot** | Compaction erased hard-won findings; always-on memory plugins flooded prompts |
-| Stage 2 | `v1.2.0` – `v1.2.1`<br>Nov 16 – 17 | 10 source files<br>(`client.js` 16,749 lines, `chief.js` 8,008 lines) | **Permission-Gated Operator** | Once Chief could edit files and run shells, unchecked power was dangerous while total lockdown was useless |
-| Stage 3 | `v1.3.0`<br>Nov 18 | 29 backend + 16 frontend modules<br>(0 external npm deps) | **Verified Engineering Base** | 16K-line files made changes fragile; concurrent writes dropped data on Windows locks; obfuscated commands slipped checks |
-| Stage 4 | `v1.4.0`<br>Nov 19 | 38 backend (9 safety) + 16 frontend modules | **Pre-Execute Safety Gatekeeper** | Old gates only checked Chief itself, missing the main chat and subagents; high-tier Chief kept hijacking edits |
-| Stage 5 | `v1.5.0` – `v1.6.0`<br>Nov 20 – 21 | 38 backend + 20 frontend modules<br>(5 tabs + top gear Settings) | **Attention & Budget Controller** | Too many switches hid who was spending tokens; bloated notes risked blowing context limits during unattended runs |
-| Stage 6 | `v1.7.0`<br>Nov 22 | **44 backend (9 safety) + 39 frontend modules** | **Opt-In Multi-Agent Command Hub** | A narrow sidebar cramped team graphs; local `Codex` / `Claude Code` worked in silos; plain chats got interrupted by global hooks |
+| Stage 1 | `v1.0.0` – `v1.1.0`<br>Nov 14 – 15 | 8 source files<br>(`client.js` 10,607 lines) | Sidebar scratchpad & co-pilot | `/compact` wiped verified paths and errors; always-on memory plugins wasted tokens |
+| Stage 2 | `v1.2.0` – `v1.2.1`<br>Nov 16 – 17 | 10 source files<br>(`client.js` 16,749 lines, `chief.js` 8,008 lines) | Permission-gated assistant | Once Chief had shell/file tools, unrestricted access was risky while full lockdown was useless |
+| Stage 3 | `v1.3.0`<br>Nov 18 | 29 backend + 16 frontend modules<br>(0 external npm deps) | Modular & concurrency base | 16K-line files were fragile; concurrent writes hit Windows locks; obfuscated commands slipped checks |
+| Stage 4 | `v1.4.0`<br>Nov 19 | 38 backend (9 safety) + 16 frontend | Pre-execute gate across agents | Old checks only watched Chief itself, missing `@lead` & subagents; high-tier Chief hijacked edits |
+| Stage 5 | `v1.5.0` – `v1.6.0`<br>Nov 20 – 21 | 38 backend + 20 frontend<br>(5 tabs + top gear) | Token & away-run control | Scattered switches hid token spend; archive growth risked bloating prompts; overnight runs needed hard caps |
+| Stage 6 | `v1.7.0`<br>Nov 22 | **44 backend (9 safety) + 39 frontend** | Opt-in multi-agent hub | Narrow sidebar cramped team graphs; local `Codex` / `Claude Code` worked in silos; plain chats hit global hooks |
 
 ---
 
-## Chapter 1: A Notepad Grows Into a Sidekick (`v1.0.0` -> `v1.1.0`)
+## 1. From a Sidebar Notepad to a Co-Pilot (`v1.0.0` → `v1.1.0`)
 
-Anyone who runs multi-hour coding sessions with an AI hits the same three walls sooner or later:
+Anyone running long coding tasks with an AI runs into the same three headaches:
 
-- Around turn 80, the context fills up and `/compact` runs. Half an hour of verified file paths, port numbers, and error line numbers vanish into a high-level summary, so the model re-reads the repo from scratch.
-- You spawn several subagents to work in parallel, then lose track of who stalled and who finished across separate tabs.
-- You install a typical memory plugin, only for it to stuff dozens of stale notes into the system prompt on every turn, burning tokens and distracting the model.
+- Around turn 80, context fills up and `/compact` runs. Verified paths, port numbers, and stack traces disappear into a short summary, so the model reads the repo again from scratch.
+- Several subagents work in parallel across separate tabs, and checking who stalled means clicking into each one.
+- Typical memory plugins inject dozens of stale notes into the system prompt every turn, burning tokens and distracting the model.
 
-`v1.0.0` targeted those exact three problems. Instead of altering the main chat flow, it sat quietly in the right sidebar as a read-only co-pilot:
+`v1.0.0` targeted those three points from the right sidebar without modifying the main chat flow:
 
-1. **Zero-Byte Cold Vaults**: Long-term notes went into a four-tier archive cabinet (`Drawers -> Gold / Silver / Bronze clip dossiers -> Memory points -> Sub-details`). Sealed notes injected **0 bytes** into the prompt and loaded only when explicitly pulled or searched.
-2. **Human-Owned Pacing and Billing Channels**: Default mode was `⏸ On-Demand` with zero background LLM calls. Whenever Chief was invoked manually, it matched the active session's exact `provider/model` string (keeping subscription routes separate from pay-per-token channels).
-3. **Pre-Compaction Rescue (`v1.1.0`)**: Before DSH ran `/compact`, Chief wrote verified paths, commands, and outcomes to local disk, confirmed the write succeeded, and then triggered compaction.
+1. **Cold-Stored Archive Cabinets**: Notes lived in a four-layer archive (`Drawers -> Dossiers -> Points -> Details`). Sealed notes injected **0 bytes** into prompts and loaded only when explicitly pulled or searched.
+2. **Human-Controlled Cadence & Billing Channels**: Default mode was `⏸ On-Demand` with zero background LLM calls. Manual Chief requests matched the session's exact `provider/model` channel so subscription routes did not accidentally fall back to pay-per-token billing.
+3. **Save Before Compacting (`v1.1.0`)**: Right before `/compact` ran, Chief wrote active paths, commands, and findings to disk, verified the write, and then triggered compaction.
 
-Also in `v1.1.0`, the first real community issue arrived (`#1`, `@edz017`): older DSH hosts lacked the refactored subagent APIs and threw at runtime. That pushed us to add runtime host capability probing (`probeSubagentSupport`) so older DSH builds still mount the panel cleanly while blocking unsupported dispatches with clear upgrade guidance.
+`v1.1.0` also resolved the first real compatibility bug (`Issue #1`): older DSH builds lacked the refactored subagent APIs and threw at runtime. Adding `probeSubagentSupport` let older hosts mount the panel cleanly while blocking unsupported dispatches with clear upgrade guidance.
 
-By then, the notepad had become a helpful co-pilot. Yet one clear limit appeared right away: **it could watch, track, and warn, but it could not act.** Asking it to check a file, tidy archives, or run compaction still forced you to bounce copy-paste between panes.
-
----
-
-## Chapter 2: Give It Hands, Then Build a Cage the Next Day (`v1.2.0` -> `v1.2.1`)
-
-`v1.2.0` gave Chief real tools via `chief-executor.js`.
-
-Typing plain instructions into the right-hand composer let Chief inspect workspace files, run safe read commands, curate archives, and execute **Smart Compact** (even waking idle sleeping sessions when the host isolated direct compaction services). In the same release, storage expanded into three isolated vaults (**Session / Global / Precipitated**) with bidirectional diffing and strict promotion rules.
-
-Giving an AI shell and file tools immediately created a sharper problem. Leave the door wide open and one bad turn can run `git reset --hard`, touch files outside the project, or save `.env` tokens into markdown archives. Lock everything down and you are back to a passive notepad.
-
-So one day later, `v1.2.1` hit the brakes and built a governance cage around execution:
-
-- **Four Tiers, Read-Only Start**: `advisor` (read-only default), `assistant`, `strategist` (per-action approval), and `chief` (high autonomy). Every newly created or handed-off session dropped safely into `advisor`.
-- **Six-Stage Security Pipeline**: Every action passed through one fixed path: `User tier -> Action request -> Hard guards -> Policy decision -> Executor -> Audit log`.
-- **Single-Use Approvals and Emergency Halt**: In `strategist`, edits and commands popped a clear confirmation card stating what runs, what changes, and why. Clicking **Allow** granted one execution, not permanent permission. Upgrading to `chief` required reading and checking an explicit risk modal verified on the backend. Anytime things looked wrong, clicking the red **`⏹ Halt`** button killed background loops immediately.
-
-The security model held firm, but the codebase itself was creaking.
-
-Four days of rapid additions stuffed everything into **10 source files**: `archives.js` grew to 2,796 lines, `index.js` to 6,075 lines, `chief.js` to 8,008 lines, and the frontend monolith `client.js` swelled to **16,749 lines**. Tweaking one button meant scrolling past unrelated logic, concurrent windows collided on Windows file locks, and even AI helpers reading a single 8,000-line backend file risked missing invariants hidden near the bottom.
+At that stage, the notepad could watch and record, but still **could not run actions**. Even checking a quick file or triggering compaction required copy-pasting back and forth.
 
 ---
 
-## Chapter 3: Swapping the Engine Mid-Flight (`v1.3.0`)
+## 2. Adding File and Shell Tools, Then Adding Permission Limits (`v1.2.0` → `v1.2.1`)
 
-Stacking more features onto a 16,749-line file was a guaranteed collapse. `v1.3.0` paused feature work for structural surgery:
+`v1.2.0` added a built-in executor (`chief-executor.js`).
 
-- **Zero-Breakage Modular Split**: Every public export, HTTP route, and panel surface stayed 100% compatible while four giant files split cleanly into **29 backend modules + 16 frontend ES modules**. To keep the plugin at zero external npm dependencies, a tiny dependency-free topological bundler (`build-client.mjs`) compiled `src/client/` back into `client.js`.
-- **Mechanical Guardrails in CI**: Automated Node 22 & Node 24 checks enforced hard structural rules on every change: **zero circular imports, zero mutable `export let` bindings**, and strict export-surface contracts.
-- **Production Concurrency & Anti-Obfuscation**:
-  - Board, state, and archive writes moved to `O_EXCL` spin locks and `threadId`-tagged temp files with jittered retries for transient Windows NTFS `EPERM / EACCES / EBUSY` errors;
-  - Security verdicts moved out of mutable JSON state into an append-only `chief-audit.jsonl`;
-  - Multi-step paused actions gained durable auto-resume (`resumeTasks`) after human approval;
-  - Command checks learned to strip NFKC homoglyphs, PowerShell `-EncodedCommand` payloads, quote splits, `^` carets, and Windows NTFS Alternate Data Streams (`safe.txt:.env`).
+Typing plain instructions into the sidebar composer allowed Chief to read workspace files, search directories, organize archives, and trigger **Smart Compact** (even waking dormant sessions when host services isolated direct compaction). Storage expanded into three isolated vaults (**Session / Global / Precipitated**) with two-way diffing.
 
-Looking back, none of the later milestones—independent safety kernel, Cognitive Desktop, or multi-tool orchestration—could have stood upright without stopping at `v1.3.0` to rebuild the frame.
+Giving an AI shell and file access immediately raised a sharper problem: leave permissions open and one bad turn can run `git reset --hard` or leak `.env` keys into notes; lock everything down and you are back to read-only.
 
----
+One day later, `v1.2.1` put clear limits around execution:
 
-## Chapter 4: Holding the Execution Door While Stopping Self-Delegation Creep (`v1.4.0`)
+- **Four Tiers, Read-Only Start**: `advisor` (read-only default), `assistant`, `strategist` (per-action approval), and `chief` (high autonomy). New and handed-off sessions always start at `advisor`.
+- **Six-Stage Pipeline**: Every action goes through `User tier -> Request -> Hard guards -> Policy decision -> Executor -> Audit log`.
+- **Single-Use Approvals & Instant Halt**: Under `strategist`, edits and commands pop a clear confirmation card stating what changes and why. Clicking **Allow** authorizes one run, not permanent access; upgrading to `chief` requires reading and checking a risk prompt verified by the backend; clicking the red `⏹ Halt` button stops background loops immediately.
 
-With the frame solid, two deeper gaps showed up in daily testing:
+The permission model worked, while the source tree grew unwieldy.
 
-First, the safety pipeline guarded Chief's own executor, yet **the main chat (`@lead`) and its subagents** made almost all real edits and shell runs. Catching a destructive command in logs after `@lead` already ran it was too late.
-
-Second, at higher tiers (`L2`/`L3`), Chief occasionally jumped the gun: ask a quick question in the sidebar and Chief edited repo files itself, colliding mid-flight with `@lead`'s uncommitted edits.
-
-`v1.4.0` drew two crisp boundaries:
-
-### 1. Isolate the Safety Kernel and Block at `tools/pre-execute`
-All security checks moved out of feature files into **9 zero-business-dependency modules under `pkg/safety/`**, locked alongside `chief-executor.js` via MD5 verification hashes so feature updates cannot quietly weaken defenses.
-
-Next, that kernel hooked directly into DSH's **`tools/pre-execute`** lifecycle across **all active agents** (main chat, subagents, and Chief). Right before any read, write, or shell call hit disk, it passed **Guard Walls**:
-- Switchable between `global` (follows every project), `workspace` (project-only), and `paused`;
-- Plain-language drafting ("keep agents out of production config") created proposals that only locked in when a human clicked approve;
-- **AI Cannot Tear Down Human Walls**: Even under `L3`, models have no tool access to delete or disable active Guard Walls. Hitting a dead end raises an explicit approval request instead.
-
-### 2. Establish "Lazy Chief" Delegation
-Chief settled into its true role as **orchestrator and safety supervisor, never a rogue co-coder**:
-- Unless you explicitly ask Chief to edit directly, repo changes dispatch to `@lead` as `[EXECUTION_REQUEST]` items instead of impersonating user turns;
-- On fresh blank chats, Chief guides `@lead` through read-only inspection and `graph.plan` planning before touching files;
-- When Chief needs missing context mid-run, it slips a prioritized `[INQUIRY]` card into `@lead`'s pre-step queue so the main agent replies without derailing its active work.
-
-That release turned a sidebar helper into a team-wide governance layer.
+In four days, everything landed in **10 source files**: `archives.js` hit 2,796 lines, `index.js` hit 6,075 lines, `chief.js` hit 8,008 lines, and `client.js` reached **16,749 lines**. Tweaking one button meant scrolling past unrelated code, concurrent windows collided on Windows file locks, and long files made it easy to miss safety invariants.
 
 ---
 
-## Chapter 5: Returning Attention and Token Budgets to the User (`v1.5.0` -> `v1.6.0`)
+## 3. Splitting Large Files, Adding File Locks, and Enforcing CI Checks (`v1.3.0`)
 
-Capability brought complexity. Power users loved the control; newcomers opening the panel saw too many knobs, worried which toggles triggered hidden API calls, feared archive growth would creep back into prompts, and hesitated to leave Away Mode running overnight without spending limits.
+Piling more changes onto a 16,749-line file would not hold up. `v1.3.0` paused new features for structural cleanup:
 
-`v1.5.0` and `v1.6.0` tackled those two anxieties together: **cut noise, make costs legible, and cap autonomous runs.**
+- **Compatible Split**: Public exports, HTTP routes, and UI behavior stayed 100% compatible while four giant files split into **29 backend modules + 16 frontend modules**. To keep zero external runtime dependencies, a small topological bundler (`build-client.mjs`) builds `src/client/` into `client.js`.
+- **CI Structural Rules**: Automated checks across Node 22 and Node 24 enforce **zero circular imports, zero mutable `export let` bindings**, and fixed export surfaces on every change.
+- **Concurrency & De-Obfuscation**:
+  - Board, state, and archive saves switched to `O_EXCL` spin locks with `threadId`-tagged temp files and retry jitter for Windows NTFS `EPERM / EACCES / EBUSY` errors;
+  - Security verdicts moved out of mutable state JSON into an append-only `chief-audit.jsonl`;
+  - Paused multi-step actions gained durable auto-resume (`resumeTasks`) after human approval;
+  - Command checks learned to unwrap NFKC homoglyphs, PowerShell `-EncodedCommand` payloads, quote splits, `^` carets, and Windows NTFS ADS paths (`safe.txt:.env`).
 
-### `v1.5.0`: Attention & Memory Economics
-- **The Cognitive Desktop**: When people work at a desk, only a few active papers stay on the blotter while everything else lives in labeled drawers. Context management copied that physical rule directly: across all three archive vaults, **only items pinned to the Cognitive Desktop (capped at `2,400 Tokens / 6 items`) enter every main prompt turn**. Overflow bumps older items into a watch queue while `🪝` keyword hooks let agents call `archive.pull` only when relevant.
-- **Orthogonal Control Axes**: Scattered toggles collapsed into two clean axes—bottom bar for **permission ceiling (`L0–L3`)**, top bar for **background cadence (`off / patrol / managed`)**. `off` makes zero background calls; `patrol` makes zero routine calls and wakes only on errors, stream breaks, or blocked tools; `managed` adds quiet background **Dream Roam** maintenance (sorting unhooked drafts without touching code) plus a 5-condition auto-sleep guard that drops back to `off` after 15 idle minutes with zero open work.
-- **Adaptive Effort**: Added a 180° fan-shaped thinking-effort gauge with automatic gearing—low/off for quick status summaries and Dream Roam, high/xhigh reserved for wall diagnosis and tricky failures.
-
-Community feedback in Issues `#3` and `#4` (`@iridiumgit`) also shaped this release: full DSH light-theme parity for floating popovers and automatic hiding of Chief entry triggers inside subagent panes.
-
-### `v1.6.0`: One Screen, Three Safety Nets for Away Mode
-- **Navigation Consolidation**: Merged **Plan** into **Tasks**, slimming top navigation to five clean tabs (`Chief / Tasks / Peers / Archives / Guards`) and moving configuration into a rotating `⚙️` top-bar Settings view. **Tasks** introduced the **SVG Flow Canvas** (sequential steps, nested subagent tracks, cross-step return arcs) paired with a collapsed-by-default **Org Tree** that expands when clicking the Lead card.
-- **Three Away-Mode Safeguards**:
-  1. **Seven Milestone Alerts** (`pending_approval`, elevation requests, wall blocks, stream rescues, auto-sleep, budget stops, hazard halts) with quiet first-load baselines so old alerts never replay;
-  2. **Segmented Ledger & Hard Budget Breaker**: Separate counters for `chat`, `review`, and `dream` usage with a default **30 calls / 300K tokens** circuit breaker in `managed` mode (direct user `ask_chief` prompts stay unblocked);
-  3. **Redacted `.md` Battle Reports**: One-click export or copy of structured session summaries with API keys and private key blocks automatically scrubbed to `[REDACTED]`.
-- **Plain Language Everywhere**: Shipped three one-click scenario presets (**Observer / Co-Pilot / Away Mode**), live `zh / en` localization, and rewritten beginner-friendly docs.
+Without stopping at `v1.3.0` to split the codebase, the standalone safety kernel and later features would have been much harder to keep bug-free.
 
 ---
 
-## Chapter 6: Leaving the Narrow Sidebar, Connecting Local CLIs, and Learning Restraint (`v1.7.0`)
+## 4. Checking Actions Before Execution Without Taking Over the Main Chat (`v1.4.0`)
 
-By `v1.6.0`, single-session governance, memory budgeting, and unattended limits worked smoothly. Three practical realities pushed the final leap into `v1.7.0` (sharpened by heavy real-world feedback from `@iridiumgit` in Issues `#5` and `#6`):
+With the structure cleaner, two practical gaps showed up in daily runs:
 
-1. **A Narrow Sidebar Runs Out of Room**: Tracking a multi-branch workflow canvas, peer agents, and external workers inside a thin side pane feels cramped—and opening several subagents spawned stacked sidebars instead of tabs.
-2. **One Machine Often Runs Several Coding Agents**: Developers frequently run DSH alongside local **`Codex`** and **`Claude Code`** CLIs or multiple DSH windows. They act like one engineering squad, yet had no unified dispatch board or shared redlines.
-3. **Power Needs Opt-In Boundaries (Issue `#6`)**: Once a plugin installs process-wide hooks, letting those hooks intercept plain, everyday chats is counterproductive. If you open a clean window to glance at a config file and never touched Chief, you should not hit workspace-boundary denials or prompt injections.
+1. Earlier checks guarded Chief's own executor, yet **the main chat (`@lead`) and its subagents** made most of the actual file edits and shell calls. Spotting a bad command in logs afterward was too late.
+2. At higher tiers (`L2` / `L3`), Chief sometimes edited code itself when asked a quick sidebar question, stepping on `@lead`'s uncommitted work.
 
-`v1.7.0` solved all three together:
+`v1.4.0` addressed both:
 
-- **Full-Width Command Surface & Clean Subagent Routing**: Registers a permanent **`Chief` / `参谋长`** `conversation.view` tab right next to Chat, hiding the duplicate host bottom composer while active, supporting independent placement and corner-button toggles, and routing subagent clicks into tabs on the existing right sidebar by default instead of splitting extra panes.
-- **Cross-Tool Collaboration System**: Native non-`ccSwitch` discovery and one-click dispatch for local `Codex`, `Claude Code`, and dormant workspace DSH sessions—automatically injecting active redlines and Guard Walls before dispatch, merging external messages cleanly under cross-window pairs, filtering noise like `Mnemon` background tasks and empty shells, and keeping the canvas 100% static when idle so motion appears only when agents actually work.
-- **Session-Level Opt-In Zero Intrusion**: Process-wide takeover tightened into per-session opt-in (`sessionEnabled`). Fresh plain chats and their subagents pass straight through all 8 backend hooks untouched—zero prompt injection, zero pre-execute blocking, zero stray board writes—until you click **Enable in This Session**, take an explicit Chief action, or opt back into auto-enable globally in Settings.
-- **Final Monolith Cleanup**: Every remaining 2,000+ line file was split cleanly, bringing the runtime to **44 backend modules (9 in `pkg/safety/`) + 39 frontend modules**, still with **0 external npm dependencies**.
+- **Standalone Safety Kernel at `tools/pre-execute`**: Security checks moved out of business modules into **9 standalone files under `pkg/safety/`**, checksum-locked alongside `chief-executor.js`. Hooking into DSH's `tools/pre-execute` meant reads, writes, and commands from `@lead`, subagents, and Chief all pass **Guard Walls** (`global` / `workspace` / `paused`) before touching disk. Users can draft rules in plain text for manual approval, and even `L3` models cannot delete or disable locked walls.
+- **Lazy Delegation**: Chief focuses on planning, reviews, and guardrails. Unless you explicitly ask Chief to edit directly, workspace changes dispatch to `@lead` as `[EXECUTION_REQUEST]` items. Blank new chats start with read-only inspection and `graph.plan`, and mid-run questions slip into `@lead`'s queue as non-blocking `[INQUIRY]` cards.
+
+That turned the plugin from a passive observer into a shared pre-execute gate across the whole agent team.
 
 ---
 
-## Before vs. After: What Changed in Essence
+## 5. Controlling Prompt Tokens and Spend for Unattended Runs (`v1.5.0` → `v1.6.0`)
+
+As features piled up, new users ran into two practical worries: too many switches made it hard to tell what spent background tokens, growing archives threatened to bloat prompts, and leaving Away Mode on overnight felt risky without hard limits.
+
+`v1.5.0` and `v1.6.0` focused on trimming noise and adding spend limits:
+
+- **Cognitive Desktop (`v1.5.0`)**: Like keeping only current papers on your desk and filing the rest in drawers, **only items pinned to the Cognitive Desktop (up to `2,400 Tokens / 6 items`) go into each main prompt turn**. Overflow moves back into a watch queue with `🪝` keyword hooks so agents pull older notes on demand via `archive.pull`.
+- **Two Separate Control Axes & Auto-Sleep (`v1.5.0`)**: Scattered switches merged into bottom **permission tiers (`L0–L3`)** and top **run cadence (`off / patrol / managed`)**. `off` and idle `patrol` spend zero background tokens; `managed` organizes unhooked drafts quietly via **Dream Roam** (`🌙 梦境漫游`) and drops back to `off` after 15 idle minutes with zero open tasks. A 180° effort gauge (`🪄 Auto` by default) saves high reasoning effort for blocked debugging and wall drafting. Issues `#3` and `#4` also drove full light-theme popover fixes and hiding Chief buttons inside subagent panes.
+- **5-Tab Layout & Away-Mode Safety Nets (`v1.6.0`)**: Merged **Plan** into **Tasks** (5 tabs: `Chief / Tasks / Peers / Archives / Guards`), moved configuration into the top-bar `⚙️` gear, and added the **SVG Flow Canvas** + click-to-expand **Org Tree**. Unattended runs gained **7 milestone alerts**, a **categorized LLM ledger + default `30 calls / 300K tokens` circuit breaker**, redacted `.md` battle report exports, three starter presets (**Observer / Co-Pilot / Away Mode**), live `zh / en` switching, and plain-language docs.
+
+---
+
+## 6. Main Conversation Tab, Local CLIs, and Per-Session Opt-In (`v1.7.0`)
+
+Once single-window tracking and budget caps worked reliably, daily workflows (`Issues #5` and `#6`) exposed three remaining gaps:
+
+1. **A Narrow Sidebar Runs Out of Room**: Inspecting flow graphs, peer links, and subagent rows in a thin side column feels tight, and clicking subagent buttons stacked extra split panes.
+2. **One Machine Runs Multiple AI CLIs**: Developers often run local **`Codex`** and **`Claude Code`** alongside DSH windows, without a shared place to dispatch work or enforce the same redlines.
+3. **Global Hooks Should Stay Out of Plain Chats (`Issue #6`)**: Once a plugin attaches to process-wide `tools/pre-execute`, intercepting plain chat windows where the user never opened Chief creates friction—especially without a UI toggle or when benign heredocs, read-only `git`/`grep` commands, or cleared `cursor.blocked` remarks trigger false alarms.
+
+`v1.7.0` fixed all three:
+
+- **Main Tab Layout & Subagent Routing (`#5`)**: Registers a clean `Chief` / `参谋长` tab in `conversation.view`, hides the duplicate host composer while active, fits `0.2.2-rc.3` viewport height cleanly, provides independent placement/button toggles, and routes subagent clicks into **existing sidebar tabs** (`revealIfOpened: true`) with an optional split-pane toggle.
+- **Local CLI Collaboration (`Peers` Tab)**: Discovers local `Codex` and `Claude Code` without `ccSwitch` (including Windows `.cmd` shims and dormant workspace sessions), attaches active redlines and Guard Walls before dispatch, groups external traffic under cross-window pairs, filters out `Mnemon` tasks and empty `DS Bot` shells from Standby, and keeps the canvas visually still until agents actually work.
+- **Opt-In Sessions, Safety Guard Switches & False-Positive Fixes (`#6`)**:
+  - Switched from process-wide interception to **per-session opt-in (`sessionEnabled`)**: unactivated plain chats and their subagents pass all 8 backend hooks untouched;
+  - Added human-only **per-session and global Safety Guard switches** in Settings (default on, independent of Redline Sentinel and manual Guard Walls, confirm-gated & audited, persisted across reloads);
+  - Updated `isDestructiveShellCommand` to stop flagging non-executable document heredocs, `export` prefixes, `grep`/`rg`, `git log --format=`, `git commit`, and unpiped `echo`, while adding `normalizeCursorBlocked` across backend and frontend so cleared/approved remarks no longer light up red `Blocked` pills.
+- **Final File Split**: Split remaining 2,000+ line files so the package runs cleanly across **44 backend modules (9 in `pkg/safety/`) + 39 frontend modules**, still with zero external npm dependencies.
+
+---
+
+## Before vs. After
 
 ```mermaid
 flowchart TB
-  subgraph Early["Early Companion Plugin (v1.0)"]
+  subgraph Early["Early Companion (v1.0)"]
     E1["Surface: Narrow right sidebar only"]
-    E2["Scope: Inside one single chat window"]
-    E3["Memory: Manual cold archive drawer pulls"]
-    E4["Safety: Prompt reminders and passive notes"]
+    E2["Scope: Inside a single chat window"]
+    E3["Memory: Manual cold archive pulls"]
+    E4["Safety: Prompt rules + passive logs"]
     E1 --> E2 --> E3 --> E4
   end
 
-  subgraph Current["Current Management Hub (v1.7)"]
-    C1["Surface: Main full-width tab + Sidebar + Opt-in zero intrusion"]
+  subgraph Current["Current Hub (v1.7)"]
+    C1["Surface: Main tab + Sidebar + Opt-in per session"]
     C2["Coordination: Main chat + Subagents + Peer windows + Local Codex / Claude Code"]
     C3["Memory: 2,400-Token Cognitive Desktop + Hooked vaults + Dream Roam"]
-    C4["Governance: Isolated tools/pre-execute safety kernel + Guard Walls + L0-L3 + Budget cap"]
+    C4["Safety: Isolated tools/pre-execute kernel + Guard Walls + Safety toggles + Budget cap"]
     C1 --> C2 --> C3 --> C4
   end
 
-  Early -.->|"9 days · 9 releases · driven by real friction"| Current
+  Early -.->|"9 days · 9 releases"| Current
 ```
 
 ---
 
-## Four Engineering Rules Left Behind
+## Four Lessons From These Releases
 
-Looking back across those nine days, nearly every architectural choice traces back to four plain lessons:
+Looking back across those nine days, most decisions come down to four simple points:
 
-1. **Memory exists to save attention, not to cram prompts.**  
-   First 0-byte cold drawers, then the `2,400`-token Cognitive Desktop both follow one rule: keep only active working notes on the desk, file the rest behind keyword hooks, and load details on demand.
+1. **Memory is there to save prompt tokens, not stuff every turn.**  
+   Zero-byte cold drawers early on and the `2,400`-token Cognitive Desktop later do the same thing: keep only active papers on the desk, file the rest behind keyword hooks, and pull details on demand.
 
-2. **Build the brakes before attaching tools—enforce safety in code, not wishes.**  
-   "Do not touch production files" written inside a prompt fades after 50 turns. Default `advisor` read-only starts, per-action approvals, and an isolated `tools/pre-execute` kernel that `L3` cannot disable actually hold.
+2. **Put brakes and confirmations in place before giving tools.**  
+   Warnings inside a system prompt fade as context grows. Starting read-only at `L0`, popping single-action approvals, and locking Guard Walls at `tools/pre-execute` stop accidents—while a human-only Safety Guard toggle keeps normal workflows from getting stuck on edge cases.
 
-3. **Multi-agent work fails on visibility and runaway spend, not lack of agents.**  
-   Clean separation (`@lead` codes, Chief plans/routes/guards), readable flow topology, and hard budget circuit breakers turn parallel agents from a guessing game into something you can step away from safely.
+3. **Multi-agent teams fail when progress and spend stay hidden.**  
+   Clear separation (`@lead` edits, Chief tracks plans and boundaries), a readable flow graph, and hard budget circuit breakers let you step away safely.
 
-4. **Mature hubs practice restraint.**  
-   Strong tools become annoying when they intrude uninvited. Idle modes cost zero background calls, quiet canvases stay visually still, and plain chats remain completely untouched until you ask for Chief.
+4. **Stay quiet when not asked.**  
+   Idle modes spend zero background tokens, idle screens stay still, and plain chats run untouched until you enable Chief. Good tools step forward when needed and stay out of the way otherwise.
 
----
-
-With `v1.7.0`, the structural foundation of a local multi-agent management hub—task topology, cognitive memory tiers, an isolated safety kernel, hard budget caps, cross-tool orchestration, and per-session opt-in restraint—is complete and tested.
-
-Now that the core frame is steady, upcoming work can focus on more natural human-agent interaction: voice input, voice wake-up, and smoother long-term memory across projects.
+With `v1.7.0`, the core plumbing—task graphs, tiered archives, pre-execute safety & switches, budget caps, local CLI dispatch, and opt-in isolation—is tested and in place. Next up is more natural human interaction: voice input, voice wake-up, and smoother cross-project long-term memory.

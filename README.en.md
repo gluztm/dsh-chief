@@ -1,7 +1,7 @@
 <div align="center">
 
 # DSH Chief (`dsh-chief`)
-**DeepSeek Harness (DSH) supervisor plugin for both the right sidebar and main conversation tab: opt-in per session with zero intrusion on plain chats, tracking tasks, layered memory, local external CLI harnesses, and pre-execute guardrails.**
+**DeepSeek Harness (DSH) sidebar & main-tab supervisor plugin: stays off by default in plain chats, tracks tasks, layers notes into cold archives, connects local external CLIs, and checks writes/commands before they run.**
 
 [![DSH Compatibility](https://img.shields.io/badge/DSH-%3E%3D%200.2.2--rc.2-38bdf8?style=flat-square)](https://dsh.deepseek.com)
 [![GitHub Release](https://img.shields.io/github/v/release/gluztm/dsh-chief?color=2563eb&style=flat-square)](https://github.com/gluztm/dsh-chief/releases)
@@ -49,13 +49,13 @@ flowchart LR
 
 ## In One Sentence
 
-- **Opt-in per session with zero intrusion**: Fresh normal chats and their subagents stay untouched by default—zero prompt injection, zero safety blocks, and zero stray board files—until you click "Enable for This Session" or use Chief (you can also restore global auto-enable in Settings).
+- **Plain chats stay untouched by default**: New chats and their subagents skip prompt injection, pre-execute blocks, and stray board files until you click **Enable for This Session** (or turn global auto-enable back on in Settings).
 - **Save before compacting**: When context fills up, Chief writes paths, commands, and errors to local archives before running `/compact`.
 - **Keep tasks from stopping halfway**: Once you lock an objective, stalled steps get nudged forward, and 3 identical errors stop the loop.
-- **Check edits and commands first**: In active sessions, tool calls check against your Guard Walls (pre-execute rules) before running and pause for approval when needed.
+- **Check edits and commands first**: Active sessions check Guard Walls and the Safety Guard before running writes or shell commands; you can toggle the built-in Safety Guard in Settings with confirmation.
 - **Read-only by default**: Even after enabling a session, Chief observes without touching workspace files until you raise the permission tier (`L0`–`L3`).
 - **Keep prompt tokens low**: Only items pinned to the Cognitive Desktop (up to `2,400 tokens / 6 items`) go into each turn; everything else stays on disk until pulled.
-- **Main page or sidebar + direct local Harnesses**: Open Chief as a full-screen `Chief` top conversation tab (hiding the duplicate host input bar), connect local `Codex` / `Claude Code` without `ccSwitch`, and open subagent chats as tabs without stacking split panes.
+- **Main tab + right sidebar**: Switch to the top `Chief` tab (hiding the duplicate host input bar), connect local `Codex` / `Claude Code` in Peers, and open subagents as tabs in the existing sidebar.
 
 ---
 
@@ -154,11 +154,12 @@ The sidebar has 5 tabs plus a top-bar Settings page:
   <img src="assets/screenshots/06-pinned-bounds-and-handoff.png" alt="06 - Pinned Global Redlines and Proposals" width="68%" />
 </div>
 
-### 07 · Top-Bar Settings: Presets, Placement, Opt-In Controls & Budget Cap (`⚙️` Settings)
-**In one sentence:** Click the `⚙️` gear in the top bar to pick a scenario preset, choose Main Tab vs. Sidebar placement and entry buttons, toggle session opt-in, set alert sounds and budget limits, or switch languages.
+### 07 · Top-Bar Settings: Presets, Placement, Toggles & Budget Cap (`⚙️` Settings)
+**In one sentence:** Click the `⚙️` gear in the top bar to pick a preset, switch placement and shortcuts, toggle session opt-in or the Safety Guard, or set alerts and budget caps.
 
-- Click `⚙️` between `DSH 参谋长` and the version badge to open **Settings**: choose from **3 Scenario Presets** (Observer / Co-Pilot / Away Mode), configure **Panel Placement** (`Sidebar + Main Tab / Main Tab Only / Sidebar Only`, composer shortcut & floating corner trigger toggles, `Sidebar Tab / New Split Pane` for subagent views, plus per-session and new-session auto-enable switches), toggle **7 Milestone Desktop Alerts & Chime**, track the **categorized LLM Ledger (`chat / review / dream`) & hard budget cap**, and switch `zh / en` live. `📌 Pin Lock` Session Handoff and redacted `.md` report export sit at the bottom of `Tasks`.
-- Pick which archive scope carries into a new window (`None`, `Spotlight Only`, `Entire Drawer`, or `Full Session Cabinet`), while Strong Intervention resets to off for safety and `idle-guard` prevents stalled runs.
+- **Presets & placement**: Pick from **Observer / Co-Pilot / Away Mode** presets, switch `Sidebar + Main Tab / Main Tab Only / Sidebar Only`, toggle composer or floating corner shortcuts, choose `Sidebar Tab / New Split Pane` for subagents, and toggle per-session or default auto-enable.
+- **Safety Guard, alerts & budget**: Toggle the per-session or global built-in Safety Guard (requires confirmation), configure 7 milestone desktop alerts and chimes, monitor the `chat / review / dream` LLM ledger & budget cap, and switch `zh / en` live.
+- **Session handoff**: `📌 Pin Lock` Session Handoff and redacted `.md` report export sit at the bottom of **Tasks**. Pick how much archive scope moves into a new window while Strong Intervention resets off for safety.
 
 <div align="center">
   <img src="assets/screenshots/07-session-handoff-and-guard.png" alt="07 - Cross-Session Handoff and Deployment" width="68%" />
@@ -199,7 +200,7 @@ No. Under `⏸ Off` and `🛡 Patrol`, idle sessions make zero background LLM ca
 No. Starting with `v1.7.0`, new chats start unactivated by default—Chief skips prompt injection, pre-execute workspace checks, idle guards, and disk writes until you click **Enable for This Session** or invoke a Chief feature. If you prefer every new session protected automatically, turn on **Auto-enable Chief in new sessions** under `⚙️ Settings -> Panel Placement`.
 
 **Can it edit or delete my files by mistake?**
-New sessions default to `L0` read-only. In `L2`, important edits and commands pop up for per-action approval. Hard rules (disk formatting, force pushes, `git reset --hard`) stay blocked at every tier, and no L0–L3 model can delete Guard Walls you locked.
+New sessions default to `L0` read-only. In `L2`, important edits and commands pop up for per-action approval. Hard rules (disk formatting, force pushes, `git reset --hard`) stay blocked whenever the Safety Guard is on, and no L0–L3 model can remove locked Guard Walls or flip Safety Guard switches (only humans can confirm turning it off in Settings).
 
 **How do I stop it right now?**
 Click the red `⏹ 急停` button at the right end of the input strip to stop background activity immediately, or switch the header mode to `⏸ Off`.
@@ -221,9 +222,9 @@ Yes. You can type plain instructions in the composer, switch presets with one cl
 ## Going deeper
 
 <details>
-<summary>Architecture Evolution: From a Sidebar Notepad to a Multi-Agent Command Hub (v1.0 -> v1.7)</summary>
+<summary>Architecture Evolution: From a Sidebar Notepad to a Multi-Agent Management Hub (v1.0 -> v1.7)</summary>
 
-What began as a shared-JSON sidebar scratchpad (`dnb-`) grew through real daily friction into a zero-dependency command hub with **44 backend modules + 39 frontend modules**:
+What began as a shared-JSON sidebar scratchpad (`dnb-`) grew through practical daily issues into a zero-dependency control hub with **44 backend modules + 39 frontend modules**:
 
 <div align="center">
   <img src="assets/evolution-roadmap-en.gif" alt="dsh-chief v1.0 to v1.7 architecture evolution animation" width="840" />
@@ -231,25 +232,25 @@ What began as a shared-JSON sidebar scratchpad (`dnb-`) grew through real daily 
 
 ```mermaid
 flowchart LR
-  A["v1.0–v1.1\nSidebar Co-Pilot\nCold vaults · Compaction rescue"] --> B["v1.2–v1.2.1\nHands + Cage\nExecutor · 4 permission tiers"]
-  B --> C["v1.3\nSplit Monoliths\n45 modules · File locks"]
+  A["v1.0–v1.1\nSidebar Co-Pilot\nCold vaults · Pre-compact save"] --> B["v1.2–v1.2.1\nExecutor + Tiers\nShell/file tools · 4 permission tiers"]
+  B --> C["v1.3\nSplit & Locks\n45 modules · O_EXCL locks"]
   C --> D["v1.4\nPre-Execute Gate\n9 safety modules · Guard Walls"]
-  D --> E["v1.5–v1.6\nAttention & Spend\nCognitive Desktop · Flow Canvas · Hard cap"]
-  E --> F["v1.7\nHub with Restraint\nMain tab · Local CLIs · Opt-in zero intrusion"]
+  D --> E["v1.5–v1.6\nContext & Spend\nCognitive Desktop · Flow Canvas · Cap"]
+  E --> F["v1.7\nMain Tab + Opt-In\nMain view · Local CLIs · Safety toggles"]
 ```
 
-Read the full engineering story and architectural tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md`)](EVOLUTION.en.md)**.
+Read the full story and tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md`)](EVOLUTION.en.md)**.
 
 </details>
 
 <details>
 <summary>What Changed in v1.7.0</summary>
 
-- **Opt-In Per Session & Zero-Intrusion Bypass**: All 8 backend runtime hooks check per-session activation (`sessionEnabled`), leaving unactivated plain chats and their subagents completely untouched (zero prompt injection, zero pre-execute blocking, zero stray board files) with an in-panel opt-in banner plus per-session & global default toggles in Settings and automatic backward compatibility for legacy sessions.
-- **Safety Guard Master Switches & False-Positive Fixes**: Adds human-only per-session and global Safety Guard toggles in Settings (confirm-gated and audited, independent of Redline Sentinel and custom Guard Walls), eliminates `destructive_command` false positives on non-executable heredocs and read-only queries, and normalizes benign `cursor.blocked` notes so resolved/approved remarks no longer trigger false red alarms.
-- **Main Page Tab (`conversation.view`) & Subagent Tab Routing**: Registers a clean top `Chief` / `参谋长` conversation tab that hides the host bottom composer, fills the viewport safely (`--dsh-conversation-viewport-height` fallback for `0.2.2-rc.3`), offers independent composer & floating corner button toggles, and opens subagent views in the active right sidebar as tabs by default (without spawning stacked split panes).
-- **Redesigned Collaboration System & Clean Standby Dock**: Native non-`ccSwitch` discovery & one-click dispatch for local `Codex` and `Claude Code` CLIs (with redlines + Guard Walls), cross-window `pair` mailbox classification, idle-static vs. active-breathing glow & flowing SVG links, one-click standby refresh scan, and strict filtering against `Mnemon` maintenance tasks, blank `DS Bot` shells, `.v4` subagents, and orphan dirs.
-- **Light Theme Unification & Monolith Split**: Unified 8-tint card accents across all 5 tabs, adapted DSH light theme surfaces across every canvas and popover, and split all monoliths cleanly into **44 backend modules and 39 frontend modules**.
+- **Opt-In Per Session (`#6`)**: Unactivated plain chats and their subagents pass all 8 backend hooks untouched (zero prompt injection, zero pre-execute blocking, zero stray board files), with an in-panel opt-in banner, Settings toggles, and legacy compatibility.
+- **Safety Guard Toggles & False-Positive Fixes (`#6`)**: Adds human-only per-session and global Safety Guard switches in Settings (confirm-gated and audited, independent of Redline Sentinel and manual Guard Walls), fixes `destructive_command` false positives on non-executable heredocs and read-only queries (`grep`/`rg`/`git log --format=`/`git commit`), and clears benign `cursor.blocked` notes so approved/resolved status does not show false red alarms.
+- **Main Page Tab (`conversation.view`) & Subagent Tabs (`#5`)**: Adds a top `Chief` / `参谋长` conversation tab that hides the duplicate host composer, fits `0.2.2-rc.3` viewport height, offers independent shortcut toggles, and opens subagent views as tabs in the existing sidebar by default.
+- **Collaboration Tab & Clean Standby Pool**: Native discovery and dispatch for local `Codex` and `Claude Code` without `ccSwitch` (attaching redlines + Guard Walls), cross-window `pair` messages, static idle visuals with active-only glow, and Standby filtering against `Mnemon` tasks and blank `DS Bot` shells.
+- **Light Theme Alignment & Module Split**: Unified card styling and light-theme surfaces across all 5 tabs, and split remaining large files into **44 backend modules and 39 frontend modules**.
 
 </details>
 
@@ -345,20 +346,20 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 
 ```mermaid
 flowchart TB
-  subgraph UI["DSH Right Sidebar & Main Tab (client.js <- 39 modules · 5 Tabs + Top-Bar Settings)"]
-    T1["Chief Tab (180° Effort Gauge · Click-Through FX · Report Export)"]
-    T2["Tasks Tab (Core Objective · Flow Canvas / Org Tree · Unified Board · Handoff)"]
+  subgraph UI["DSH Right Sidebar & Main Tab (client.js <- 39 modules · 5 Tabs + ⚙️ Settings)"]
+    T1["Chief Tab (180° Effort Gauge · Dismissible Overlay · Report Export)"]
+    T2["Tasks Tab (Core Objective · Flow Canvas / Org Tree · Task Board · Handoff)"]
     T3["Peers Tab (Collab Arena · Local Codex/Claude CLI · Cross-Window Mail · Subagent Tabs)"]
-    T5["Archives Tab (2400T Cognitive Desktop · Hooked Stack-of-Papers)"]
+    T5["Archives Tab (2400T Cognitive Desktop · Hooked Drawers)"]
     T6["Guards Tab (Guard Walls · Blocker Removal · 📌 Redlines)"]
-    T7["Top-Bar ⚙️ Settings (Presets · Placement & Corner/Subagent Toggles · Opt-In · Budget · zh/en)"]
+    T7["Top-Bar ⚙️ Settings (Presets · Placement & Shortcut Toggles · Opt-In · Safety Guard · Budget · zh/en)"]
   end
 
   subgraph Core["Local Backend & Safety Kernel (Zero External Deps · 44 modules)"]
-    Hot["Hot Boards: ~/.dsh/chief/board.json & boards/<sid>.json\nCross-process/worker_threads O_EXCL spin locks"]
+    Hot["Hot Boards: ~/.dsh/chief/board.json & boards/<sid>.json\nCross-process / worker_threads O_EXCL locks"]
     Walls["Guard Walls: ~/.dsh/chief/guard-walls.json\nGlobal / Workspace / Paused"]
-    Cold["3-Tier Vaults: 2400T Cognitive Desktop + Hooked Drawers + 0-byte Blind Vault"]
-    Bus["Runtime & Safety: safety/*.js + Off/Patrol/Managed(5-Cond Sleep) + Audit"]
+    Cold["3-Tier Vaults: 2400T Cognitive Desktop + Hooked Drawers + 0-byte Cold Vault"]
+    Bus["Runtime & Safety: safety/*.js + Off/Patrol/Managed + Audit"]
   end
 
   subgraph Agents["Host Execution Agents (tools/pre-execute gate)"]
@@ -368,8 +369,8 @@ flowchart TB
   end
 
   UI <-->|"27 Same-Origin Routes (/api/dsh-chief/*, fail-closed 403)"| Core
-  Hot -->|"Compact Hot State"| Lead
-  Hot -->|"Compact Hot State"| Subs
+  Hot -->|"Board Digest"| Lead
+  Hot -->|"Board Digest"| Subs
   Walls -->|"Pre-Execution Block or Ask Prompt"| Lead
   Walls -->|"Pre-Execution Block or Ask Prompt"| Subs
   Cold -.->|"Cognitive Desktop Full Text · Hooked Pull on Demand"| Lead
@@ -409,8 +410,9 @@ flowchart TB
 | Contributor | Role |
 | --- | --- |
 | [gluztm](https://github.com/gluztm) | Creator, product design, and maintainer |
-| [Gemini](https://github.com/gemini-code-assist) | Feature development, `pkg/safety/` kernel, Cognitive Desktop, orthogonal runtime modes, fan gauge & CI gates |
-| [Codex](https://github.com/codex) | Modular architecture design, concurrency stress tests, and red-team boundary audits |
+| [Claude](https://github.com/claude) | Plain-language docs & UI copy overhaul and frontend polish |
+| [Gemini](https://github.com/gemini-code-assist) | Feature development, `pkg/safety/` kernel, Cognitive Desktop, runtime controls, fan gauge & CI gates |
+| [Codex](https://github.com/codex) | Modular architecture split, concurrency stress tests, and red-team boundary audits |
 | [deepseek-ai](https://github.com/deepseek-ai) | DeepSeek Harness host runtime and SuperAgent workflow alignment |
 
 ---

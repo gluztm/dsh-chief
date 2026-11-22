@@ -7,46 +7,46 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.7.0] - 2026-11-22
 
-> **Release Theme**: **主页面大屏模式 · 会话级按需零侵入 · 「协同系统」直连本机外协与全页视觉统一** — Opt-in per-session Chief activation & zero-intrusion bypass (Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6)), `conversation.view` Main Page Tab with full entry & subagent-tab controls (Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5)), redesigned "协同系统" with native local CLI dispatch (`Codex` / `Claude Code`), idle-static / active-breathing & SVG flow connectors, phantom standby cleanup, light-theme unification, and full monolith modularization.
+> 主页面大屏模式、会话级按需启用、人类专控安全卫兵开关、本机 `Codex` / `Claude Code` 直连，以及模块拆分和文档更新（Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5), [#6](https://github.com/gluztm/dsh-chief/issues/6)）。
 
 ### Added
-- **会话级按需启用与普通窗口零侵入（Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6), thanks `@iridiumgit`，`state-schema.js` / `chief-state.js` / `runtime-hooks.js` / `chief-view.js` / `api-routes.js` / `components/Panel.js` / `tabs/plan.js`）**：
-  - 将参谋长运行从“进程级全盘接管”收口为**会话级按需激活 (`sessionEnabled`)**：全新普通聊天窗口及其拉起的子代理默认未启用，在 `systemPrompt.section`、`tools/pre-execute`、`agent/pre-step`、`tools/result`、`session/event`、`agent/turn-stopping`、`agent/created` 及 `watchdogTimer` 全 8 处后端钩子直接无害放行，不注入提示词、不触发安全卫兵越界拦截、不运行空转守卫，也不落盘多余看板与空白配置。
-  - 在未启用会话打开面板时，顶部显示轻量提示条带与「在本会话启用」按钮；设置页新增「本会话启用参谋长」单窗开关与全局「新会话默认自动启用参谋长」（默认关闭），仅调整语言/通知等纯全局偏好绝不误激活当前普通会话；在会话内主动提问、建任务/边界/档案、连接跨窗或使用交接单部署时自动启用，升级前已配置或已沉淀数据的历史会话自动无损兼容。
-- **内置安全卫兵单会话 / 全局人类专控开关（Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6) comment, thanks `@iridiumgit`，`safety/invariant-guards.js` / `safety/guard-walls.js` / `safety/tool-gate.js` / `chief-executor.js` / `state-schema.js` / `chief-state.js` / `runtime-hooks.js` / `api-routes.js` / `tabs/plan.js` / `tabs/boundaries.js` / `modals/safety.js`）**：
-  - 设置页新增独立的「🛡️ 内置安全卫兵（越界 / 凭据 / 高危命令）」卡片，提供**本会话开关**与**全局总开关**（默认全部开启，与右侧栏「红线哨兵」及手工创建的「物理驻墙」相互独立）；关闭任一开关须经人类风险确认弹窗（非人类调用方或未勾选确认被后端硬拒绝并写入 `chief-audit.jsonl`），关闭状态时边界页顶部显示警示横幅与一键恢复按钮，且调整全局开关绝不误激活普通未启用会话。
-- **主页面大屏模式 (`conversation.view`) 与完整入口控制（Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5), thanks `@iridiumgit`，`entry.js` / `store.js` / `components/Panel.js` / `tabs/plan.js` / `styles/base.js`）**：
-  - 将参谋长注册为对话顶部常驻主页面页签（`order: 1`，标签精简为 `参谋长 / Chief`），支持 1080px 宽屏居中排版、一键大屏/右侧栏切换、自动隐藏宿主底部原生主输入框与 `CC` 用量条（切回对话无痕恢复），并通过 `--dsh-conversation-viewport-height` 兜底兼容 DSH `0.2.2-rc.3` Web GUI 贴底显示。
-  - 设置页新增「🖥️ 面板显示位置（主页面 / 右侧栏）」开关卡片：支持 `右侧栏 + 主页面` / `仅主页面` / `仅右侧栏`、独立关闭「输入框旁快捷按钮 (`showComposerEntry`)」与「右下角浮动按钮 (`showCornerTrigger`)」、以及「子代理窗口隐藏参谋长页面」并附友好返回引导卡片。
-- **全新「协同系统」与本机外部代理直连 (`tabs/peers.js` / `styles/bubble.js` / `network-harness.js` / `chief-network.js` / `chief-view.js`)**：
-  - 打造液态玻璃风「协同系统」可视化编队画布：支持拖拽/点选入编、工作中自动锁死编队防误拆（HTTP 409 护栏）与一键 `⏹ 急停解体`、待命池一键「刷新扫描」与免切窗发现有效工作区内的休眠会话；系统空闲时保持 100% 静止，工作时对应图标呈柔和主题色呼吸泛光、激活的 SVG 连线呈现方向性虚线流动与光点微粒特效。
-  - 支持免 `ccSwitch` 跨平台探测本机外部 CLI（`Codex` / `Claude Code` 等，含 Windows `.cmd` shim、脱敏环境变量直连与派单前自动注入红线和物理驻墙），赋予 `@lead` 主代理完整的已联动窗口与外协编队视野，并打通 L2/L3 桌面取档闭环。
+- **会话级按需启用（普通窗口不介入，Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6)，`state-schema.js` / `chief-state.js` / `runtime-hooks.js` / `chief-view.js` / `api-routes.js` / `components/Panel.js` / `tabs/plan.js`）**：
+  - 参谋长改为会话级按需启用（`sessionEnabled`）：新开的普通聊天窗及其子代理在未启用时，`systemPrompt.section`、`tools/pre-execute`、`agent/pre-step`、`tools/result`、`session/event`、`agent/turn-stopping`、`agent/created` 与 `watchdogTimer` 这 8 处后端钩子直接放行，不注提示词、不拦工具、不写空白看板。
+  - 未启用会话打开面板时，顶部提供一键「在本会话启用」提示条；设置页提供「本会话启用参谋长」与「新会话默认自动启用」（默认关闭）；改语言或通知等全局设置不会顺带激活普通会话，已有配置或数据的老会话自动保持启用。
+- **安全卫兵单会话 / 全局人类专控开关（Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6)，`safety/invariant-guards.js` / `safety/guard-walls.js` / `safety/tool-gate.js` / `chief-executor.js` / `state-schema.js` / `chief-state.js` / `runtime-hooks.js` / `api-routes.js` / `tabs/plan.js` / `tabs/boundaries.js` / `modals/safety.js`）**：
+  - 设置页新增「🛡️ 内置安全卫兵（越界 / 凭据 / 高危命令）」卡片，提供本会话开关与全局总开关（默认开启，与右侧栏「红线哨兵」和手工「物理驻墙」互不影响）。
+  - 关闭任一开关须经人类风险确认弹窗（非人类调用或未勾选确认被后端拒绝并记入 `chief-audit.jsonl`）；开关配置在 `normalizeTacticalModes` 与 `evaluatePreExecuteDefense` / `evaluateSafetyGuardHardRules` 全路径持久化生效；关闭时边界页顶部显示警示条与一键恢复按钮，切换全局开关不激活未启用会话。
+- **主页面大屏模式 (`conversation.view`) 与入口开关（Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5)，`entry.js` / `store.js` / `components/Panel.js` / `tabs/plan.js` / `styles/base.js`）**：
+  - 在对话顶部注册 `参谋长 / Chief` 主页面页签（`order: 1`），切过去后居中宽屏展示并自动隐藏宿主底部原生主输入框与 `CC` 用量条（切回对话恢复），并通过 `--dsh-conversation-viewport-height` 适配 DSH `0.2.2-rc.3` 贴底高度。
+  - 设置页新增「🖥️ 面板显示位置（主页面 / 右侧栏）」：`右侧栏 + 主页面 / 仅主页面 / 仅右侧栏`、独立关闭「输入框旁快捷按钮 (`showComposerEntry`)」与「右下角浮动按钮 (`showCornerTrigger`)」，以及「子代理窗口隐藏参谋长页面」提示卡片。
+- **「协同系统」与本机外部代理直连（`tabs/peers.js` / `styles/bubble.js` / `network-harness.js` / `chief-network.js` / `chief-view.js`）**：
+  - 支持免 `ccSwitch` 探测本机 `Codex` / `Claude Code` 等外部 CLI（含 Windows `.cmd` shim、脱敏环境变量直连与派单自带红线/物理驻墙）；工作时自动锁编防拆（HTTP 409）并支持 `⏹ 急停解体`，待命池支持「刷新扫描」免切窗发现休眠会话；画布空闲时静止，干活时对应图标和连线高亮流动；同时让 `@lead` 看到已连接窗口与外协列表，并打通 L2/L3 桌面取档。
 
 ### Changed & Fixed
-- **子代理对话默认改为「现有右侧栏加页签」并可切换（Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5) comment #4, thanks `@iridiumgit`，`store.js` / `tabs/peers.js` / `tabs/plan.js`）**：
-  - 修复 `openSubagentChat()` 因默认携带 `preferNewPane: true` 触发宿主 `planSplitPane` 不断叠出新侧边栏的问题；改为默认 `{ revealIfOpened: true }` 在现有右侧栏活动面板加 tab（重复点击自动聚焦去重），协同水泡子代理胶囊默认显示「查看」，同时在设置页「面板显示位置」保留「子代理对话打开方式：`现有栏加页签` / `新开分屏`」随时切换。
-- **清理待命池幽灵、后台维护与空白会话 (`chief-network.js`)**：
-  - 移除 `listPeerDirectory` 全盘孤儿磁盘扫描，收口发现范围至有效 `workspaceRegistry` 会话；剔除 `Mnemon · Memory maintenance` 等插件后台任务、无标题无任务的空白空壳（如新建未对话的 `DS Bot`）、读取失败快照以及 `.v4` 新格式 `parentSession` / `delegationDepth` 子代理。
-- **修复 `destructive_command` 对文档 heredoc 与只读查询的上下文误判（Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6) comment B, thanks `@iridiumgit`，`safety/invariant-guards.js`）**：
-  - `isDestructiveShellCommand` 对无危险管道消费的纯非可执行文件 heredoc（如 `cat > ".../交付说明.md" <<'DOCEOF'`）、`grep`/`rg`、`git log/show/diff/status/commit`（排除 `-c` 等危险参数）及未接管道的 `echo`/`printf` 不再触发正文误杀；同时收紧 `shutdown`/`diskpart`/`mkfs` 上下文锚定、覆盖 `python3 -c "os.system('rm -rf /')"` 并继续 100% 拦截 `.sh` 可执行 heredoc 与 `| bash`/`mysql <<'EOF'` 真实高危注入。
-- **修复 `board.cursor.blocked` 红色「受阻」告警条误报（Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6) comment #7075636856, thanks `@iridiumgit`，`board-schema.js` / `board-actions.js` / `digest.js` / `model-tools.js` / `src/client/utils.js` / `components/Panel.js` / `components/common.js`）**：
-  - 新增 `normalizeCursorBlocked` 语义归一化与前端防御层，自动过滤「无」「无（已获用户批准执行）」「已解除」「用户已接受…」「None / N/A / Resolved」等非阻塞陈述，避免误渲染红色告警条，同时完整保留「无法 / 无权限 / 没有找到 / 等待用户批准 / 但仍缺少…」等真实阻塞提示并收紧 `cursor.set` 工具说明。
-- **外部 Agent 协同消息统一归类「跨窗」 (`network-harness.js` / `chief-state.js` / `chief-network.js` / `tabs/peers.js`)**：
-  - 外部 Harness 派单与回执统一使用 `channelType: 'pair'` 与 `harness:<provider>` 虚拟根标记（豁免于断连集群隔离），并在前端将新版及历史外部 Harness 消息统一收拢在「跨窗 · 外协」折叠卡片流中（修复双 `@@` 前缀并全面重做消息流视觉）。
-- **全页浅色主题适配、减法瘦身与巨石模块化重构 (`src/` / `tools/`)**：
-  - 将协同卡片去中二化重命名为「协同系统」（移除冗余开关与次级页「连接其他对话窗口」「长期规矩」）；全面适配 DSH 桌面端浅色主题（含战术浮窗、扇形仪表盘、协同画布与未启用提示条）、统一 5 页签 8 色克制左强调线与 `AccCard` 风格，去掉任务完成态删除线；将所有 `>= 2,000` 行巨石文件拆分为 **44 个后端模块（含 9 个安全内核模块）+ 39 个前端模块**并补全顶层架构注释，版本号升至 `1.7.0`。
+- **子代理对话默认改为在现有右侧栏加页签（Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5)，`store.js` / `tabs/peers.js` / `tabs/plan.js`）**：
+  - 去掉 `openSubagentChat()` 默认的 `preferNewPane: true`，改为 `{ revealIfOpened: true }` 在现有右侧栏开新标签页并去重，同时在设置页保留「`现有栏加页签` / `新开分屏`」可切换；协同水泡子代理胶囊默认文案改为「查看」。
+- **清理待命池幽灵会话与后台任务（`chief-network.js`）**：
+  - 移除 `listPeerDirectory` 全盘孤儿扫描，只从有效 `workspaceRegistry` 发现候选；过滤掉 `Mnemon · Memory maintenance` 等插件后台任务、无标题无任务的空白空壳、读取失败快照与 `.v4` 子代理。
+- **修复 `destructive_command` 对文档 heredoc 与只读查询的误判（Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6)，`safety/invariant-guards.js`）**：
+  - `isDestructiveShellCommand` 对不送入危险管道的纯文档 heredoc（如 `cat > ".../交付说明.md" <<'DOCEOF'`）、`export ...=` 前缀、`grep`/`rg`、`git log/show/diff/status/commit`（保留 `-c` 等危险参数检查）及未接管道的 `echo`/`printf` 不再误拦截；同时收紧 `shutdown`/`diskpart`/`mkfs` 匹配条件，补上 `python3 -c "os.system('rm -rf /')"` 检测，并继续拦截 `.sh` 可执行 heredoc 与管道执行脚本。
+- **修复 `board.cursor.blocked` 红色「受阻」告警条误报（Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6)，`board-schema.js` / `board-actions.js` / `digest.js` / `model-tools.js` / `src/client/utils.js` / `components/Panel.js` / `components/common.js`）**：
+  - 新增前后端 `normalizeCursorBlocked` 归一化，自动把「无」「无（已获用户批准执行）」「已解除」「用户已接受…」「None / N/A / Resolved」等非阻塞陈述转成空串，避免顶部误亮红条；保留「无法 / 无权限 / 没有找到 / 等待用户批准 / 但仍缺少…」等真实阻塞信息，并更新 `cursor.set.blocked` 参数提示。
+- **外部代理消息统一归入「跨窗」（`network-harness.js` / `chief-state.js` / `chief-network.js` / `tabs/peers.js`）**：
+  - 外部 Harness 派单和回执改用 `channelType: 'pair'` 与 `harness:<provider>` 根标记，在协同消息区统一归进「跨窗 · 外协」折叠列表，同时修掉双 `@@` 前缀。
+- **浅色主题适配、界面精简与源码拆分（`src/` / `tools/`）**：
+  - 协同卡片更名为「协同系统」，去掉多余开关及次级页「连接其他对话窗口」「长期规矩」；全页适配 DSH 桌面浅色主题（含浮窗、扇形表盘、协同画布与提示条），去掉任务完成删除线；将超过 2,000 行的源文件拆分为 **44 个后端模块（含 9 个安全模块）+ 39 个前端模块**，版本号升至 `1.7.0`。
 
 ## [1.6.0] - 2026-11-21
 
-> **Release Theme**: **简明可视 · 节约注意力资源（Visual Clarity & Attention Conservation）** — consolidated 5-tab navigation, SVG Flow Canvas & click-to-expand Org Tree, top-bar rotating `⚙️` Settings page, Away Managed reliability loop, and live `zh / en` bilingual UI.
+> 5 页签整合、SVG 流程画布、顶栏齿轮设置、离桌托管告警/预算熔断与中英双语。
 
 ### Added
 
-#### 🧭 可视化工作拓扑、5 页签整合与全站统一拉起交互 (`board-schema.js` / `board-actions.js` / `digest.js` / `subagent-runtime.js` / `tabs/tasks-flow.js` / `tabs/tasks.js` / `components/common.js`)
+#### 🧭 可视化工作拓扑、5 页签整合与卡片折叠 (`board-schema.js` / `board-actions.js` / `digest.js` / `subagent-runtime.js` / `tabs/tasks-flow.js` / `tabs/tasks.js` / `components/common.js`)
 - **工程实现**：
-  - **5 页签一体化任务工作台**：将原「规划」页签正式合并入「任务」页签（顶栏保持 `参谋 / 任务 / 协同 / 档案 / 边界` 5 大页签），按「**核心目标 → 可视化工作拓扑（流程画布 / 组织树）→ 推进任务板（步骤与任务列表合一）→ 跨会话接力与部署**」清晰排布。
-  - **工作流推进流与跨步回指拓扑 (`planStepId` / `targetPlanStepId` / `derivePlanFlowProgress`)**：任务卡片支持关联规划步骤及目标回指步骤（并对历史看板基于 `graph.plan` 自动回填）；「流程画布」使用 SVG 绘制主线顺序阶段节点、可嵌套子代理分支卡片与跨步回指连线（支持横竖向切换与缩放适配器）。
-  - **全站统一拉起折叠体验**：抽象通用可折叠组件 `AccCard`，推进任务板默认折叠已完成任务分组；「组织树」默认收起，移除冗余的全局 `全部收起 / 全展开` 按钮，改为点击 `👑 主代理` 卡片整卡即可直接拉起/收起下级子代理与任务树，并补齐 DSH 浅色主题全部覆盖样式。
+  - **5 页签整合**：将原「规划」页签并入「任务」页签（顶栏保持 `参谋 / 任务 / 协同 / 档案 / 边界` 5 个页签），按「核心目标 → 流程画布 / 组织树 → 推进任务板 → 跨会话接力与部署」排列。
+  - **工作流推进流与跨步回指 (`planStepId` / `targetPlanStepId` / `derivePlanFlowProgress`)**：任务卡片支持关联规划步骤及目标回指步骤（对历史看板基于 `graph.plan` 自动回填）；「流程画布」用 SVG 绘制主线顺序节点、子代理分支与跨步回指连线。
+  - **统一卡片折叠组件 (`AccCard`)**：推进任务板默认折叠已完成任务分组；「组织树」默认收起，移除全局 `全部收起 / 全展开` 按钮，点击 `👑 主代理` 卡片整卡即可展开或收起子代理树，并补齐 DSH 浅色主题样式。
 - **用户感知**：打开「任务」页即可在一屏内看懂主代理和子代理现在推到第几步、卡在哪步、谁做完会向哪步交卷；平时层级保持收起干净，需要排查哪一条再点开即可。
 
 #### 🌙 离桌托管闭环：关键节点告警、LLM 调用账本与硬预算熔断、复盘战报导出 (`chief-state.js` / `chief-models.js` / `chief-review.js` / `runtime-hooks.js` / `src/client/notify.js` / `src/client/report.js`)
@@ -72,26 +72,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
-#### 🗂️ 认知桌面、三层钩子渐变隔离与动态俯视纸质卷宗 UI (`archive-core.js` / `archive-dossiers.js` / `tabs/archives.js`)
+#### 🗂️ 认知桌面、三层钩子与折叠卷宗 UI (`archive-core.js` / `archive-dossiers.js` / `tabs/archives.js`)
 - **工程实现**：
-  - **三层钩子平滑可见性模型**：本局档案柜未整理草稿对主对话不可见、参谋随时可读，经参谋整理写入 `hookKeywords`/`hookCue`/`hasHook: true` 后仅向主对话注入轻量 `🪝` 索引并新增 `chief_board({ action: "archive.pull", id })` 按需拉阅（点亮 `leadPulledSessions` 与 `📖 主代理已拉阅` 徽章）；全局档案柜未织钩草稿对主对话和参谋双盲，织钩后仅向参谋开放 `globalHookIndex` 与 `pull_global` 拉阅（主对话仍 0 泄露）；冷藏档案柜（`precipitated`）新增 `precipitatedFolders` 折叠抽屉及人类速览钩子，对主对话和参谋维持 0-byte 隔离并拦截参谋 `archiveOps` 访问。
-  - **认知桌面预算驱动与双通道注入**：`digest.js` 与 `board-actions.js` 彻底肃清 `sessionArchiveBriefs` 全文泄露，确立置顶 `desktop`（上限 `2,400 Tokens / 6 份`）为唯一全文注入源；超额自动按 `copper < silver < gold`/Pin 时间挤退入 `recentlyUnpinnedWatch` 观察队列；新增 `executeChiefArchiveInjectionOp` 双通道（`pin_to_desktop`/`unpin_from_desktop` 通道 A、`deliver_to_lead` 一次性执行信封通道 B，记入 `chiefDeliveredSessions`），严格服从 L0–L3 权限门控。
-  - **动态俯视纸质卡片 UI**：新增 `.dnb-desktop-zone`（含实时 Token 占用条与「🌙 交参谋梦境漫游归入抽屉」快捷按钮）、`.dnb-vault-banner` 谁在看总览横幅、全三层 `.dnb-drawer-box` 折叠抽屉及 `.dnb-paper-dossier` 动态纸质卷宗卡（折叠态仅呈现标题、关键词钩子与谁在看徽章，点击后平滑展开操作栏与分块记忆点）。
-- **用户感知**：打开档案页顶部即见置顶「认知桌面」和 Token 额度条，三层档案像俯瞰书桌上的实体文件夹与纸页，未点开只看标题和关键词钩子，谁能看、谁在看一眼了然，主对话上下文不再被无关历史档案挤爆。
+  - **三层钩子可见性模型**：本局档案柜未整理草稿对主对话不可见、参谋随时可读，经参谋整理写入 `hookKeywords`/`hookCue`/`hasHook: true` 后仅向主对话注入轻量 `🪝` 索引并新增 `chief_board({ action: "archive.pull", id })` 按需拉阅（点亮 `leadPulledSessions` 与 `📖 主代理已拉阅` 徽章）；全局档案柜未织钩草稿对主对话和参谋不可见，织钩后仅向参谋开放 `globalHookIndex` 与 `pull_global` 拉阅（主对话保持 0 字节）；冷藏档案柜（`precipitated`）新增 `precipitatedFolders` 折叠抽屉及人类速览钩子，对主对话和参谋保持 0-byte 隔离并拦截参谋 `archiveOps` 访问。
+  - **认知桌面预算与双通道注入**：`digest.js` 与 `board-actions.js` 移除 `sessionArchiveBriefs` 全文注入，确立置顶 `desktop`（上限 `2,400 Tokens / 6 份`）为唯一全文注入源；超额自动按 `copper < silver < gold`/Pin 时间退入 `recentlyUnpinnedWatch` 观察队列；新增 `executeChiefArchiveInjectionOp` 双通道（`pin_to_desktop`/`unpin_from_desktop` 通道 A、`deliver_to_lead` 一次性执行信封通道 B，记入 `chiefDeliveredSessions`），服从 L0–L3 权限控制。
+  - **折叠纸质卡片 UI**：新增 `.dnb-desktop-zone`（含实时 Token 占用条与「🌙 交参谋梦境漫游归入抽屉」快捷按钮）、`.dnb-vault-banner` 谁在看总览横幅、全三层 `.dnb-drawer-box` 折叠抽屉及 `.dnb-paper-dossier` 折叠卷宗卡（折叠态仅显示标题、关键词钩子与谁在看徽章，点击后展开操作栏与分块记忆点）。
+- **用户感知**：打开档案页顶部即见置顶「认知桌面」和 Token 额度条，三层档案未点开时只看标题和关键词钩子，谁能看、谁在看一眼了然，主对话上下文不再被无关历史档案挤满。
 
-#### 🤖 正交运行模式、托管「🌙 梦境漫游」、5 条件自动休眠与一站式执行 (`chief-review.js` / `auto-continue.js` / `runtime-hooks.js`)
+#### 🤖 运行模式与权限解耦、托管「🌙 梦境漫游」、5 条件自动休眠与连续执行 (`chief-review.js` / `auto-continue.js` / `runtime-hooks.js`)
 - **工程实现**：
-  - **三态正交总控 (`runMode: 'off' | 'patrol' | 'managed'`)**：统一替代旧版零散开关；`off` 后台 0 review LLM 消耗；`patrol` 常规回合 0 Token，仅在 `guard_wall_blocked`、`turn_error`、`stream_interrupted` 等异常事件唤醒巡检；`managed` 启用持续督导。
-  - **托管后台「🌙 梦境漫游」 (`runManagedDreamRoam`)**：托管态 L1+ 权限时自动分拣未织钩草稿与 `recentlyUnpinnedWatch` 入抽屉并生成钩子，同时点亮星空紫蓝毛玻璃遮罩 `data-tone="dream"`（`'🌙 参谋长正在梦境漫游 · 轻拢卷宗与织就钩子中...'`），严禁改写工作区代码或回推桌面。
+  - **三态运行模式 (`runMode: 'off' | 'patrol' | 'managed'`)**：统一替代旧版零散开关；`off` 后台 0 review LLM 消耗；`patrol` 常规回合 0 Token，仅在 `guard_wall_blocked`、`turn_error`、`stream_interrupted` 等异常事件唤醒巡检；`managed` 启用持续督导。
+  - **托管后台「🌙 梦境漫游」 (`runManagedDreamRoam`)**：托管态 L1+ 权限时自动分拣未织钩草稿与 `recentlyUnpinnedWatch` 入抽屉并生成钩子，同时显示紫蓝毛玻璃遮罩 `data-tone="dream"`（`'🌙 参谋长正在梦境漫游 · 轻拢卷宗与织就钩子中...'`），不改写工作区代码或回推桌面。
   - **5 条件自动休眠守护**：`checkAndStopIdleAutoPilot` 仅在（1）闲置达 `managedIdleTimeoutMs`（默认 15 分钟）且无运行中代理、（2）0 `doing` 任务、（3）0 待审批/提权、（4）0 未结 `inquiries`、（5）0 待复盘定时器且 `recentlyUnpinnedWatch` 清空时自动切回 `'off'`。
-  - **`Auto continue` 双模式唤醒与 L3 一站式建议收口**：`patrol` 与 `managed` 下断流事件过红线与物理墙检查后按 L0–L3 分级处置（L3 下发 `[EXECUTION_REQUEST #taskId]`）；`L3 + 强介入` 时 `executeBatchSuggestions` 自动执行安全建议（跳过 `guard_wall`、`goal_approval` 及 `pinGlobal`）并产出 `isOneStopReport: true` 合并战报卡片 `'🏁 一站式战报回执'`。
-- **用户感知**：关停即零消耗，巡检只在真出事或断线时介入，开启托管后参谋长会在空闲期悄悄「🌙 梦境漫游」归整卷宗并织好检索钩子，忙完 15 分钟所有待办归零后自动退回关停休眠。
+  - **`Auto continue` 双模式唤醒与 L3 批量建议收口**：`patrol` 与 `managed` 下断流事件过红线与物理墙检查后按 L0–L3 分级处置（L3 下发 `[EXECUTION_REQUEST #taskId]`）；`L3 + 强介入` 时 `executeBatchSuggestions` 自动执行安全建议（跳过 `guard_wall`、`goal_approval` 及 `pinGlobal`）并产出 `isOneStopReport: true` 合并战报卡片 `'🏁 一站式战报回执'`。
+- **用户感知**：关停即零消耗，巡检只在真出事或断线时介入，开启托管后参谋长会在空闲期运行「🌙 梦境漫游」归整卷宗并织好检索钩子，忙完 15 分钟所有待办归零后自动退回关停休眠。
 
 #### 🧠 思考强度、自适应换挡与跨模型每角色 `🔒 锁挡` 保护 (`chief-models.js` / `subagent-runtime.js` / `tabs/chief.js`)
 - **工程实现**：
   - **6 档配置与模型能力对齐 (`thinkingEffort`)**：支持 `auto / off / low / medium / high / xhigh`，调用 `llm.resolveModelInfo` 自动降级或对非推理模型剥离参数；`decideAdaptiveChiefEffort` 在 `chat_summary` / `dream_roam` / `quick_status` 自动降为 `off`，常规复盘为 `medium`，`blank_explore` / `wall_blocked` / `craft_wall` / `precipitate` / `strong_intervention` 升为 `high`，`hazard_diagnosis` 升为 `xhigh`，并在聊天与回执卡落盘 `thinkingEffort` 与 `thinkingEffortMode` 角标元数据。
-  - **L2/L3 跨代理热调挡与 `🔒 锁挡` 一票否决**：通过 `effortOps`、看板 `task.dispatch({ reasoningEffort })` 与 `controlMainAgent({ op: 'set_effort' })` 静默热调 `@lead` 与子代理下一轮推理深度；新增 `lockedModelEfforts` 每角色锁挡，用户一键锁定后参谋 L2/L3 自动改挡被硬拦截并记入审计。
-- **用户感知**：可在模型选择器与参谋回复右上角直接看清每条回答使用的推理强度，默认「🪄 自适应」自动把好钢用在复杂排障与筑墙上；也能直接在前端一键锁定主对话或任意子代理的思考挡位，防止参谋越权改动。
+  - **L2/L3 跨代理热调挡与 `🔒 锁挡` 拦截**：通过 `effortOps`、看板 `task.dispatch({ reasoningEffort })` 与 `controlMainAgent({ op: 'set_effort' })` 静默热调 `@lead` 与子代理下一轮推理深度；新增 `lockedModelEfforts` 每角色锁挡，用户一键锁定后参谋 L2/L3 自动改挡被拦截并记入审计。
+- **用户感知**：可在模型选择器与参谋回复右上角直接看清每条回答使用的推理强度，默认「🪄 自适应」把高推理留给复杂排障与筑墙；也能直接在前端一键锁定主对话或任意子代理的思考挡位，防止参谋越权改动。
 
 ### Fixed
 - **加固模型思考锁挡 (`lockedModelEfforts`) 权限隔离与 `toggleLockAgentEffort` 落地 (`chief-state.js` / `api-routes.js`)**：封堵非人类调用方通过 `updateChiefConfig` 直接篡改 `lockedModelEfforts` 或已锁挡 `chief` 思考强度的旁路（Fail-Closed 拦截并写入 `model_effort_lock` 审计日志）；仅允许经宿主鉴权面板路由 (`/chief/config`) 或显式 `byUser: true` 人工操作修改。
@@ -108,7 +108,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 将模型选择器与战术驾驶舱中的思考强度替换为 180° 扇形档位表（`EffortFanGauge`）：支持拖拽/点击切换固定挡位或点按中心一键切回 `🪄 自动调节`，移除自动扫掠循环动画与底部自适应说明栏，保持原生气泡解释且彻底消除鼠标跨档悬停导致的弹窗高度抽搐；
   - 取消针对单个主/子代理的思考档位下拉调控与 `锁挡` 按钮，改为在扇形表盘下方提供「团队思考强度（主/子代理）：自动 / 手动」一键切换（`teamEffortMode`，默认 `auto` 由参谋长按当前权限范围自动调节，切换 `manual` 则由人类掌控且参谋主动调挡门禁与执行均严格拦截）；
   - 精简移除战术驾驶舱顶部 `拉起 / 复位` 把手，保留主代理与子代理卡片及调度标签前置 `agentLead` / `agentSub` 矢量图标，并为 `.dnb-tactical-pop` / `.dnb-perm-pop` / `.dnb-more-menu` / `.dnb-menu` 补充深/浅色实底背景修复深色模式下弹层半透明透底叠字问题。
-- **支持鼠标单击毛玻璃遮罩即穿透恢复操作且保留外框流光提示 (`components/Panel.js` / `styles.js`)**：当后台「🌙 梦境漫游」或自动审查点亮毛玻璃舞台时，新增 `点击任意处收起遮罩继续操作 · 外框流光表示仍在运作` 提示；用户鼠标单击毛玻璃任意区域即可立即卸除模糊与点击拦截层恢复自由操作面板，同时四边 `.dnb-chief-fx-border` 彩色流光外框依然保持运行，直至本轮后台运作结束。
+- **支持鼠标单击毛玻璃遮罩收起并保留外框提示 (`components/Panel.js` / `styles.js`)**：当后台「🌙 梦境漫游」或自动审查打开毛玻璃遮罩时，显示 `点击任意处收起遮罩继续操作 · 外框流光表示仍在运作` 提示；点击遮罩任意位置可立刻收起模糊层恢复面板操作，外框继续保留直到后台动作结束。
 
 ## [1.4.0] - 2026-11-19
 
