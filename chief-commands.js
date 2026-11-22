@@ -672,6 +672,7 @@ export async function askOrCommandChief(deps, {
             ? 'blank_explore'
             : ((effCfg.tacticalModes && effCfg.tacticalModes.intervention) ? 'strong_intervention' : 'ask_chat')))
 
+  const safetyGuardEnabled = !(effCfg && effCfg.tacticalModes && effCfg.tacticalModes.safetyGuardEnabled === false)
   const loopRes = await runChiefAgenticLoop(deps, {
     rootId,
     sessionId: rootId,
@@ -685,6 +686,7 @@ export async function askOrCommandChief(deps, {
     board,
     maxSteps: statusOnlyInquiry ? 1 : 4,
     readOnlyToolsOnly: false,
+    safetyGuardEnabled,
     disableTools: statusOnlyInquiry || (_wallBlockerEscalation && permRank < 3),
     lazyDeferWorkspaceWritesToLead,
     callLlmFn: (callOpts) => callChiefLlm(deps, { reasonKind: askReasonKind, ...callOpts, maxTokens: SUMMARY_MAX_TOKENS }),
@@ -715,7 +717,7 @@ export async function askOrCommandChief(deps, {
   let chiefSystemBlockedNeedsElevation = false
 
   if (explicitCompactReq && !compactToolRec) {
-    const compactGuard = evaluateSafetyGuardHardRules({ tool: 'session_compact', opClass: 'workflow', board })
+    const compactGuard = evaluateSafetyGuardHardRules({ tool: 'session_compact', opClass: 'workflow', board, safetyGuardEnabled })
     if (compactGuard.blocked) {
       forcedCompactOut = { ok: false, blockedBySafetyGuard: true, error: compactGuard.reason }
       loopBadges.push(compactGuard.badge || '🛡️ 卫兵拦截压缩')
@@ -1089,7 +1091,7 @@ export async function askOrCommandChief(deps, {
       : null
     const relayMode = ['steer', 'followup', 'silent'].includes(r.mode) ? r.mode : 'steer'
 
-    const relayGuard = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: r.text, board })
+    const relayGuard = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: r.text, board, safetyGuardEnabled })
     if (relayGuard.blocked) {
       actionBadges.push(relayGuard.badge || '🛡️ 卫兵拦递话')
       relayResults.push({ ok: false, target: targetName, blockedBySafetyGuard: true, error: relayGuard.reason })

@@ -621,6 +621,8 @@ window.__ModuleLoader__.load({
         pendingElevation: null,
         auditLog: [],
         autoPilot: false,
+        globalSafetyGuardEnabled: true,
+        sessionSafetyGuardEnabled: true,
         tacticalModes: {
           intervention: false,
           maxInterventionTurns: 10,
@@ -633,6 +635,7 @@ window.__ModuleLoader__.load({
           compactThresholdInput: '64K',
           redlineSentinel: false,
           conciseBrief: false,
+          safetyGuardEnabled: true,
         },
         runtimeGuard: {
           consecutiveInterventionTurns: 0,
@@ -703,6 +706,10 @@ window.__ModuleLoader__.load({
       chiefRiskModalOpen: false,
       chiefRiskAgreed: false,
       chiefRiskBusy: false,
+      safetyGuardModalOpen: false,
+      safetyGuardModalScope: 'session',
+      safetyGuardAgreed: false,
+      safetyGuardBusy: false,
       dismissedApprovalIds: {},
       openApprovalModalId: '',
       approvalBusyId: '',
@@ -1311,6 +1318,39 @@ window.__ModuleLoader__.load({
       if (raw === 0 || raw === '0') return 0
       const n = Math.round(Number(raw))
       return Number.isFinite(n) && n >= 1 ? Math.min(30, n) : 10
+    }
+
+    const CURSOR_BLOCKED_REAL_CONTRAST_RE = /(?:但|但是|不过|然而|仍|依然|还是).{0,12}(?:卡在|卡住|阻塞|受阻|无法|失败|报错|错误|缺少|缺失|无权限|权限拒绝|拒绝|冲突|超限|超时|未通过)|\b(?:but|however|still)\b.{0,24}\b(?:blocked|stalled|fail(?:ed|ing)?|error|missing|denied|cannot|can't|unable|timeout)\b/i
+
+    /**
+     * Normalize `board.cursor.blocked` so non-blocking / cleared / user-approved remarks
+     * (e.g. "无", "无（已获用户批准执行）", "用户已接受当前配置…", "None (approved)")
+     * collapse to `""` instead of lighting up a false-positive red alarm pill, while
+     * preserving genuine blockers (e.g. "无法连接", "无权限", "没有找到", "等待用户批准",
+     * "None of the tests passed", or contrast clauses like "用户已确认，但仍缺少…").
+     */
+    function normalizeCursorBlocked(raw) {
+      const s = String(raw === null || raw === undefined ? '' : raw).replace(/\s+/g, ' ').trim()
+      if (!s) return ''
+      const unwrapped = s.replace(/^[\s\-—–_\/.,;:!?~`'"“”‘’（）()【】\[\]{}]+|[\s\-—–_\/.,;:!?~`'"“”‘’（）()【】\[\]{}]+$/g, '').trim()
+      if (!unwrapped) return ''
+      if (/^(?:无|暂无|没有|木有|空|正常|无阻塞|无卡点|无阻碍|无受阻|无障碍|未受阻|未阻塞|不阻塞|不受阻|非阻塞|目前无阻塞|当前无阻塞|暂无阻塞|暂无卡点|没有阻塞|没有卡点|无异常|无报错|已解除|已解决|已清空|已清零|已放行|已通过|已恢复|已批准|已获批|已获批准|已获用户批准|已获用户批准执行|已确认|已同意|none|no|n\/?a|nil|null|empty|nothing|false|ok|clear|cleared|resolved|unblocked|not\s+blocked|no\s+blockers?|no\s+issues?|approved|user\s+approved)$/i.test(unwrapped)) {
+        return ''
+      }
+      if (CURSOR_BLOCKED_REAL_CONTRAST_RE.test(s)) {
+        return s.slice(0, 400)
+      }
+      if (
+        /^(?:(?:目前|当前)?(?:无|暂无)(?=$|[\s（(【\[，,；;：:。.\-—/、])|(?:目前|当前)?(?:无|暂无|没有|未|不|非)(?:明显|任何)?(?:阻塞|卡点|阻碍|受阻|障碍|卡住|异常|报错|问题)(?=$|[\s（(【\[，,；;：:。.\-—/、])|(?:已解除|已解决|已放行|已清空|已清零|已恢复|已获(?:用户)?批(?:准)?(?:执行)?|已由用户(?:批准|确认|同意|接受)|用户已(?:接受|批准|确认|同意|拍板|放行|认可)))/.test(s)
+      ) {
+        return ''
+      }
+      if (
+        /^(?:(?:none|n\/?a|nil|null|nothing)(?=$|\s*[(\[.,;:\-\/])|(?:not\s+blocked|no\s+blockers?(?:\s+found|\s+now|\s+remaining)?|unblocked|resolved|cleared|approved(?:\s+by\s+user)?|user\s+(?:approved|accepted|confirmed))(?=$|[\s(\[.,;:\-\/]))/i.test(s)
+      ) {
+        return ''
+      }
+      return s.slice(0, 400)
     }
 
     /** Width-aware truncation so CJK and ASCII labels fit cleanly inside pills & SVG nodes. */
@@ -2032,6 +2072,8 @@ window.__ModuleLoader__.load({
           ...prevMeta,
           sessionEnabled: typeof cfg.sessionEnabled === 'boolean' ? cfg.sessionEnabled : prevMeta.sessionEnabled,
           defaultAutoEnableSessions: typeof cfg.defaultAutoEnableSessions === 'boolean' ? cfg.defaultAutoEnableSessions : Boolean(prevMeta.defaultAutoEnableSessions),
+          globalSafetyGuardEnabled: typeof cfg.globalSafetyGuardEnabled === 'boolean' ? cfg.globalSafetyGuardEnabled : (prevMeta.globalSafetyGuardEnabled !== false),
+          sessionSafetyGuardEnabled: typeof cfg.sessionSafetyGuardEnabled === 'boolean' ? cfg.sessionSafetyGuardEnabled : (prevMeta.sessionSafetyGuardEnabled !== false),
           runMode: cfg.runMode || (cfg.stopped ? 'off' : (cfg.paceMode === 'auto' ? 'managed' : (cfg.paceMode === 'smart' ? 'patrol' : 'off'))),
           managedIdleTimeoutMs: Number(cfg.managedIdleTimeoutMs) || prevMeta.managedIdleTimeoutMs || (15 * 60 * 1000),
           notifyEnabled: nextNotifyEnabled,
@@ -3610,6 +3652,14 @@ window.__ModuleLoader__.load({
           patch({ autoPilotConfirmOpen: true, secPaceMenuOpen: false })
           return null
         }
+        if (value && value.requireSafetyGuardConfirm) {
+          patch({
+            safetyGuardModalOpen: true,
+            safetyGuardModalScope: value.scope === 'global' ? 'global' : 'session',
+            safetyGuardAgreed: false,
+          })
+          return null
+        }
         if (!value || value.ok === false) {
           patch({ error: (value && value.error) || '保存设置失败' })
           return null
@@ -3644,6 +3694,16 @@ window.__ModuleLoader__.load({
           : ((value.view && value.view.config && typeof value.view.config.paceMode === 'string')
               ? value.view.config.paceMode
               : null)
+        const cfgObj = value.config || (value.view && value.view.config) || null
+        const resolvedGlobalSafety = cfgObj && typeof cfgObj.globalSafetyGuardEnabled === 'boolean'
+          ? cfgObj.globalSafetyGuardEnabled
+          : null
+        const resolvedSessionSafety = cfgObj && typeof cfgObj.sessionSafetyGuardEnabled === 'boolean'
+          ? cfgObj.sessionSafetyGuardEnabled
+          : null
+        const resolvedTacticalModes = cfgObj && cfgObj.tacticalModes && typeof cfgObj.tacticalModes === 'object'
+          ? cfgObj.tacticalModes
+          : null
         const updatedSubagents = resolvedLocks && Array.isArray(store.subagents)
           ? store.subagents.map(ag => {
               if (!ag || typeof ag !== 'object') return ag
@@ -3660,7 +3720,7 @@ window.__ModuleLoader__.load({
         patch({
           compactInputDraft: null,
           compactLowWarning: value.compactLowWarning || '',
-          ...((resolvedLocks || resolvedTeamEffortMode || resolvedSessionEnabled !== null || resolvedDefaultAutoEnable !== null || resolvedRunMode !== null || resolvedPaceMode !== null)
+          ...((resolvedLocks || resolvedTeamEffortMode || resolvedSessionEnabled !== null || resolvedDefaultAutoEnable !== null || resolvedRunMode !== null || resolvedPaceMode !== null || resolvedGlobalSafety !== null || resolvedSessionSafety !== null || resolvedTacticalModes)
             ? {
                 chiefMeta: {
                   ...store.chiefMeta,
@@ -3670,6 +3730,11 @@ window.__ModuleLoader__.load({
                   ...(resolvedDefaultAutoEnable !== null ? { defaultAutoEnableSessions: resolvedDefaultAutoEnable } : {}),
                   ...(resolvedRunMode !== null ? { runMode: resolvedRunMode } : {}),
                   ...(resolvedPaceMode !== null ? { paceMode: resolvedPaceMode, stopped: resolvedPaceMode === 'stopped' } : {}),
+                  ...(resolvedGlobalSafety !== null ? { globalSafetyGuardEnabled: resolvedGlobalSafety } : {}),
+                  ...(resolvedSessionSafety !== null ? { sessionSafetyGuardEnabled: resolvedSessionSafety } : {}),
+                  ...(resolvedTacticalModes
+                    ? { tacticalModes: { ...(store.chiefMeta.tacticalModes || {}), ...resolvedTacticalModes } }
+                    : {}),
                 },
               }
             : {}),
@@ -3717,9 +3782,21 @@ window.__ModuleLoader__.load({
             })
           } else if (typeof nextCfg.tacticalModes.intervention === 'boolean' && Object.keys(nextCfg.tacticalModes).length === 1) {
             patch({ notice: nextCfg.tacticalModes.intervention ? '⚡ 已开启强介入' : '已关闭强介入' })
+          } else if (typeof nextCfg.tacticalModes.safetyGuardEnabled === 'boolean' && Object.keys(nextCfg.tacticalModes).length === 1) {
+            patch({
+              notice: nextCfg.tacticalModes.safetyGuardEnabled
+                ? '🛡 本会话安全卫兵已开启'
+                : '⚠ 本会话已关闭安全卫兵：内置越界/凭据/高危命令检查已放行',
+            })
           } else {
             patch({ notice: '✦ 已更新自动控制开关' })
           }
+        } else if (typeof nextCfg.globalSafetyGuardEnabled === 'boolean') {
+          patch({
+            notice: nextCfg.globalSafetyGuardEnabled
+              ? '🛡 已开启全局安全卫兵总开关'
+              : '⚠ 已关闭全局安全卫兵总开关：全部会话将放行内置安全检查',
+          })
         } else if (typeof nextCfg.runMode === 'string') {
           const rmMap = {
             off: '⏸ 已切到关停：后台不花额度，也不自动检查，只在你提问或点按钮时工作',
@@ -11832,8 +11909,9 @@ window.__ModuleLoader__.load({
             ? resolved.agentNames.slice(0, 2).map(n => '@' + shortAgentName(n, true)).join('、')
               + (resolved.agentNames.length > 2 ? ' 等 ' + resolved.agentNames.length + ' 个代理' : '')
             : '@主代理'
-          const subReason = kind === 'blocked' && (task.note || (board && board.cursor && board.cursor.blocked))
-            ? clampTitle(task.note || board.cursor.blocked, 20)
+          const cursorBlocked = normalizeCursorBlocked(board && board.cursor && board.cursor.blocked)
+          const subReason = kind === 'blocked' && (task.note || cursorBlocked)
+            ? clampTitle(task.note || cursorBlocked, 20)
             : ''
 
           return h(
@@ -14818,6 +14896,111 @@ window.__ModuleLoader__.load({
           ),
           h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', lineHeight: 1.4 } },
             '切换回低权限或开新对话时，高权限会自动关闭，需要重新确认。'),
+        ),
+      )
+    }
+
+    function SafetyGuardConfirmModal({ view }) {
+      if (!view.safetyGuardModalOpen) return null
+      const isGlobal = view.safetyGuardModalScope === 'global'
+      const agreed = Boolean(view.safetyGuardAgreed)
+      const busy = Boolean(view.safetyGuardBusy)
+      return h(
+        'div',
+        {
+          className: 'dnb-modal-backdrop',
+          onClick: e => {
+            if (e.target === e.currentTarget && !busy) patch({ safetyGuardModalOpen: false, safetyGuardAgreed: false })
+          },
+        },
+        h(
+          'div',
+          { className: 'dnb-modal-card' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+            h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#ef4444' } },
+              isGlobal
+                ? bi('全局关闭内置安全卫兵：风险确认', 'Disable Global Safety Guard: Confirm Risks')
+                : bi('本会话关闭内置安全卫兵：风险确认', 'Disable Session Safety Guard: Confirm Risks')),
+            h('button', {
+              type: 'button',
+              className: 'dnb-icon-btn',
+              style: { width: 22, height: 22 },
+              disabled: busy,
+              onClick: () => patch({ safetyGuardModalOpen: false, safetyGuardAgreed: false }),
+            }, h(Icon, { name: 'x', size: 13 })),
+          ),
+          h(
+            'div',
+            { className: 'dnb-risk-box' },
+            h('div', { style: { fontSize: 13.5, fontWeight: 700, color: '#ef4444', display: 'flex', alignItems: 'center', gap: 6 } },
+              isGlobal
+                ? bi('⚠️ 即将关闭全部会话的内置安全卫兵', '⚠️ About to disable the built-in Safety Guard across ALL sessions')
+                : bi('⚠️ 即将关闭当前会话的内置安全卫兵', '⚠️ About to disable the built-in Safety Guard for this session')),
+            h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } },
+              bi('关闭后，以下内置硬拦截规则将不再触发：', 'While disabled, these built-in checks will pass through without blocking:')),
+            h(
+              'ul',
+              { style: { margin: '0 0 0 18px', padding: 0, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--dnb-text)' } },
+              h('li', null, bi('工作区外路径的读写与命令执行越界拦截', 'Workspace escape checks for reads, writes, and command cwd')),
+              h('li', null, bi('`.env`、SSH 私钥、`.credentials` 等敏感凭据触及拦截', 'Credential path protections (`.env`, private keys, `.credentials`)')),
+              h('li', null, bi('`rm -rf`、`DROP DATABASE`、`git reset --hard` 与内置禁止红线检查', 'Destructive command checks (`rm -rf`, `DROP DATABASE`, `git reset --hard`) and built-in forbidden bounds')),
+            ),
+            h('div', { style: { fontSize: 11.5, fontWeight: 600, color: 'var(--dnb-text-2)' } },
+              bi('注：你在「边界」页手工添加的「物理驻墙」仍独立生效，可随时在设置或边界页一键恢复安全卫兵。', 'Note: Custom Guard Walls in the Boundaries tab remain active independently, and you can re-enable the Safety Guard anytime with one click.')),
+          ),
+          h(
+            'label',
+            { className: 'dnb-risk-check' },
+            h('input', {
+              type: 'checkbox',
+              checked: agreed,
+              disabled: busy,
+              style: { marginTop: 3 },
+              onChange: e => patch({ safetyGuardAgreed: Boolean(e.target.checked) }),
+            }),
+            h('span', null,
+              isGlobal
+                ? bi('我已知悉关闭风险，确认在全部会话放行内置安全卫兵检查。', 'I understand the risks and confirm disabling the built-in Safety Guard globally.')
+                : bi('我已知悉关闭风险，确认在本会话放行内置安全卫兵检查。', 'I understand the risks and confirm disabling the built-in Safety Guard for this session.')),
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 32, padding: '0 14px', fontSize: 12.5 },
+              disabled: busy,
+              onClick: () => patch({ safetyGuardModalOpen: false, safetyGuardAgreed: false }),
+            }, bi('取消', 'Cancel')),
+            h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: {
+                height: 32,
+                padding: '0 16px',
+                fontSize: 12.5,
+                background: agreed ? '#dc2626' : 'var(--dnb-fill)',
+                color: agreed ? '#fff' : 'var(--dnb-text-3)',
+                fontWeight: 700,
+              },
+              disabled: !agreed || busy,
+              onClick: async () => {
+                patch({ safetyGuardBusy: true })
+                try {
+                  const payload = isGlobal
+                    ? { globalSafetyGuardEnabled: false, confirmedDisableSafetyGuard: true }
+                    : { tacticalModes: { safetyGuardEnabled: false }, confirmedDisableSafetyGuard: true }
+                  const ok = await updateSecConfig(payload)
+                  if (ok) patch({ safetyGuardModalOpen: false, safetyGuardAgreed: false })
+                } finally {
+                  patch({ safetyGuardBusy: false })
+                }
+              },
+            }, busy ? bi('正在关闭…', 'Disabling…') : bi('确认关闭', 'Confirm Disable')),
+          ),
         ),
       )
     }
@@ -18343,6 +18526,7 @@ window.__ModuleLoader__.load({
     function HandoffTab({ view }) {
       const [presetsOpen, setPresetsOpen] = React.useState(true)
       const [placementOpen, setPlacementOpen] = React.useState(true)
+      const [safetyOpen, setSafetyOpen] = React.useState(true)
       const [notifyOpen, setNotifyOpen] = React.useState(true)
       const [ledgerOpen, setLedgerOpen] = React.useState(true)
       const [langOpen, setLangOpen] = React.useState(true)
@@ -18399,6 +18583,9 @@ window.__ModuleLoader__.load({
       const placementPref = (view && view.placementPref) || { placement: 'both', showComposerEntry: true, showCornerTrigger: true, hideInSubagent: true, subagentOpenMode: 'tab' }
       const placementMode = placementPref.placement || 'both'
       const subOpenMode = placementPref.subagentOpenMode === 'split' ? 'split' : 'tab'
+      const globalSafetyOn = meta.globalSafetyGuardEnabled !== false
+      const sessionSafetyOn = meta.sessionSafetyGuardEnabled !== false
+      const effectiveSafetyOn = Boolean(globalSafetyOn && sessionSafetyOn && (!meta.tacticalModes || meta.tacticalModes.safetyGuardEnabled !== false))
       const placementLabel = placementMode === 'topTab'
         ? bi('仅主页面', 'Main Tab Only')
         : (placementMode === 'sidebar' ? bi('仅右侧栏', 'Sidebar Only') : bi('右侧栏 + 主页面', 'Sidebar + Main Tab'))
@@ -18561,6 +18748,75 @@ window.__ModuleLoader__.load({
             'div',
             { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', lineHeight: 1.45, marginTop: 4 } },
             bi('切到主页面后可在对话顶部直接大屏切换，修改立即生效无需重启。', 'Switching placement updates the conversation top tab and sidebar immediately without restart.'),
+          ),
+        ),
+
+        // 1.8 Built-in Safety Guard Toggles (Per-Session + Global Master Switch — GitHub Issue #6)
+        h(
+          AccCard,
+          {
+            open: safetyOpen,
+            onToggle: () => setSafetyOpen(v => !v),
+            tone: 'rose',
+            title: bi('🛡️ 内置安全卫兵（越界 / 凭据 / 高危命令）', '🛡️ Built-in Safety Guard (Bounds / Secrets / Shell)'),
+            badges: h('span', { className: 'dnb-acc-badge', 'data-tone': effectiveSafetyOn ? 'green' : 'red' },
+              effectiveSafetyOn ? bi('保护开启', 'Active') : bi('已关闭', 'Disabled')),
+            preview: effectiveSafetyOn
+              ? bi('默认开启，防越界与高危命令', 'Active by default')
+              : (!globalSafetyOn ? bi('全局总开关已关闭', 'Disabled globally') : bi('本会话已关闭', 'Disabled in session')),
+            bodyStyle: { padding: 0 },
+          },
+          view && view.sessionId
+            ? h(
+                'div',
+                { className: 'dnb-cell', style: { justifyContent: 'space-between', gap: 8 } },
+                h('div', { style: { minWidth: 0 } },
+                  h('div', { style: { fontSize: 12 } }, bi('本会话启用安全卫兵（默认开）', 'Enable Safety Guard in this session')),
+                  h('div', { style: { fontSize: 10.5, color: globalSafetyOn ? 'var(--dnb-text-3)' : '#f87171', marginTop: 1 } },
+                    globalSafetyOn
+                      ? bi('仅控制当前会话；关闭会放行工作区外路径、凭据路径与内置命令拦截', 'Controls this session only; disabling lets workspace escapes, credentials, and destructive checks pass')
+                      : bi('已被下方全局总开关关闭，请先开启全局总开关', 'Overridden by the global switch below; re-enable the global switch first')),
+                ),
+                h(Switch, {
+                  checked: globalSafetyOn && sessionSafetyOn,
+                  disabled: !globalSafetyOn,
+                  onChange: on => {
+                    if (!globalSafetyOn) return
+                    if (on) {
+                      void updateSecConfig({ tacticalModes: { safetyGuardEnabled: true } })
+                    } else {
+                      patch({
+                        safetyGuardModalOpen: true,
+                        safetyGuardModalScope: 'session',
+                        safetyGuardAgreed: false,
+                      })
+                    }
+                  },
+                }),
+              )
+            : null,
+          h(
+            'div',
+            { className: 'dnb-cell', style: { justifyContent: 'space-between', gap: 8 } },
+            h('div', { style: { minWidth: 0 } },
+              h('div', { style: { fontSize: 12 } }, bi('全局安全卫兵总开关（默认开）', 'Global Safety Guard master switch')),
+              h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
+                bi('关闭后全部已启用会话均不再触发内置安全卫兵（与右侧栏「红线哨兵」互不影响；手工物理驻墙仍独立生效）', 'Applies across all active sessions (independent of Redline Sentinel; custom Guard Walls remain active)')),
+            ),
+            h(Switch, {
+              checked: globalSafetyOn,
+              onChange: on => {
+                if (on) {
+                  void updateSecConfig({ globalSafetyGuardEnabled: true })
+                } else {
+                  patch({
+                    safetyGuardModalOpen: true,
+                    safetyGuardModalScope: 'global',
+                    safetyGuardAgreed: false,
+                  })
+                }
+              },
+            }),
           ),
         ),
 
@@ -24586,6 +24842,9 @@ window.__ModuleLoader__.load({
         }
       }
       const info = view.boundaries || {}
+      const meta = view.chiefMeta || {}
+      const globalSafetyOn = meta.globalSafetyGuardEnabled !== false
+      const safetyDisabled = Boolean(meta.tacticalModes && meta.tacticalModes.safetyGuardEnabled === false)
       const rows = [
         [bi('工作目录', 'Working Dir'), info.sessionWorkingDirectory || info.workingDirectory],
         [bi('沙箱模式', 'Sandbox'), info.sessionSandboxMode || info.sandboxMode],
@@ -24597,6 +24856,39 @@ window.__ModuleLoader__.load({
       return h(
         'div',
         { className: 'dnb-view' },
+        safetyDisabled
+          ? h(
+              'div',
+              {
+                style: {
+                  marginBottom: 10,
+                  padding: '8px 10px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(239, 68, 68, 0.45)',
+                  background: 'rgba(239, 68, 68, 0.12)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'space-between',
+                  gap: 8,
+                  flexWrap: 'wrap',
+                },
+              },
+              h('div', { style: { fontSize: 11.5, color: '#ef4444', lineHeight: 1.45, flex: '1 1 200px' } },
+                !globalSafetyOn
+                  ? bi('⚠️ 全局内置安全卫兵已关闭：全部会话的越界、凭据与高危命令拦截已暂停（手工物理驻墙仍独立生效）。', '⚠️ Global Safety Guard is OFF: built-in bounds, secret, and shell checks are bypassed (custom Guard Walls remain active).')
+                  : bi('⚠️ 本会话内置安全卫兵已关闭：当前会话的越界、凭据与高危命令拦截已暂停（手工物理驻墙仍独立生效）。', '⚠️ Session Safety Guard is OFF: built-in bounds, secret, and shell checks are bypassed here (custom Guard Walls remain active).')),
+              h('button', {
+                type: 'button',
+                className: 'dnb-primary-btn',
+                style: { height: 26, padding: '0 10px', fontSize: 11, flexShrink: 0 },
+                onClick: () => void updateSecConfig(
+                  !globalSafetyOn
+                    ? { globalSafetyGuardEnabled: true }
+                    : { tacticalModes: { safetyGuardEnabled: true } },
+                ),
+              }, bi('🛡 一键恢复安全卫兵', '🛡 Restore Safety Guard')),
+            )
+          : null,
         h(
           'div',
           { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 10, flexWrap: 'wrap' } },
@@ -28075,8 +28367,9 @@ window.__ModuleLoader__.load({
                 ? h(BoundariesTab, { store: view })
                 : h(TasksTab, { board, view })
 
-      const cursorText = board && board.cursor && (board.cursor.next || board.cursor.step || board.cursor.blocked)
-        ? (board.cursor.blocked ? '卡住了：' + board.cursor.blocked : (board.cursor.next || board.cursor.step))
+      const cursorBlocked = normalizeCursorBlocked(board && board.cursor && board.cursor.blocked)
+      const cursorText = board && board.cursor && (board.cursor.next || board.cursor.step || cursorBlocked)
+        ? (cursorBlocked ? '卡住了：' + cursorBlocked : (board.cursor.next || board.cursor.step))
         : ''
 
       return h(
@@ -28261,9 +28554,9 @@ window.__ModuleLoader__.load({
                     style: {
                       padding: '5px 10px',
                       borderRadius: 10,
-                      background: board.cursor.blocked ? STATUS_BG.blocked : 'rgba(10, 132, 255, 0.13)',
-                      border: board.cursor.blocked ? '1px solid rgba(255, 69, 58, 0.30)' : '1px solid rgba(10, 132, 255, 0.30)',
-                      color: board.cursor.blocked ? '#ff453a' : '#409cff',
+                      background: cursorBlocked ? STATUS_BG.blocked : 'rgba(10, 132, 255, 0.13)',
+                      border: cursorBlocked ? '1px solid rgba(255, 69, 58, 0.30)' : '1px solid rgba(10, 132, 255, 0.30)',
+                      color: cursorBlocked ? '#ff453a' : '#409cff',
                       fontSize: 11.5,
                       fontWeight: 600,
                       display: 'flex',
@@ -28274,12 +28567,12 @@ window.__ModuleLoader__.load({
                     title: '点这里查看正在跑或卡住的子代理',
                     onClick: () => {
                       const targetTask = (board.cursor.expectedTaskId && tasks.find(t => t && t.id === board.cursor.expectedTaskId))
-                        || tasks.find(t => t && (board.cursor.blocked ? t.status === 'blocked' : t.status === 'doing'))
+                        || tasks.find(t => t && (cursorBlocked ? t.status === 'blocked' : t.status === 'doing'))
                       if (targetTask) focusObjectiveInPyramid(targetTask.id)
                       else patch({ tab: 'tasks', taskViewMode: 'graph', topoSectionCollapsed: false, settingsOpen: false })
                     },
                   },
-                  board.cursor.blocked
+                  cursorBlocked
                     ? '⚠ '
                     : h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '10px', color: '#409cff' } }),
                   h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 } }, cursorText),
@@ -28446,6 +28739,7 @@ window.__ModuleLoader__.load({
 
           // Scoped Modal Overlays (Strictly bounded inside .dnb-panel)
           h(ChiefRiskConfirmModal, { view }),
+          h(SafetyGuardConfirmModal, { view }),
           h(OperationApprovalModal, { view }),
           h(ElevationRequestModal, { view }),
           h(AuditLogModal, { view }),

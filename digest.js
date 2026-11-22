@@ -13,6 +13,8 @@
  *    (`todo_write`, `create_goal`, `update_goal`) into the board.
  */
 
+import { normalizeCursorBlocked } from './board-schema.js'
+
 const DIGEST_BUDGET = 2500
 
 function ownerName(id) {
@@ -309,7 +311,7 @@ function cursorLines(board) {
   const cursor = board && board.cursor ? board.cursor : null
   const step = clamp(cursor && cursor.step, 120)
   const next = clamp(cursor && cursor.next, 160)
-  const blocked = clamp(cursor && cursor.blocked, 120)
+  const blocked = clamp(normalizeCursorBlocked(cursor && cursor.blocked), 120)
   if (!step && !next && !blocked) {
     const open = (Array.isArray(board && board.plan) ? board.plan : []).filter(item => !item.done)
     if (!open.length) return []

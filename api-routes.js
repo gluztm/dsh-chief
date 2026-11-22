@@ -294,6 +294,8 @@ export function createApiRoutes(deps) {
                 hostCompat,
                 sessionEnabled: Boolean(effCfg.sessionEnabled),
                 defaultAutoEnableSessions: Boolean(effCfg.defaultAutoEnableSessions),
+                globalSafetyGuardEnabled: effCfg.globalSafetyGuardEnabled !== false,
+                sessionSafetyGuardEnabled: effCfg.sessionSafetyGuardEnabled !== false,
                 paceMode: effCfg.paceMode || 'manual',
                 runMode: effCfg.runMode || 'off',
                 managedIdleTimeoutMs: effCfg.managedIdleTimeoutMs || 15 * 60 * 1000,

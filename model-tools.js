@@ -240,7 +240,7 @@ export function createModelTools(deps) {
       },
       step: { type: 'string', description: 'cursor.set: which plan step is open right now, in your own words.' },
       next: { type: 'string', description: 'cursor.set: the very next action — concrete enough to execute without re-reading the transcript.' },
-      blocked: { type: 'string', description: 'cursor.set: what is blocking right now, or empty when nothing is.' },
+      blocked: { type: 'string', description: 'cursor.set: ONLY fill when execution is genuinely stalled/cannot proceed (e.g. missing credentials, permission denied, unresolved error). MUST pass empty string "" when not blocked — NEVER put "无", "none", user preferences/rules, or resolved notes here.' },
       clear: { type: 'boolean', description: 'cursor.set: wipe step / next / blocked instead of overwriting them.' },
       expectedTaskId: { type: 'string', description: 'cursor.set: task id this cursor is working on — the panel highlights that node in the tree.' },
       memoryId: { type: 'string', description: 'Memory entry id for memory.remove.' },

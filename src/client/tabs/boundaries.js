@@ -22,6 +22,7 @@ import {
   removeGuardWallApi,
   toggleGuardWallSelect,
   mergeGuardWallsApi,
+  updateSecConfig,
 } from '../api.js'
 import { Icon, AccCard } from '../components/common.js'
 
@@ -560,6 +561,9 @@ export function BoundariesTab({ store: view }) {
     }
   }
   const info = view.boundaries || {}
+  const meta = view.chiefMeta || {}
+  const globalSafetyOn = meta.globalSafetyGuardEnabled !== false
+  const safetyDisabled = Boolean(meta.tacticalModes && meta.tacticalModes.safetyGuardEnabled === false)
   const rows = [
     [bi('工作目录', 'Working Dir'), info.sessionWorkingDirectory || info.workingDirectory],
     [bi('沙箱模式', 'Sandbox'), info.sessionSandboxMode || info.sandboxMode],
@@ -571,6 +575,39 @@ export function BoundariesTab({ store: view }) {
   return h(
     'div',
     { className: 'dnb-view' },
+    safetyDisabled
+      ? h(
+          'div',
+          {
+            style: {
+              marginBottom: 10,
+              padding: '8px 10px',
+              borderRadius: 10,
+              border: '1px solid rgba(239, 68, 68, 0.45)',
+              background: 'rgba(239, 68, 68, 0.12)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              flexWrap: 'wrap',
+            },
+          },
+          h('div', { style: { fontSize: 11.5, color: '#ef4444', lineHeight: 1.45, flex: '1 1 200px' } },
+            !globalSafetyOn
+              ? bi('⚠️ 全局内置安全卫兵已关闭：全部会话的越界、凭据与高危命令拦截已暂停（手工物理驻墙仍独立生效）。', '⚠️ Global Safety Guard is OFF: built-in bounds, secret, and shell checks are bypassed (custom Guard Walls remain active).')
+              : bi('⚠️ 本会话内置安全卫兵已关闭：当前会话的越界、凭据与高危命令拦截已暂停（手工物理驻墙仍独立生效）。', '⚠️ Session Safety Guard is OFF: built-in bounds, secret, and shell checks are bypassed here (custom Guard Walls remain active).')),
+          h('button', {
+            type: 'button',
+            className: 'dnb-primary-btn',
+            style: { height: 26, padding: '0 10px', fontSize: 11, flexShrink: 0 },
+            onClick: () => void updateSecConfig(
+              !globalSafetyOn
+                ? { globalSafetyGuardEnabled: true }
+                : { tacticalModes: { safetyGuardEnabled: true } },
+            ),
+          }, bi('🛡 一键恢复安全卫兵', '🛡 Restore Safety Guard')),
+        )
+      : null,
     h(
       'div',
       { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 10, flexWrap: 'wrap' } },

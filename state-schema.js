@@ -1121,9 +1121,12 @@ export function resolveWorkspaceConfig(state, sessionId = '') {
   const modelRef = wsCfg && typeof wsCfg.modelRef === 'string'
     ? wsCfg.modelRef.trim()
     : (typeof base.modelRef === 'string' ? base.modelRef.trim() : '')
+  const globalSafetyGuardEnabled = baseTactical.safetyGuardEnabled !== false
+  const sessionSafetyGuardEnabled = !(wsCfg && wsCfg.tacticalModes && wsCfg.tacticalModes.safetyGuardEnabled === false)
   const mergedTactical = wsCfg && wsCfg.tacticalModes
     ? normalizeTacticalModes({ ...baseTactical, ...wsCfg.tacticalModes })
     : { ...baseTactical, ...(sid ? { intervention: false } : {}) }
+  mergedTactical.safetyGuardEnabled = globalSafetyGuardEnabled && sessionSafetyGuardEnabled
   const ackOk = hasValidChiefRiskAck(ws)
   const rawPerm = (wsCfg && typeof wsCfg.permissionMode === 'string')
     ? wsCfg.permissionMode
@@ -1204,6 +1207,8 @@ export function resolveWorkspaceConfig(state, sessionId = '') {
     chiefRiskVerified,
     autoPilot: !stopped && runMode === 'managed',
     autoReview: !stopped && runMode === 'managed',
+    globalSafetyGuardEnabled,
+    sessionSafetyGuardEnabled,
     tacticalModes: mergedTactical,
   }
 }
@@ -1219,6 +1224,7 @@ export const DEFAULT_TACTICAL_MODES = {
   strictVerify: false,
   redlineSentinel: false,
   conciseBrief: false,
+  safetyGuardEnabled: true,
   maxInterventionTurns: 10,
 }
 
@@ -1247,6 +1253,7 @@ export function normalizeTacticalModes(raw) {
     strictVerify: Boolean(src.strictVerify),
     redlineSentinel: Boolean(src.redlineSentinel),
     conciseBrief: Boolean(src.conciseBrief),
+    safetyGuardEnabled: src.safetyGuardEnabled !== false,
     maxInterventionTurns: parsedTurns,
   }
 }

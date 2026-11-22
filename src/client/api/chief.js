@@ -123,6 +123,14 @@ export async function updateSecConfig(nextCfg) {
       patch({ autoPilotConfirmOpen: true, secPaceMenuOpen: false })
       return null
     }
+    if (value && value.requireSafetyGuardConfirm) {
+      patch({
+        safetyGuardModalOpen: true,
+        safetyGuardModalScope: value.scope === 'global' ? 'global' : 'session',
+        safetyGuardAgreed: false,
+      })
+      return null
+    }
     if (!value || value.ok === false) {
       patch({ error: (value && value.error) || '保存设置失败' })
       return null
@@ -157,6 +165,16 @@ export async function updateSecConfig(nextCfg) {
       : ((value.view && value.view.config && typeof value.view.config.paceMode === 'string')
           ? value.view.config.paceMode
           : null)
+    const cfgObj = value.config || (value.view && value.view.config) || null
+    const resolvedGlobalSafety = cfgObj && typeof cfgObj.globalSafetyGuardEnabled === 'boolean'
+      ? cfgObj.globalSafetyGuardEnabled
+      : null
+    const resolvedSessionSafety = cfgObj && typeof cfgObj.sessionSafetyGuardEnabled === 'boolean'
+      ? cfgObj.sessionSafetyGuardEnabled
+      : null
+    const resolvedTacticalModes = cfgObj && cfgObj.tacticalModes && typeof cfgObj.tacticalModes === 'object'
+      ? cfgObj.tacticalModes
+      : null
     const updatedSubagents = resolvedLocks && Array.isArray(store.subagents)
       ? store.subagents.map(ag => {
           if (!ag || typeof ag !== 'object') return ag
@@ -173,7 +191,7 @@ export async function updateSecConfig(nextCfg) {
     patch({
       compactInputDraft: null,
       compactLowWarning: value.compactLowWarning || '',
-      ...((resolvedLocks || resolvedTeamEffortMode || resolvedSessionEnabled !== null || resolvedDefaultAutoEnable !== null || resolvedRunMode !== null || resolvedPaceMode !== null)
+      ...((resolvedLocks || resolvedTeamEffortMode || resolvedSessionEnabled !== null || resolvedDefaultAutoEnable !== null || resolvedRunMode !== null || resolvedPaceMode !== null || resolvedGlobalSafety !== null || resolvedSessionSafety !== null || resolvedTacticalModes)
         ? {
             chiefMeta: {
               ...store.chiefMeta,
@@ -183,6 +201,11 @@ export async function updateSecConfig(nextCfg) {
               ...(resolvedDefaultAutoEnable !== null ? { defaultAutoEnableSessions: resolvedDefaultAutoEnable } : {}),
               ...(resolvedRunMode !== null ? { runMode: resolvedRunMode } : {}),
               ...(resolvedPaceMode !== null ? { paceMode: resolvedPaceMode, stopped: resolvedPaceMode === 'stopped' } : {}),
+              ...(resolvedGlobalSafety !== null ? { globalSafetyGuardEnabled: resolvedGlobalSafety } : {}),
+              ...(resolvedSessionSafety !== null ? { sessionSafetyGuardEnabled: resolvedSessionSafety } : {}),
+              ...(resolvedTacticalModes
+                ? { tacticalModes: { ...(store.chiefMeta.tacticalModes || {}), ...resolvedTacticalModes } }
+                : {}),
             },
           }
         : {}),
@@ -230,9 +253,21 @@ export async function updateSecConfig(nextCfg) {
         })
       } else if (typeof nextCfg.tacticalModes.intervention === 'boolean' && Object.keys(nextCfg.tacticalModes).length === 1) {
         patch({ notice: nextCfg.tacticalModes.intervention ? '⚡ 已开启强介入' : '已关闭强介入' })
+      } else if (typeof nextCfg.tacticalModes.safetyGuardEnabled === 'boolean' && Object.keys(nextCfg.tacticalModes).length === 1) {
+        patch({
+          notice: nextCfg.tacticalModes.safetyGuardEnabled
+            ? '🛡 本会话安全卫兵已开启'
+            : '⚠ 本会话已关闭安全卫兵：内置越界/凭据/高危命令检查已放行',
+        })
       } else {
         patch({ notice: '✦ 已更新自动控制开关' })
       }
+    } else if (typeof nextCfg.globalSafetyGuardEnabled === 'boolean') {
+      patch({
+        notice: nextCfg.globalSafetyGuardEnabled
+          ? '🛡 已开启全局安全卫兵总开关'
+          : '⚠ 已关闭全局安全卫兵总开关：全部会话将放行内置安全检查',
+      })
     } else if (typeof nextCfg.runMode === 'string') {
       const rmMap = {
         off: '⏸ 已切到关停：后台不花额度，也不自动检查，只在你提问或点按钮时工作',

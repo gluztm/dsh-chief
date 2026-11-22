@@ -417,6 +417,7 @@ export async function executeBatchSuggestions(deps, {
         command: cmdSample,
         args: { text: sug.draftText || '', title: sug.title || '' },
         board,
+        safetyGuardEnabled: !(effCfg && effCfg.tacticalModes && effCfg.tacticalModes.safetyGuardEnabled === false),
       })
       if (guardRes.blocked) {
         mutateChiefState((st) => {
@@ -532,6 +533,7 @@ export async function handleApprovalDecision(deps, {
   let found = null
   let currentMode = DEFAULT_CHIEF_PERMISSION_MODE
   let effPolicyPlugins = []
+  let effSafetyGuardEnabled = true
   let existingNonPending = false
   let hashMismatch = false
 
@@ -541,6 +543,7 @@ export async function handleApprovalDecision(deps, {
     const eff = resolveWorkspaceConfig(state, rootId)
     currentMode = normalizePermissionMode(eff.permissionMode, { requireAck: true, hasChiefRiskAck: ackOk })
     effPolicyPlugins = Array.isArray(eff.policyPlugins) ? eff.policyPlugins : []
+    effSafetyGuardEnabled = !(eff && eff.tacticalModes && eff.tacticalModes.safetyGuardEnabled === false)
     const item = (ws.pendingApprovals || []).find(a => a && a.id === approvalId && a.status === 'pending')
     if (!item) {
       existingNonPending = (ws.pendingApprovals || []).some(a => a && a.id === approvalId)
@@ -689,6 +692,7 @@ export async function handleApprovalDecision(deps, {
         permissionMode: currentMode === 'chief' ? 'chief' : 'strategist',
         hasChiefRiskAck: currentMode === 'chief',
         policyPlugins: effPolicyPlugins,
+        safetyGuardEnabled: effSafetyGuardEnabled,
         capabilityScope: resolvedScope,
         approvedOnce: true,
         board,
@@ -709,7 +713,7 @@ export async function handleApprovalDecision(deps, {
         resultMsg = scopeCheck.error
         appendChiefAuditLog(rootId, { mode: currentMode, stage: 'scope_guard', rule: scopeCheck.rule, decision: 'rejected', operation: found.operationLabel, target: found.targetLabel, reason: scopeCheck.error, outcome: 'rejected', by: 'operator' })
       } else {
-        const guardRes = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: payload.text || '', board })
+        const guardRes = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: payload.text || '', board, safetyGuardEnabled: effSafetyGuardEnabled })
         if (guardRes.blocked) {
           execOk = false
           execRes = { ok: false, blockedBySafetyGuard: true, error: guardRes.reason }
@@ -753,7 +757,7 @@ export async function handleApprovalDecision(deps, {
         }
       }
     } else if (found.kind === 'compact') {
-      const guardRes = evaluateSafetyGuardHardRules({ tool: 'session_compact', opClass: 'workflow', board })
+      const guardRes = evaluateSafetyGuardHardRules({ tool: 'session_compact', opClass: 'workflow', board, safetyGuardEnabled: effSafetyGuardEnabled })
       if (guardRes.blocked) {
         execOk = false
         execRes = { ok: false, blockedBySafetyGuard: true, error: guardRes.reason }

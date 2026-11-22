@@ -521,6 +521,7 @@ export async function executeChiefToolCall(deps, call, execCtx = {}) {
   const rootId = String(execCtx.rootId || '')
   const board = execCtx.board || {}
   const readOnlyToolsOnly = Boolean(execCtx.readOnlyToolsOnly)
+  const safetyGuardEnabled = execCtx.safetyGuardEnabled !== false
   const approvedOnce = Boolean(execCtx.approvedOnce)
   const capabilityScope = execCtx.capabilityScope || null
 
@@ -563,7 +564,7 @@ export async function executeChiefToolCall(deps, call, execCtx = {}) {
   const resolvedAbsTarget = rawTargetPath ? path.resolve(cwd, rawTargetPath) : ''
   const rawCommand = tool === 'run_command' ? String(args.command || args.cmd || '').trim() : ''
 
-  // Stage 3: 安全卫兵硬性规则（优先于任何权限等级、策略插件与逐项批准）
+  // Stage 3: 安全卫兵硬性规则（优先于任何权限等级、策略插件与逐项批准；受人类可控 safetyGuardEnabled 开关控制）
   const guardRes = evaluateSafetyGuardHardRules({
     tool,
     opClass,
@@ -572,6 +573,7 @@ export async function executeChiefToolCall(deps, call, execCtx = {}) {
     args,
     cwd,
     board,
+    safetyGuardEnabled,
   })
   if (guardRes.blocked) {
     writeAudit({
@@ -1093,6 +1095,7 @@ export async function runChiefAgenticLoop(deps, {
   board = null,
   maxSteps = 4,
   readOnlyToolsOnly = false,
+  safetyGuardEnabled = true,
   disableTools = false,
   lazyDeferWorkspaceWritesToLead = false,
   callLlmFn,
@@ -1182,6 +1185,7 @@ export async function runChiefAgenticLoop(deps, {
           args: (c && c.args && typeof c.args === 'object') ? c.args : {},
           cwd,
           board,
+          safetyGuardEnabled,
         })
         if (!preDef || preDef.decision !== 'deny') {
           if (typeof recordAuditFn === 'function') {
@@ -1222,6 +1226,7 @@ export async function runChiefAgenticLoop(deps, {
         policyPlugins,
         board,
         readOnlyToolsOnly,
+        safetyGuardEnabled,
         upsertArchiveFn,
         compactNowFn,
         queueApprovalFn,

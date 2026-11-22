@@ -487,6 +487,100 @@ try {
   execMod.mutateGuardWalls({ op: 'remove', wallId: 'c6-wo-wall', cwd: tmpWs, callerOrigin: 'human_ui', humanConfirmToken: execMod.HUMAN_BOUNDS_CONFIRM_TOKEN })
   execMod.mutateGuardWalls({ op: 'remove', wallId: 'c6-ask-wall', cwd: tmpWs, callerOrigin: 'human_ui', humanConfirmToken: execMod.HUMAN_BOUNDS_CONFIRM_TOKEN })
 
+  // Issue #6 Problem A: Human-only Safety Guard switches (per-session & global master switch)
+  const aiDisableSessionRes = stateMod.updateChiefConfig({
+    sessionId: 'c6-lead',
+    tacticalModes: { safetyGuardEnabled: false },
+    confirmedDisableSafetyGuard: true,
+    by: 'chief',
+  })
+  assert.equal(aiDisableSessionRes.ok, false, 'AI/non-human must NOT disable session safety guard')
+  assert.equal(aiDisableSessionRes.blocked, true)
+  assert.equal(aiDisableSessionRes.code, 'safety_guard_human_only')
+
+  const aiDisableGlobalRes = stateMod.updateChiefConfig({
+    sessionId: 'c6-lead',
+    globalSafetyGuardEnabled: false,
+    confirmedDisableSafetyGuard: true,
+    by: 'lead',
+  })
+  assert.equal(aiDisableGlobalRes.ok, false, 'AI/non-human must NOT disable global safety guard')
+  assert.equal(aiDisableGlobalRes.code, 'safety_guard_human_only')
+
+  const unconfirmedDisableRes = stateMod.updateChiefConfig({
+    sessionId: 'c6-lead',
+    tacticalModes: { safetyGuardEnabled: false },
+    byUser: true,
+    _fromUiPanel: true,
+  })
+  assert.equal(unconfirmedDisableRes.ok, false, 'Disabling safety guard without explicit confirmation must require modal confirmation')
+  assert.equal(unconfirmedDisableRes.requireSafetyGuardConfirm, true)
+
+  // Activate a second session to verify per-session isolation
+  stateMod.updateChiefConfig({ sessionId: 'c6-other-active', sessionEnabled: true, byUser: true, _fromUiPanel: true })
+
+  // Confirm disabling per-session safety guard on c6-lead only
+  const sessOffRes = stateMod.updateChiefConfig({
+    sessionId: 'c6-lead',
+    tacticalModes: { safetyGuardEnabled: false },
+    confirmedDisableSafetyGuard: true,
+    byUser: true,
+    _fromUiPanel: true,
+  })
+  assert.equal(sessOffRes.ok, true)
+  assert.equal(sessOffRes.config.tacticalModes.safetyGuardEnabled, false)
+
+  const c6SessOffAllow = await preExecHook(
+    { name: 'run_command', arguments: { command: 'rm -rf /' }, agent: { id: 'c6-lead' } },
+    async () => ({ kind: 'allow' }),
+  )
+  assert.equal(c6SessOffAllow.kind, 'allow', 'Disabling safety guard on c6-lead must allow built-in safety rules on c6-lead')
+
+  const c6SubOffAllow = await preExecHook(
+    { name: 'write_file', arguments: { path: path.join(tmpOutside, 'allowed-when-off.txt'), content: 'x' }, agent: { id: 'c6-sub-worker' } },
+    async () => ({ kind: 'allow' }),
+  )
+  assert.equal(c6SubOffAllow.kind, 'allow', 'Subagent inherits disabled session safety guard from root c6-lead')
+
+  const c6OtherStillBlocked = await preExecHook(
+    { name: 'run_command', arguments: { command: 'rm -rf /' }, agent: { id: 'c6-other-active' } },
+    async () => ({ kind: 'allow' }),
+  )
+  assert.equal(c6OtherStillBlocked.kind, 'deny', 'Other active session c6-other-active MUST stay protected when only c6-lead disables safety guard')
+
+  // Confirm disabling global safety guard master switch from an unactivated session (must NOT activate that unactivated session!)
+  const globalOffRes = stateMod.updateChiefConfig({
+    sessionId: 'c6-uninit-probe',
+    globalSafetyGuardEnabled: false,
+    confirmedDisableSafetyGuard: true,
+    byUser: true,
+    _fromUiPanel: true,
+  })
+  assert.equal(globalOffRes.ok, true)
+  assert.equal(globalOffRes.config.globalSafetyGuardEnabled, false)
+  const stAfterGlobalOff = stateMod.loadChiefState({ forceDisk: true })
+  assert.equal(stateMod.isChiefSessionEnabled(stAfterGlobalOff, 'c6-uninit-probe'), false, 'Toggling global safety guard from unactivated session MUST NOT activate that session')
+
+  const c6OtherGlobalOffAllow = await preExecHook(
+    { name: 'run_command', arguments: { command: 'rm -rf /' }, agent: { id: 'c6-other-active' } },
+    async () => ({ kind: 'allow' }),
+  )
+  assert.equal(c6OtherGlobalOffAllow.kind, 'allow', 'Global safety guard off must bypass built-in safety guard for all active sessions')
+
+  // Re-enable global + session safety guards -> blocks immediately again
+  stateMod.updateChiefConfig({ sessionId: 'c6-uninit-probe', globalSafetyGuardEnabled: true, byUser: true, _fromUiPanel: true })
+  stateMod.updateChiefConfig({ sessionId: 'c6-lead', tacticalModes: { safetyGuardEnabled: true }, byUser: true, _fromUiPanel: true })
+  const c6LeadRestored = await preExecHook(
+    { name: 'run_command', arguments: { command: 'rm -rf /' }, agent: { id: 'c6-lead' } },
+    async () => ({ kind: 'allow' }),
+  )
+  const c6OtherRestored = await preExecHook(
+    { name: 'run_command', arguments: { command: 'rm -rf /' }, agent: { id: 'c6-other-active' } },
+    async () => ({ kind: 'allow' }),
+  )
+  assert.equal(c6LeadRestored.kind, 'deny', 'Re-enabling safety guard must immediately restore blocking on c6-lead')
+  assert.equal(c6OtherRestored.kind, 'deny', 'Re-enabling global safety guard must immediately restore blocking on c6-other-active')
+
   console.log('✓ C6 passed: tools/pre-execute physically blocks dangerous Lead & Subagent calls, supports DSH 0.2.2-rc.5 tools/ask gate, and allows safe reads')
 
   // -------------------------------------------------------------------------

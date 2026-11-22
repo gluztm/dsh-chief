@@ -68,6 +68,7 @@ import {
   pushLog,
   safe,
   summary,
+  normalizeCursorBlocked,
 } from './board-schema.js'
 
 import { createBoardHandoffHelpers } from './board-handoff.js'
@@ -1045,7 +1046,7 @@ export function createBoardActions(deps) {
       const clips = []
       if (typeof args.step === 'string') current.step = clipInto(clips, 'cursor.step', args.step, CAP_CURSOR)
       if (typeof args.next === 'string') current.next = clipInto(clips, 'cursor.next', args.next, CAP_CURSOR)
-      if (typeof args.blocked === 'string') current.blocked = clipInto(clips, 'cursor.blocked', args.blocked, CAP_CURSOR)
+      if (typeof args.blocked === 'string') current.blocked = normalizeCursorBlocked(clipInto(clips, 'cursor.blocked', args.blocked, CAP_CURSOR))
       if (typeof args.expectedTaskId === 'string') current.expectedTaskId = args.expectedTaskId.trim() || undefined
       if (asBool(args.clear) === true) {
         current.step = ''

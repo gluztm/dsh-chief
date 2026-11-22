@@ -807,6 +807,7 @@ export function evaluatePreExecuteDefense({
   cwd = '',
   board = null,
   walls = null,
+  safetyGuardEnabled = true,
 } = {}) {
   const toolName = String(tool || '').trim()
   const lower = toolName.toLowerCase()
@@ -860,6 +861,10 @@ export function evaluatePreExecuteDefense({
       displayReason: `🧱 物理驻墙「${wallVerdict.wallTitle}」：${wallVerdict.reason}`,
       badge: wallVerdict.badge,
     }
+  }
+
+  if (safetyGuardEnabled === false) {
+    return { decision: 'allow', bypassedBySafetyGuardToggle: true }
   }
 
   const extraText = [

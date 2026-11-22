@@ -225,6 +225,75 @@ try {
     false,
     'Legitimate .\\env\\setup.js MUST NOT false-positive',
   )
+
+  // Issue #6 Problem B: context-aware destructive_command precision (zero false positives on docs/heredoc/search, zero bypasses on pipes/inline)
+  assert.equal(
+    safetyMod.isDestructiveShellCommand(`cat > "${path.join(tmpWs, '交付说明.md')}" <<'DOCEOF'\n# 说明\n请勿执行 rm -rf / 或 git reset --hard 或 drop database 或 shutdown\nDOCEOF`),
+    false,
+    'Non-executable heredoc writing Markdown doc MUST NOT trigger destructive_command',
+  )
+  assert.equal(
+    safetyMod.isDestructiveShellCommand(`export MYSQL_PWD='test123'; M=/usr/bin/mysql; cd /tmp && $M -u root -e "SELECT 1"`),
+    false,
+    'Benign env + mysql query MUST NOT trigger destructive_command',
+  )
+  assert.equal(
+    safetyMod.isDestructiveShellCommand(`git log -1 --format='%h %ad %s'`),
+    false,
+    'git log --format MUST NOT trigger destructive_command',
+  )
+  assert.equal(
+    safetyMod.isDestructiveShellCommand('grep -rn "shutdown" src/'),
+    false,
+    'grep searching literal word shutdown MUST NOT trigger destructive_command',
+  )
+  assert.equal(
+    safetyMod.isDestructiveShellCommand('git commit -m "fix graceful shutdown handling"'),
+    false,
+    'git commit mentioning shutdown MUST NOT trigger destructive_command',
+  )
+  assert.equal(
+    safetyMod.isDestructiveShellCommand('echo "avoid running drop database in prod"'),
+    false,
+    'echo without dangerous pipe MUST NOT trigger destructive_command',
+  )
+
+  // Real threats & pipe/script bypasses MUST still block
+  assert.equal(
+    safetyMod.isDestructiveShellCommand("cat <<'EOF' | bash\nrm -rf /\nEOF"),
+    true,
+    'Heredoc piped into bash MUST block',
+  )
+  assert.equal(
+    safetyMod.isDestructiveShellCommand("mysql -u root <<'EOF'\nDROP DATABASE prod;\nEOF"),
+    true,
+    'Heredoc piped into mysql client with DROP DATABASE MUST block',
+  )
+  assert.equal(
+    safetyMod.isDestructiveShellCommand(`cat > "${path.join(tmpWs, 'evil.sh')}" <<'EOF'\nrm -rf /\nEOF`),
+    true,
+    'Heredoc writing executable .sh script with destructive command MUST block',
+  )
+  assert.equal(
+    safetyMod.isDestructiveShellCommand(`python3 -c "import os; os.system('rm -rf /')"`),
+    true,
+    'python3 -c inline rm -rf / MUST block',
+  )
+  assert.equal(
+    safetyMod.isDestructiveShellCommand('shutdown -h now'),
+    true,
+    'Direct shutdown command MUST block',
+  )
+  assert.equal(
+    safetyMod.isDestructiveShellCommand('echo "rm -rf /" | sh'),
+    true,
+    'echo piped into sh MUST block',
+  )
+  assert.equal(
+    safetyMod.evaluateSafetyGuardHardRules({ command: 'rm -rf /', safetyGuardEnabled: false }).blocked,
+    false,
+    'Explicit safetyGuardEnabled=false must bypass built-in hard rules',
+  )
   console.log('✓ S2 passed: compound pipeline & inline script bypasses blocked with 0 false positives')
 
   // -------------------------------------------------------------------------

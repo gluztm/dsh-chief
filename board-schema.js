@@ -406,6 +406,39 @@ function normalizeGoalApproval(raw) {
   }
 }
 
+const CURSOR_BLOCKED_REAL_CONTRAST_RE = /(?:但|但是|不过|然而|仍|依然|还是).{0,12}(?:卡在|卡住|阻塞|受阻|无法|失败|报错|错误|缺少|缺失|无权限|权限拒绝|拒绝|冲突|超限|超时|未通过)|\b(?:but|however|still)\b.{0,24}\b(?:blocked|stalled|fail(?:ed|ing)?|error|missing|denied|cannot|can't|unable|timeout)\b/i
+
+/**
+ * Normalize `board.cursor.blocked` so non-blocking / cleared / user-approved remarks
+ * (e.g. "无", "无（已获用户批准执行）", "用户已接受当前配置…", "None (approved)")
+ * collapse to `""` instead of lighting up a false-positive red alarm pill, while
+ * preserving genuine blockers (e.g. "无法连接", "无权限", "没有找到", "等待用户批准",
+ * "None of the tests passed", or contrast clauses like "用户已确认，但仍缺少…").
+ */
+export function normalizeCursorBlocked(raw) {
+  const s = String(raw === null || raw === undefined ? '' : raw).replace(/\s+/g, ' ').trim()
+  if (!s) return ''
+  const unwrapped = s.replace(/^[\s\-—–_\/.,;:!?~`'"“”‘’（）()【】\[\]{}]+|[\s\-—–_\/.,;:!?~`'"“”‘’（）()【】\[\]{}]+$/g, '').trim()
+  if (!unwrapped) return ''
+  if (/^(?:无|暂无|没有|木有|空|正常|无阻塞|无卡点|无阻碍|无受阻|无障碍|未受阻|未阻塞|不阻塞|不受阻|非阻塞|目前无阻塞|当前无阻塞|暂无阻塞|暂无卡点|没有阻塞|没有卡点|无异常|无报错|已解除|已解决|已清空|已清零|已放行|已通过|已恢复|已批准|已获批|已获批准|已获用户批准|已获用户批准执行|已确认|已同意|none|no|n\/?a|nil|null|empty|nothing|false|ok|clear|cleared|resolved|unblocked|not\s+blocked|no\s+blockers?|no\s+issues?|approved|user\s+approved)$/i.test(unwrapped)) {
+    return ''
+  }
+  if (CURSOR_BLOCKED_REAL_CONTRAST_RE.test(s)) {
+    return s.slice(0, 400)
+  }
+  if (
+    /^(?:(?:目前|当前)?(?:无|暂无)(?=$|[\s（(【\[，,；;：:。.\-—/、])|(?:目前|当前)?(?:无|暂无|没有|未|不|非)(?:明显|任何)?(?:阻塞|卡点|阻碍|受阻|障碍|卡住|异常|报错|问题)(?=$|[\s（(【\[，,；;：:。.\-—/、])|(?:已解除|已解决|已放行|已清空|已清零|已恢复|已获(?:用户)?批(?:准)?(?:执行)?|已由用户(?:批准|确认|同意|接受)|用户已(?:接受|批准|确认|同意|拍板|放行|认可)))/.test(s)
+  ) {
+    return ''
+  }
+  if (
+    /^(?:(?:none|n\/?a|nil|null|nothing)(?=$|\s*[(\[.,;:\-\/])|(?:not\s+blocked|no\s+blockers?(?:\s+found|\s+now|\s+remaining)?|unblocked|resolved|cleared|approved(?:\s+by\s+user)?|user\s+(?:approved|accepted|confirmed))(?=$|[\s(\[.,;:\-\/]))/i.test(s)
+  ) {
+    return ''
+  }
+  return s.slice(0, 400)
+}
+
 export function normalizeBoard(raw) {
   const board = raw && typeof raw === 'object' ? raw : {}
   const plan = Array.isArray(board.plan) ? board.plan : []
@@ -455,7 +488,7 @@ export function normalizeBoard(raw) {
       at: board.cursor && typeof board.cursor.at === 'number' ? board.cursor.at : 0,
       step: str(board.cursor && board.cursor.step, '').slice(0, 400),
       next: str(board.cursor && board.cursor.next, '').slice(0, 400),
-      blocked: str(board.cursor && board.cursor.blocked, '').slice(0, 400),
+      blocked: normalizeCursorBlocked(board.cursor && board.cursor.blocked),
       by: str(board.cursor && board.cursor.by, ''),
       session: str(board.cursor && board.cursor.session, ''),
     },

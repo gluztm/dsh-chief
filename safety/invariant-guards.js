@@ -22,13 +22,14 @@ export const HARD_GUARD_RULE_IDS = Object.freeze([
 ])
 
 const DESTRUCTIVE_COMMAND_PATTERNS = [
-  /\brm\s+-[a-z]*(?:r[a-z]*f|f[a-z]*r)[a-z]*\s+(?:\/(?:etc|usr|bin|sbin|var|lib|boot|dev|proc|sys|root|home|\*)?(?=$|[\s/])|~|\*|\.\.)/i,
+  /\brm\s+-[a-z]*(?:r[a-z]*f|f[a-z]*r)[a-z]*\s+(?:\/(?:etc|usr|bin|sbin|var|lib|boot|dev|proc|sys|root|home|\*)?(?=$|[\s/'")])|~|\*|\.\.)/i,
   /\bgit\s+(?:reset\s+--hard|clean\s+-[a-z]*f[a-z]*d|push\s+(?:--force|-f)\b)/i,
-  /\b(?:diskpart|cipher\s+\/w|bcdedit)\b/i,
+  /(?:^|[;&|]\s*|(?:(?:sudo|doas|nohup|command)\s+)+|(?:cmd(?:\.exe)?\s+\/[ck]|(?:powershell|pwsh)(?:\.exe)?\s+-[a-z]*c\w*|(?:bash|sh|zsh)\s+-[a-z]*c)\s+["']?)\b(?:diskpart(?:\.exe)?|cipher(?:\.exe)?\s+\/w|bcdedit(?:\.exe)?)\b/i,
   /(?:^|[;&|]\s*|(?:cmd(?:\.exe)?\s+\/c|powershell(?:\.exe)?\s+-[a-z]*c\w*|pwsh(?:\.exe)?\s+-[a-z]*c\w*)\s+["']?)\bformat(?:\.com)?\s+(?:[a-z]:|\/(?:fs|q|v|x|p|y)\b)/i,
   /\bdel\s+\/[fqs][^\n]*[a-z]:\\/i,
   /\bRemove-Item\b[^\n]*-Recurse[^\n]*-Force[^\n]*(?:[a-z]:\\|\*)/i,
-  /\b(?:shutdown(?:\.exe)?|restart-computer|stop-computer|mkfs|dd\s+if=.*of=\/dev\/)\b/i,
+  /(?:^|[;&|]\s*|(?:(?:sudo|doas|nohup|command)\s+)+|(?:cmd(?:\.exe)?\s+\/[ck]|(?:powershell|pwsh)(?:\.exe)?\s+-[a-z]*c\w*|(?:bash|sh|zsh)\s+-[a-z]*c)\s+["']?)(?:(?:\/usr)?\/s?bin\/)?(?:shutdown(?:\.exe)?|restart-computer|stop-computer|mkfs(?:\.[a-z0-9]+)?)(?=$|[\s;'"])/i,
+  /\b(?:shutdown(?:\.exe)?\s+(?:-[hrspPfk]|\/[srphtl]|now\b)|mkfs(?:\.[a-z0-9]+)?\s+\/dev\/|dd\s+if=\S+[^\n]*\bof=\/dev\/)/i,
   /\breg(?:\.exe)?\s+delete\s+(?:hklm|hkcr|hkcu\\software\\microsoft)\b/i,
   /\bdrop\s+(?:database|schema)\b/i,
 ]
@@ -54,12 +55,126 @@ function expandEnvPlaceholdersForCheck(text) {
     .replace(/\$\{[A-Za-z0-9_]+\}/g, '/')
 }
 
+const DANGEROUS_PIPE_CONSUMER_RE = /\|\s*(?:sudo\s+)?(?:(?:\/usr)?\/s?bin\/)?(?:sh|bash|zsh|dash|ksh|cmd(?:\.exe)?|powershell(?:\.exe)?|pwsh(?:\.exe)?|node(?:\.exe)?|python\d*|py|perl|ruby|php|mysql|psql|sqlite3?|sqlcmd|eval|iex|xargs)\b/i
+const EXEC_SCRIPT_EXT_RE = /\.(?:sh|bash|zsh|ps1|bat|cmd)$/i
+
+function stripLeadingEnvAssignments(seg) {
+  return String(seg || '')
+    .trim()
+    .replace(/^(?:export\s+)?(?:[A-Za-z_][A-Za-z0-9_]*=(?:'[^']*'|"[^"]*"|\S*)\s+)*/i, '')
+    .trim()
+}
+
+function stripNonExecHeredocBodies(command) {
+  const raw = String(command || '')
+  if (!raw.includes('<<')) return raw
+  const lines = raw.split(/\r?\n/)
+  const out = []
+  for (let i = 0; i < lines.length; i += 1) {
+    const line = lines[i]
+    out.push(line)
+    const hdMatch = line.match(/<<-?\s*(['"]?)([A-Za-z_][A-Za-z0-9_-]*)\1/)
+    if (!hdMatch || !hdMatch[2]) continue
+    const delim = hdMatch[2]
+    let endIdx = -1
+    for (let j = i + 1; j < lines.length; j += 1) {
+      if (lines[j].trim() === delim) {
+        endIdx = j
+        break
+      }
+    }
+    if (endIdx < 0) continue
+
+    const lastSeg = line.split(/;|&&|\|\|/).pop() || ''
+    const hasDangerPipe = DANGEROUS_PIPE_CONSUMER_RE.test(line)
+    const cmdHead = stripLeadingEnvAssignments(lastSeg)
+    const cmdM = cmdHead.match(/^([^\s;&|]+)/)
+    const primaryCmd = cmdM ? path.basename(cmdM[1]).toLowerCase() : ''
+    const isCatOrTee = primaryCmd === 'cat' || primaryCmd === 'tee' || primaryCmd === 'cat.exe' || primaryCmd === 'tee.exe'
+
+    const redirM = lastSeg.match(/>>?\s*(?:"([^"]+)"|'([^']+)'|([^\s;&|]+))/)
+    const teeArgM = primaryCmd.startsWith('tee')
+      ? cmdHead.replace(/^tee(?:\.exe)?(?:\s+-[a-z]+)*\s+/i, '').match(/^(?:"([^"]+)"|'([^']+)'|([^\s;&|<>]+))/)
+      : null
+    const targetFile = (redirM && (redirM[1] || redirM[2] || redirM[3]))
+      || (teeArgM && (teeArgM[1] || teeArgM[2] || teeArgM[3]))
+      || ''
+    const safeTarget = Boolean(targetFile)
+      && !/^\/dev\//i.test(targetFile)
+      && !EXEC_SCRIPT_EXT_RE.test(targetFile.trim())
+
+    if (isCatOrTee && safeTarget && !hasDangerPipe) {
+      for (let k = i + 1; k < endIdx; k += 1) out.push('')
+      out.push(lines[endIdx])
+      i = endIdx
+    }
+  }
+  return out.join('\n')
+}
+
+function isBenignGitReadOrCommit(cmdText) {
+  const tokens = String(cmdText || '').trim().split(/\s+/).filter(Boolean)
+  if (!tokens.length || !/^git(?:\.exe)?$/i.test(path.basename(tokens[0]))) return false
+  const valFlags = new Set(['-C', '--git-dir', '--work-tree'])
+  const boolFlags = new Set(['-p', '--paginate', '-P', '--no-pager', '--bare'])
+  let i = 1
+  while (i < tokens.length) {
+    const tok = tokens[i]
+    if (valFlags.has(tok)) {
+      i += 2
+      continue
+    }
+    if (boolFlags.has(tok) || /^--(?:git-dir|work-tree)=/i.test(tok)) {
+      i += 1
+      continue
+    }
+    if (tok.startsWith('-')) return false
+    break
+  }
+  const sub = tokens[i] ? tokens[i].toLowerCase() : ''
+  return sub === 'log' || sub === 'show' || sub === 'diff' || sub === 'status' || sub === 'branch' || sub === 'commit'
+}
+
+function isBenignTextOnlySegment(seg, hasDangerousConsumer) {
+  const s = String(seg || '').trim()
+  if (!s) return false
+  if (/\$\(|`|>\s*\/dev\/|>>?\s*["']?[^\s"']+\.(?:sh|bash|zsh|ps1|bat|cmd)(?:["'\s]|$)/i.test(s)) {
+    return false
+  }
+  const cleaned = stripLeadingEnvAssignments(s)
+  if (!cleaned) return true
+  if (/^(?:grep|egrep|fgrep|rg|ag|ack)(?:\.exe)?(?=\s|$)/i.test(cleaned)) {
+    return true
+  }
+  if (isBenignGitReadOrCommit(cleaned)) {
+    return true
+  }
+  if (/^(?:echo|printf)(?:\.exe)?(?=\s|$)/i.test(cleaned) && !hasDangerousConsumer) {
+    return true
+  }
+  return false
+}
+
 export function isDestructiveShellCommand(command) {
   const raw = String(command || '').trim()
   if (!raw) return false
-  const analysis = analyzeCommand(raw)
-  const probes = [raw, analysis.normalized, ...analysis.segments, ...analysis.inlinePayloads]
-  return probes.some(p => p && DESTRUCTIVE_COMMAND_PATTERNS.some(re => re.test(p)))
+  const sanitized = stripNonExecHeredocBodies(raw)
+  const hasDangerousConsumer = DANGEROUS_PIPE_CONSUMER_RE.test(sanitized)
+  const analysis = analyzeCommand(sanitized)
+  for (const seg of analysis.segments) {
+    if (!seg) continue
+    if (isBenignTextOnlySegment(seg, hasDangerousConsumer)) continue
+    if (DESTRUCTIVE_COMMAND_PATTERNS.some(re => re.test(seg))) return true
+    const normSeg = normalizeCommandForSecurity(seg)
+    if (normSeg && DESTRUCTIVE_COMMAND_PATTERNS.some(re => re.test(normSeg))) return true
+  }
+  for (const payload of analysis.inlinePayloads) {
+    if (!payload) continue
+    if (DESTRUCTIVE_COMMAND_PATTERNS.some(re => re.test(payload))) return true
+    const normPayload = normalizeCommandForSecurity(payload)
+    if (normPayload && DESTRUCTIVE_COMMAND_PATTERNS.some(re => re.test(normPayload))) return true
+  }
+  return false
 }
 
 export function commandTouchesSensitiveCredential(command) {
@@ -198,7 +313,11 @@ export function evaluateSafetyGuardHardRules({
   args = null,
   cwd = '',
   board = null,
+  safetyGuardEnabled = true,
 } = {}) {
+  if (safetyGuardEnabled === false) {
+    return { blocked: false, bypassedBySafetyGuardToggle: true }
+  }
   const argObj = args && typeof args === 'object' ? args : {}
   const resolvedPath = targetPath || (typeof argObj.path === 'string' ? argObj.path : '')
   const resolvedCommand = command || (typeof argObj.command === 'string' ? argObj.command : (typeof argObj.cmd === 'string' ? argObj.cmd : ''))

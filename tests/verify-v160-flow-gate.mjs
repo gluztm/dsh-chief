@@ -273,6 +273,51 @@ try {
   const digestText = digestMod.renderDigest(flowBoard, { subagents: mockSubagents })
   assert.ok(digestText.includes('(id:p2)'), 'W4 digest must expose open plan step id for model planStepId binding')
 
+  // Issue #6 comment #7075636856 Bug A: non-blocking cursor.blocked remarks must normalize to ''
+  const benignCursorSamples = [
+    '',
+    '—',
+    '（无）',
+    '无',
+    '无（已获用户批准执行）',
+    '无，一切正常',
+    '暂无',
+    '暂无阻塞',
+    '已解除：用户已批准',
+    '已获用户批准执行',
+    '用户已接受当前配置…禁止再拿改码前的备份按 tree_code 做差异比较。',
+    'none',
+    'None (user approved)',
+    'N/A',
+    'Not blocked - continuing',
+    'Resolved',
+  ]
+  for (const sample of benignCursorSamples) {
+    assert.equal(schemaMod.normalizeCursorBlocked(sample), '', `benign cursor.blocked should normalize to empty: ${sample}`)
+    const bNorm = schemaMod.normalizeBoard({ cursor: { step: '步骤2', next: '继续', blocked: sample } })
+    assert.equal(bNorm.cursor.blocked, '', `normalizeBoard must clear benign cursor.blocked: ${sample}`)
+  }
+  const realCursorBlockers = [
+    '无法连接 MySQL：ECONNREFUSED',
+    '无权限写入 /etc/nginx/nginx.conf',
+    '没有找到 package.json',
+    '等待用户批准 L3 升级',
+    '用户已确认方案，但仍缺少生产库凭据',
+    'None of the unit tests passed',
+    'No permission to read ~/.ssh/id_rsa',
+    'npm test failed on S2',
+  ]
+  for (const sample of realCursorBlockers) {
+    assert.equal(schemaMod.normalizeCursorBlocked(sample), sample, `real blocker must be preserved: ${sample}`)
+    const bReal = schemaMod.normalizeBoard({ cursor: { step: '步骤2', next: '等待', blocked: sample } })
+    assert.equal(bReal.cursor.blocked, sample, `normalizeBoard must keep real blocker: ${sample}`)
+  }
+  const approvedCursorDigest = digestMod.renderDigest(
+    schemaMod.normalizeBoard({ cursor: { step: '步骤2', next: '运行测试', blocked: '无（已获用户批准执行）' } }),
+    { subagents: mockSubagents },
+  )
+  assert.ok(!approvedCursorDigest.includes('卡在:'), 'renderDigest must omit 卡在: for normalized approved cursor')
+
   let capturedBrief = ''
   const mockRuntime = {
     get(k) { return this[k] || null },

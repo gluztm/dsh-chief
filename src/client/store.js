@@ -148,6 +148,8 @@ export const store = {
     pendingElevation: null,
     auditLog: [],
     autoPilot: false,
+    globalSafetyGuardEnabled: true,
+    sessionSafetyGuardEnabled: true,
     tacticalModes: {
       intervention: false,
       maxInterventionTurns: 10,
@@ -160,6 +162,7 @@ export const store = {
       compactThresholdInput: '64K',
       redlineSentinel: false,
       conciseBrief: false,
+      safetyGuardEnabled: true,
     },
     runtimeGuard: {
       consecutiveInterventionTurns: 0,
@@ -230,6 +233,10 @@ export const store = {
   chiefRiskModalOpen: false,
   chiefRiskAgreed: false,
   chiefRiskBusy: false,
+  safetyGuardModalOpen: false,
+  safetyGuardModalScope: 'session',
+  safetyGuardAgreed: false,
+  safetyGuardBusy: false,
   dismissedApprovalIds: {},
   openApprovalModalId: '',
   approvalBusyId: '',

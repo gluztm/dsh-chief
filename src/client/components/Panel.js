@@ -43,6 +43,7 @@ import {
   fullModelWithChannel,
   isInternalProbeName,
   sessionIdFromUrl,
+  normalizeCursorBlocked,
 } from '../utils.js'
 import {
   loadChiefView,
@@ -69,6 +70,7 @@ import {
   PeerLinkConfirmModal,
   HandoffWarnModal,
   ChiefRiskConfirmModal,
+  SafetyGuardConfirmModal,
   OperationApprovalModal,
   ElevationRequestModal,
   AuditLogModal,
@@ -240,8 +242,9 @@ function PanelInner(props) {
             ? h(BoundariesTab, { store: view })
             : h(TasksTab, { board, view })
 
-  const cursorText = board && board.cursor && (board.cursor.next || board.cursor.step || board.cursor.blocked)
-    ? (board.cursor.blocked ? '卡住了：' + board.cursor.blocked : (board.cursor.next || board.cursor.step))
+  const cursorBlocked = normalizeCursorBlocked(board && board.cursor && board.cursor.blocked)
+  const cursorText = board && board.cursor && (board.cursor.next || board.cursor.step || cursorBlocked)
+    ? (cursorBlocked ? '卡住了：' + cursorBlocked : (board.cursor.next || board.cursor.step))
     : ''
 
   return h(
@@ -426,9 +429,9 @@ function PanelInner(props) {
                 style: {
                   padding: '5px 10px',
                   borderRadius: 10,
-                  background: board.cursor.blocked ? STATUS_BG.blocked : 'rgba(10, 132, 255, 0.13)',
-                  border: board.cursor.blocked ? '1px solid rgba(255, 69, 58, 0.30)' : '1px solid rgba(10, 132, 255, 0.30)',
-                  color: board.cursor.blocked ? '#ff453a' : '#409cff',
+                  background: cursorBlocked ? STATUS_BG.blocked : 'rgba(10, 132, 255, 0.13)',
+                  border: cursorBlocked ? '1px solid rgba(255, 69, 58, 0.30)' : '1px solid rgba(10, 132, 255, 0.30)',
+                  color: cursorBlocked ? '#ff453a' : '#409cff',
                   fontSize: 11.5,
                   fontWeight: 600,
                   display: 'flex',
@@ -439,12 +442,12 @@ function PanelInner(props) {
                 title: '点这里查看正在跑或卡住的子代理',
                 onClick: () => {
                   const targetTask = (board.cursor.expectedTaskId && tasks.find(t => t && t.id === board.cursor.expectedTaskId))
-                    || tasks.find(t => t && (board.cursor.blocked ? t.status === 'blocked' : t.status === 'doing'))
+                    || tasks.find(t => t && (cursorBlocked ? t.status === 'blocked' : t.status === 'doing'))
                   if (targetTask) focusObjectiveInPyramid(targetTask.id)
                   else patch({ tab: 'tasks', taskViewMode: 'graph', topoSectionCollapsed: false, settingsOpen: false })
                 },
               },
-              board.cursor.blocked
+              cursorBlocked
                 ? '⚠ '
                 : h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '10px', color: '#409cff' } }),
               h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 } }, cursorText),
@@ -611,6 +614,7 @@ function PanelInner(props) {
 
       // Scoped Modal Overlays (Strictly bounded inside .dnb-panel)
       h(ChiefRiskConfirmModal, { view }),
+      h(SafetyGuardConfirmModal, { view }),
       h(OperationApprovalModal, { view }),
       h(ElevationRequestModal, { view }),
       h(AuditLogModal, { view }),

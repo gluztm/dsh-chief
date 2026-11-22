@@ -1116,12 +1116,108 @@ export function updateChiefConfig(patch) {
     : rawInput
   const sid = String(safePatch.sessionId || safePatch.session || '').trim() || 'global'
   const GLOBAL_ONLY_CFG_KEYS = new Set(['defaultAutoEnableSessions', 'uiLang', 'notifyEnabled', 'notifySound'])
-  const META_CFG_KEYS = new Set(['sessionId', 'session', 'by', 'byUser', '_fromUiPanel'])
+  const META_CFG_KEYS = new Set([
+    'sessionId',
+    'session',
+    'by',
+    'byUser',
+    '_fromUiPanel',
+    'confirmedDisableSafetyGuard',
+    'safetyGuardScope',
+  ])
   const payloadKeys = Object.keys(safePatch).filter(k => !META_CFG_KEYS.has(k) && safePatch[k] !== undefined)
+  const callerBy = typeof safePatch.by === 'string' ? safePatch.by.trim() : ''
+  const isHumanBy = !callerBy || /^(?:user|human|operator|ui_panel)$/i.test(callerBy)
+  const isHumanLockCaller = safePatch._fromUiPanel === true
+    || (safePatch.byUser === true && isHumanBy)
+
+  const incomingTacticalRaw = safePatch.tacticalModes && typeof safePatch.tacticalModes === 'object'
+    ? safePatch.tacticalModes
+    : null
+  const wantsGlobalSafetyToggle = typeof safePatch.globalSafetyGuardEnabled === 'boolean'
+    || Boolean(incomingTacticalRaw && typeof incomingTacticalRaw.safetyGuardEnabled === 'boolean' && (sid === 'global' || safePatch.safetyGuardScope === 'global'))
+  const targetGlobalSafetyVal = typeof safePatch.globalSafetyGuardEnabled === 'boolean'
+    ? safePatch.globalSafetyGuardEnabled
+    : (wantsGlobalSafetyToggle ? Boolean(incomingTacticalRaw.safetyGuardEnabled) : undefined)
+  const wantsSessionSafetyToggle = !wantsGlobalSafetyToggle
+    && Boolean(incomingTacticalRaw && typeof incomingTacticalRaw.safetyGuardEnabled === 'boolean')
+  const targetSessionSafetyVal = wantsSessionSafetyToggle
+    ? Boolean(incomingTacticalRaw.safetyGuardEnabled)
+    : undefined
+  const wantsDisableSafety = targetGlobalSafetyVal === false || targetSessionSafetyVal === false
+
+  const isGlobalSafetyOnly = payloadKeys.length > 0 && payloadKeys.every(k =>
+    k === 'globalSafetyGuardEnabled'
+    || (k === 'tacticalModes' && wantsGlobalSafetyToggle && Object.keys(incomingTacticalRaw || {}).length === 1),
+  )
   const isGlobalPrefOnly = payloadKeys.length > 0 && payloadKeys.every(k => GLOBAL_ONLY_CFG_KEYS.has(k))
   const isDefaultAutoOnly = payloadKeys.length === 1 && payloadKeys[0] === 'defaultAutoEnableSessions'
   return mutateChiefState((state) => {
     const existingWs = state.workspaces && state.workspaces[sid] ? state.workspaces[sid] : null
+    const effBeforeCheck = resolveWorkspaceConfig(state, sid)
+    if (wantsGlobalSafetyToggle || wantsSessionSafetyToggle) {
+      if (!isHumanLockCaller) {
+        const blockEntry = {
+          mode: effBeforeCheck.permissionMode,
+          stage: 'safety_guard_toggle',
+          rule: 'safety_guard_human_only',
+          decision: 'blocked',
+          operation: wantsGlobalSafetyToggle ? '修改全局安全卫兵开关' : '修改会话安全卫兵开关',
+          target: wantsGlobalSafetyToggle ? 'global' : sid,
+          reason: `未授权来源 (${callerBy || 'unknown'}) 试图修改安全卫兵开关，仅允许人类通过设置面板显式操作`,
+          outcome: 'rejected',
+          by: clamp(callerBy || 'unknown', 40),
+        }
+        if (existingWs) pushAuditToWs(existingWs, blockEntry, sid)
+        else {
+          const normBlock = normalizeAuditEntry(blockEntry)
+          if (normBlock) appendAuditJsonlRecord(normBlock, sid)
+        }
+        return {
+          ok: false,
+          blocked: true,
+          code: 'safety_guard_human_only',
+          error: '安全卫兵开关仅允许人类通过设置面板显式操作，已拦截非人类来源修改',
+        }
+      }
+      if (wantsDisableSafety && safePatch.confirmedDisableSafetyGuard !== true) {
+        return {
+          ok: false,
+          requireSafetyGuardConfirm: true,
+          scope: targetGlobalSafetyVal === false ? 'global' : 'session',
+          error: '关闭安全卫兵需先在风险确认弹窗中勾选确认（confirmedDisableSafetyGuard: true）',
+        }
+      }
+    }
+    if (isGlobalSafetyOnly) {
+      const nextGlobalVal = Boolean(targetGlobalSafetyVal)
+      state.config.tacticalModes = {
+        ...normalizeTacticalModes(state.config.tacticalModes),
+        safetyGuardEnabled: nextGlobalVal,
+      }
+      const toggleEntry = {
+        mode: effBeforeCheck.permissionMode,
+        stage: 'safety_guard_toggle',
+        rule: 'safety_guard_toggled',
+        decision: nextGlobalVal ? 'executed' : 'disabled',
+        operation: '切换全局安全卫兵总开关',
+        target: 'global',
+        reason: nextGlobalVal ? '人类显式开启全局安全卫兵总开关' : '人类确认风险后关闭全局安全卫兵总开关',
+        outcome: 'ok',
+        by: clamp(callerBy || 'operator', 40),
+      }
+      if (existingWs) pushAuditToWs(existingWs, toggleEntry, sid)
+      else {
+        const normToggle = normalizeAuditEntry(toggleEntry)
+        if (normToggle) appendAuditJsonlRecord(normToggle, sid)
+      }
+      const nextCfg = resolveWorkspaceConfig(state, sid)
+      return {
+        ok: true,
+        config: { ...nextCfg, tacticalModes: { ...nextCfg.tacticalModes } },
+        llmLedger: summarizeLlmLedger(existingWs && existingWs.llmLedger, nextCfg),
+      }
+    }
     if (isDefaultAutoOnly || (isGlobalPrefOnly && !(existingWs && existingWs.config))) {
       if (typeof safePatch.defaultAutoEnableSessions === 'boolean') {
         state.config.defaultAutoEnableSessions = safePatch.defaultAutoEnableSessions
@@ -1185,10 +1281,6 @@ export function updateChiefConfig(patch) {
     }
 
     // Hard gate on model thinking effort lock mutations (human UI / explicit byUser only)
-    const callerBy = typeof safePatch.by === 'string' ? safePatch.by.trim() : ''
-    const isHumanBy = !callerBy || /^(?:user|human|operator|ui_panel)$/i.test(callerBy)
-    const isHumanLockCaller = safePatch._fromUiPanel === true
-      || (safePatch.byUser === true && isHumanBy)
     const wantsLockMutation = safePatch.lockedModelEfforts !== undefined
       || safePatch.toggleLockAgentEffort !== undefined
       || safePatch.teamEffortMode !== undefined
@@ -1286,9 +1378,6 @@ export function updateChiefConfig(patch) {
       }
     }
 
-    const incomingTacticalRaw = safePatch.tacticalModes && typeof safePatch.tacticalModes === 'object'
-      ? safePatch.tacticalModes
-      : null
     let incomingTactical = incomingTacticalRaw ? { ...incomingTacticalRaw } : null
     if (incomingTactical && incomingTactical.intervention === true && !prevTactical.intervention) {
       if (safePatch.confirmedInterventionRisk !== true) {
@@ -1384,7 +1473,7 @@ export function updateChiefConfig(patch) {
       }
     }
 
-    const applyPatchTo = (targetCfg, allowIntervention, allowAutoPilot = allowIntervention, allowPermSync = false, allowLocks = false) => {
+    const applyPatchTo = (targetCfg, allowIntervention, allowAutoPilot = allowIntervention, allowPermSync = false, allowLocks = false, allowSafetyGuardToggle = false) => {
       if (typeof safePatch.modelRef === 'string') targetCfg.modelRef = safePatch.modelRef.trim()
       if (typeof safePatch.thinkingEffort === 'string') {
         targetCfg.thinkingEffort = normalizeThinkingEffort(safePatch.thinkingEffort)
@@ -1481,11 +1570,15 @@ export function updateChiefConfig(patch) {
         }
       }
       if (incomingTactical) {
+        const prevTargetTactical = normalizeTacticalModes(targetCfg.tacticalModes)
         const merged = normalizeTacticalModes({
-          ...normalizeTacticalModes(targetCfg.tacticalModes),
+          ...prevTargetTactical,
           ...incomingTactical,
         })
         if (!allowIntervention) merged.intervention = false
+        if (!allowSafetyGuardToggle) {
+          merged.safetyGuardEnabled = prevTargetTactical.safetyGuardEnabled !== false
+        }
         targetCfg.tacticalModes = merged
       } else if (!allowIntervention && targetCfg.tacticalModes) {
         targetCfg.tacticalModes = { ...normalizeTacticalModes(targetCfg.tacticalModes), intervention: false }
@@ -1510,7 +1603,37 @@ export function updateChiefConfig(patch) {
         tacticalModes: { ...effBefore.tacticalModes },
       }
     }
-    applyPatchTo(ws.config, true, true, true, isHumanLockCaller)
+    applyPatchTo(ws.config, true, true, true, isHumanLockCaller, wantsSessionSafetyToggle)
+    if (wantsGlobalSafetyToggle) {
+      state.config.tacticalModes = {
+        ...normalizeTacticalModes(state.config.tacticalModes),
+        safetyGuardEnabled: Boolean(targetGlobalSafetyVal),
+      }
+      pushAuditToWs(ws, {
+        mode: resolveWorkspaceConfig(state, sid).permissionMode,
+        stage: 'safety_guard_toggle',
+        rule: 'safety_guard_toggled',
+        decision: targetGlobalSafetyVal ? 'executed' : 'disabled',
+        operation: '切换全局安全卫兵总开关',
+        target: 'global',
+        reason: targetGlobalSafetyVal ? '人类显式开启全局安全卫兵总开关' : '人类确认风险后关闭全局安全卫兵总开关',
+        outcome: 'ok',
+        by: clamp(callerBy || 'operator', 40),
+      }, sid)
+    }
+    if (wantsSessionSafetyToggle) {
+      pushAuditToWs(ws, {
+        mode: resolveWorkspaceConfig(state, sid).permissionMode,
+        stage: 'safety_guard_toggle',
+        rule: 'safety_guard_toggled',
+        decision: targetSessionSafetyVal ? 'executed' : 'disabled',
+        operation: '切换会话安全卫兵开关',
+        target: sid,
+        reason: targetSessionSafetyVal ? '人类显式开启本会话安全卫兵' : '人类确认风险后关闭本会话安全卫兵',
+        outcome: 'ok',
+        by: clamp(callerBy || 'operator', 40),
+      }, sid)
+    }
     if (typeof safePatch.defaultAutoEnableSessions === 'boolean') {
       state.config.defaultAutoEnableSessions = safePatch.defaultAutoEnableSessions
     }

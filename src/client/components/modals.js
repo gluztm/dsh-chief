@@ -30,6 +30,7 @@ import {
 } from './modals/workflow.js'
 import {
   ChiefRiskConfirmModal,
+  SafetyGuardConfirmModal,
   OperationApprovalModal,
   ElevationRequestModal,
   AuditLogModal,
@@ -51,6 +52,7 @@ export {
   PeerLinkConfirmModal,
   HandoffWarnModal,
   ChiefRiskConfirmModal,
+  SafetyGuardConfirmModal,
   OperationApprovalModal,
   ElevationRequestModal,
   AuditLogModal,

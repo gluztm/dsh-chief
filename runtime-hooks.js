@@ -250,7 +250,8 @@ export function createRuntimeHooks(deps) {
           const cwdForCheck = (key && key !== 'global' && getSessionCwd(runtime, key)) || process.cwd()
           const board = key && key !== 'global' ? boardForSession(boardFileFor(key)) : null
           const detailSample = `${trigger || ''} ${detail || ''}`.trim()
-          const safetyGuard = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: detailSample, board })
+          const safetyGuardEnabled = !(effCfg && effCfg.tacticalModes && effCfg.tacticalModes.safetyGuardEnabled === false)
+          const safetyGuard = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: detailSample, board, safetyGuardEnabled })
           if (safetyGuard && safetyGuard.blocked) {
             appendChiefAuditLog(key, {
               mode: effCfg.permissionMode || 'advisor',
@@ -915,6 +916,9 @@ export function createRuntimeHooks(deps) {
             const sid = caller && caller.id ? String(caller.id) : ''
             const rootId = resolveRootSessionId(sid, caller) || sid || 'global'
             if (!isSessionActive(rootId, caller)) return next()
+            const preState = loadChiefState()
+            const preEffCfg = resolveWorkspaceConfig(preState, rootId)
+            const safetyGuardEnabled = !(preEffCfg && preEffCfg.tacticalModes && preEffCfg.tacticalModes.safetyGuardEnabled === false)
             const cwd = (sid && getSessionCwd(runtime, sid)) || (rootId !== 'global' && getSessionCwd(runtime, rootId)) || process.cwd()
             const board = rootId && rootId !== 'global' ? boardForSession(boardFileFor(rootId)) : loadBoard(boardFile())
             const verdict = evaluatePreExecuteDefense({
@@ -922,6 +926,7 @@ export function createRuntimeHooks(deps) {
               args: exec.arguments && typeof exec.arguments === 'object' ? exec.arguments : {},
               cwd,
               board,
+              safetyGuardEnabled,
             })
             if (verdict && verdict.decision === 'deny') {
               const st = loadChiefState()

@@ -1296,6 +1296,7 @@ function NotesTab({ board }) {
 export function HandoffTab({ view }) {
   const [presetsOpen, setPresetsOpen] = React.useState(true)
   const [placementOpen, setPlacementOpen] = React.useState(true)
+  const [safetyOpen, setSafetyOpen] = React.useState(true)
   const [notifyOpen, setNotifyOpen] = React.useState(true)
   const [ledgerOpen, setLedgerOpen] = React.useState(true)
   const [langOpen, setLangOpen] = React.useState(true)
@@ -1352,6 +1353,9 @@ export function HandoffTab({ view }) {
   const placementPref = (view && view.placementPref) || { placement: 'both', showComposerEntry: true, showCornerTrigger: true, hideInSubagent: true, subagentOpenMode: 'tab' }
   const placementMode = placementPref.placement || 'both'
   const subOpenMode = placementPref.subagentOpenMode === 'split' ? 'split' : 'tab'
+  const globalSafetyOn = meta.globalSafetyGuardEnabled !== false
+  const sessionSafetyOn = meta.sessionSafetyGuardEnabled !== false
+  const effectiveSafetyOn = Boolean(globalSafetyOn && sessionSafetyOn && (!meta.tacticalModes || meta.tacticalModes.safetyGuardEnabled !== false))
   const placementLabel = placementMode === 'topTab'
     ? bi('仅主页面', 'Main Tab Only')
     : (placementMode === 'sidebar' ? bi('仅右侧栏', 'Sidebar Only') : bi('右侧栏 + 主页面', 'Sidebar + Main Tab'))
@@ -1514,6 +1518,75 @@ export function HandoffTab({ view }) {
         'div',
         { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', lineHeight: 1.45, marginTop: 4 } },
         bi('切到主页面后可在对话顶部直接大屏切换，修改立即生效无需重启。', 'Switching placement updates the conversation top tab and sidebar immediately without restart.'),
+      ),
+    ),
+
+    // 1.8 Built-in Safety Guard Toggles (Per-Session + Global Master Switch — GitHub Issue #6)
+    h(
+      AccCard,
+      {
+        open: safetyOpen,
+        onToggle: () => setSafetyOpen(v => !v),
+        tone: 'rose',
+        title: bi('🛡️ 内置安全卫兵（越界 / 凭据 / 高危命令）', '🛡️ Built-in Safety Guard (Bounds / Secrets / Shell)'),
+        badges: h('span', { className: 'dnb-acc-badge', 'data-tone': effectiveSafetyOn ? 'green' : 'red' },
+          effectiveSafetyOn ? bi('保护开启', 'Active') : bi('已关闭', 'Disabled')),
+        preview: effectiveSafetyOn
+          ? bi('默认开启，防越界与高危命令', 'Active by default')
+          : (!globalSafetyOn ? bi('全局总开关已关闭', 'Disabled globally') : bi('本会话已关闭', 'Disabled in session')),
+        bodyStyle: { padding: 0 },
+      },
+      view && view.sessionId
+        ? h(
+            'div',
+            { className: 'dnb-cell', style: { justifyContent: 'space-between', gap: 8 } },
+            h('div', { style: { minWidth: 0 } },
+              h('div', { style: { fontSize: 12 } }, bi('本会话启用安全卫兵（默认开）', 'Enable Safety Guard in this session')),
+              h('div', { style: { fontSize: 10.5, color: globalSafetyOn ? 'var(--dnb-text-3)' : '#f87171', marginTop: 1 } },
+                globalSafetyOn
+                  ? bi('仅控制当前会话；关闭会放行工作区外路径、凭据路径与内置命令拦截', 'Controls this session only; disabling lets workspace escapes, credentials, and destructive checks pass')
+                  : bi('已被下方全局总开关关闭，请先开启全局总开关', 'Overridden by the global switch below; re-enable the global switch first')),
+            ),
+            h(Switch, {
+              checked: globalSafetyOn && sessionSafetyOn,
+              disabled: !globalSafetyOn,
+              onChange: on => {
+                if (!globalSafetyOn) return
+                if (on) {
+                  void updateSecConfig({ tacticalModes: { safetyGuardEnabled: true } })
+                } else {
+                  patch({
+                    safetyGuardModalOpen: true,
+                    safetyGuardModalScope: 'session',
+                    safetyGuardAgreed: false,
+                  })
+                }
+              },
+            }),
+          )
+        : null,
+      h(
+        'div',
+        { className: 'dnb-cell', style: { justifyContent: 'space-between', gap: 8 } },
+        h('div', { style: { minWidth: 0 } },
+          h('div', { style: { fontSize: 12 } }, bi('全局安全卫兵总开关（默认开）', 'Global Safety Guard master switch')),
+          h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
+            bi('关闭后全部已启用会话均不再触发内置安全卫兵（与右侧栏「红线哨兵」互不影响；手工物理驻墙仍独立生效）', 'Applies across all active sessions (independent of Redline Sentinel; custom Guard Walls remain active)')),
+        ),
+        h(Switch, {
+          checked: globalSafetyOn,
+          onChange: on => {
+            if (on) {
+              void updateSecConfig({ globalSafetyGuardEnabled: true })
+            } else {
+              patch({
+                safetyGuardModalOpen: true,
+                safetyGuardModalScope: 'global',
+                safetyGuardAgreed: false,
+              })
+            }
+          },
+        }),
       ),
     ),
 

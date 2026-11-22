@@ -115,6 +115,111 @@ export function ChiefRiskConfirmModal({ view }) {
   )
 }
 
+export function SafetyGuardConfirmModal({ view }) {
+  if (!view.safetyGuardModalOpen) return null
+  const isGlobal = view.safetyGuardModalScope === 'global'
+  const agreed = Boolean(view.safetyGuardAgreed)
+  const busy = Boolean(view.safetyGuardBusy)
+  return h(
+    'div',
+    {
+      className: 'dnb-modal-backdrop',
+      onClick: e => {
+        if (e.target === e.currentTarget && !busy) patch({ safetyGuardModalOpen: false, safetyGuardAgreed: false })
+      },
+    },
+    h(
+      'div',
+      { className: 'dnb-modal-card' },
+      h(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
+        h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#ef4444' } },
+          isGlobal
+            ? bi('全局关闭内置安全卫兵：风险确认', 'Disable Global Safety Guard: Confirm Risks')
+            : bi('本会话关闭内置安全卫兵：风险确认', 'Disable Session Safety Guard: Confirm Risks')),
+        h('button', {
+          type: 'button',
+          className: 'dnb-icon-btn',
+          style: { width: 22, height: 22 },
+          disabled: busy,
+          onClick: () => patch({ safetyGuardModalOpen: false, safetyGuardAgreed: false }),
+        }, h(Icon, { name: 'x', size: 13 })),
+      ),
+      h(
+        'div',
+        { className: 'dnb-risk-box' },
+        h('div', { style: { fontSize: 13.5, fontWeight: 700, color: '#ef4444', display: 'flex', alignItems: 'center', gap: 6 } },
+          isGlobal
+            ? bi('⚠️ 即将关闭全部会话的内置安全卫兵', '⚠️ About to disable the built-in Safety Guard across ALL sessions')
+            : bi('⚠️ 即将关闭当前会话的内置安全卫兵', '⚠️ About to disable the built-in Safety Guard for this session')),
+        h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } },
+          bi('关闭后，以下内置硬拦截规则将不再触发：', 'While disabled, these built-in checks will pass through without blocking:')),
+        h(
+          'ul',
+          { style: { margin: '0 0 0 18px', padding: 0, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--dnb-text)' } },
+          h('li', null, bi('工作区外路径的读写与命令执行越界拦截', 'Workspace escape checks for reads, writes, and command cwd')),
+          h('li', null, bi('`.env`、SSH 私钥、`.credentials` 等敏感凭据触及拦截', 'Credential path protections (`.env`, private keys, `.credentials`)')),
+          h('li', null, bi('`rm -rf`、`DROP DATABASE`、`git reset --hard` 与内置禁止红线检查', 'Destructive command checks (`rm -rf`, `DROP DATABASE`, `git reset --hard`) and built-in forbidden bounds')),
+        ),
+        h('div', { style: { fontSize: 11.5, fontWeight: 600, color: 'var(--dnb-text-2)' } },
+          bi('注：你在「边界」页手工添加的「物理驻墙」仍独立生效，可随时在设置或边界页一键恢复安全卫兵。', 'Note: Custom Guard Walls in the Boundaries tab remain active independently, and you can re-enable the Safety Guard anytime with one click.')),
+      ),
+      h(
+        'label',
+        { className: 'dnb-risk-check' },
+        h('input', {
+          type: 'checkbox',
+          checked: agreed,
+          disabled: busy,
+          style: { marginTop: 3 },
+          onChange: e => patch({ safetyGuardAgreed: Boolean(e.target.checked) }),
+        }),
+        h('span', null,
+          isGlobal
+            ? bi('我已知悉关闭风险，确认在全部会话放行内置安全卫兵检查。', 'I understand the risks and confirm disabling the built-in Safety Guard globally.')
+            : bi('我已知悉关闭风险，确认在本会话放行内置安全卫兵检查。', 'I understand the risks and confirm disabling the built-in Safety Guard for this session.')),
+      ),
+      h(
+        'div',
+        { style: { display: 'flex', justifyContent: 'flex-end', gap: 8 } },
+        h('button', {
+          type: 'button',
+          className: 'dnb-pill',
+          style: { height: 32, padding: '0 14px', fontSize: 12.5 },
+          disabled: busy,
+          onClick: () => patch({ safetyGuardModalOpen: false, safetyGuardAgreed: false }),
+        }, bi('取消', 'Cancel')),
+        h('button', {
+          type: 'button',
+          className: 'dnb-primary-btn',
+          style: {
+            height: 32,
+            padding: '0 16px',
+            fontSize: 12.5,
+            background: agreed ? '#dc2626' : 'var(--dnb-fill)',
+            color: agreed ? '#fff' : 'var(--dnb-text-3)',
+            fontWeight: 700,
+          },
+          disabled: !agreed || busy,
+          onClick: async () => {
+            patch({ safetyGuardBusy: true })
+            try {
+              const payload = isGlobal
+                ? { globalSafetyGuardEnabled: false, confirmedDisableSafetyGuard: true }
+                : { tacticalModes: { safetyGuardEnabled: false }, confirmedDisableSafetyGuard: true }
+              const ok = await updateSecConfig(payload)
+              if (ok) patch({ safetyGuardModalOpen: false, safetyGuardAgreed: false })
+            } finally {
+              patch({ safetyGuardBusy: false })
+            }
+          },
+        }, busy ? bi('正在关闭…', 'Disabling…') : bi('确认关闭', 'Confirm Disable')),
+      ),
+    ),
+  )
+}
+
 export function OperationApprovalModal({ view }) {
   const meta = view.chiefMeta || {}
   const list = (Array.isArray(meta.pendingApprovals) ? meta.pendingApprovals : [])

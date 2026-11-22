@@ -14,6 +14,7 @@ import {
   isInternalProbeName,
   buildAgentHierarchy,
   resolveTaskAgents,
+  normalizeCursorBlocked,
 } from '../utils.js'
 import {
   submitChiefBar,
@@ -390,8 +391,9 @@ export function ObjectiveRadarStrip({ board, compact = false }) {
         ? resolved.agentNames.slice(0, 2).map(n => '@' + shortAgentName(n, true)).join('、')
           + (resolved.agentNames.length > 2 ? ' 等 ' + resolved.agentNames.length + ' 个代理' : '')
         : '@主代理'
-      const subReason = kind === 'blocked' && (task.note || (board && board.cursor && board.cursor.blocked))
-        ? clampTitle(task.note || board.cursor.blocked, 20)
+      const cursorBlocked = normalizeCursorBlocked(board && board.cursor && board.cursor.blocked)
+      const subReason = kind === 'blocked' && (task.note || cursorBlocked)
+        ? clampTitle(task.note || cursorBlocked, 20)
         : ''
 
       return h(

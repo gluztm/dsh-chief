@@ -173,6 +173,7 @@ export function evaluateUnifiedToolGate({
   args = null,
   cwd = '',
   board = null,
+  safetyGuardEnabled = true,
   permissionMode = DEFAULT_CHIEF_PERMISSION_MODE,
   hasChiefRiskAck = false,
   approvedOnce = false,
@@ -187,6 +188,7 @@ export function evaluateUnifiedToolGate({
     args,
     cwd,
     board,
+    safetyGuardEnabled,
   })
   if (hardGuard.blocked) {
     return {
