@@ -7,20 +7,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [1.7.0] - 2026-11-22
 
-> 主页面大屏模式、会话级按需启用、人类专控安全卫兵开关、本机 `Codex` / `Claude Code` 直连，以及模块拆分和文档更新（Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5), [#6](https://github.com/gluztm/dsh-chief/issues/6)）。
+> 全新「协同系统」直连本机 `Codex` / `Claude Code`、主页面大屏模式、会话级按需启用、人类专控安全卫兵开关，以及模块拆分与文档更新（Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5), [#6](https://github.com/gluztm/dsh-chief/issues/6)）。
 
 ### Added
+- **「协同系统」与本机 `Codex` / `Claude Code` 直连（`tabs/peers.js` / `styles/bubble.js` / `network-harness.js` / `chief-network.js` / `chief-view.js`）**：
+  - **可视化编队画布**：主对话、卫星子代理、跨窗口与本机外部代理同屏连线；空闲时画面完全静止，工作时对应图标和 SVG 连线高亮流动，编队运行期间自动锁定防止误拆（HTTP 409）并支持一键 `⏹ 急停解体`。
+  - **本机外部代理直连**：免 `ccSwitch` 跨平台探测本机安装的 `Codex` / `Claude Code`（含 Windows `.cmd` shim、脱敏环境变量直连），派单前自动附带当前红线与物理驻墙。
+  - **待命池刷新与 `@lead` 编队视野**：新增「刷新扫描」一键免切窗发现工作区内的休眠会话并过滤后台干扰；让 `@lead` 看到完整编队列表并打通 L2/L3 桌面取档。
+- **主页面大屏模式 (`conversation.view`) 与入口开关（Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5)，`entry.js` / `store.js` / `components/Panel.js` / `tabs/plan.js` / `styles/base.js`）**：
+  - 在对话顶部注册 `参谋长 / Chief` 主页面页签（`order: 1`），切过去后居中宽屏展示并自动隐藏宿主底部原生主输入框与 `CC` 用量条（切回对话恢复），并通过 `--dsh-conversation-viewport-height` 适配 DSH `0.2.2-rc.3` 贴底高度。
+  - 设置页新增「🖥️ 面板显示位置（主页面 / 右侧栏）」：`右侧栏 + 主页面 / 仅主页面 / 仅右侧栏`、独立关闭「输入框旁快捷按钮 (`showComposerEntry`)」与「右下角浮动按钮 (`showCornerTrigger`)」，以及「子代理窗口隐藏参谋长页面」提示卡片。
 - **会话级按需启用（普通窗口不介入，Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6)，`state-schema.js` / `chief-state.js` / `runtime-hooks.js` / `chief-view.js` / `api-routes.js` / `components/Panel.js` / `tabs/plan.js`）**：
   - 参谋长改为会话级按需启用（`sessionEnabled`）：新开的普通聊天窗及其子代理在未启用时，`systemPrompt.section`、`tools/pre-execute`、`agent/pre-step`、`tools/result`、`session/event`、`agent/turn-stopping`、`agent/created` 与 `watchdogTimer` 这 8 处后端钩子直接放行，不注提示词、不拦工具、不写空白看板。
   - 未启用会话打开面板时，顶部提供一键「在本会话启用」提示条；设置页提供「本会话启用参谋长」与「新会话默认自动启用」（默认关闭）；改语言或通知等全局设置不会顺带激活普通会话，已有配置或数据的老会话自动保持启用。
 - **安全卫兵单会话 / 全局人类专控开关（Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6)，`safety/invariant-guards.js` / `safety/guard-walls.js` / `safety/tool-gate.js` / `chief-executor.js` / `state-schema.js` / `chief-state.js` / `runtime-hooks.js` / `api-routes.js` / `tabs/plan.js` / `tabs/boundaries.js` / `modals/safety.js`）**：
   - 设置页新增「🛡️ 内置安全卫兵（越界 / 凭据 / 高危命令）」卡片，提供本会话开关与全局总开关（默认开启，与右侧栏「红线哨兵」和手工「物理驻墙」互不影响）。
   - 关闭任一开关须经人类风险确认弹窗（非人类调用或未勾选确认被后端拒绝并记入 `chief-audit.jsonl`）；开关配置在 `normalizeTacticalModes` 与 `evaluatePreExecuteDefense` / `evaluateSafetyGuardHardRules` 全路径持久化生效；关闭时边界页顶部显示警示条与一键恢复按钮，切换全局开关不激活未启用会话。
-- **主页面大屏模式 (`conversation.view`) 与入口开关（Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5)，`entry.js` / `store.js` / `components/Panel.js` / `tabs/plan.js` / `styles/base.js`）**：
-  - 在对话顶部注册 `参谋长 / Chief` 主页面页签（`order: 1`），切过去后居中宽屏展示并自动隐藏宿主底部原生主输入框与 `CC` 用量条（切回对话恢复），并通过 `--dsh-conversation-viewport-height` 适配 DSH `0.2.2-rc.3` 贴底高度。
-  - 设置页新增「🖥️ 面板显示位置（主页面 / 右侧栏）」：`右侧栏 + 主页面 / 仅主页面 / 仅右侧栏`、独立关闭「输入框旁快捷按钮 (`showComposerEntry`)」与「右下角浮动按钮 (`showCornerTrigger`)」，以及「子代理窗口隐藏参谋长页面」提示卡片。
-- **「协同系统」与本机外部代理直连（`tabs/peers.js` / `styles/bubble.js` / `network-harness.js` / `chief-network.js` / `chief-view.js`）**：
-  - 支持免 `ccSwitch` 探测本机 `Codex` / `Claude Code` 等外部 CLI（含 Windows `.cmd` shim、脱敏环境变量直连与派单自带红线/物理驻墙）；工作时自动锁编防拆（HTTP 409）并支持 `⏹ 急停解体`，待命池支持「刷新扫描」免切窗发现休眠会话；画布空闲时静止，干活时对应图标和连线高亮流动；同时让 `@lead` 看到已连接窗口与外协列表，并打通 L2/L3 桌面取档。
 
 ### Changed & Fixed
 - **子代理对话默认改为在现有右侧栏加页签（Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5)，`store.js` / `tabs/peers.js` / `tabs/plan.js`）**：
@@ -96,8 +98,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Fixed
 - **加固模型思考锁挡 (`lockedModelEfforts`) 权限隔离与 `toggleLockAgentEffort` 落地 (`chief-state.js` / `api-routes.js`)**：封堵非人类调用方通过 `updateChiefConfig` 直接篡改 `lockedModelEfforts` 或已锁挡 `chief` 思考强度的旁路（Fail-Closed 拦截并写入 `model_effort_lock` 审计日志）；仅允许经宿主鉴权面板路由 (`/chief/config`) 或显式 `byUser: true` 人工操作修改。
 - **拦截 `inquiry.reply` 重复重放 (`chief-state.js`)**：`answerChiefInquiry` 校验问询当前状态，对已 `answered` 结案的 `inquiryId` 幂等拒绝并写入 `inquiry_reply_replay_rejected` 审计记录，杜绝覆盖原答案及重复写入聊天回执、审计日志与任务账本。
-- **修复 DSH 浅色主题下弹层仍为深色问题（Fixes [#3](https://github.com/gluztm/dsh-chief/issues/3), thanks `@iridiumgit`，`styles.js`）**：将 `--dnb-popover` 从固定深色的 `--dsw-alias-hovercard-bg` 切换为随主题变的 `--dsw-alias-bg-elevated`，并显式适配 `html[data-ds-theme-source="light"]` 与 `[data-ds-theme="light"]`（独立于系统 `prefers-color-scheme`，覆盖四级权限弹层、战术驾驶舱、更多菜单、流光毛玻璃与俯视角纸质卷宗，并防止系统浅色误染 DSH 深色主题）。
-- **子代理会话自动隐藏参谋长入口与防会话污染（Fixes [#4](https://github.com/gluztm/dsh-chief/issues/4), thanks `@iridiumgit`，`store.js` / `api.js` / `components/Panel.js`）**：新增 `isSubagentSessionId` 复用宿主 `sessions.subagentAddress` 与快照元信息识别子代理会话，在子代理对话框内自动隐藏输入框参谋长按钮（`ComposerEntry`）及主视口右下角悬浮入口（`CornerTrigger`），并阻止 `adoptSession` 被子代理窗格覆盖主会话焦点。
+- **修复 DSH 浅色主题下弹层仍为深色问题（Fixes [#3](https://github.com/gluztm/dsh-chief/issues/3)，`styles.js`）**：将 `--dnb-popover` 从固定深色的 `--dsw-alias-hovercard-bg` 切换为随主题变的 `--dsw-alias-bg-elevated`，并显式适配 `html[data-ds-theme-source="light"]` 与 `[data-ds-theme="light"]`（独立于系统 `prefers-color-scheme`，覆盖四级权限弹层、战术驾驶舱、更多菜单、流光毛玻璃与俯视角纸质卷宗，并防止系统浅色误染 DSH 深色主题）。
+- **子代理会话自动隐藏参谋长入口与防会话污染（Fixes [#4](https://github.com/gluztm/dsh-chief/issues/4)，`store.js` / `api.js` / `components/Panel.js`）**：新增 `isSubagentSessionId` 复用宿主 `sessions.subagentAddress` 与快照元信息识别子代理会话，在子代理对话框内自动隐藏输入框参谋长按钮（`ComposerEntry`）及主视口右下角悬浮入口（`CornerTrigger`），并阻止 `adoptSession` 被子代理窗格覆盖主会话焦点。
 - **自适应顶栏版本号、锁挡状态同步、强介入先锁目标即推与极低概率请示拆墙（`Panel.js` / `tasks.js` / `modals.js` / `chief.js` / `chief-commands.js` / `chief-approvals.js` / `api-routes.js`）**：
   - 使用 `@container dnb-head` 在宽敞面板展示版本号、窄面板自动隐藏（未同步警示始终亮显）；
   - 修复子代理/主对话思考强度 `🔒 锁挡` 按钮因 `effortLocked` 缓存及别名键导致的无法切换/解锁问题，并区分清晰锁定态图标文案；

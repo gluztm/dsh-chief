@@ -130,18 +130,18 @@ As features piled up, new users ran into two practical worries: too many switche
 
 ---
 
-## 6. Main Conversation Tab, Local CLIs, and Per-Session Opt-In (`v1.7.0`)
+## 6. Direct Local CLI Collaboration, Main Tab, and Per-Session Opt-In (`v1.7.0`)
 
 Once single-window tracking and budget caps worked reliably, daily workflows (`Issues #5` and `#6`) exposed three remaining gaps:
 
-1. **A Narrow Sidebar Runs Out of Room**: Inspecting flow graphs, peer links, and subagent rows in a thin side column feels tight, and clicking subagent buttons stacked extra split panes.
-2. **One Machine Runs Multiple AI CLIs**: Developers often run local **`Codex`** and **`Claude Code`** alongside DSH windows, without a shared place to dispatch work or enforce the same redlines.
+1. **One Machine Runs Multiple AI CLIs**: Developers often run local **`Codex`** and **`Claude Code`** alongside DSH windows, without a shared place to form squads, dispatch tasks, or enforce the same redlines.
+2. **A Narrow Sidebar Runs Out of Room**: Inspecting flow graphs, peer links, and subagent rows in a thin side column feels tight, and clicking subagent buttons stacked extra split panes.
 3. **Global Hooks Should Stay Out of Plain Chats (`Issue #6`)**: Once a plugin attaches to process-wide `tools/pre-execute`, intercepting plain chat windows where the user never opened Chief creates friction—especially without a UI toggle or when benign heredocs, read-only `git`/`grep` commands, or cleared `cursor.blocked` remarks trigger false alarms.
 
 `v1.7.0` fixed all three:
 
+- **Collaboration System & Local CLI Dispatch (`Peers` Tab)**: Redesigned the `Peers` squad canvas for `@lead`, subagents, linked windows, and local external CLIs. It discovers and dispatches local `Codex` and `Claude Code` without `ccSwitch` (including Windows `.cmd` shims and dormant workspace scans) with active redlines and Guard Walls attached, locks active squads (`HTTP 409`) with one-click `⏹ Halt`, routes external replies under cross-window pairs, filters out `Mnemon` tasks and empty `DS Bot` shells from Standby, keeps the canvas still until agents work, and gives `@lead` full squad visibility plus L2/L3 archive pull.
 - **Main Tab Layout & Subagent Routing (`#5`)**: Registers a clean `Chief` / `参谋长` tab in `conversation.view`, hides the duplicate host composer while active, fits `0.2.2-rc.3` viewport height cleanly, provides independent placement/button toggles, and routes subagent clicks into **existing sidebar tabs** (`revealIfOpened: true`) with an optional split-pane toggle.
-- **Local CLI Collaboration (`Peers` Tab)**: Discovers local `Codex` and `Claude Code` without `ccSwitch` (including Windows `.cmd` shims and dormant workspace sessions), attaches active redlines and Guard Walls before dispatch, groups external traffic under cross-window pairs, filters out `Mnemon` tasks and empty `DS Bot` shells from Standby, and keeps the canvas visually still until agents actually work.
 - **Opt-In Sessions, Safety Guard Switches & False-Positive Fixes (`#6`)**:
   - Switched from process-wide interception to **per-session opt-in (`sessionEnabled`)**: unactivated plain chats and their subagents pass all 8 backend hooks untouched;
   - Added human-only **per-session and global Safety Guard switches** in Settings (default on, independent of Redline Sentinel and manual Guard Walls, confirm-gated & audited, persisted across reloads);

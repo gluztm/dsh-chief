@@ -134,11 +134,11 @@ The sidebar has 5 tabs plus a top-bar Settings page:
   <img src="assets/screenshots/04-dual-tier-goal-and-step-qa.png" alt="04 - Goal Supervision and Step Q&A" width="68%" />
 </div>
 
-### 05 · Cross-Window Peer Linking & Mailbox (`协同` Tab)
-**In one sentence:** Link separate DSH windows to exchange progress and contracts, and wipe link caches as soon as you detach.
+### 05 · Collaboration System & Local CLIs (`Peers` Tab)
+**In one sentence:** Connect the main chat, subagents, peer windows, and local `Codex` / `Claude Code` on one canvas—locking active squads automatically and staying visually still when idle.
 
-- Connects open DSH windows to share task state and mailbox messages across front-end UI and backend APIs; detaching clears link caches, external notes, and mailbox leftovers.
-- Screenshots pasted into the composer save under `<cwd>/.dsh-chief/uploads/` so models read real image files.
+- **Direct Local CLI Dispatch**: Auto-detects local `Codex` / `Claude Code` without `ccSwitch` (including Windows `.cmd` shims), injects active redlines and Guard Walls on dispatch, auto-locks editing while busy (`HTTP 409`), and supports one-click `⏹ Halt`.
+- **Cross-Window Mail & Standby Scan**: One-click **Refresh Scan** discovers dormant DSH windows without tab-switching while filtering out background maintenance (`Mnemon`) and blank shells; external messages group cleanly under cross-window pairs, detaching clears caches, and pasted images save to `<cwd>/.dsh-chief/uploads/`.
 
 <div align="center">
   <img src="assets/screenshots/05-cross-session-collab-bus.png" alt="05 - Cross-Window Linking and Mailbox" width="68%" />
@@ -246,11 +246,13 @@ Read the full story and tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md
 <details>
 <summary>What Changed in v1.7.0</summary>
 
+- **Collaboration System & Direct Local `Codex` / `Claude Code` Dispatch**:
+  - Redesigned the `Peers` squad canvas for `@lead`, subagents, linked windows, and local external CLIs—staying still when idle, lighting up only active workers and connectors, auto-locking busy squads (`HTTP 409`), and offering `⏹ Halt`.
+  - Discovers and dispatches local `Codex` and `Claude Code` without `ccSwitch` (including Windows `.cmd` shims) with active redlines and Guard Walls attached; adds Standby **Refresh Scan** to find dormant windows while filtering `Mnemon` tasks and empty `DS Bot` shells, routes external replies into cross-window pairs, and gives `@lead` full squad visibility plus L2/L3 archive pull.
+- **Main Page Tab (`conversation.view`) & Subagent Tabs (`#5`)**: Adds a top `Chief` / `参谋长` conversation tab that hides the duplicate host composer, fits `0.2.2-rc.3` viewport height, offers independent shortcut toggles, and opens subagent views as tabs in the existing sidebar by default.
 - **Opt-In Per Session (`#6`)**: Unactivated plain chats and their subagents pass all 8 backend hooks untouched (zero prompt injection, zero pre-execute blocking, zero stray board files), with an in-panel opt-in banner, Settings toggles, and legacy compatibility.
 - **Safety Guard Toggles & False-Positive Fixes (`#6`)**: Adds human-only per-session and global Safety Guard switches in Settings (confirm-gated and audited, independent of Redline Sentinel and manual Guard Walls), fixes `destructive_command` false positives on non-executable heredocs and read-only queries (`grep`/`rg`/`git log --format=`/`git commit`), and clears benign `cursor.blocked` notes so approved/resolved status does not show false red alarms.
-- **Main Page Tab (`conversation.view`) & Subagent Tabs (`#5`)**: Adds a top `Chief` / `参谋长` conversation tab that hides the duplicate host composer, fits `0.2.2-rc.3` viewport height, offers independent shortcut toggles, and opens subagent views as tabs in the existing sidebar by default.
-- **Collaboration Tab & Clean Standby Pool**: Native discovery and dispatch for local `Codex` and `Claude Code` without `ccSwitch` (attaching redlines + Guard Walls), cross-window `pair` messages, static idle visuals with active-only glow, and Standby filtering against `Mnemon` tasks and blank `DS Bot` shells.
-- **Light Theme Alignment & Module Split**: Unified card styling and light-theme surfaces across all 5 tabs, and split remaining large files into **44 backend modules and 39 frontend modules**.
+- **Light Theme Alignment, Module Split & Evolution Doc**: Unified card styling and light-theme surfaces across all 5 tabs, split remaining large files into **44 backend modules and 39 frontend modules**, and added bilingual [Architecture Evolution (`EVOLUTION.en.md`)](EVOLUTION.en.md).
 
 </details>
 
