@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "DSH Chief",
-    "description": "A quiet chief perched beside DeepSeek Harness: naps through plain chats, rallies local Codex / Claude Code for big jobs, and catches the AI before it wrecks your files."
+    "description": "A quiet sidekick beside DeepSeek Harness: stays out of the way in plain chats, chimes in with tips and safety checks while you're here, and takes over when you step away."
   },
   "ui": {
     "brandName": "DSH Chief",
