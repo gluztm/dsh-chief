@@ -5,22 +5,30 @@ All notable changes to **`dsh-chief`** (**DSH 参谋长**) will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
-## [1.7.0] - 2026-11-21
+## [1.7.0] - 2026-11-22
 
-> **Release Theme**: **主页面大屏模式 · 协同系统动效与外协跨窗归类** — `conversation.view` Main Page Tab & placement setting ([#5](https://github.com/gluztm/dsh-chief/issues/5)), "协同系统" rename with idle-static / active-breathing & SVG flow connectors, external Harness `"跨窗"` mailbox routing, full codebase modularization, and light-theme visual unification.
+> **Release Theme**: **主页面大屏模式 · 会话级按需零侵入 · 「协同系统」直连本机外协与全页视觉统一** — Opt-in per-session Chief activation & zero-intrusion bypass (Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6)), `conversation.view` Main Page Tab with full entry & subagent-tab controls (Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5)), redesigned "协同系统" with native local CLI dispatch (`Codex` / `Claude Code`), idle-static / active-breathing & SVG flow connectors, phantom standby cleanup, light-theme unification, and full monolith modularization.
 
 ### Added
-- **对话顶部主页面 (`conversation.view`) 与显示位置配置 (`entry.js` / `store.js` / `components/Panel.js` / `tabs/plan.js` / `styles/base.js`)**：
-  - 将 DSH 参谋长注册到主对话顶部 `conversation.view` 标签栏（`order: 1`，紧跟「对话」），支持大屏宽屏居中排版；
-  - 设置页新增「🖥️ 面板显示位置（主页面 / 右侧栏）」开关卡片（支持 `右侧栏 + 主页面` / `仅主页面` / `仅右侧栏`、保留输入框快捷按钮、子代理会话自动隐藏与引导），并在面板右上角提供一键切大屏/回右侧栏按钮。
-- **「协同系统」工作态呼吸光效与动态连接线 (`tabs/peers.js` / `styles/bubble.js` / `components/Panel.js`)**：
-  - 系统停止或成员空闲时保持 100% 静止；当参谋长、主对话、子代理、联动窗口或外部 Harness 处于工作态时，对应图标呈现柔和克制的主题色呼吸泛光，激活的 SVG 连线呈现方向性虚线流动与光点微粒特效，深浅主题双适配。
+- **会话级按需启用与普通窗口零侵入（Fixes [#6](https://github.com/gluztm/dsh-chief/issues/6), thanks `@iridiumgit`，`state-schema.js` / `chief-state.js` / `runtime-hooks.js` / `chief-view.js` / `api-routes.js` / `components/Panel.js` / `tabs/plan.js`）**：
+  - 将参谋长运行从“进程级全盘接管”收口为**会话级按需激活 (`sessionEnabled`)**：全新普通聊天窗口及其拉起的子代理默认未启用，在 `systemPrompt.section`、`tools/pre-execute`、`agent/pre-step`、`tools/result`、`session/event`、`agent/turn-stopping`、`agent/created` 及 `watchdogTimer` 全 8 处后端钩子直接无害放行，不注入提示词、不触发安全卫兵越界拦截、不运行空转守卫，也不落盘多余看板与空白配置。
+  - 在未启用会话打开面板时，顶部显示轻量提示条带与「在本会话启用」按钮；设置页新增「本会话启用参谋长」单窗开关与全局「新会话默认自动启用参谋长」（默认关闭），仅调整语言/通知等纯全局偏好绝不误激活当前普通会话；在会话内主动提问、建任务/边界/档案、连接跨窗或使用交接单部署时自动启用，升级前已配置或已沉淀数据的历史会话自动无损兼容。
+- **主页面大屏模式 (`conversation.view`) 与完整入口控制（Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5), thanks `@iridiumgit`，`entry.js` / `store.js` / `components/Panel.js` / `tabs/plan.js` / `styles/base.js`）**：
+  - 将参谋长注册为对话顶部常驻主页面页签（`order: 1`，标签精简为 `参谋长 / Chief`），支持 1080px 宽屏居中排版、一键大屏/右侧栏切换、自动隐藏宿主底部原生主输入框与 `CC` 用量条（切回对话无痕恢复），并通过 `--dsh-conversation-viewport-height` 兜底兼容 DSH `0.2.2-rc.3` Web GUI 贴底显示。
+  - 设置页新增「🖥️ 面板显示位置（主页面 / 右侧栏）」开关卡片：支持 `右侧栏 + 主页面` / `仅主页面` / `仅右侧栏`、独立关闭「输入框旁快捷按钮 (`showComposerEntry`)」与「右下角浮动按钮 (`showCornerTrigger`)」、以及「子代理窗口隐藏参谋长页面」并附友好返回引导卡片。
+- **全新「协同系统」与本机外部代理直连 (`tabs/peers.js` / `styles/bubble.js` / `network-harness.js` / `chief-network.js` / `chief-view.js`)**：
+  - 打造液态玻璃风「协同系统」可视化编队画布：支持拖拽/点选入编、工作中自动锁死编队防误拆（HTTP 409 护栏）与一键 `⏹ 急停解体`、待命池一键「刷新扫描」与免切窗发现有效工作区内的休眠会话；系统空闲时保持 100% 静止，工作时对应图标呈柔和主题色呼吸泛光、激活的 SVG 连线呈现方向性虚线流动与光点微粒特效。
+  - 支持免 `ccSwitch` 跨平台探测本机外部 CLI（`Codex` / `Claude Code` 等，含 Windows `.cmd` shim、脱敏环境变量直连与派单前自动注入红线和物理驻墙），赋予 `@lead` 主代理完整的已联动窗口与外协编队视野，并打通 L2/L3 桌面取档闭环。
 
 ### Changed & Fixed
-- **外部 Agent 协同消息统一归类至「跨窗」(`network-harness.js` / `chief-state.js` / `chief-network.js` / `tabs/peers.js`)**：
-  - 修复外部 Harness（`Codex` / `Claude Code` 等）派单与回执写入 `channelType: 'pair'` 与 `harness:<provider>` 虚拟根标记（豁免于断连集群隔离），并在前端对新版及历史落盘外部 Harness 记录统一展示在「跨窗 · 外协」分组下，不再混入「内部」；顺手修复双 `@@` 目标前缀。
-- **协同卡片去中二化与模块化精简 (`tabs/peers.js` / `tabs/chief.js` / `styles/*.js`)**：
-  - 将协同卡片标题重命名为「协同系统」（移除「水泡」「实验」标签与冗余开关卡片）；统一所有页签 8 色克制左强调线、`AccCard` 折叠条、卡片流协同消息记录以及 DSH 浅色主题规则；拆分所有 `>= 2,000` 行巨石文件，版本号对齐升至 `1.7.0`。
+- **子代理对话默认改为「现有右侧栏加页签」并可切换（Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5) comment #4, thanks `@iridiumgit`，`store.js` / `tabs/peers.js` / `tabs/plan.js`）**：
+  - 修复 `openSubagentChat()` 因默认携带 `preferNewPane: true` 触发宿主 `planSplitPane` 不断叠出新侧边栏的问题；改为默认 `{ revealIfOpened: true }` 在现有右侧栏活动面板加 tab（重复点击自动聚焦去重），协同水泡子代理胶囊默认显示「查看」，同时在设置页「面板显示位置」保留「子代理对话打开方式：`现有栏加页签` / `新开分屏`」随时切换。
+- **清理待命池幽灵、后台维护与空白会话 (`chief-network.js`)**：
+  - 移除 `listPeerDirectory` 全盘孤儿磁盘扫描，收口发现范围至有效 `workspaceRegistry` 会话；剔除 `Mnemon · Memory maintenance` 等插件后台任务、无标题无任务的空白空壳（如新建未对话的 `DS Bot`）、读取失败快照以及 `.v4` 新格式 `parentSession` / `delegationDepth` 子代理。
+- **外部 Agent 协同消息统一归类「跨窗」 (`network-harness.js` / `chief-state.js` / `chief-network.js` / `tabs/peers.js`)**：
+  - 外部 Harness 派单与回执统一使用 `channelType: 'pair'` 与 `harness:<provider>` 虚拟根标记（豁免于断连集群隔离），并在前端将新版及历史外部 Harness 消息统一收拢在「跨窗 · 外协」折叠卡片流中（修复双 `@@` 前缀并全面重做消息流视觉）。
+- **全页浅色主题适配、减法瘦身与巨石模块化重构 (`src/` / `tools/`)**：
+  - 将协同卡片去中二化重命名为「协同系统」（移除冗余开关与次级页「连接其他对话窗口」「长期规矩」）；全面适配 DSH 桌面端浅色主题（含战术浮窗、扇形仪表盘、协同画布与未启用提示条）、统一 5 页签 8 色克制左强调线与 `AccCard` 风格，去掉任务完成态删除线；将所有 `>= 2,000` 行巨石文件拆分为 **44 个后端模块（含 9 个安全内核模块）+ 39 个前端模块**并补全顶层架构注释，版本号升至 `1.7.0`。
 
 ## [1.6.0] - 2026-11-21
 

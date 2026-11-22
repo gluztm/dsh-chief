@@ -224,6 +224,8 @@ export const CSS_BASE = `
 
   .dnb-conv-page {
     height: 100%;
+    height: calc(var(--dsh-conversation-viewport-height, 100%) - var(--dsh-composer-height, 0px));
+    max-height: 100%;
     min-height: 0;
     flex: 1 1 auto;
     display: flex;
@@ -250,6 +252,10 @@ export const CSS_BASE = `
     display: flex !important;
     flex-direction: column !important;
     overflow: hidden !important;
+  }
+  [data-conversation-scroll]:has([data-dnb-conv-view="1"]) .dnb-conv-page {
+    height: var(--dsh-conversation-viewport-height, 100%);
+    max-height: 100%;
   }
 
   .dnb-dock {

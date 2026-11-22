@@ -1349,7 +1349,7 @@ export function HandoffTab({ view }) {
     void updateSecConfig({ managedBudgetMaxCalls: val })
   }
 
-  const placementPref = (view && view.placementPref) || { placement: 'both', showComposerEntry: true, hideInSubagent: true, subagentOpenMode: 'tab' }
+  const placementPref = (view && view.placementPref) || { placement: 'both', showComposerEntry: true, showCornerTrigger: true, hideInSubagent: true, subagentOpenMode: 'tab' }
   const placementMode = placementPref.placement || 'both'
   const subOpenMode = placementPref.subagentOpenMode === 'split' ? 'split' : 'tab'
   const placementLabel = placementMode === 'topTab'
@@ -1437,6 +1437,15 @@ export function HandoffTab({ view }) {
         h(Switch, {
           checked: placementPref.showComposerEntry !== false,
           onChange: on => savePlacementPref({ showComposerEntry: on }),
+        }),
+      ),
+      h(
+        'div',
+        { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '7px 2px' } },
+        h('span', { style: { fontSize: 12 } }, bi('右下角保留浮动快捷按钮', 'Keep floating corner button')),
+        h(Switch, {
+          checked: placementPref.showCornerTrigger !== false,
+          onChange: on => savePlacementPref({ showCornerTrigger: on }),
         }),
       ),
       h(

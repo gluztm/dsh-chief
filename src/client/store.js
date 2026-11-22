@@ -13,6 +13,7 @@ const PLACEMENT_STORAGE_KEY = 'dsh-chief:placement-pref'
 const DEFAULT_PLACEMENT_PREF = {
   placement: 'both',
   showComposerEntry: true,
+  showCornerTrigger: true,
   hideInSubagent: true,
   subagentOpenMode: 'tab',
 }
@@ -26,6 +27,7 @@ export function normalizePlacementPref(raw) {
   return {
     placement,
     showComposerEntry: src.showComposerEntry !== false,
+    showCornerTrigger: src.showCornerTrigger !== false,
     hideInSubagent: src.hideInSubagent !== false,
     subagentOpenMode,
   }

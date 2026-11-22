@@ -486,6 +486,7 @@ window.__ModuleLoader__.load({
     const DEFAULT_PLACEMENT_PREF = {
       placement: 'both',
       showComposerEntry: true,
+      showCornerTrigger: true,
       hideInSubagent: true,
       subagentOpenMode: 'tab',
     }
@@ -499,6 +500,7 @@ window.__ModuleLoader__.load({
       return {
         placement,
         showComposerEntry: src.showComposerEntry !== false,
+        showCornerTrigger: src.showCornerTrigger !== false,
         hideInSubagent: src.hideInSubagent !== false,
         subagentOpenMode,
       }
@@ -4901,6 +4903,8 @@ window.__ModuleLoader__.load({
 
       .dnb-conv-page {
         height: 100%;
+        height: calc(var(--dsh-conversation-viewport-height, 100%) - var(--dsh-composer-height, 0px));
+        max-height: 100%;
         min-height: 0;
         flex: 1 1 auto;
         display: flex;
@@ -4927,6 +4931,10 @@ window.__ModuleLoader__.load({
         display: flex !important;
         flex-direction: column !important;
         overflow: hidden !important;
+      }
+      [data-conversation-scroll]:has([data-dnb-conv-view="1"]) .dnb-conv-page {
+        height: var(--dsh-conversation-viewport-height, 100%);
+        max-height: 100%;
       }
 
       .dnb-dock {
@@ -18388,7 +18396,7 @@ window.__ModuleLoader__.load({
         void updateSecConfig({ managedBudgetMaxCalls: val })
       }
 
-      const placementPref = (view && view.placementPref) || { placement: 'both', showComposerEntry: true, hideInSubagent: true, subagentOpenMode: 'tab' }
+      const placementPref = (view && view.placementPref) || { placement: 'both', showComposerEntry: true, showCornerTrigger: true, hideInSubagent: true, subagentOpenMode: 'tab' }
       const placementMode = placementPref.placement || 'both'
       const subOpenMode = placementPref.subagentOpenMode === 'split' ? 'split' : 'tab'
       const placementLabel = placementMode === 'topTab'
@@ -18476,6 +18484,15 @@ window.__ModuleLoader__.load({
             h(Switch, {
               checked: placementPref.showComposerEntry !== false,
               onChange: on => savePlacementPref({ showComposerEntry: on }),
+            }),
+          ),
+          h(
+            'div',
+            { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '7px 2px' } },
+            h('span', { style: { fontSize: 12 } }, bi('右下角保留浮动快捷按钮', 'Keep floating corner button')),
+            h(Switch, {
+              checked: placementPref.showCornerTrigger !== false,
+              onChange: on => savePlacementPref({ showCornerTrigger: on }),
             }),
           ),
           h(
@@ -28590,9 +28607,10 @@ window.__ModuleLoader__.load({
       const urlSid = sessionIdFromUrl()
       const isSubagent = useIsSubagentSession(urlSid)
       const placement = (view.placementPref && view.placementPref.placement) || 'both'
+      const showCorner = (view.placementPref && view.placementPref.showCornerTrigger) !== false
       const hideSub = (view.placementPref && view.placementPref.hideInSubagent) !== false
       const showing = view.open || view.convView || view.panel === SIDE_ID || dockShown || (placement === 'topTab' && Boolean(urlSid || view.sessionId))
-      if (showing || (isSubagent && hideSub)) return null
+      if (!showCorner || showing || (isSubagent && hideSub)) return null
       return h(
         'button',
         {

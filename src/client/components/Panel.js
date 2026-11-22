@@ -772,9 +772,10 @@ export function CornerTrigger() {
   const urlSid = sessionIdFromUrl()
   const isSubagent = useIsSubagentSession(urlSid)
   const placement = (view.placementPref && view.placementPref.placement) || 'both'
+  const showCorner = (view.placementPref && view.placementPref.showCornerTrigger) !== false
   const hideSub = (view.placementPref && view.placementPref.hideInSubagent) !== false
   const showing = view.open || view.convView || view.panel === SIDE_ID || dockShown || (placement === 'topTab' && Boolean(urlSid || view.sessionId))
-  if (showing || (isSubagent && hideSub)) return null
+  if (!showCorner || showing || (isSubagent && hideSub)) return null
   return h(
     'button',
     {
