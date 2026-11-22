@@ -3,7 +3,7 @@
   "version": "1.7.0",
   "icon": "icon.svg",
   "type": "module",
-  "description": "Right-sidebar supervisor plugin for DeepSeek Harness (DSH): saves findings before compaction, monitors subagent workflows, checks file edits and shell commands against guard rules, stops repeat-error loops, and hands off long sessions.",
+  "description": "A quiet chief perched beside DeepSeek Harness: naps through plain chats, rallies local Codex / Claude Code for big jobs, and catches the AI before it wrecks your files.",
   "author": "gluztm",
   "license": "AGPL-3.0-only",
   "repository": {

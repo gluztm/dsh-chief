@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "DSH Chief",
-    "description": "Right-sidebar plugin for DSH: tracks task progress, saves notes before context compaction, and asks before editing your workspace. Read-only by default."
+    "description": "A quiet chief perched beside DeepSeek Harness: naps through plain chats, rallies local Codex / Claude Code for big jobs, and catches the AI before it wrecks your files."
   },
   "ui": {
     "brandName": "DSH Chief",

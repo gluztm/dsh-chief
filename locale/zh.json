@@ -1,7 +1,7 @@
 {
   "meta": {
     "title": "DSH 参谋长",
-    "description": "DSH 右侧栏插件：跟踪任务进度，压缩上下文前先存档，模型改工作区前先问你。默认只读。"
+    "description": "挂在 DeepSeek Harness 旁边的老参谋：平时老实歇着不打扰，干大活能拉 Codex / Claude Code 来凑桌，主对话刚想手滑，他先按住问你。"
   },
   "ui": {
     "brandName": "DSH 参谋长",
