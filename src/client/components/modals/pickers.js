@@ -290,31 +290,31 @@ function describeSuggestionMeta(sug) {
   }
   if (sug.kind === 'guard_wall') {
     return {
-      typeLabel: '🧱 新增物理驻墙',
+      typeLabel: '🚧 新增自定义拦截规则',
       impact: `范围：${sug.targetLabel || '🌐 所有项目通用'}（触发规则会直接拦下）`,
-      expect: '确认后生效，助手踩到红线时会被直接拦住',
+      expect: '确认后生效，助手踩到规则时会被直接拦住',
       tone: '#f87171',
       bg: 'rgba(239, 68, 68, 0.13)',
     }
   }
   if (sug.kind === 'wall_removal') {
     const spec = (sug.wallRemovalSpec && typeof sug.wallRemovalSpec === 'object') ? sug.wallRemovalSpec : {}
-    const actText = spec.action === 'remove' ? '永久删掉这条物理驻墙' : '暂时停用这条物理驻墙'
+    const actText = spec.action === 'remove' ? '永久删掉这条拦截规则' : '暂时停用这条拦截规则'
     return {
-      typeLabel: '⚠️ 申请关闭物理驻墙（需你确认）',
-      impact: `涉及：${spec.wallTitle || sug.targetLabel || '这条物理驻墙'}（所有模式都要你同意）`,
+      typeLabel: '⚠️ 申请关闭自定义拦截规则（需你确认）',
+      impact: `涉及：${spec.wallTitle || sug.targetLabel || '这条自定义拦截规则'}（所有模式都要你同意）`,
       expect: `同意后会${actText}，参谋长不能自己关闭`,
       tone: '#ef4444',
       bg: 'rgba(239, 68, 68, 0.18)',
     }
   }
   if (sug.kind === 'bound') {
-    const colLabel = sug.boundField === 'allowed' ? '必做事项' : (sug.boundField === 'notes' ? '注意事项' : '禁止红线')
+    const colLabel = sug.boundField === 'allowed' ? '必须做' : (sug.boundField === 'notes' ? '注意' : '不要做')
     const repCount = Array.isArray(sug.replaces) ? sug.replaces.filter(Boolean).length : 0
     return {
-      typeLabel: repCount > 0 ? `🏛 合并边界 (${repCount} 合 1)` : `🏛 新增${colLabel}`,
-      impact: sug.pinGlobal ? '📌 会固定为所有任务通用的规则' : '只对当前这次对话生效',
-      expect: repCount > 0 ? `会合并掉 ${repCount} 条零散规则` : `会加入${colLabel}，让所有助手一起遵守`,
+      typeLabel: repCount > 0 ? `📝 合并规矩 (${repCount} 合 1)` : `📝 新增「${colLabel}」`,
+      impact: sug.pinGlobal ? '📌 会固定为所有对话通用的规矩' : '只对当前这次对话生效',
+      expect: repCount > 0 ? `会合并掉 ${repCount} 条零散规矩` : `会加入「${colLabel}」，提醒助手遵守`,
       tone: '#fbbf24',
       bg: 'rgba(245, 158, 11, 0.12)',
     }

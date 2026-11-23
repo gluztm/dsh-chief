@@ -1134,27 +1134,32 @@ export function updateChiefConfig(patch) {
   const incomingTacticalRaw = safePatch.tacticalModes && typeof safePatch.tacticalModes === 'object'
     ? safePatch.tacticalModes
     : null
+  const hasTacticalSafetyField = Boolean(incomingTacticalRaw && typeof incomingTacticalRaw.safetyGuardEnabled === 'boolean')
   const wantsGlobalSafetyToggle = typeof safePatch.globalSafetyGuardEnabled === 'boolean'
-    || Boolean(incomingTacticalRaw && typeof incomingTacticalRaw.safetyGuardEnabled === 'boolean' && (sid === 'global' || safePatch.safetyGuardScope === 'global'))
+    || Boolean(hasTacticalSafetyField && (sid === 'global' || safePatch.safetyGuardScope === 'global'))
   const targetGlobalSafetyVal = typeof safePatch.globalSafetyGuardEnabled === 'boolean'
     ? safePatch.globalSafetyGuardEnabled
-    : (wantsGlobalSafetyToggle ? Boolean(incomingTacticalRaw.safetyGuardEnabled) : undefined)
-  const wantsSessionSafetyToggle = !wantsGlobalSafetyToggle
-    && Boolean(incomingTacticalRaw && typeof incomingTacticalRaw.safetyGuardEnabled === 'boolean')
+    : (wantsGlobalSafetyToggle && hasTacticalSafetyField ? Boolean(incomingTacticalRaw.safetyGuardEnabled) : undefined)
+  const wantsSessionSafetyToggle = Boolean(hasTacticalSafetyField && sid !== 'global' && safePatch.safetyGuardScope !== 'global')
   const targetSessionSafetyVal = wantsSessionSafetyToggle
     ? Boolean(incomingTacticalRaw.safetyGuardEnabled)
     : undefined
-  const wantsDisableSafety = targetGlobalSafetyVal === false || targetSessionSafetyVal === false
 
   const isGlobalSafetyOnly = payloadKeys.length > 0 && payloadKeys.every(k =>
     k === 'globalSafetyGuardEnabled'
-    || (k === 'tacticalModes' && wantsGlobalSafetyToggle && Object.keys(incomingTacticalRaw || {}).length === 1),
+    || (k === 'tacticalModes' && wantsGlobalSafetyToggle && !wantsSessionSafetyToggle && Object.keys(incomingTacticalRaw || {}).length === 1),
   )
   const isGlobalPrefOnly = payloadKeys.length > 0 && payloadKeys.every(k => GLOBAL_ONLY_CFG_KEYS.has(k))
   const isDefaultAutoOnly = payloadKeys.length === 1 && payloadKeys[0] === 'defaultAutoEnableSessions'
   return mutateChiefState((state) => {
     const existingWs = state.workspaces && state.workspaces[sid] ? state.workspaces[sid] : null
     const effBeforeCheck = resolveWorkspaceConfig(state, sid)
+    const prevGlobalSafety = !(state.config && state.config.tacticalModes && state.config.tacticalModes.safetyGuardEnabled === false)
+    const prevSessionSafety = !(existingWs && existingWs.config && existingWs.config.tacticalModes && existingWs.config.tacticalModes.safetyGuardEnabled === false)
+    const isActualGlobalChange = wantsGlobalSafetyToggle && (Boolean(targetGlobalSafetyVal) !== prevGlobalSafety)
+    const isActualSessionChange = wantsSessionSafetyToggle && (Boolean(targetSessionSafetyVal) !== prevSessionSafety)
+    const actuallyDisablingGlobal = wantsGlobalSafetyToggle && targetGlobalSafetyVal === false && prevGlobalSafety === true
+    const actuallyDisablingSession = wantsSessionSafetyToggle && targetSessionSafetyVal === false && prevSessionSafety === true
     if (wantsGlobalSafetyToggle || wantsSessionSafetyToggle) {
       if (!isHumanLockCaller) {
         const blockEntry = {
@@ -1162,9 +1167,9 @@ export function updateChiefConfig(patch) {
           stage: 'safety_guard_toggle',
           rule: 'safety_guard_human_only',
           decision: 'blocked',
-          operation: wantsGlobalSafetyToggle ? '修改全局安全卫兵开关' : '修改会话安全卫兵开关',
+          operation: wantsGlobalSafetyToggle ? '修改全局安全拦截开关' : '修改会话安全拦截开关',
           target: wantsGlobalSafetyToggle ? 'global' : sid,
-          reason: `未授权来源 (${callerBy || 'unknown'}) 试图修改安全卫兵开关，仅允许人类通过设置面板显式操作`,
+          reason: `未授权来源 (${callerBy || 'unknown'}) 试图修改安全拦截开关，仅允许人类通过控制或设置面板显式操作`,
           outcome: 'rejected',
           by: clamp(callerBy || 'unknown', 40),
         }
@@ -1177,15 +1182,15 @@ export function updateChiefConfig(patch) {
           ok: false,
           blocked: true,
           code: 'safety_guard_human_only',
-          error: '安全卫兵开关仅允许人类通过设置面板显式操作，已拦截非人类来源修改',
+          error: '安全拦截开关仅允许人类通过面板显式操作，已拦截非人类来源修改',
         }
       }
-      if (wantsDisableSafety && safePatch.confirmedDisableSafetyGuard !== true) {
+      if ((actuallyDisablingGlobal || actuallyDisablingSession) && safePatch.confirmedDisableSafetyGuard !== true) {
         return {
           ok: false,
           requireSafetyGuardConfirm: true,
-          scope: targetGlobalSafetyVal === false ? 'global' : 'session',
-          error: '关闭安全卫兵需先在风险确认弹窗中勾选确认（confirmedDisableSafetyGuard: true）',
+          scope: actuallyDisablingGlobal ? 'global' : 'session',
+          error: '关闭安全拦截需先在确认弹窗中勾选确认（confirmedDisableSafetyGuard: true）',
         }
       }
     }
@@ -1195,21 +1200,23 @@ export function updateChiefConfig(patch) {
         ...normalizeTacticalModes(state.config.tacticalModes),
         safetyGuardEnabled: nextGlobalVal,
       }
-      const toggleEntry = {
-        mode: effBeforeCheck.permissionMode,
-        stage: 'safety_guard_toggle',
-        rule: 'safety_guard_toggled',
-        decision: nextGlobalVal ? 'executed' : 'disabled',
-        operation: '切换全局安全卫兵总开关',
-        target: 'global',
-        reason: nextGlobalVal ? '人类显式开启全局安全卫兵总开关' : '人类确认风险后关闭全局安全卫兵总开关',
-        outcome: 'ok',
-        by: clamp(callerBy || 'operator', 40),
-      }
-      if (existingWs) pushAuditToWs(existingWs, toggleEntry, sid)
-      else {
-        const normToggle = normalizeAuditEntry(toggleEntry)
-        if (normToggle) appendAuditJsonlRecord(normToggle, sid)
+      if (isActualGlobalChange) {
+        const toggleEntry = {
+          mode: effBeforeCheck.permissionMode,
+          stage: 'safety_guard_toggle',
+          rule: 'safety_guard_toggled',
+          decision: nextGlobalVal ? 'executed' : 'disabled',
+          operation: '切换全局安全拦截总开关',
+          target: 'global',
+          reason: nextGlobalVal ? '人类显式开启全局安全拦截总开关' : '人类确认风险后关闭全局安全拦截总开关',
+          outcome: 'ok',
+          by: clamp(callerBy || 'operator', 40),
+        }
+        if (existingWs) pushAuditToWs(existingWs, toggleEntry, sid)
+        else {
+          const normToggle = normalizeAuditEntry(toggleEntry)
+          if (normToggle) appendAuditJsonlRecord(normToggle, sid)
+        }
       }
       const nextCfg = resolveWorkspaceConfig(state, sid)
       return {
@@ -1609,27 +1616,29 @@ export function updateChiefConfig(patch) {
         ...normalizeTacticalModes(state.config.tacticalModes),
         safetyGuardEnabled: Boolean(targetGlobalSafetyVal),
       }
-      pushAuditToWs(ws, {
-        mode: resolveWorkspaceConfig(state, sid).permissionMode,
-        stage: 'safety_guard_toggle',
-        rule: 'safety_guard_toggled',
-        decision: targetGlobalSafetyVal ? 'executed' : 'disabled',
-        operation: '切换全局安全卫兵总开关',
-        target: 'global',
-        reason: targetGlobalSafetyVal ? '人类显式开启全局安全卫兵总开关' : '人类确认风险后关闭全局安全卫兵总开关',
-        outcome: 'ok',
-        by: clamp(callerBy || 'operator', 40),
-      }, sid)
+      if (isActualGlobalChange) {
+        pushAuditToWs(ws, {
+          mode: resolveWorkspaceConfig(state, sid).permissionMode,
+          stage: 'safety_guard_toggle',
+          rule: 'safety_guard_toggled',
+          decision: targetGlobalSafetyVal ? 'executed' : 'disabled',
+          operation: '切换全局安全拦截总开关',
+          target: 'global',
+          reason: targetGlobalSafetyVal ? '人类显式开启全局安全拦截总开关' : '人类确认风险后关闭全局安全拦截总开关',
+          outcome: 'ok',
+          by: clamp(callerBy || 'operator', 40),
+        }, sid)
+      }
     }
-    if (wantsSessionSafetyToggle) {
+    if (wantsSessionSafetyToggle && isActualSessionChange) {
       pushAuditToWs(ws, {
         mode: resolveWorkspaceConfig(state, sid).permissionMode,
         stage: 'safety_guard_toggle',
         rule: 'safety_guard_toggled',
         decision: targetSessionSafetyVal ? 'executed' : 'disabled',
-        operation: '切换会话安全卫兵开关',
+        operation: '切换会话安全拦截开关',
         target: sid,
-        reason: targetSessionSafetyVal ? '人类显式开启本会话安全卫兵' : '人类确认风险后关闭本会话安全卫兵',
+        reason: targetSessionSafetyVal ? '人类显式开启本会话安全拦截' : '人类确认风险后关闭本会话安全拦截',
         outcome: 'ok',
         by: clamp(callerBy || 'operator', 40),
       }, sid)

@@ -215,7 +215,7 @@ export function decideAdaptiveChiefEffort({
     }
     return 'high'
   }
-  if (txt && /(?:深度|全面|彻底|根因|重构|架构|死锁|并发|安全审计|复盘|仔细想|好好想|正则墙|物理墙)/.test(txt)) {
+  if (txt && /(?:深度|全面|彻底|根因|重构|架构|死锁|并发|安全审计|复盘|仔细想|好好想|正则墙|物理墙|拦截规则)/.test(txt)) {
     return 'high'
   }
   if (rk === 'ask_chat' && txt && txt.length <= 28 && /^(?:在吗|进度|到哪一步|怎么样|状态|你好|看看)/.test(txt)) {

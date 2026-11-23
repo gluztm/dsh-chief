@@ -236,6 +236,7 @@ export const store = {
   safetyGuardModalOpen: false,
   safetyGuardModalScope: 'session',
   safetyGuardAgreed: false,
+  safetyGuardPauseWalls: false,
   safetyGuardBusy: false,
   dismissedApprovalIds: {},
   openApprovalModalId: '',

@@ -473,8 +473,8 @@ function PanelInner(props) {
                 { className: 'dnb-session-optin-text' },
                 h('span', { className: 'dnb-session-optin-dot', 'aria-hidden': 'true' }),
                 h('span', null, bi(
-                  '本会话未启用参谋长（普通模式：不注入提示词，也不触发安全卫兵拦截）',
-                  'Chief is inactive in this session (no prompt injection or safety guard interception)',
+                  '本会话未启用参谋长（普通模式：不提示，也不触发安全拦截）',
+                  'Chief is off in this chat (no prompts or Safety Block checks)',
                 )),
               ),
               h('button', {

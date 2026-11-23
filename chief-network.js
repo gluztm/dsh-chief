@@ -44,12 +44,67 @@ export function registerChiefDirectRequestHook(fn) {
   chiefDirectRequestHook = typeof fn === 'function' ? fn : null
 }
 
+function sanitizeJsonValue(val, depth = 0) {
+  if (depth > 8) return undefined
+  if (val === null) return null
+  const t = typeof val
+  if (t === 'string' || t === 'boolean') return val
+  if (t === 'number') {
+    if (!Number.isFinite(val)) return undefined
+    return Object.is(val, -0) ? 0 : val
+  }
+  if (t !== 'object') return undefined
+  if (Array.isArray(val)) {
+    const arr = []
+    for (const item of val) {
+      const cleanItem = sanitizeJsonValue(item, depth + 1)
+      if (cleanItem !== undefined) arr.push(cleanItem)
+    }
+    return arr
+  }
+  return sanitizeJsonRecord(val, depth + 1)
+}
+
+function sanitizeJsonRecord(obj, depth = 0) {
+  if (!obj || typeof obj !== 'object' || Array.isArray(obj) || depth > 8) return {}
+  const out = {}
+  for (const [k, v] of Object.entries(obj)) {
+    if (!k || typeof k !== 'string') continue
+    if (v === undefined || typeof v === 'function' || typeof v === 'symbol') continue
+    const clean = sanitizeJsonValue(v, depth + 1)
+    if (clean !== undefined) out[k] = clean
+  }
+  return out
+}
+
+function formatDeliveryFailureHint(code, rawMessage) {
+  const cleanCode = String(code || '').trim()
+  const cleanMsg = String(rawMessage || '').trim()
+  if (cleanCode === 'agent-preset/not-found' || cleanCode === 'agent-preset/invalid') {
+    return `当前会话绑定的 Agent 预设不可用（${cleanMsg || cleanCode}），可能是对应预设插件未兼容当前 DSH 版本或被禁用；请检查插件状态，或新建对话后继续`
+  }
+  if (cleanCode === 'session/writer-held') {
+    return `目标会话正被其他进程或窗口占用写入锁（${cleanMsg || cleanCode}）`
+  }
+  if (cleanCode === 'session/subagent-owned') {
+    return `目标会话归属子代理通道，不支持直接按主会话唤醒（${cleanMsg || cleanCode}）`
+  }
+  if (cleanCode && cleanCode !== 'session/not-found') {
+    return cleanMsg ? `${cleanCode}: ${cleanMsg}` : cleanCode
+  }
+  return cleanMsg
+}
+
 export async function buildMessageEnvelope(text, sourceKind = CHIEF_RELAY_SOURCE, extraSource = {}, imageBlocks = []) {
   const dshLlm = await loadDshLlm()
   const safeImages = Array.isArray(imageBlocks) ? imageBlocks : []
   const content = [...safeImages, ...(text ? [{ type: 'text', text }] : [])]
   if (!content.length) content.push({ type: 'text', text: '' })
-  const source = { kind: sourceKind, ...extraSource }
+  const source = sanitizeJsonRecord({
+    kind: String(sourceKind || CHIEF_RELAY_SOURCE),
+    ...(extraSource && typeof extraSource === 'object' ? extraSource : {}),
+  })
+  if (!source.kind) source.kind = String(sourceKind || CHIEF_RELAY_SOURCE)
   if (dshLlm && typeof dshLlm.createUserMessage === 'function') {
     try {
       return dshLlm.createUserMessage({ content, source })
@@ -793,6 +848,9 @@ async function deliverSinglePeer(deps, directory, peer, {
   let deliveredPhysical = false
   let deliveryMode = 'mailbox-queued'
   let errorNote = ''
+  let resolveErrorCode = ''
+  let resolveError = ''
+  let hadHardError = false
 
   if (mode !== 'silent') {
     // Path A: Subagent delivery via DSH native subagents service
@@ -813,21 +871,34 @@ async function deliverSinglePeer(deps, directory, peer, {
           }
         } catch (err) {
           errorNote = String(err && err.message ? err.message : err)
+          hadHardError = true
         }
       }
     }
 
     // Path B: Direct Agent handle delivery (for root lead, peer standalone sessions, or fallback live child agent)
-    if (!deliveredPhysical && agentsSvc && peer.id) {
-      let targetAgent = typeof agentsSvc.get === 'function' ? agentsSvc.get(peer.id) : null
-      if (!targetAgent && runtime) {
+    if (!deliveredPhysical && peer.id) {
+      let targetAgent = agentsSvc && typeof agentsSvc.get === 'function' ? agentsSvc.get(peer.id) : null
+      const controller = runtime && typeof runtime.get === 'function' ? runtime.get('sessionController') : null
+      if (!targetAgent && controller && typeof controller.resolveAgent === 'function') {
         try {
-          const controller = runtime.get('sessionController')
-          if (controller && typeof controller.resolveAgent === 'function') {
-            const resolved = await controller.resolveAgent(peer.id)
-            if (resolved && resolved.agent) targetAgent = resolved.agent
+          const resolved = await controller.resolveAgent(peer.id)
+          if (resolved && resolved.agent) {
+            targetAgent = resolved.agent
+          } else if (resolved && resolved.error) {
+            resolveErrorCode = String(resolved.error.code || '')
+            resolveError = String(resolved.error.message || resolved.error)
+            errorNote = formatDeliveryFailureHint(resolveErrorCode, resolveError)
+            if (resolveErrorCode !== 'session/not-found') hadHardError = true
           }
-        } catch {}
+        } catch (err) {
+          resolveErrorCode = String((err && err.code) || '')
+          resolveError = String((err && err.message) || err)
+          errorNote = formatDeliveryFailureHint(resolveErrorCode, resolveError)
+          if (resolveErrorCode !== 'session/not-found') hadHardError = true
+        }
+      } else if (!targetAgent && !errorNote && !agentsSvc && !controller) {
+        errorNote = '宿主 agents 与 sessionController 服务均未就绪'
       }
       if (targetAgent) {
         const envelopeSourceKind = envelopeKind === 'execution_request'
@@ -835,7 +906,7 @@ async function deliverSinglePeer(deps, directory, peer, {
           : (envelopeKind === 'inquiry' ? CHIEF_INQUIRY_SOURCE : CHIEF_RELAY_SOURCE)
         const envelope = await buildMessageEnvelope(formatted, envelopeSourceKind, {
           senderName: fromLabel,
-          senderSessionId: fromSession || undefined,
+          ...(fromSession ? { senderSessionId: String(fromSession) } : {}),
           role: envelopeKind === 'execution_request'
             ? 'execution_request'
             : (envelopeKind === 'inquiry' ? 'inquiry' : (mode === 'steer' ? 'steer' : 'relay')),
@@ -847,27 +918,38 @@ async function deliverSinglePeer(deps, directory, peer, {
             if (r && typeof r.then === 'function') await r
             deliveredPhysical = true
             deliveryMode = 'agent-steer'
+            errorNote = ''
+            hadHardError = false
           } else if (targetAgent.status !== 'running' && typeof targetAgent.followup === 'function') {
             const r = targetAgent.followup(envelope)
             if (r && typeof r.then === 'function') await r
             deliveredPhysical = true
             deliveryMode = 'agent-followup'
+            errorNote = ''
+            hadHardError = false
           } else if (typeof targetAgent.inject === 'function') {
             const r = targetAgent.inject(envelope)
             if (r && typeof r.then === 'function') await r
             deliveredPhysical = true
             deliveryMode = 'agent-inject'
+            errorNote = ''
+            hadHardError = false
           } else if (typeof targetAgent.steer === 'function') {
             targetAgent.steer(safeBlocks.length ? formatted + imgSuffix : formatted)
             deliveredPhysical = true
             deliveryMode = 'agent-steer-text'
+            errorNote = ''
+            hadHardError = false
           }
         } catch (err) {
           errorNote = String(err && err.message ? err.message : err)
+          hadHardError = true
         }
       }
     }
   }
+
+  const isHardDeliveryFailure = !deliveredPhysical && mode !== 'silent' && hadHardError && Boolean(errorNote) && resolveErrorCode !== 'session/not-found'
 
   // Always record in the shared cluster mailbox; if physical delivery already carried it,
   // mark the recipient in readBy so `agent/pre-step` will NOT double-deliver it!
@@ -909,9 +991,12 @@ async function deliverSinglePeer(deps, directory, peer, {
 
   if (recordBoardLog && (peer.rootId || directory.rootId)) {
     const badge = mode === 'steer' ? '⚡ 插话' : mode === 'silent' ? '📌 备忘纸条' : '📨 递话'
+    const logMsg = isHardDeliveryFailure
+      ? `⚠️ 未送达 ${fromLabel} → ${peer.handle}（${clamp(errorNote, 110)}）：${clamp(text, 48)}${imgSuffix}`
+      : `${badge} ${fromLabel} → ${peer.handle}：${clamp(text, 56)}${imgSuffix}`
     deps.appendBoardLog(
       peer.rootId || directory.rootId,
-      `${badge} ${fromLabel} → ${peer.handle}：${clamp(text, 56)}${imgSuffix}`,
+      logMsg,
       fromLabel,
     )
   }
@@ -924,7 +1009,16 @@ async function deliverSinglePeer(deps, directory, peer, {
     deliveredPhysical,
     deliveryMode,
     savedImagePaths: safePaths,
-    ...(errorNote && !deliveredPhysical ? { note: '目标暂未在线运行，已存入参谋部协同信箱，将在其下一步自动送达（' + errorNote + '）' } : {}),
+    ...(resolveErrorCode ? { resolveErrorCode } : {}),
+    ...(resolveError ? { resolveError } : {}),
+    ...(isHardDeliveryFailure ? { deliveryError: errorNote } : {}),
+    ...(errorNote && !deliveredPhysical
+      ? {
+          note: isHardDeliveryFailure
+            ? `未能送达主对话：${errorNote}（消息仅暂存参谋部信箱，未实际唤醒目标会话）`
+            : `目标暂未在线运行，已存入参谋部协同信箱，将在其下一步自动送达（${errorNote}）`,
+        }
+      : {}),
   }
 }
 

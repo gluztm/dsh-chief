@@ -3,7 +3,7 @@
  *
  * 【核心职责】
  *   承载主面板任务增删改查（`refresh` / `act`）、跨窗口交接（`loadTargets` / `loadHandoff` / `transfer`）、
- *   记忆问答、红线规则（Bounds）与物理驻墙（Guard Walls）增删合并，以及任务编辑器预填动作。
+ *   记忆问答、红线规则与自定义拦截规则增删合并，以及任务编辑器预填动作。
  *
  * 【边界约定】
  *   - 仅依赖 `./transport.js`，不导入上层 `archives.js` 或 `chief.js`。
@@ -408,7 +408,7 @@ export async function saveGuardWallApi({ title, ruleType = 'forbid_cmd', pattern
     ? patterns
     : (cleanPattern ? cleanPattern.split(/[\r\n,;，；]+/).map(s => s.trim()).filter(Boolean) : [])
   if (!cleanTitle || !patList.length) {
-    patch({ error: '请给物理驻墙起个名字，并至少写 1 条拦截条件' })
+    patch({ error: '请给拦截规则起个名字，并至少写 1 条拦截条件' })
     return null
   }
   const res = await act({
@@ -428,7 +428,7 @@ export async function saveGuardWallApi({ title, ruleType = 'forbid_cmd', pattern
       wallFormOpen: false,
       wallDraftTitle: '',
       wallDraftPattern: '',
-      notice: `🧱 已启用物理驻墙「${cleanTitle}」（${scope === 'workspace' ? '只管当前项目' : '🌐 所有项目通用'}）`,
+      notice: `🚧 已启用自定义拦截规则「${cleanTitle}」（${scope === 'workspace' ? '只管当前项目' : '🌐 所有项目通用'}）`,
     })
   }
   return res
@@ -438,10 +438,39 @@ export async function setGuardWallScopeApi(wallId, scope) {
   if (!wallId || !scope) return null
   const res = await act({ action: 'wall.setScope', wallId, scope })
   if (res && res.ok) {
-    const labelMap = { global: '🌐 所有项目通用', workspace: '📁 只管当前项目', paused: '⏸ 暂停使用' }
-    patch({ notice: `🧱 物理驻墙范围已改为：${labelMap[scope] || scope}` })
+    const labelMap = { global: '🌐 所有项目通用', workspace: '📁 只管当前项目', paused: '⏸ 已暂停' }
+    patch({ notice: `🚧 自定义拦截规则状态已改为：${labelMap[scope] || scope}` })
   }
   return res
+}
+
+export async function setAllGuardWallsScopeApi(scope, targetIds = null) {
+  const walls = Array.isArray(store.guardWalls) ? store.guardWalls : []
+  const allowedIds = Array.isArray(targetIds) && targetIds.length > 0 ? new Set(targetIds) : null
+  const targets = walls.filter(w => {
+    if (!w || !w.id) return false
+    if (allowedIds && !allowedIds.has(w.id)) return false
+    if (scope === 'paused') return w.scope !== 'paused'
+    return w.scope === 'paused'
+  })
+  if (!targets.length) return { ok: true, count: 0 }
+  let count = 0
+  let lastRes = null
+  for (const w of targets) {
+    const res = await act({ action: 'wall.setScope', wallId: w.id, scope })
+    if (res && res.ok) {
+      count += 1
+      lastRes = res
+    }
+  }
+  if (count > 0) {
+    patch({
+      notice: scope === 'paused'
+        ? `⏸ 已暂停 ${count} 条自定义拦截规则`
+        : `🚧 已恢复 ${count} 条自定义拦截规则`,
+    })
+  }
+  return { ok: count > 0, count, lastRes }
 }
 
 export async function removeGuardWallApi(wallId) {
@@ -452,7 +481,7 @@ export async function removeGuardWallApi(wallId) {
     patch({
       wallSelectedIds: curSel.filter(id => id !== wallId),
       wallMergeError: '',
-      notice: '🧱 已删除这条物理驻墙',
+      notice: '🚧 已删除这条自定义拦截规则',
     })
   }
   return res
@@ -471,21 +500,21 @@ export async function mergeGuardWallsApi({ wallIds = [], autoGroup = false } = {
   if (!autoGroup) {
     const cleanIds = [...new Set((Array.isArray(wallIds) ? wallIds : []).filter(id => walls.some(w => w && w.id === id)))]
     if (cleanIds.length < 2) {
-      const msg = '请至少选 2 条同类型的物理驻墙再合并'
+      const msg = '请至少选 2 条同类型的自定义拦截规则再合并'
       patch({ wallMergeError: msg, error: msg })
       return { ok: false, code: 'MERGE_MIN_TWO', error: msg }
     }
     const picked = walls.filter(w => cleanIds.includes(w.id))
     const ruleTypes = new Set(picked.map(w => w.ruleType))
     if (ruleTypes.size > 1) {
-      const msg = '⛔ 不同类型的物理驻墙不能混在一起合并，比如「禁碰路径」只能和「禁碰路径」合。请取消选错的那条。'
+      const msg = '⛔ 不同类型的拦截规则不能混在一起合并，比如「禁碰路径」只能和「禁碰路径」合。请取消选错的那条。'
       patch({ wallMergeError: msg, error: msg })
       return { ok: false, code: 'CROSS_TYPE_MERGE_FORBIDDEN', error: msg }
     }
   }
   patch({ wallMergeError: '', error: '' })
   return await withChiefWorkFx(
-    { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '正在合并同类物理驻墙…', minMs: 520 },
+    { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '正在合并同类拦截规则…', minMs: 520 },
     async () => {
       const res = await act({
         action: 'wall.merge',
@@ -500,7 +529,7 @@ export async function mergeGuardWallsApi({ wallIds = [], autoGroup = false } = {
       patch({
         wallSelectedIds: [],
         wallMergeError: '',
-        notice: `🧱 已把 ${res.mergedCount || 2} 条同类物理驻墙合并成 ${res.createdCount || 1} 条`,
+        notice: `🚧 已把 ${res.mergedCount || 2} 条同类拦截规则合并成 ${res.createdCount || 1} 条`,
       })
       return res
     },

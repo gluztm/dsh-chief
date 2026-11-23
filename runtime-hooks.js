@@ -264,11 +264,11 @@ export function createRuntimeHooks(deps) {
               outcome: 'blocked',
               by: 'auto-continue',
             })
-            return { allowed: false, skipped: 'guard-wall-blocked', logMessage: `安全护栏阻断自动续跑：${safetyGuard.reason}` }
+            return { allowed: false, skipped: 'guard-wall-blocked', logMessage: `安全防护阻断自动续跑：${safetyGuard.reason}` }
           }
           const activeWalls = listGuardWalls(cwdForCheck)
           if (detail && Array.isArray(activeWalls) && activeWalls.some(w => w && w.enabled && w.mode === 'deny' && Array.isArray(w.patterns) && w.patterns.some(p => p && detail.includes(p)))) {
-            return { allowed: false, skipped: 'guard-wall-blocked', logMessage: '触发动态物理墙保护红线，已暂停自动续跑等待人工确认' }
+            return { allowed: false, skipped: 'guard-wall-blocked', logMessage: '触发自定义拦截规则，已暂停自动续跑等待人工确认' }
           }
 
           const hasAck = hasValidChiefRiskAck(ws)
@@ -316,7 +316,7 @@ export function createRuntimeHooks(deps) {
               category: 'main_workflow',
               operationLabel: '断线自动续跑主对话',
               targetLabel: '主对话 (@lead)',
-              reason: `检测到会话中断或未收口（${trigger}），已核验安全边界与物理墙，L2 参谋模式需您允许后唤醒续跑`,
+              reason: `检测到会话中断或未收口（${trigger}），已核验安全防护与拦截规则，L2 参谋模式需您允许后唤醒续跑`,
               impact: '点击「允许本次操作」后将发出 [EXECUTION_REQUEST] 信封唤醒主对话继续推进',
               preview: detail ? String(detail).slice(0, 220) : `触发原因：${trigger}`,
               dedupeKey: `autocont:${sessionId}:${trigger}:${Math.floor(Date.now() / 15_000)}`,
@@ -352,7 +352,7 @@ export function createRuntimeHooks(deps) {
               status: 'running',
               originalText: `[L3 断线自动续跑 · ${trigger}] ${detail ? String(detail).slice(0, 160) : '异常中断自动恢复'}`,
               forcedTarget: 'lead',
-              lastReceipt: '已过边界与物理墙核验，准备下发 [EXECUTION_REQUEST]',
+              lastReceipt: '已过安全防护与拦截规则核验，准备下发 [EXECUTION_REQUEST]',
             })
             if (entry) l3TaskId = entry.taskId || entry.id
           })
@@ -391,7 +391,12 @@ export function createRuntimeHooks(deps) {
     }, 'dsh-chief: auto-continue cleanup')
 
     ctx.inject(['llm'], llmCtx => {
-      const ownLlm = (llmCtx && llmCtx.llm) || (llmCtx && llmCtx.get ? llmCtx.get('llm') : null)
+      let ownLlm = null
+      try {
+        ownLlm = (llmCtx && typeof llmCtx.get === 'function' ? llmCtx.get('llm') : null)
+          || (llmCtx && llmCtx.llm)
+          || null
+      } catch {}
       if (ownLlm) deps.hostState.activeLlm = ownLlm
       llmCtx.effect(() => () => {
         if (deps.hostState.activeLlm === ownLlm) deps.hostState.activeLlm = null
@@ -416,7 +421,10 @@ export function createRuntimeHooks(deps) {
     }), 'dsh-chief: chief pre-step delta')
 
     ctx.inject(['systemPrompt'], spCtx => {
-      const systemPrompt = spCtx.get ? spCtx.get('systemPrompt') : undefined
+      let systemPrompt
+      try {
+        systemPrompt = spCtx && typeof spCtx.get === 'function' ? spCtx.get('systemPrompt') : undefined
+      } catch {}
       if (!systemPrompt || typeof systemPrompt.section !== 'function') return
       // Always on, and always FIRST. A model that only meets the chief after
       // ten thousand tokens of other context writes for a while and forgets it,
@@ -425,14 +433,23 @@ export function createRuntimeHooks(deps) {
       // first turn; -10000 sorts ahead of every built-in section (they use small
       // positive orders, and equal orders fall back to name order), and the host
       // only requires the order to be a finite number.
-      const fallbackAgentId = spCtx && spCtx.agent && spCtx.agent.id ? String(spCtx.agent.id)
-        : (spCtx && spCtx.get && spCtx.get('agent') && spCtx.get('agent').id ? String(spCtx.get('agent').id) : '')
+      const readScopedAgent = (c) => {
+        try {
+          if (c && typeof c.get === 'function') return c.get('agent') || null
+        } catch {}
+        return null
+      }
+      const fallbackAgent = readScopedAgent(spCtx)
+      const fallbackAgentId = fallbackAgent && fallbackAgent.id ? String(fallbackAgent.id) : ''
       spCtx.effect(() => systemPrompt.section({
         name: 'dsh-chief',
         order: -10000,
         text: (promptCtx) => {
-          const liveAgent = (promptCtx && promptCtx.agent) || (spCtx && spCtx.agent) || null
-          const curId = liveAgent && liveAgent.id ? String(liveAgent.id) : fallbackAgentId
+          const liveAgent = (promptCtx && promptCtx.agent) || readScopedAgent(spCtx) || null
+          const promptSessionId = promptCtx && promptCtx.session && promptCtx.session.id
+            ? String(promptCtx.session.id)
+            : ''
+          const curId = (liveAgent && liveAgent.id ? String(liveAgent.id) : '') || promptSessionId || fallbackAgentId
           const rootId = resolveRootSessionId(curId, liveAgent) || curId
           if (!isSessionActive(rootId, liveAgent)) return ''
           let teamTasks
@@ -669,7 +686,7 @@ export function createRuntimeHooks(deps) {
         const id = String(session.id)
         const rootIdForAct = resolveRootSessionId(id) || id
         if (!isSessionActive(rootIdForAct)) return
-        if (event.type === 'turn/start' || event.type === 'message/user' || event.type === 'tool/call' || event.type === 'turn/end') {
+        if (event.type === 'turn/start' || event.type === 'user/message' || event.type === 'message/user' || event.type === 'tool/call' || event.type === 'turn/end') {
           touchWorkspaceActivity(rootIdForAct)
         }
         if (event.type === 'turn/start') {
@@ -933,13 +950,16 @@ export function createRuntimeHooks(deps) {
               const effCfg = resolveWorkspaceConfig(st, rootId)
               const ident = resolveAgentIdentity(runtime, sid, caller)
               const actorName = (ident && ident.self) || 'lead'
+              const isCustomRuleBlock = Boolean(verdict.wallId)
+              const sourceIconTitle = isCustomRuleBlock ? '🚧 自定义拦截规则已拦截' : '🛡️ 安全拦截已拦截'
+              const sourceLabel = isCustomRuleBlock ? '自定义拦截规则' : '安全拦截'
               const targetPreview = String(
                 (exec.arguments && (exec.arguments.path || exec.arguments.file_path || exec.arguments.command || exec.arguments.cmd))
                 || exec.name,
               ).slice(0, 120)
               appendChiefAuditLog(rootId, {
                 mode: effCfg.permissionMode || 'advisor',
-                stage: verdict.stage || 'guard_wall',
+                stage: verdict.stage || (isCustomRuleBlock ? 'guard_wall' : 'safety_guard'),
                 rule: verdict.rule || 'pre_execute_denied',
                 decision: 'blocked',
                 operation: String(exec.name),
@@ -949,9 +969,9 @@ export function createRuntimeHooks(deps) {
                 by: actorName,
               })
               recordWorkspaceAlertEvent(rootId, {
-                kind: 'guard_wall_blocked',
+                kind: isCustomRuleBlock ? 'guard_wall_blocked' : 'safety_guard_blocked',
                 level: 'danger',
-                title: '🧱 物理驻墙已拦截越界调用',
+                title: sourceIconTitle,
                 body: `@${actorName} 调用 ${exec.name}：${String(verdict.reason || '').slice(0, 140)}`,
                 dedupeKey: `wall:${rootId}:${exec.name}:${verdict.wallId || verdict.rule || ''}`,
               })
@@ -959,25 +979,23 @@ export function createRuntimeHooks(deps) {
                 const bFile = rootId !== 'global' ? boardFileFor(rootId) : boardFile()
                 withBoardLock(bFile, () => {
                   const b = loadBoard(bFile)
-                  pushLog(b, `🧱 事前物理防线已拦截 @${actorName} 调用 ${exec.name}：${String(verdict.reason || '').slice(0, 110)}`, 'guard', sid || rootId)
+                  pushLog(b, `${sourceIconTitle} @${actorName} 调用 ${exec.name}：${String(verdict.reason || '').slice(0, 110)}`, 'guard', sid || rootId)
                   saveBoard(b, bFile)
                 })
               } catch {}
-              if (effCfg.tacticalModes && effCfg.tacticalModes.redlineSentinel) {
-                mutateChiefState((s) => {
-                  if (!s.workspaces || !s.workspaces[rootId]) return
-                  const ws = s.workspaces[rootId]
-                  if (!Array.isArray(ws.chat)) ws.chat = []
-                  ws.chat.push({
-                    id: 'chat-' + Date.now().toString(36),
-                    role: 'chief',
-                    kind: 'receipt',
-                    text: `- 【🧱 红线哨兵 · 事前物理拦截】已当场阻断 \`@${actorName}\` 的越界调用 \`${exec.name}\`\n- 【拦截原因】${verdict.reason}`,
-                    actions: [verdict.badge || '🧱 事前物理拦截'],
-                    at: Date.now(),
-                  })
+              mutateChiefState((s) => {
+                if (!s.workspaces || !s.workspaces[rootId]) return
+                const ws = s.workspaces[rootId]
+                if (!Array.isArray(ws.chat)) ws.chat = []
+                ws.chat.push({
+                  id: 'chat-' + Date.now().toString(36),
+                  role: 'chief',
+                  kind: 'receipt',
+                  text: `- 【${sourceIconTitle}】已当场阻断 \`@${actorName}\` 的调用 \`${exec.name}\`\n- 【拦截原因】${verdict.reason}`,
+                  actions: [sourceIconTitle],
+                  at: Date.now(),
                 })
-              }
+              })
               if (effCfg && (effCfg.runMode === 'patrol' || effCfg.runMode === 'managed') && !effCfg.stopped) {
                 scheduleChiefTurnReview(makeChiefDeps(runtime), {
                   agent: caller,
@@ -985,12 +1003,12 @@ export function createRuntimeHooks(deps) {
                   abnormalTrigger: 'guard_wall_blocked',
                 })
               }
-              const escalationCue = verdict.wallId
-                ? `（严禁尝试命令或路径变形绕过物理墙 [${verdict.wallId}]；仅当你确认无任何合法替代方案可继续任务时，可调用 chief_board({ action: "chief.request", subject: "撞墙阻断上报", text: "说明被拦截墙(${verdict.wallId})、为何无法绕过及当前卡点" }) 上报参谋长评估）`
+              const escalationCue = isCustomRuleBlock
+                ? `（严禁尝试命令或路径变形绕过自定义拦截规则 [${verdict.wallId}]；仅当你确认无任何合法替代方案可继续任务时，可调用 chief_board({ action: "chief.request", subject: "撞墙阻断上报", text: "说明被拦截规则(${verdict.wallId})、为何无法绕过及当前卡点" }) 上报参谋长评估）`
                 : ''
               return {
                 kind: 'deny',
-                reason: `[DSH 安全卫兵事前物理拦截] ${verdict.reason}${escalationCue}`,
+                reason: `[DSH ${sourceLabel}已拦截] ${verdict.reason}${escalationCue}`,
                 info: { stage: verdict.stage, rule: verdict.rule, wallId: verdict.wallId || '' },
               }
             } else if (verdict && verdict.decision === 'ask') {
@@ -1015,7 +1033,7 @@ export function createRuntimeHooks(deps) {
               })
               return {
                 kind: 'ask',
-                reason: `[DSH 物理驻墙审批] ${verdict.reason}`,
+                reason: `[DSH 自定义拦截规则审批] ${verdict.reason}`,
                 displayReason: verdict.displayReason || verdict.reason,
               }
             }
@@ -1067,9 +1085,13 @@ export function createRuntimeHooks(deps) {
     try {
       ctx.inject(['subprocess'], (subProcCtx) => {
         const rt = deps.hostState.activeRuntime
-        deps.hostState.activeSubprocess = (subProcCtx && subProcCtx.subprocess)
-          || (rt && typeof rt.get === 'function' ? rt.get('subprocess') : null)
-          || null
+        let subProc = null
+        try {
+          subProc = (subProcCtx && typeof subProcCtx.get === 'function' ? subProcCtx.get('subprocess') : null)
+            || (rt && typeof rt.get === 'function' ? rt.get('subprocess') : null)
+            || null
+        } catch {}
+        deps.hostState.activeSubprocess = subProc
       })
     } catch {}
 

@@ -93,8 +93,13 @@ function localizedAlertCopy(ev) {
       }
     case 'guard_wall_blocked':
       return {
-        title: bi('🧱 物理驻墙已拦下操作', '🧱 Guard Wall Blocked Call'),
-        body: body || bi('触发了执行前的物理驻墙（拦截规则），等你处理。', 'Stopped by your pre-run guard wall rules. Please check.'),
+        title: bi('🚧 自定义拦截规则已拦下操作', '🚧 Custom Block Rule Triggered'),
+        body: body || bi('命中你在边界页添加的自定义拦截规则，等你处理。', 'Stopped by your custom block rules. Please check.'),
+      }
+    case 'safety_guard_blocked':
+      return {
+        title: bi('🛡️ 安全拦截已拦下操作', '🛡️ Safety Block Triggered'),
+        body: body || bi('拦住了危险操作（如删文件、改项目外文件或读密码），等你查看。', 'Blocked a risky action (e.g., file delete, outside edit, or secret read).'),
       }
     case 'auto_continue_rescue':
       return {
@@ -113,7 +118,7 @@ function localizedAlertCopy(ev) {
       }
     case 'hazard_halt':
       return {
-        title: bi('🚨 发现高风险，已紧急暂停', '🚨 High Risk Found, Paused'),
+        title: bi('🚨 高危操作急停：已自动暂停', '🚨 High-Risk Halt: Paused'),
         body: body || bi('遇到高风险操作或反复卡住，已先帮你停下。', 'Paused after spotting a risky action or repeated block.'),
       }
     default:

@@ -178,8 +178,8 @@ export function runModeMeta(key) {
         label: bi('⏸ 关停', '⏸ Off'),
         shortLabel: bi('⏸ 关停', '⏸ Off'),
         hint: bi(
-          '后台不调用模型，只在你提问或点按钮时回复。不会自动巡检、梦境漫游或续跑。',
-          'No background model calls; responds only when you ask or click. No auto patrol, Dream Roam, or auto-resume.',
+          '平时完全不动不花钱，只有你主动问它或点按钮时才干活。',
+          'Completely quiet while idle; responds only when you ask or click.',
         ),
       }
     case 'patrol':
@@ -188,8 +188,8 @@ export function runModeMeta(key) {
         label: bi('🛡 巡检', '🛡 Patrol'),
         shortLabel: bi('🛡 巡检', '🛡 Patrol'),
         hint: bi(
-          '平时不耗后台额度，只在被拦截、报错或中断时唤醒。支持自动续跑。',
-          'No background calls while idle; wakes only on blocks, errors, or drops. Supports auto-resume.',
+          '平时不动不花钱，只有在出错、断线或被安全拦截时才出来帮忙。',
+          'No background calls while idle; wakes only on errors, drops, or safety blocks.',
         ),
       }
     case 'managed':
@@ -198,8 +198,8 @@ export function runModeMeta(key) {
         label: bi('🤖 托管', '🤖 Managed'),
         shortLabel: bi('🤖 托管', '🤖 Managed'),
         hint: bi(
-          '持续在后台盯进度，闲时用 🌙 梦境漫游整理档案。闲置 15 分钟满足条件后自动休眠，带用量上限。',
-          'Keeps watching progress and tidies archives with 🌙 Dream Roam. Auto-sleeps after 15m idle when conditions are met, with a usage cap.',
+          '一直在后台盯着把事做完，有空时顺手整理资料；闲置 15 分钟自动停，带费用上限。',
+          'Keeps watching progress and tidies archives in idle time. Auto-sleeps after 15m idle, with a usage cap.',
         ),
       }
     default:
@@ -267,9 +267,9 @@ export function effortMeta(key) {
 
 export function boundListLabel(field) {
   switch (field) {
-    case 'allowed': return bi('必做事项', 'Must Do')
-    case 'forbidden': return bi('禁止红线', 'Forbidden')
-    case 'notes': return bi('注意事项', 'Watchouts')
+    case 'allowed': return bi('必须做', 'Must Do')
+    case 'forbidden': return bi('不要做', 'Don\'t Do')
+    case 'notes': return bi('注意', 'Watchouts')
     default: return String(field || '')
   }
 }
@@ -287,8 +287,8 @@ export function presetList() {
       id: 'collab',
       icon: '🤝',
       title: bi('日常协作', 'Co-Pilot'),
-      tag: bi('L2 · 巡检 · 红线哨兵', 'L2 · Patrol · Sentinel'),
-      desc: bi('平时不在后台调用模型，报错或撞墙时才介入；重要改动逐项弹窗问你。', 'No background model calls while idle; steps in on errors or blocked walls and asks before important changes.'),
+      tag: bi('L2 · 巡检 · 改前先问你', 'L2 · Patrol · Ask First'),
+      desc: bi('平时不动不花钱，出错或被拦时才出来帮忙；重要改动会先弹窗问你。', 'No background calls while idle; steps in on errors or blocks and asks before important edits.'),
     },
     {
       id: 'away',

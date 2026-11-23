@@ -1113,7 +1113,7 @@ try {
       id: 'alert-w13-fresh-' + nowMs,
       kind: 'guard_wall_blocked',
       level: 'warn',
-      title: '🧱 物理驻墙已拦截',
+      title: '🚧 自定义拦截规则已拦截',
       at: nowMs,
       body: 'Pre-tool wall intercepted rm -rf',
     }
@@ -1135,7 +1135,7 @@ try {
     assert.equal(nextRes.initialized, false)
     assert.equal(nextRes.fired.length, 1, 'W13 only fresh unseen alert inside recency window must fire')
     assert.equal(sentNotifs.length, 1)
-    assert.ok(sentNotifs[0].title.includes('物理驻墙'), 'W13 desktop notification title must reflect localized guard wall copy')
+    assert.ok(sentNotifs[0].title.includes('自定义拦截规则'), 'W13 desktop notification title must reflect localized custom block rule copy')
     assert.ok(oscCreated >= 2, 'W13 optional chime must trigger WebAudio 2-note oscillator')
 
     i18nW13.setRuntimeUiLang('en')
@@ -1143,9 +1143,9 @@ try {
       id: 'alert-w13-en-' + nowMs,
       kind: 'guard_wall_blocked',
       level: 'warn',
-      title: '🧱 Guard Wall Blocked Call',
+      title: '🚧 Custom Block Rule Triggered',
       at: nowMs + 10,
-      body: 'Pre-tool wall intercepted rm -rf',
+      body: 'Pre-tool rule intercepted rm -rf',
     }
     const nextEnRes = notifyMod.processIncomingAlertEvents([...wsW13.alertEvents, freshAlert, staleAlert, freshAlertEn], {
       notifyEnabled: true,
@@ -1155,7 +1155,7 @@ try {
     })
     assert.equal(nextEnRes.fired.length, 1, 'W13 incremental unseen English alert must fire once')
     assert.equal(sentNotifs.length, 2)
-    assert.ok(sentNotifs[1].title.includes('Guard Wall'), 'W13 English notification title must reflect localized guard wall copy')
+    assert.ok(sentNotifs[1].title.includes('Custom Block Rule'), 'W13 English notification title must reflect localized custom block rule copy')
   } finally {
     i18nW13.setRuntimeUiLang('auto')
     if (hadWinDesc) Object.defineProperty(globalThis, 'window', hadWinDesc)

@@ -844,7 +844,7 @@ try {
     'groupChatHistoryTurnsNewestFirst',
     'dnb-wall-box',
     'data-tone',
-    '物理驻墙',
+    '自定义拦截规则',
     'wall.merge',
     'CROSS_TYPE_MERGE_FORBIDDEN',
     'dnb-chief-fx-stage',

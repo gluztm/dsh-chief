@@ -254,10 +254,10 @@ export function classifyChiefWorkFx(text, quickTag = '') {
     return { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游，帮你整理档案…' }
   }
   if (quickTag === 'craft_wall') {
-    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在写物理驻墙规则…' }
+    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在生成自定义拦截规则…' }
   }
   if (quickTag === 'extract_bounds') {
-    return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在整理边界规则…' }
+    return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在整理 AI 规矩…' }
   }
   const clean = String(text || '').trim()
   const hits = []
@@ -270,11 +270,11 @@ export function classifyChiefWorkFx(text, quickTag = '') {
   if (/置顶桌面|认知桌面|递送.*档案|拉阅.*钩子|archiveOps/i.test(clean)) {
     hits.push({ tone: 'archive', tab: 'archive', label: '📌 参谋长正在整理认知桌面资料…' })
   }
-  if (/手搓|驻墙|筑墙|物理墙|guard_?wall|wallProposals/i.test(clean)) {
-    hits.push({ tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在写物理驻墙规则…' })
+  if (/手搓|驻墙|筑墙|物理墙|拦截规则|guard_?wall|wallProposals/i.test(clean)) {
+    hits.push({ tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在生成自定义拦截规则…' })
   }
-  if (/提炼.{0,4}边界|工作边界|红线|必做项|注意事项|boundProposals/i.test(clean)) {
-    hits.push({ tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在整理红线规则…' })
+  if (/提炼.{0,4}(边界|规矩)|工作边界|给 AI 的规矩|红线|必做项|注意事项|boundProposals/i.test(clean)) {
+    hits.push({ tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在整理 AI 规矩…' })
   }
   if (/整理档案|档案柜|卷宗|归档|收纳入柜|桌面档案|抽屉|archive/i.test(clean)) {
     hits.push({ tone: 'archive', tab: 'archive', label: '参谋长正在整理档案…' })
@@ -295,7 +295,7 @@ export function classifyChiefWorkFx(text, quickTag = '') {
       tone: 'neon',
       tab: allBoundaries ? 'boundaries' : (store.tab || 'chief'),
       ...(allBoundaries ? { boundSubTab: 'rules' } : {}),
-      label: allBoundaries ? '参谋长正在整理规则和物理驻墙…' : '参谋长正在批量处理中…',
+      label: allBoundaries ? '参谋长正在整理 AI 规矩和拦截规则…' : '参谋长正在批量处理中…',
     }
   }
   return {
@@ -312,13 +312,13 @@ export function resolveChiefSuggestionWorkFx(suggestions = []) {
   }
   const kinds = new Set(list.map(s => String(s.kind || '').trim()))
   if (kinds.size === 1 && kinds.has('guard_wall')) {
-    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在启用物理驻墙…' }
+    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在启用自定义拦截规则…' }
   }
   if (kinds.size === 1 && kinds.has('wall_removal')) {
-    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '⚠️ 正在按你的确认调整物理驻墙…' }
+    return { tone: 'wall', tab: 'boundaries', boundSubTab: 'rules', label: '⚠️ 正在按你的确认调整自定义拦截规则…' }
   }
   if (kinds.size === 1 && kinds.has('bound')) {
-    return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在添加边界规则…' }
+    return { tone: 'bounds', tab: 'boundaries', boundSubTab: 'rules', label: '参谋长正在添加 AI 规矩…' }
   }
   if (kinds.size === 1 && kinds.has('archive_op')) {
     return { tone: 'archive', tab: 'archive', label: '📌 参谋长正在整理认知桌面资料…' }
@@ -331,7 +331,7 @@ export function resolveChiefSuggestionWorkFx(suggestions = []) {
     tone: 'neon',
     tab: allBoundsPage ? 'boundaries' : (store.tab || 'chief'),
     ...(allBoundsPage ? { boundSubTab: 'rules' } : {}),
-    label: allBoundsPage ? '参谋长正在保存规则和物理驻墙…' : '🏁 参谋长正在依次执行建议…',
+    label: allBoundsPage ? '参谋长正在保存 AI 规矩和拦截规则…' : '🏁 参谋长正在依次执行建议…',
   }
 }
 

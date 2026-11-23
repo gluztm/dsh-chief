@@ -918,22 +918,37 @@ export function createSubagentRuntime(deps) {
     if (!targetSid) throw new Error('missing target session id for compaction')
     const agents = rt && typeof rt.get === 'function' ? rt.get('agents') : null
     let ag = agents && typeof agents.get === 'function' ? agents.get(targetSid) : null
+    let resolveErrDetail = ''
     if (!ag) {
       const ctrl = rt && typeof rt.get === 'function' ? rt.get('sessionController') : null
       if (ctrl && typeof ctrl.resolveAgent === 'function') {
         try {
           const resolved = await ctrl.resolveAgent(targetSid)
-          if (resolved && resolved.agent) ag = resolved.agent
-        } catch {}
+          if (resolved && resolved.agent) {
+            ag = resolved.agent
+          } else if (resolved && resolved.error) {
+            resolveErrDetail = String(resolved.error.message || resolved.error.code || resolved.error)
+          }
+        } catch (err) {
+          resolveErrDetail = String((err && err.message) || err || '')
+        }
       }
     }
-    if (!ag) throw new Error('target session agent not found for compaction')
+    if (!ag) {
+      throw new Error(resolveErrDetail
+        ? `target session agent not found for compaction (${resolveErrDetail})`
+        : 'target session agent not found for compaction')
+    }
     if (ag.status === 'running') throw new Error('agent is busy running; refusing compaction')
 
     const signal = AbortSignal.timeout(60_000)
     const effectiveCmdId = cmdId || ('chief-compact-' + Date.now().toString(36))
 
-    const compSvc = rt && typeof rt.get === 'function' ? rt.get('compaction') : null
+    const presetSvc = rt && typeof rt.get === 'function' ? rt.get('agentPresets') : null
+    const scopedCompSvc = presetSvc && typeof presetSvc.serviceFor === 'function'
+      ? safe(() => presetSvc.serviceFor(ag, 'compaction'), null)
+      : null
+    const compSvc = scopedCompSvc || (rt && typeof rt.get === 'function' ? rt.get('compaction') : null)
     if (compSvc && typeof compSvc.compactNow === 'function') {
       const directRes = await compSvc.compactNow(ag, signal, effectiveCmdId)
       if (directRes === null) {
@@ -1269,9 +1284,21 @@ export function createSubagentRuntime(deps) {
           text: textBody,
           mode: op === 'followup' ? 'followup' : 'steer',
         })
+        if (deliv && !deliv.deliveredPhysical && deliv.deliveryError) {
+          return {
+            ...deliv,
+            ok: false,
+            error: deliv.deliveryError,
+            badge: '⚠️ 主代理未送达',
+          }
+        }
         return {
           ...deliv,
-          badge: deliv.ok ? `🎯 已${op === 'followup' ? '递话' : '插话'}主代理` : '⚠️ 调控主代理失败',
+          badge: deliv.ok
+            ? (deliv.deliveredPhysical
+                ? `🎯 已${op === 'followup' ? '递话' : '插话'}主代理`
+                : '⏳ 已入信箱待送达')
+            : '⚠️ 调控主代理失败',
         }
       },
       async triggerAutoContinueNow(sid, trigger, opts = {}) {

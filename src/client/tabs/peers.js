@@ -1183,7 +1183,7 @@ export function PeersTab({ view }) {
                         'data-provider': hItem.provider,
                         'data-running': hItem.running ? '1' : '0',
                         draggable: true,
-                        title: `${hItem.label || hItem.provider} — ${roleText}\n${bi('独立进程 · 派单自动附带当前红线与物理墙', 'Out-of-process · redlines & walls auto-prepended')}${hItem.binaryPath ? '\n' + hItem.binaryPath : ''}`,
+                        title: `${hItem.label || hItem.provider} — ${roleText}\n${bi('独立进程 · 派单自动附带给 AI 的规矩与自定义拦截规则', 'Out-of-process · rules for AI & custom block rules auto-prepended')}${hItem.binaryPath ? '\n' + hItem.binaryPath : ''}`,
                         onDragStart: e => beginDragItem(e, { fromZone: 'inside', kind: 'harness', id: hItem.provider }),
                         onDragEnd: endDragItem,
                       },
@@ -1338,7 +1338,7 @@ export function PeersTab({ view }) {
                 className: 'dnb-input',
                 style: { flex: 1, height: 28, fontSize: 11.5 },
                 value: dispatchText,
-                placeholder: bi(`向 @${dispatchTarget} 下达任务（自动入队锁定并附带红线与物理墙）…`, `Task for @${dispatchTarget} (auto-enrolls, locks & prepends redlines)…`),
+                placeholder: bi(`向 @${dispatchTarget} 下达任务（自动入队锁定并附带规矩与拦截规则）…`, `Task for @${dispatchTarget} (auto-enrolls, locks & prepends rules)…`),
                 onChange: e => setDispatchText(e.target.value),
               }),
               h('button', {

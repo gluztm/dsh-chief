@@ -136,7 +136,7 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
   if (decision === 'approve' && found.kind === 'guard_wall') {
     const cwdNow = resolveSessionWorkspaceCwd(deps, rootId)
     const spec = found.wallSpec && typeof found.wallSpec === 'object' ? found.wallSpec : {
-      title: String(found.title || '参谋长手搓物理墙').replace(/^🧱\s*驻防物理墙[:：]\s*/, ''),
+      title: String(found.title || '参谋长生成的自定义拦截规则').replace(/^(?:🧱|🚧)\s*(?:驻防物理墙|新增拦截规则)[:：]\s*/, ''),
       scope: found.pinGlobal === false ? 'workspace' : 'global',
       ruleType: 'forbid_path',
       patterns: String(found.draftText || '').split(/[,，;\n]+/).map(s => s.trim()).filter(Boolean),
@@ -151,7 +151,7 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
       humanConfirmToken: HUMAN_BOUNDS_CONFIRM_TOKEN,
     })
     if (!wallRes || !wallRes.ok) {
-      return { ok: false, error: (wallRes && wallRes.error) || '驻防物理墙落锁失败' }
+      return { ok: false, error: (wallRes && wallRes.error) || '自定义拦截规则启用失败' }
     }
     mutateChiefState((state) => {
       const ws = ensureWorkspace(state, rootId)
@@ -160,8 +160,8 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
           id: nextId('chat'),
           role: 'chief',
           kind: 'receipt',
-          text: `- 【🧱 物理驻墙已确认落锁】${wallRes.wall.title}\n- 【拦截范围】${wallRes.wall.scope === 'workspace' ? '仅绑定当前工程' : '🌐 全局随身常驻'} | 规则：\`${wallRes.wall.patterns.join(', ')}\``,
-          actions: ['确认驻防物理墙'],
+          text: `- 【🚧 自定义拦截规则已启用】${wallRes.wall.title}\n- 【拦截范围】${wallRes.wall.scope === 'workspace' ? '仅绑定当前工程' : '🌐 全局随身常驻'} | 规则：\`${wallRes.wall.patterns.join(', ')}\``,
+          actions: ['启用自定义拦截规则'],
           at: Date.now(),
         })
         if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
@@ -171,7 +171,7 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
         stage: 'guard_wall',
         rule: 'guard_wall_approved',
         decision: 'executed',
-        operation: '落锁物理驻墙',
+        operation: '启用自定义拦截规则',
         target: wallRes.wall.title,
         reason: wallRes.wall.patterns.join(', '),
         outcome: 'ok',
@@ -192,7 +192,7 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
     const targetWallId = String(spec.wallId || '').trim()
     const opType = spec.action === 'remove' ? 'remove' : 'set_scope'
     if (!targetWallId) {
-      return { ok: false, error: '拆墙申请缺少有效的目标物理驻墙 ID (wallId)' }
+      return { ok: false, error: '关闭规则申请缺少有效的目标规则 ID (wallId)' }
     }
     const wallRes = mutateGuardWalls({
       op: opType,
@@ -203,10 +203,10 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
       humanConfirmToken: HUMAN_BOUNDS_CONFIRM_TOKEN,
     })
     if (!wallRes || !wallRes.ok) {
-      return { ok: false, error: (wallRes && wallRes.error) || '按人工批复调整物理驻墙失败' }
+      return { ok: false, error: (wallRes && wallRes.error) || '按人工批复调整自定义拦截规则失败' }
     }
     const wallTitle = spec.wallTitle || (wallRes.wall && wallRes.wall.title) || targetWallId
-    const actVerb = opType === 'remove' ? '拆除移除' : '暂挂休眠'
+    const actVerb = opType === 'remove' ? '删除移除' : '暂停休眠'
     mutateChiefState((state) => {
       const ws = ensureWorkspace(state, rootId)
       if (!_suppressChatReceipt) {
@@ -214,8 +214,8 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
           id: nextId('chat'),
           role: 'chief',
           kind: 'receipt',
-          text: `- 【🧱 已按人工批示${actVerb}物理驻墙】${wallTitle} (\`${targetWallId}\`)\n- 【代理上报与拆墙依据】${clamp(spec.blockerEvidence || found.reason || '主/子代理撞墙无法绕过，参谋呈报经人类批准后执行', 180)}`,
-          actions: [`已${actVerb}驻墙`],
+          text: `- 【🚧 已按人工批示${actVerb}自定义拦截规则】${wallTitle} (\`${targetWallId}\`)\n- 【代理上报与调整依据】${clamp(spec.blockerEvidence || found.reason || '主/子代理命中拦截无法绕过，参谋呈报经人类批准后执行', 180)}`,
+          actions: [`已${actVerb}拦截规则`],
           at: Date.now(),
         })
         if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
@@ -225,9 +225,9 @@ export async function handleSuggestionDecision(deps, { sessionId, suggestionId, 
         stage: 'guard_wall',
         rule: 'wall_removal_approved',
         decision: 'executed',
-        operation: `人工批复${actVerb}物理驻墙`,
+        operation: `人工批复${actVerb}自定义拦截规则`,
         target: `${wallTitle} (${targetWallId})`,
-        reason: clamp(spec.reason || found.reason || '代理撞墙无法绕过，经人类显式审批后放行', 180),
+        reason: clamp(spec.reason || found.reason || '代理命中拦截无法绕过，经人类显式审批后放行', 180),
         outcome: 'ok',
         by: 'operator',
       }, rootId)
@@ -458,10 +458,10 @@ export async function executeBatchSuggestions(deps, {
         const w = res.wallApplied
         const scopeLabel = w.scope === 'workspace' ? '仅本工程' : '🌐全局随身'
         const patPreview = Array.isArray(w.patterns) ? clamp(w.patterns.join(', '), 60) : ''
-        summaries.push(`🧱 已落锁物理驻墙「${clamp(w.title, 36)}」（${scopeLabel}${patPreview ? ` · \`${patPreview}\`` : ''}）`)
+        summaries.push(`🚧 已启用自定义拦截规则「${clamp(w.title, 36)}」（${scopeLabel}${patPreview ? ` · \`${patPreview}\`` : ''}）`)
       } else if (res.wallRemoved) {
         const r = res.wallRemoved
-        summaries.push(`🧱 已按人工批复${r.action === 'remove' ? '拆除' : '暂挂'}物理驻墙「${clamp(r.title || r.wallId, 36)}」`)
+        summaries.push(`🚧 已按人工批复${r.action === 'remove' ? '删除' : '暂停'}自定义拦截规则「${clamp(r.title || r.wallId, 36)}」`)
       } else if (res.goalApproved) {
         summaries.push('✅ 已批准并结项当前核心目标')
       } else if (res.archiveApplied && res.archiveApplied.actionText) {
@@ -733,7 +733,7 @@ export async function handleApprovalDecision(deps, {
             savedImagePaths: Array.isArray(payload.savedImagePaths) ? payload.savedImagePaths : [],
           })
           const isLeadTarget = /^(?:lead|main|主对话)$/i.test(String(payload.target || 'lead').trim())
-          if (isLeadTarget && (!deliv.ok || (payload.isBlankContext && !deliv.deliveredPhysical)) && deps && typeof deps.stagePendingTransfer === 'function') {
+          if (isLeadTarget && !deliv.deliveryError && (!deliv.ok || (payload.isBlankContext && !deliv.deliveredPhysical)) && deps && typeof deps.stagePendingTransfer === 'function') {
             const staged = deps.stagePendingTransfer(
               `[DSH 参谋预派发指令${payload.subject ? ' · ' + payload.subject : ''}]\n${payload.text || ''}`,
               rootId,
@@ -748,6 +748,10 @@ export async function handleApprovalDecision(deps, {
               execRes = deliv
               resultMsg = execOk ? `已投递给 ${deliv.target || found.targetLabel}` : ((deliv && deliv.error) || '投递失败')
             }
+          } else if (deliv && !deliv.deliveredPhysical && deliv.deliveryError) {
+            execOk = false
+            execRes = { ...deliv, ok: false, error: deliv.deliveryError }
+            resultMsg = deliv.deliveryError
           } else {
             execOk = Boolean(deliv && deliv.ok)
             execRes = deliv

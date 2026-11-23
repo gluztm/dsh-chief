@@ -19,6 +19,7 @@ import {
   toggleBoundSelect,
   saveGuardWallApi,
   setGuardWallScopeApi,
+  setAllGuardWallsScopeApi,
   removeGuardWallApi,
   toggleGuardWallSelect,
   mergeGuardWallsApi,
@@ -80,10 +81,10 @@ function GuardWallsCard({ view }) {
       className: 'dnb-wall-box',
       tone: 'rose',
       icon: h(Icon, { name: 'shieldSentinel', size: 13.5, style: { color: activeCount > 0 ? '#ef4444' : '#f87171', flexShrink: 0 } }),
-      title: bi('物理驻墙 · 执行前拦截', 'Guard Wall · Pre-Tool Block'),
+      title: bi('🚧 自定义拦截规则', '🚧 Custom Block Rules'),
       preview: walls.length
         ? `${activeCount} ${bi('生效', 'active')} · ${walls.slice(0, 2).map(w => w.title).join(bi('、', ', '))}`
-        : bi('物理驻墙：在模型运行工具前直接拦下危险操作', 'Blocks risky tool calls before they run'),
+        : bi('你指定不能碰的文件或命令，AI 一碰就会被直接拦下', 'Files or commands you forbid are blocked before execution'),
       bodyStyle: { padding: 0 },
       badges: h(
         'span',
@@ -96,6 +97,15 @@ function GuardWallsCard({ view }) {
       actions: h(
         React.Fragment,
         null,
+        walls.length > 0
+          ? h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+              title: activeCount > 0 ? bi('一键暂停所有自定义拦截规则', 'Pause all custom block rules') : bi('一键启用所有自定义拦截规则', 'Enable all custom block rules'),
+              onClick: () => void setAllGuardWallsScopeApi(activeCount > 0 ? 'paused' : 'global'),
+            }, activeCount > 0 ? bi('⏸ 全部暂停', '⏸ Pause All') : bi('▶ 全部启用', '▶ Enable All'))
+          : null,
         h('button', {
           type: 'button',
           className: 'dnb-pill',
@@ -131,7 +141,7 @@ function GuardWallsCard({ view }) {
                   onClick: () => {
                     setWallMenuOpen(false)
                     void submitChiefBar(
-                      '请帮我根据当前工程重点保护目录与高危操作，手搓可复用的事前防御物理驻墙提案（wallProposals），默认 global 随身生效；若同时识别到需要补充的工作边界红线/必做项，也请一并填入 boundProposals，全部写入 JSON 数组供我一键确认落锁。',
+                      '请帮我根据当前工程重点保护目录与高危操作，生成可复用的自定义拦截规则提案（wallProposals），默认 global 随身生效；若同时识别到需要补充的工作边界红线/必做项，也请一并填入 boundProposals，全部写入 JSON 数组供我一键确认落锁。',
                       'craft_wall',
                     )
                   },
@@ -362,13 +372,13 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
 
   const pinnedCountInCol = list.filter(x => pinnedSet.has(x)).length
 
-  const uiLabel = label === '必做事项'
-    ? bi('必做事项', 'Must Do')
-    : label === '禁止红线'
-      ? bi('禁止红线', 'Forbidden')
-      : label === '注意事项'
-        ? bi('注意事项', 'Watchouts')
-        : label
+  const uiLabel = (label === '必须做' || label === '必做事项' || field === 'allowed')
+    ? bi('✅ 必须做', '✅ Must Do')
+    : ((label === '不要做' || label === '禁止红线' || field === 'forbidden')
+        ? bi('🚫 不要做', '🚫 Don\'t Do')
+        : ((label === '注意' || label === '注意事项' || field === 'notes')
+            ? bi('💡 注意', '💡 Watchouts')
+            : label))
   const boundTone = field === 'allowed' ? 'emerald' : (field === 'forbidden' ? 'rose' : 'amber')
   return h(
     AccCard,
@@ -409,6 +419,21 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
             : (selected.length >= 2 ? `合并 ${selected.length} 条` : '合并为一条'))
         : null,
     },
+    field === 'forbidden'
+      ? h('div', {
+          style: {
+            padding: '6px 11px',
+            fontSize: 11,
+            lineHeight: 1.45,
+            color: 'var(--dnb-text-3)',
+            background: 'rgba(244, 63, 94, 0.06)',
+            borderBottom: '1px solid var(--dnb-border)',
+          },
+        }, bi(
+          '说明：开着「安全拦截」时，这里写的高危命令也会顺带拦下；普通文字要求请写到「注意」里。',
+          'Note: With Safety Block on, dangerous commands mentioned here may also be blocked; put general reminders under Watchouts.',
+        ))
+      : null,
     list.map((item, idx) => {
       const isPinned = pinnedSet.has(item)
       const isChecked = selected.includes(item)
@@ -563,7 +588,10 @@ export function BoundariesTab({ store: view }) {
   const info = view.boundaries || {}
   const meta = view.chiefMeta || {}
   const globalSafetyOn = meta.globalSafetyGuardEnabled !== false
-  const safetyDisabled = Boolean(meta.tacticalModes && meta.tacticalModes.safetyGuardEnabled === false)
+  const sessionSafetyOn = meta.sessionSafetyGuardEnabled !== false
+  const safetyDisabled = Boolean(!globalSafetyOn || !sessionSafetyOn || (meta.tacticalModes && meta.tacticalModes.safetyGuardEnabled === false))
+  const wallsList = Array.isArray(view.guardWalls) ? view.guardWalls : []
+  const activeWallCount = wallsList.filter(w => w && w.activeNow).length
   const rows = [
     [bi('工作目录', 'Working Dir'), info.sessionWorkingDirectory || info.workingDirectory],
     [bi('沙箱模式', 'Sandbox'), info.sessionSandboxMode || info.sandboxMode],
@@ -575,12 +603,23 @@ export function BoundariesTab({ store: view }) {
   return h(
     'div',
     { className: 'dnb-view' },
-    safetyDisabled
-      ? h(
-          'div',
-          {
-            style: {
-              marginBottom: 10,
+    // Section 1: Safety Block (hard pre-tool blocking)
+    h(
+      'div',
+      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 8, flexWrap: 'wrap' } },
+      h(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flexWrap: 'wrap' } },
+        h('span', { style: { fontSize: 12.5, fontWeight: 700, color: 'var(--dnb-text)' } }, bi('🛡️ 安全拦截', '🛡️ Safety Block')),
+        h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, bi('程序直接拦住，AI 绕不过', 'Enforced before tools run')),
+      ),
+    ),
+    h(
+      'div',
+      {
+        style: safetyDisabled
+          ? {
+              marginBottom: 8,
               padding: '8px 10px',
               borderRadius: 10,
               border: '1px solid rgba(239, 68, 68, 0.45)',
@@ -590,40 +629,88 @@ export function BoundariesTab({ store: view }) {
               justifyContent: 'space-between',
               gap: 8,
               flexWrap: 'wrap',
+            }
+          : {
+              marginBottom: 8,
+              padding: '8px 10px',
+              borderRadius: 10,
+              border: '1px solid rgba(52, 211, 153, 0.35)',
+              background: 'rgba(16, 185, 129, 0.08)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              gap: 8,
+              flexWrap: 'wrap',
             },
-          },
-          h('div', { style: { fontSize: 11.5, color: '#ef4444', lineHeight: 1.45, flex: '1 1 200px' } },
-            !globalSafetyOn
-              ? bi('⚠️ 全局内置安全卫兵已关闭：全部会话的越界、凭据与高危命令拦截已暂停（手工物理驻墙仍独立生效）。', '⚠️ Global Safety Guard is OFF: built-in bounds, secret, and shell checks are bypassed (custom Guard Walls remain active).')
-              : bi('⚠️ 本会话内置安全卫兵已关闭：当前会话的越界、凭据与高危命令拦截已暂停（手工物理驻墙仍独立生效）。', '⚠️ Session Safety Guard is OFF: built-in bounds, secret, and shell checks are bypassed here (custom Guard Walls remain active).')),
-          h('button', {
+      },
+      h(
+        'div',
+        { style: { flex: '1 1 200px', minWidth: 0 } },
+        h(
+          'div',
+          { style: { fontSize: 12, fontWeight: 600, color: safetyDisabled ? '#f87171' : '#34d399' } },
+          safetyDisabled
+            ? (!globalSafetyOn
+                ? bi('⚠️ 自动防误操作 · 已关闭（全部对话）', '⚠️ Auto Protection · Off (All Chats)')
+                : bi('⚠️ 自动防误操作 · 已关闭（当前对话）', '⚠️ Auto Protection · Off (This Chat)'))
+            : bi('🛡️ 自动防误操作 · 已开启', '🛡️ Auto Protection · On'),
+        ),
+        h(
+          'div',
+          { style: { fontSize: 11, color: safetyDisabled ? '#fca5a5' : 'var(--dnb-text-3)', marginTop: 2, lineHeight: 1.4 } },
+          safetyDisabled
+            ? bi(
+                `已放行内置拦截${activeWallCount ? `（下方仍有 ${activeWallCount} 条自定义规则生效）` : ''}`,
+                `Built-in blocks bypassed${activeWallCount ? ` (${activeWallCount} custom rule(s) still active below)` : ''}`,
+              )
+            : bi(
+                '自动拦住删文件、改项目外文件、读 .env/密钥等危险操作',
+                'Blocks risky file deletes, edits outside workspace, and secret reads',
+              ),
+        ),
+      ),
+      safetyDisabled
+        ? h('button', {
             type: 'button',
             className: 'dnb-primary-btn',
             style: { height: 26, padding: '0 10px', fontSize: 11, flexShrink: 0 },
             onClick: () => void updateSecConfig(
               !globalSafetyOn
-                ? { globalSafetyGuardEnabled: true }
+                ? { globalSafetyGuardEnabled: true, ...(!sessionSafetyOn ? { tacticalModes: { safetyGuardEnabled: true } } : {}) }
                 : { tacticalModes: { safetyGuardEnabled: true } },
             ),
-          }, bi('🛡 一键恢复安全卫兵', '🛡 Restore Safety Guard')),
-        )
-      : null,
+          }, bi('🛡️ 一键开启', '🛡️ Enable'))
+        : h('button', {
+            type: 'button',
+            className: 'dnb-pill',
+            style: { height: 26, padding: '0 10px', fontSize: 11, flexShrink: 0 },
+            onClick: () => patch({
+              safetyGuardModalOpen: true,
+              safetyGuardModalScope: 'session',
+              safetyGuardAgreed: false,
+              safetyGuardPauseWalls: activeWallCount > 0,
+            }),
+          }, bi('关闭', 'Turn Off')),
+    ),
+    h(GuardWallsCard, { view }),
+    // Section 2: Guidelines for AI (prompt-injected rules)
     h(
       'div',
-      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 10, flexWrap: 'wrap' } },
+      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 14, marginBottom: 8, flexWrap: 'wrap' } },
       h(
         'div',
         {
-          style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 },
+          style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flexWrap: 'wrap' },
           title: bi(
-            `已固定 ${totalPinnedCount} 条全局规则（点图钉切换）`,
+            `已固定 ${totalPinnedCount} 条全局规矩（点图钉切换）`,
             `${totalPinnedCount} global rules pinned (click pin to toggle)`,
           ),
         },
-        h('span', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } }, bi('红线边界', 'Redlines & Bounds')),
+        h('span', { style: { fontSize: 12.5, fontWeight: 700, color: 'var(--dnb-text)' } }, bi('📝 给 AI 的规矩', '📝 Rules for AI')),
         totalPinnedCount > 0
           ? h('span', { className: 'dnb-acc-count', style: { fontSize: 10.5 } }, `📌 ${totalPinnedCount}`)
           : null,
+        h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, bi('每轮提醒 AI 照着做', 'Shown to AI every turn')),
       ),
       h(
         'div',
@@ -632,14 +719,14 @@ export function BoundariesTab({ store: view }) {
           className: 'dnb-pill',
           style: { height: 25, padding: '0 9px', fontSize: 11 },
           disabled: view.secBusy,
-          title: '让参谋长根据本次踩坑整理出新规则',
+          title: '让参谋长根据本次踩坑整理出新规矩',
           onClick: () => {
             void submitChiefBar(
-              '请结合当前会话的踩坑撞墙记录、工具权限约束与工作约定，简明分点总结工作边界，并务必完整填入 JSON 的 boundProposals 数组向我发起边界注入请示（若提到具体条文请每条都放进 boundProposals）。',
+              '请结合当前会话的踩坑撞墙记录、工具权限约束与工作约定，简明分点总结给 AI 的工作规矩，并务必完整填入 JSON 的 boundProposals 数组向我发起请示（若提到具体条文请每条都放进 boundProposals）。',
               'extract_bounds',
             )
           },
-        }, h(Icon, { name: 'sparkles', size: 11 }), view.secBusy && view.chiefQuickAction === 'extract_bounds' ? '提炼中…' : (view.secBusy && !view.boundConsolidating ? '提炼中…' : '提炼新边界')),
+        }, h(Icon, { name: 'sparkles', size: 11 }), view.secBusy && view.chiefQuickAction === 'extract_bounds' ? '提炼中…' : (view.secBusy && !view.boundConsolidating ? '提炼中…' : '提炼新规矩')),
         h(
           'div',
           { className: 'dnb-more-wrap', onClick: e => e.stopPropagation() },
@@ -648,7 +735,7 @@ export function BoundariesTab({ store: view }) {
             className: 'dnb-pill',
             style: { height: 25, padding: '0 7px', fontSize: 11 },
             'data-active': view.boundMoreMenuOpen ? '1' : '0',
-            title: '更多规则操作',
+            title: '更多规矩操作',
             onClick: () => patch({ boundMoreMenuOpen: !view.boundMoreMenuOpen }),
           }, '⋯'),
           view.boundMoreMenuOpen
@@ -668,7 +755,7 @@ export function BoundariesTab({ store: view }) {
                       type: 'button',
                       className: 'dnb-more-item',
                       disabled: view.secBusy,
-                      title: '让参谋长把零散、重复的规则合并精简',
+                      title: '让参谋长把零散、重复的规矩合并精简',
                       onClick: () => {
                         patch({ boundMoreMenuOpen: false })
                         void requestConsolidateBounds('', [])
@@ -680,7 +767,6 @@ export function BoundariesTab({ store: view }) {
         ),
       ),
     ),
-    h(GuardWallsCard, { view }),
     BOUND_LISTS.map(b =>
       h(BoundCard, {
         key: b.field,

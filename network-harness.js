@@ -806,7 +806,7 @@ export async function dispatchBubbleHarness(deps, {
     constraintLines.push('禁止红线: ' + forbiddenList.join('；'))
   }
   if (activeWalls.length) {
-    constraintLines.push('物理驻墙保护: ' + activeWalls.map(w => `${w.title}(${(w.patterns || []).join(', ')})`).join('；'))
+    constraintLines.push('自定义拦截规则保护: ' + activeWalls.map(w => `${w.title}(${(w.patterns || []).join(', ')})`).join('；'))
   }
   const safePrompt = constraintLines.length
     ? `[DSH 参谋长协同水泡派单 · 外部独立进程需严格遵守以下边界]\n${constraintLines.join('\n')}\n\n[任务内容]\n${taskText}`

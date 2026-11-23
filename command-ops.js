@@ -1009,7 +1009,7 @@ export async function handleLeadDirectRequestToChief(deps, {
 
   // Rare path: Lead / Subagent reports an insurmountable dynamic guard-wall blocker -> read-only Chief evaluation first; any wall removal still requires explicit human approval across L0-L3
   const combinedReqText = `${subject || ''} ${cleanBody}`
-  const isWallBlockerEscalation = /(?:撞墙阻断|物理驻墙|物理墙|无法绕过|事前物理拦截|guard_wall|wall-[a-z0-9]+)/i.test(combinedReqText)
+  const isWallBlockerEscalation = /(?:撞墙阻断|物理驻墙|物理墙|自定义拦截规则|拦截规则|无法绕过|事前物理拦截|guard_wall|wall-[a-z0-9]+)/i.test(combinedReqText)
   if (isWallBlockerEscalation) {
     const cwdNow = resolveSessionWorkspaceCwd(deps, rootId)
     const activeWallsNow = listGuardWalls({ cwd: cwdNow }).filter(w => w && w.scope !== 'paused')
@@ -1017,7 +1017,7 @@ export async function handleLeadDirectRequestToChief(deps, {
       if (!askOrCommandChiefRunner) throw new Error('askOrCommandChief runner not registered')
       const evalRes = await askOrCommandChiefRunner(deps, {
         sessionId: rootId,
-        text: `[来自 ${fromLabel} 的撞墙阻断上报 · ${subject || '物理墙评估'}]\n${cleanBody}`,
+        text: `[来自 ${fromLabel} 的阻断上报 · ${subject || '拦截规则评估'}]\n${cleanBody}`,
         _fromLeadRequest: true,
         _wallBlockerEscalation: true,
       })

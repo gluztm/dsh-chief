@@ -2,7 +2,7 @@
  * board-actions.js — 任务板统一写操作调度面（`runAction` / `runActionUnlocked`）
  *
  * 【核心职责】
- *   对外暴露 `createBoardActions(deps)`，处理任务 CRUD、计划设置、边界红线/物理驻墙变更、
+ *   对外暴露 `createBoardActions(deps)`，处理任务 CRUD、计划设置、边界红线与自定义拦截规则变更、
  *   档案搜索拉取保存、笔记/记忆操作；长程交接、档案摘取与跨会话投放部署已拆出至 `board-handoff.js`。
  *
  * 【并发安全约定】
@@ -1093,13 +1093,13 @@ export function createBoardActions(deps) {
       })
       if (!res.ok) return res
       const actionLabel = op === 'remove'
-        ? `移除物理驻墙 ${args.wallId || args.id || ''}`
+        ? `移除自定义拦截规则 ${args.wallId || args.id || ''}`
         : (op === 'merge'
-            ? `合并同类物理驻墙（${res.mergedCount || 0} 条合为 ${res.createdCount || 1} 条）`
+            ? `合并同类拦截规则（${res.mergedCount || 0} 条合为 ${res.createdCount || 1} 条）`
             : (op === 'set_scope'
-                ? `切换物理驻墙「${(res.wall && res.wall.title) || ''}」状态为 ${args.scope}`
-                : `驻防物理墙「${(res.wall && res.wall.title) || ''}」(${res.wall && res.wall.scope === 'workspace' ? '本工程' : (res.wall && res.wall.scope === 'paused' ? '暂挂' : '全局常驻')})`))
-      pushLog(board, '🧱 ' + actionLabel, by, session)
+                ? `切换自定义拦截规则「${(res.wall && res.wall.title) || ''}」状态为 ${args.scope}`
+                : `启用自定义拦截规则「${(res.wall && res.wall.title) || ''}」(${res.wall && res.wall.scope === 'workspace' ? '本工程' : (res.wall && res.wall.scope === 'paused' ? '已暂停' : '全局常驻')})`))
+      pushLog(board, '🚧 ' + actionLabel, by, session)
       return {
         ok: true,
         mergedCount: res.mergedCount || 0,

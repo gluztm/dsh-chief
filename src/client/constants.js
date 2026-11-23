@@ -10,7 +10,7 @@ export const SIDE_ID = 'dsh-chief'
 
 export const BRAND_NAME = 'DSH 参谋长'
 
-export const EXPECTED_BACKEND_BUILD = '1.7.0'
+export const EXPECTED_BACKEND_BUILD = '1.7.1'
 
 export const CHIEF_PERMISSION_LABELS = {
   advisor: 'L0 · 顾问模式',
@@ -27,9 +27,9 @@ export const INTERVENTION_TIER_DESC = {
 }
 
 export const RUN_MODE_OPTIONS = [
-  { key: 'off', label: '⏸ 关停', shortLabel: '⏸ 关停', hint: '后台不调用模型，只在你提问或点按钮时回复。不会自动巡检、梦境漫游或续跑。' },
-  { key: 'patrol', label: '🛡 巡检', shortLabel: '🛡 巡检', hint: '平时不耗后台额度，只在被拦截、报错或中断时唤醒。支持自动续跑。' },
-  { key: 'managed', label: '🤖 托管', shortLabel: '🤖 托管', hint: '持续在后台盯进度，闲时用 🌙 梦境漫游整理档案。闲置 15 分钟满足条件后自动休眠。' },
+  { key: 'off', label: '⏸ 关停', shortLabel: '⏸ 关停', hint: '平时完全不动不花钱，只有你主动问它或点按钮时才干活。' },
+  { key: 'patrol', label: '🛡 巡检', shortLabel: '🛡 巡检', hint: '平时不动不花钱，只有在出错、断线或被安全拦截时才出来帮忙。' },
+  { key: 'managed', label: '🤖 托管', shortLabel: '🤖 托管', hint: '一直在后台盯着把事做完，有空时顺手整理资料；闲置 15 分钟自动停，带费用上限。' },
 ]
 
 export const THINKING_EFFORT_OPTIONS = [
@@ -76,9 +76,9 @@ export const RELAY_MODES = [
 ]
 
 export const BOUND_LISTS = [
-  { field: 'allowed', label: '必做事项', dot: '#30d158' },
-  { field: 'forbidden', label: '禁止红线', dot: '#ff453a' },
-  { field: 'notes', label: '注意事项', dot: '#f59e0b' },
+  { field: 'allowed', label: '必须做', dot: '#30d158' },
+  { field: 'forbidden', label: '不要做', dot: '#ff453a' },
+  { field: 'notes', label: '注意', dot: '#f59e0b' },
 ]
 
 export const BOUND_CAP = 20

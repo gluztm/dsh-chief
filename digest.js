@@ -454,7 +454,7 @@ function chiefPostureLine(permissionMode) {
   if (mode === 'strategist' || mode === 'workspace-write' || mode === 'auto-review') {
     return '🛡️ 权限 posture=L2 参谋模式 (strategist · 逐项授权)：可申请改工作区与调主/子代理工作流，每项受控操作需用户弹窗「允许本次操作」后执行，严守禁止红线。'
   }
-  return '🛡️ 权限 posture=L3 参谋长模式 (chief · 已主动确认风险)：参谋拥有最高自主实权（全盘读写、测试命令、切换/协调主子代理与压缩）；主模型/子代理严守安全卫兵硬规则与禁止红线。'
+  return '🛡️ 权限 posture=L3 参谋长模式 (chief · 已主动确认风险)：参谋拥有最高自主实权（全盘读写、测试命令、切换/协调主子代理与压缩）；主模型/子代理严守安全防护硬规则与禁止红线。'
 }
 
 /** The injected section. Never throws: a broken digest must not break a prompt. */

@@ -732,14 +732,19 @@ export function ChiefComposerBar({ view, barRef }) {
   const isLowPctThreshold = thresholdMode === 'pct' && pct < 25
   const pctSelectChoices = Array.from(new Set([10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, pct])).sort((a, b) => a - b)
   const isSmartCompact = Boolean(tm.smartCompact)
+  const globalSafetyOn = meta.globalSafetyGuardEnabled !== false
+  const sessionSafetyOn = meta.sessionSafetyGuardEnabled !== false
+  const effectiveSafetyOn = Boolean(globalSafetyOn && sessionSafetyOn && tm.safetyGuardEnabled !== false)
+  const customWallsList = Array.isArray(view.guardWalls) ? view.guardWalls : []
+  const activeWallCount = customWallsList.filter(w => w && w.activeNow).length
+  const totalWallCount = customWallsList.length
   const activeChipsCount = (tm.intervention ? 1 : 0)
     + (tm.autoCompact ? 1 : 0)
-    + (tm.redlineSentinel ? 1 : 0)
+    + (!effectiveSafetyOn ? 1 : 0)
   const commitTokenThresholdInput = (rawText) => {
     const valStr = String(rawText ?? '').trim() || '64K'
     void updateSecConfig({
       tacticalModes: {
-        ...tm,
         compactThresholdMode: 'tokens',
         compactThresholdInput: valStr,
       },
@@ -758,37 +763,36 @@ export function ChiefComposerBar({ view, barRef }) {
         return
       }
       const safeN = Math.min(30, Math.max(1, Math.round(Number(val) || 1)))
-      void updateSecConfig({ tacticalModes: { ...tm, maxInterventionTurns: safeN } })
+      void updateSecConfig({ tacticalModes: { maxInterventionTurns: safeN } })
       return
     }
     if (key === 'compactThresholdPct') {
       const targetPct = Math.min(95, Math.max(10, Math.round(Number(val) || 80)))
-      void updateSecConfig({ tacticalModes: { ...tm, compactThresholdMode: 'pct', compactThresholdPct: targetPct } })
+      void updateSecConfig({ tacticalModes: { compactThresholdMode: 'pct', compactThresholdPct: targetPct } })
       return
     }
     if (key === 'compactThresholdMode') {
       const nextM = val === 'tokens' ? 'tokens' : 'pct'
       patch({ compactInputDraft: null })
-      void updateSecConfig({ tacticalModes: { ...tm, compactThresholdMode: nextM } })
+      void updateSecConfig({ tacticalModes: { compactThresholdMode: nextM } })
       return
     }
     if (key === 'smartCompact') {
       const nextSmart = Boolean(val)
       void updateSecConfig({
         tacticalModes: {
-          ...tm,
           smartCompact: nextSmart,
           ...(nextSmart ? { autoCompact: true } : {}),
         },
       })
       return
     }
-    void updateSecConfig({ tacticalModes: { ...tm, [key]: val } })
+    void updateSecConfig({ tacticalModes: { [key]: val } })
   }
   const placeholder = secImages.length > 0
     ? bi('已放 ' + secImages.length + ' 张图，按回车直接发送，或写点说明…', `${secImages.length} image(s) attached. Press Enter to send or add text…`)
     : (activeTarget === 'auto'
-        ? bi('直接说你想让它做什么：整理档案、设拦截规则、改计划或问问题…', 'Tell Chief what to do: organize archives, set guard rules, edit plans, or ask…')
+        ? bi('直接说你想让它做什么：整理档案、加拦截规则、改计划或问问题…', 'Tell Chief what to do: organize archives, add block rules, edit plans, or ask…')
         : activeTarget === 'all'
           ? bi('给所有人发消息（', 'Message everyone (') + modeObj.label + ')…'
           : (bi('给 @', 'To @') + shortAgentName(activePeer ? activePeer.name : activeTarget, true) + ' ' + modeObj.label + '…'))
@@ -839,6 +843,51 @@ export function ChiefComposerBar({ view, barRef }) {
           h(
             'div',
             { className: 'dnb-tactical-body' },
+          // Row 0: Unified One-Click Safety Block Switch (built-in auto-block + custom rules count)
+          h(
+            'div',
+            { className: 'dnb-tactical-row' },
+            h(
+              'div',
+              { style: { flex: 1, minWidth: 0 } },
+              h(
+                'div',
+                { style: { fontSize: 12, fontWeight: 600, color: effectiveSafetyOn ? '#34d399' : '#f87171', display: 'flex', alignItems: 'center', gap: 5 } },
+                '🛡️ 安全拦截',
+                !effectiveSafetyOn
+                  ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)' } }, !globalSafetyOn ? '全部对话已关' : '当前对话已关')
+                  : null,
+              ),
+              h(
+                'div',
+                { style: { fontSize: 11, color: effectiveSafetyOn ? 'var(--dnb-text-3)' : '#fca5a5', marginTop: 1 } },
+                effectiveSafetyOn
+                  ? `自动拦住删文件、改项目外文件、读密码等危险操作${totalWallCount ? ` · 自定义规则 ${activeWallCount}/${totalWallCount} 条生效` : ''}`
+                  : `已关闭（${!globalSafetyOn ? '全部对话已关' : '当前对话已关'}）${activeWallCount ? ` · 还有 ${activeWallCount} 条自定义规则生效` : ' · 已全部放行'}`,
+              ),
+            ),
+            h(Switch, {
+              checked: effectiveSafetyOn,
+              tone: effectiveSafetyOn ? undefined : 'red',
+              onChange: on => {
+                if (on) {
+                  void updateSecConfig(
+                    !globalSafetyOn
+                      ? { globalSafetyGuardEnabled: true, ...(tm.safetyGuardEnabled === false || !sessionSafetyOn ? { tacticalModes: { safetyGuardEnabled: true } } : {}) }
+                      : { tacticalModes: { safetyGuardEnabled: true } },
+                  )
+                } else {
+                  patch({
+                    tacticalMenuOpen: false,
+                    safetyGuardModalOpen: true,
+                    safetyGuardModalScope: 'session',
+                    safetyGuardAgreed: false,
+                    safetyGuardPauseWalls: activeWallCount > 0,
+                  })
+                }
+              },
+            }),
+          ),
           // Row 1: Intervention + Max Turns Stepper
           h(
             'div',
@@ -1037,31 +1086,6 @@ export function ChiefComposerBar({ view, barRef }) {
             ),
             h(Switch, { checked: Boolean(tm.strictVerify), onChange: v => toggleTacticalField('strictVerify', v) }),
           ),
-          // Row 4: Redline Sentinel
-          h(
-            'div',
-            { className: 'dnb-tactical-row' },
-            h(
-              'div',
-              { style: { flex: 1, minWidth: 0 } },
-              h(
-                'div',
-                { style: { fontSize: 12, fontWeight: 600, color: tm.redlineSentinel ? '#f87171' : 'var(--dnb-text)', display: 'flex', alignItems: 'center' } },
-                h(Icon, {
-                  name: 'shieldSentinel',
-                  size: 14,
-                  style: {
-                    color: tm.redlineSentinel ? '#ef4444' : 'var(--dnb-text-3)',
-                    marginRight: 5,
-                    filter: tm.redlineSentinel ? 'drop-shadow(0 0 4px rgba(239,68,68,0.45))' : undefined,
-                  },
-                }),
-                '红线哨兵',
-              ),
-              h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '碰到禁止红线或物理驻墙（拦截规则）时马上拦住'),
-            ),
-            h(Switch, { checked: Boolean(tm.redlineSentinel), tone: 'red', onChange: v => toggleTacticalField('redlineSentinel', v) }),
-          ),
           // Row 5: Concise Brief
           h(
             'div',
@@ -1210,13 +1234,14 @@ export function ChiefComposerBar({ view, barRef }) {
                       : `占用达 ${pct}% 时自动存档并压缩`),
               }, isSmartCompact ? '✦ 智选压缩' : `🗜 自动压缩 ${thresholdMode === 'tokens' ? (tm.compactThresholdInput || '64K') : (pct + '%')}`)
             : null,
-          tm.redlineSentinel
+          !effectiveSafetyOn
             ? h('button', {
                 type: 'button',
                 className: 'dnb-tac-chip',
                 'data-tone': 'red',
                 onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen }),
-              }, h(Icon, { name: 'shieldSentinel', size: 13, style: { color: '#ef4444' } }), '红线哨兵')
+                title: '安全拦截当前已关闭，点开控制面板可一键开启',
+              }, '🛡️ 安全拦截已关')
             : null,
           guard.circuitBroken
             ? h('span', {
@@ -1482,7 +1507,7 @@ export function ChiefComposerBar({ view, barRef }) {
         className: 'dnb-plus-btn',
         'data-active': (view.tacticalMenuOpen || activeChipsCount > 0) ? '1' : '0',
         'data-danger': tm.intervention ? '1' : '0',
-        title: '打开开关面板：可设强介入、智选压缩、红线哨兵和思考深度',
+        title: '打开控制面板：可一键开关安全拦截、强介入、自动压缩和思考深度',
         onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen, secPermMenuOpen: false, secModelMenuOpen: false, secPaceMenuOpen: false }),
       }, h(Icon, { name: view.tacticalMenuOpen ? 'x' : 'plus', size: 14, style: { display: 'block', verticalAlign: 0 } })),
       h('input', {

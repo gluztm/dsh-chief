@@ -13,7 +13,7 @@ import { React, h } from '../../react-runtime.js'
 import { CHIEF_PERMISSION_LABELS } from '../../constants.js'
 import { bi } from '../../i18n.js'
 import { patch } from '../../store.js'
-import { updateSecConfig, decideApproval, decideElevation } from '../../api.js'
+import { updateSecConfig, setAllGuardWallsScopeApi, decideApproval, decideElevation } from '../../api.js'
 import { Icon } from '../common.js'
 
 export function ChiefRiskConfirmModal({ view }) {
@@ -119,13 +119,21 @@ export function SafetyGuardConfirmModal({ view }) {
   if (!view.safetyGuardModalOpen) return null
   const isGlobal = view.safetyGuardModalScope === 'global'
   const agreed = Boolean(view.safetyGuardAgreed)
+  const pauseWallsChecked = Boolean(view.safetyGuardPauseWalls)
   const busy = Boolean(view.safetyGuardBusy)
+  const activeCustomWalls = (Array.isArray(view.guardWalls) ? view.guardWalls : [])
+    .filter(w => w && w.scope !== 'paused')
+  const closeModal = () => patch({
+    safetyGuardModalOpen: false,
+    safetyGuardAgreed: false,
+    safetyGuardPauseWalls: false,
+  })
   return h(
     'div',
     {
       className: 'dnb-modal-backdrop',
       onClick: e => {
-        if (e.target === e.currentTarget && !busy) patch({ safetyGuardModalOpen: false, safetyGuardAgreed: false })
+        if (e.target === e.currentTarget && !busy) closeModal()
       },
     },
     h(
@@ -135,36 +143,93 @@ export function SafetyGuardConfirmModal({ view }) {
         'div',
         { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
         h('span', { style: { fontSize: 13.5, fontWeight: 700, color: '#ef4444' } },
-          isGlobal
-            ? bi('全局关闭内置安全卫兵：风险确认', 'Disable Global Safety Guard: Confirm Risks')
-            : bi('本会话关闭内置安全卫兵：风险确认', 'Disable Session Safety Guard: Confirm Risks')),
+          bi('🛡️ 关闭安全拦截', '🛡️ Turn Off Safety Block')),
         h('button', {
           type: 'button',
           className: 'dnb-icon-btn',
           style: { width: 22, height: 22 },
           disabled: busy,
-          onClick: () => patch({ safetyGuardModalOpen: false, safetyGuardAgreed: false }),
+          onClick: closeModal,
         }, h(Icon, { name: 'x', size: 13 })),
       ),
       h(
         'div',
+        { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
+        h('button', {
+          type: 'button',
+          className: 'dnb-pill',
+          'data-active': !isGlobal ? '1' : '0',
+          style: {
+            height: 28,
+            padding: '0 10px',
+            fontSize: 11.5,
+            fontWeight: !isGlobal ? 700 : 500,
+            borderColor: !isGlobal ? 'rgba(239, 68, 68, 0.55)' : undefined,
+            background: !isGlobal ? 'rgba(239, 68, 68, 0.14)' : undefined,
+            color: !isGlobal ? '#fca5a5' : undefined,
+          },
+          disabled: busy,
+          onClick: () => patch({ safetyGuardModalScope: 'session' }),
+        }, bi('仅关闭当前对话', 'This Chat Only')),
+        h('button', {
+          type: 'button',
+          className: 'dnb-pill',
+          'data-active': isGlobal ? '1' : '0',
+          style: {
+            height: 28,
+            padding: '0 10px',
+            fontSize: 11.5,
+            fontWeight: isGlobal ? 700 : 500,
+            borderColor: isGlobal ? 'rgba(239, 68, 68, 0.55)' : undefined,
+            background: isGlobal ? 'rgba(239, 68, 68, 0.14)' : undefined,
+            color: isGlobal ? '#fca5a5' : undefined,
+          },
+          disabled: busy,
+          onClick: () => patch({ safetyGuardModalScope: 'global' }),
+        }, bi('关闭全部对话', 'All Chats')),
+      ),
+      h(
+        'div',
         { className: 'dnb-risk-box' },
-        h('div', { style: { fontSize: 13.5, fontWeight: 700, color: '#ef4444', display: 'flex', alignItems: 'center', gap: 6 } },
+        h('div', { style: { fontSize: 13, fontWeight: 700, color: '#ef4444', display: 'flex', alignItems: 'center', gap: 6 } },
           isGlobal
-            ? bi('⚠️ 即将关闭全部会话的内置安全卫兵', '⚠️ About to disable the built-in Safety Guard across ALL sessions')
-            : bi('⚠️ 即将关闭当前会话的内置安全卫兵', '⚠️ About to disable the built-in Safety Guard for this session')),
+            ? bi('⚠️ 即将关闭全部对话的「自动防误操作」', '⚠️ Turn off Auto Protection across ALL chats')
+            : bi('⚠️ 即将关闭当前对话的「自动防误操作」', '⚠️ Turn off Auto Protection for this chat')),
         h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } },
-          bi('关闭后，以下内置硬拦截规则将不再触发：', 'While disabled, these built-in checks will pass through without blocking:')),
+          bi('关闭后，AI 做下面这些事时不再自动拦住：', 'Once turned off, these actions will pass without automatic blocking:')),
         h(
           'ul',
           { style: { margin: '0 0 0 18px', padding: 0, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--dnb-text)' } },
-          h('li', null, bi('工作区外路径的读写与命令执行越界拦截', 'Workspace escape checks for reads, writes, and command cwd')),
-          h('li', null, bi('`.env`、SSH 私钥、`.credentials` 等敏感凭据触及拦截', 'Credential path protections (`.env`, private keys, `.credentials`)')),
-          h('li', null, bi('`rm -rf`、`DROP DATABASE`、`git reset --hard` 与内置禁止红线检查', 'Destructive command checks (`rm -rf`, `DROP DATABASE`, `git reset --hard`) and built-in forbidden bounds')),
+          h('li', null, bi('改动或读取项目文件夹以外的文件', 'Reading or editing files outside your project folder')),
+          h('li', null, bi('读取 `.env`、私钥、密码等敏感文件', 'Reading sensitive files such as `.env`, keys, or passwords')),
+          h('li', null, bi('运行 `rm -rf`、删库、强制覆盖代码等危险命令，以及「不要做」里写到的高危命令', 'Running `rm -rf`, DB drops, force overrides, or dangerous commands in Don\'t Do')),
         ),
-        h('div', { style: { fontSize: 11.5, fontWeight: 600, color: 'var(--dnb-text-2)' } },
-          bi('注：你在「边界」页手工添加的「物理驻墙」仍独立生效，可随时在设置或边界页一键恢复安全卫兵。', 'Note: Custom Guard Walls in the Boundaries tab remain active independently, and you can re-enable the Safety Guard anytime with one click.')),
+        activeCustomWalls.length === 0
+          ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } },
+              bi('当前没有生效中的「自定义拦截规则」，关闭后不会再被安全检查拦住。随时可在控制面板一键恢复。', 'No active Custom Block Rules right now. You can turn Safety Block back on anytime.'))
+          : null,
       ),
+      activeCustomWalls.length > 0
+        ? h(
+            'label',
+            {
+              className: 'dnb-risk-check',
+              style: { background: 'rgba(245, 158, 11, 0.08)', border: '1px solid rgba(245, 158, 11, 0.28)', borderRadius: 8, padding: '7px 10px' },
+            },
+            h('input', {
+              type: 'checkbox',
+              checked: pauseWallsChecked,
+              disabled: busy,
+              style: { marginTop: 3 },
+              onChange: e => patch({ safetyGuardPauseWalls: Boolean(e.target.checked) }),
+            }),
+            h('span', { style: { fontSize: 12 } },
+              bi(
+                `同时暂停当前生效的 ${activeCustomWalls.length} 条「自定义拦截规则」（边界页随时可一键恢复）`,
+                `Also pause the ${activeCustomWalls.length} active Custom Block Rules (re-enable anytime in Guards tab)`,
+              )),
+          )
+        : null,
       h(
         'label',
         { className: 'dnb-risk-check' },
@@ -177,8 +242,8 @@ export function SafetyGuardConfirmModal({ view }) {
         }),
         h('span', null,
           isGlobal
-            ? bi('我已知悉关闭风险，确认在全部会话放行内置安全卫兵检查。', 'I understand the risks and confirm disabling the built-in Safety Guard globally.')
-            : bi('我已知悉关闭风险，确认在本会话放行内置安全卫兵检查。', 'I understand the risks and confirm disabling the built-in Safety Guard for this session.')),
+            ? bi('我了解风险，确认关闭全部对话的安全拦截。', 'I understand the risks and confirm turning off Safety Block for all chats.')
+            : bi('我了解风险，确认关闭当前对话的安全拦截。', 'I understand the risks and confirm turning off Safety Block for this chat.')),
       ),
       h(
         'div',
@@ -188,7 +253,7 @@ export function SafetyGuardConfirmModal({ view }) {
           className: 'dnb-pill',
           style: { height: 32, padding: '0 14px', fontSize: 12.5 },
           disabled: busy,
-          onClick: () => patch({ safetyGuardModalOpen: false, safetyGuardAgreed: false }),
+          onClick: closeModal,
         }, bi('取消', 'Cancel')),
         h('button', {
           type: 'button',
@@ -209,12 +274,17 @@ export function SafetyGuardConfirmModal({ view }) {
                 ? { globalSafetyGuardEnabled: false, confirmedDisableSafetyGuard: true }
                 : { tacticalModes: { safetyGuardEnabled: false }, confirmedDisableSafetyGuard: true }
               const ok = await updateSecConfig(payload)
-              if (ok) patch({ safetyGuardModalOpen: false, safetyGuardAgreed: false })
+              if (ok) {
+                if (pauseWallsChecked && activeCustomWalls.length > 0) {
+                  await setAllGuardWallsScopeApi('paused', activeCustomWalls.map(w => w.id))
+                }
+                closeModal()
+              }
             } finally {
               patch({ safetyGuardBusy: false })
             }
           },
-        }, busy ? bi('正在关闭…', 'Disabling…') : bi('确认关闭', 'Confirm Disable')),
+        }, busy ? bi('正在关闭…', 'Disabling…') : bi('确认关闭', 'Confirm Turn Off')),
       ),
     ),
   )

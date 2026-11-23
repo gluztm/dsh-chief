@@ -253,11 +253,17 @@ export async function updateSecConfig(nextCfg) {
         })
       } else if (typeof nextCfg.tacticalModes.intervention === 'boolean' && Object.keys(nextCfg.tacticalModes).length === 1) {
         patch({ notice: nextCfg.tacticalModes.intervention ? '⚡ 已开启强介入' : '已关闭强介入' })
+      } else if (typeof nextCfg.globalSafetyGuardEnabled === 'boolean' && nextCfg.tacticalModes && typeof nextCfg.tacticalModes.safetyGuardEnabled === 'boolean') {
+        patch({
+          notice: nextCfg.globalSafetyGuardEnabled
+            ? '🛡 已开启全部对话与当前对话的安全拦截'
+            : '⚠ 已关闭安全拦截：自动防误操作已放行',
+        })
       } else if (typeof nextCfg.tacticalModes.safetyGuardEnabled === 'boolean' && Object.keys(nextCfg.tacticalModes).length === 1) {
         patch({
           notice: nextCfg.tacticalModes.safetyGuardEnabled
-            ? '🛡 本会话安全卫兵已开启'
-            : '⚠ 本会话已关闭安全卫兵：内置越界/凭据/高危命令检查已放行',
+            ? '🛡 当前对话安全拦截已开启'
+            : '⚠ 当前对话已关闭安全拦截：自动防误操作已放行',
         })
       } else {
         patch({ notice: '✦ 已更新自动控制开关' })
@@ -265,13 +271,13 @@ export async function updateSecConfig(nextCfg) {
     } else if (typeof nextCfg.globalSafetyGuardEnabled === 'boolean') {
       patch({
         notice: nextCfg.globalSafetyGuardEnabled
-          ? '🛡 已开启全局安全卫兵总开关'
-          : '⚠ 已关闭全局安全卫兵总开关：全部会话将放行内置安全检查',
+          ? '🛡 已开启全部对话安全拦截总开关'
+          : '⚠ 已关闭全部对话安全拦截总开关：自动防误操作已放行',
       })
     } else if (typeof nextCfg.runMode === 'string') {
       const rmMap = {
         off: '⏸ 已切到关停：后台不花额度，也不自动检查，只在你提问或点按钮时工作',
-        patrol: '🛡 已切到巡检：平时不花额度，只在报错、断线或触发物理驻墙时介入',
+        patrol: '🛡 已切到巡检：平时不花额度，只在报错、断线或触发拦截规则时介入',
         managed: '🤖 已切到托管：后台盯着进度、用梦境漫游整理档案，闲置 15 分钟自动停下',
       }
       patch({ notice: rmMap[nextCfg.runMode] || '已更新运行方式' })
@@ -294,7 +300,7 @@ export async function updateSecConfig(nextCfg) {
     } else if (nextCfg.preset) {
       const presetMap = {
         observer: bi('👁 已切到「只读旁观」：L0 · ⏸ 关停 · 低思考深度', '👁 Switched to Observer: L0 · Off · Low thinking'),
-        collab: bi('🤝 已切到「日常协作」：L2 · 🛡 巡检 · 每步问你 · 🛡 红线哨兵', '🤝 Switched to Co-Pilot: L2 · Patrol · Ask first · 🛡 Sentinel'),
+        collab: bi('🤝 已切到「日常协作」：L2 · 🛡 巡检 · 改前先问你', '🤝 Switched to Co-Pilot: L2 · Patrol · Ask First'),
         away: bi('🚀 已切到「离桌托管」：L3 · 🤖 托管 · 80%自动压缩 · 30次/300K上限', '🚀 Switched to Away Mode: L3 · Managed · 80% compact · 30 calls/300K cap'),
       }
       patch({ notice: presetMap[nextCfg.preset] || bi('✦ 已套用预设模式', '✦ Preset applied') })
@@ -310,8 +316,8 @@ export async function updateSecConfig(nextCfg) {
     } else if (typeof nextCfg.sessionEnabled === 'boolean') {
       patch({
         notice: nextCfg.sessionEnabled
-          ? bi('✅ 已在本会话启用参谋长（提示词、看板与安全卫兵已生效）', '✅ Chief enabled for this session (prompt, board & safety guard active)')
-          : bi('⏸ 已退出本会话参谋长（本会话恢复普通零侵入模式）', '⏸ Chief disabled for this session (zero-intrusion mode)'),
+          ? bi('✅ 已在本会话启用参谋长（提示词、看板与安全拦截已生效）', '✅ Chief enabled for this chat (prompts, board & Safety Block active)')
+          : bi('⏸ 已退出本会话参谋长（本会话恢复普通零侵入模式）', '⏸ Chief disabled for this chat (zero-intrusion mode)'),
       })
       void refresh()
       void loadChiefView(false)
@@ -361,6 +367,16 @@ export async function updateSecConfig(nextCfg) {
         return null
       }
       patch({ autoPilotConfirmOpen: true, secPaceMenuOpen: false })
+      return null
+    }
+    if (payload && payload.requireSafetyGuardConfirm) {
+      patch({
+        safetyGuardModalOpen: true,
+        safetyGuardModalScope: payload.scope === 'global' ? 'global' : 'session',
+        safetyGuardAgreed: false,
+        safetyGuardPauseWalls: false,
+        tacticalMenuOpen: false,
+      })
       return null
     }
     patch({ error: String((error && error.message) || error) })
@@ -641,13 +657,13 @@ export async function decideSuggestion(sug, decision, editedText = '', boundFiel
         }
       } else if (sug.kind === 'guard_wall') {
         const applied = value && value.wallApplied
-        patch({ notice: '🧱 已启用物理驻墙：' + ((applied && applied.title) || sug.title || '') })
+        patch({ notice: '🚧 已启用自定义拦截规则：' + ((applied && applied.title) || sug.title || '') })
       } else if (sug.kind === 'wall_removal') {
         const removed = value && value.wallRemoved
         patch({
           notice: removed && removed.action === 'remove'
-            ? `🧱 已删除物理驻墙：${removed.title || sug.title || ''}`
-            : `⏸ 已暂停物理驻墙：${(removed && removed.title) || sug.title || ''}`,
+            ? `🚧 已删除自定义拦截规则：${removed.title || sug.title || ''}`
+            : `⏸ 已暂停自定义拦截规则：${(removed && removed.title) || sug.title || ''}`,
         })
       } else if (sug.kind === 'advice') {
         patch({ notice: '💡 已采纳建议并发送 → @' + (sug.targetLabel || sug.target || '主对话') })
@@ -865,10 +881,10 @@ export async function submitChiefBar(overrideText = '', quickTag = '') {
           if (m && m.text) pushAction((m.op === 'remove' ? '移除：' : '记入：') + clampTitle(m.text, 14))
         }
         for (const wp of (value.wallProposals || [])) {
-          if (wp && wp.title) pushAction('新物理驻墙：' + clampTitle(wp.title, 14))
+          if (wp && wp.title) pushAction('新拦截规则：' + clampTitle(wp.title, 14))
         }
         for (const wr of (value.wallRemovalProposals || [])) {
-          if (wr && wr.title) pushAction('⚠️ 申请关墙：' + clampTitle(wr.title, 14))
+          if (wr && wr.title) pushAction('⚠️ 申请关规则：' + clampTitle(wr.title, 14))
         }
         for (const bp of (value.boundProposals || [])) {
           if (bp && bp.draftText) pushAction('建议改边界：' + clampTitle(bp.draftText, 12))
@@ -893,7 +909,7 @@ export async function submitChiefBar(overrideText = '', quickTag = '') {
           ...(createdSugCount > 0
             ? {
                 notice: hasWallRemovalOnly
-                  ? `⚠️ 参谋长申请关闭 ${value.wallRemovalProposals.length} 条物理驻墙，请在上方建议卡片里决定`
+                  ? `⚠️ 参谋长申请关闭 ${value.wallRemovalProposals.length} 条自定义拦截规则，请在上方建议卡片里决定`
                   : `✨ 已生成 ${createdSugCount} 条待确认建议，点顶部「▶ 执行建议」就能生效`,
               }
             : {}),

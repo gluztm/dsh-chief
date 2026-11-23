@@ -10,6 +10,7 @@ import { normalizePermissionMode, permissionRank, buildCapabilityScope } from '.
 import { detectPrematurePromiseText } from './idle-guard.js'
 import {
   CHAT_CAP,
+  SUGGESTIONS_CAP,
   REVIEW_DELAY_MS,
   SMART_REVIEW_COOLDOWN_MS,
   AUTO_REVIEW_COOLDOWN_MS,
@@ -73,7 +74,7 @@ const TURN_REVIEW_SYSTEM = [
   '   - `"kind": "bound"`：明显撞墙或发现长期红线/必做规矩时请示注入边界；',
   '   - `"kind": "relay"`：发现明确跨对话信息差时的递话建议；',
   '   - `"kind": "advice"`：当主模型陷入明显可替代方案、环境坑点或需提醒用户拍板的关键决策时提出一句话建议，可带 `"popup": true|false`（仅关键分叉/阻塞决策设 `true`）。',
-  '8. `shouldCompactNow` & `compactReason`：仅当 `SMART_COMPACT_CO_MANAGED`（✦ 智选）启用时评估！此时硬性上下文阈值已退让为辅助，由你与主会话共同把控压缩时机：只要一个完整阶段目标刚刚收口、工作流切换阶段、出现大量重复试错/工具噪音日志、或上下文估算已达 ≥30% 且适合归档脱水时，果断设 `shouldCompactNow: true` 并填写一句话 `compactReason`；仅在刚起步或上下文极轻时保持 `false`。',
+  '8. `shouldCompactNow` & `compactReason`：仅当 `SMART_COMPACT_CO_MANAGED`（✦ 智选）启用时评估！仅当上下文已具明显体量（估算 ≥20% 或 ≥35K tokens，或存在大量重复试错工具噪音）且本阶段已稳定收口时，才设 `shouldCompactNow: true` 并填写一句话 `compactReason`；若主对话刚口头预告下一步却空转停手、或上下文仍很轻（<20% 且 <35K tokens），严禁提议压缩，保持 `false`。',
   '9. `AUTO_PILOT_SESSION_ONLY`（全自动托管安全边界）：当激活标志包含 `AUTO_PILOT_SESSION_ONLY` 时，所有自动决策仅限本对话会话内部！严禁将本会话规律生成 `"pinGlobal": true` 的全局定住边界，严禁跨出本对话去篡改全局档案柜或无关独立窗口；发现跨窗口传递信息时可留待人工审批。',
   '10. `desktopArchivePin`（按需取档上认知桌面）：仅当 prompt 列出的「可用但尚未摆上认知桌面的可见档案」中存在当前任务/卡点/排障**正高度直接需要**的一份时，设 `"desktopArchivePin": { "vaultScope": "session|global", "id": "候选id", "title": "候选标题", "reason": "为何需要摆上一线桌面（30字内）" }`；不需要时**必须为 `null`**。严禁编造列表外的 ID 或触碰冷藏库；`AUTO_PILOT_SESSION_ONLY` 时严禁选 `global`。',
   '',
@@ -872,7 +873,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
       hazardAlertCreated = {
         id: nextId('hazard'),
         category: hazardInfo.category || 'irreversible_risk',
-        title: hazardInfo.title || '强介入紧急煞车 · 已停止推进',
+        title: hazardInfo.title || '高危操作急停 · 已停止推进',
         reason: hazardInfo.reason || '继续推进可能造成不可逆损失或必然撞穿工作边界，已立即停止强介入。',
         objective: clamp((board && board.objective) || '', 300),
         at: Date.now(),
@@ -886,12 +887,12 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
       ws.chat.push({
         id: nextId('chat'),
         role: 'chief',
-        text: `- 【🚨 紧急煞车 · 强介入已停】${hazardAlertCreated.title}\n  理由：${hazardAlertCreated.reason}`,
-        actions: ['高危急停'],
+        text: `- 【🚨 高危操作急停 · 强介入已停】${hazardAlertCreated.title}\n  理由：${hazardAlertCreated.reason}`,
+        actions: ['高危操作急停'],
         at: Date.now(),
       })
       if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
-      pushAuditToWs(ws, { mode: permNow, stage: 'safety_guard', decision: 'hazard_stop', operation: '强介入紧急煞车', target: 'lead', reason: hazardAlertCreated.reason, outcome: 'blocked', by: 'chief' })
+      pushAuditToWs(ws, { mode: permNow, stage: 'safety_guard', decision: 'hazard_stop', operation: '高危操作急停', target: 'lead', reason: hazardAlertCreated.reason, outcome: 'blocked', by: 'chief' })
       pushAlertEventToWs(ws, {
         kind: 'hazard_halt',
         level: 'danger',
@@ -1041,9 +1042,43 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   }
 
   // When both Smart Compact & Intervention trigger on the same turn:
-  // L3 runs harvest + compact silently first; L2 queues approval popup; L0/L1 never auto-compact.
+  // Guardrails A & B prevent premature low-context compaction or compacting ahead of a verbal-promise stall.
+  const liveTokens = Number(liveUsage && liveUsage.totalTokens) || 0
+  const liveCtxWin = Math.max(1000, Number(liveUsage && liveUsage.contextWindow) || 128_000)
+  const liveRatioPct = liveTokens > 0 ? (liveTokens / liveCtxWin) * 100 : 0
+  const openWorkCount = planSteps.filter(p => p && !p.done).length + tasks.filter(t => t && t.status !== 'done').length
+  const lowContextSuppress = !force && liveTokens > 0 && liveRatioPct < 20 && liveTokens < 35_000
+  const prematureStallSuppress = !force && Boolean(prematureCue) && !hasRunningChild && openWorkCount > 0
+  const compactRequestedNow = permRankNow >= 2 && smartCoManaged && parsed.shouldCompactNow === true && typeof deps.compactSessionNow === 'function'
+
+  if (prematureStallSuppress && !tactical.intervention && !isGoalAchieved && permRankNow >= 1) {
+    const idleAdviceTitle = '主对话刚预告下一步就停住了，点此催它继续'
+    const idleCueShort = clamp(prematureCue, 80)
+    const idleSug = normalizeSuggestion({
+      kind: 'advice',
+      fromAgent: '⏸ 空转提醒',
+      title: idleAdviceTitle,
+      reason: `检测到主对话以「${idleCueShort}」收尾但看板仍有 ${openWorkCount} 项未完成${compactRequestedNow ? '，已暂缓压缩' : ''}。`,
+      target: 'lead',
+      targetLabel: '主对话 (@lead)',
+      mode: 'followup',
+      draftText: `你刚才提到了「${idleCueShort}」但直接结束了本轮，看板上还有未完成任务，请立即调用工具实际落实并回报结果。`,
+      popup: false,
+    })
+    if (idleSug) {
+      mutateChiefState((s) => {
+        const ws = ensureWorkspace(s, rootId)
+        const dup = ws.suggestions.some(ex => ex && ex.status === 'pending' && ex.title === idleAdviceTitle)
+        if (!dup) {
+          ws.suggestions.push(idleSug)
+          if (ws.suggestions.length > SUGGESTIONS_CAP) ws.suggestions = ws.suggestions.slice(-SUGGESTIONS_CAP)
+        }
+      })
+    }
+  }
+
   let smartCompacted = false
-  if (permRankNow >= 2 && smartCoManaged && parsed.shouldCompactNow === true && typeof deps.compactSessionNow === 'function') {
+  if (compactRequestedNow && !lowContextSuppress && !prematureStallSuppress) {
     const wsNow = ensureWorkspace(loadChiefState(), rootId)
     const lastCompactedAt = (wsNow.runtimeGuard && wsNow.runtimeGuard.lastCompactedAt) || 0
     const sinceLast = Date.now() - lastCompactedAt
@@ -1141,7 +1176,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   if (interventionMessage) {
     const tags = [
       tactical.strictVerify ? '严格校验实测' : '',
-      tactical.redlineSentinel ? '红线哨兵巡检' : '',
+      tactical.redlineSentinel ? '拦截播报与巡检' : '',
       tactical.conciseBrief ? '精炼要点' : '',
     ].filter(Boolean).join(' · ')
     const delivRes = await deliverCrossMessage(deps, {
@@ -1285,7 +1320,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
               ...(res.thinkingEffort ? { thinkingEffort: res.thinkingEffort } : {}),
               ...(res.thinkingEffortMode ? { thinkingEffortMode: res.thinkingEffortMode } : {}),
               text: [
-                `- 【🏁 一站式战报回执】L3 强介入已顺序推进 ${batchOut.executedCount} 项安全建议${batchOut.blockedCount ? ` · 安全护栏拦禁 ${batchOut.blockedCount} 项` : ''}${batchOut.skippedGoalCount ? ` · 保留高危/结项/全局项 ${batchOut.skippedGoalCount} 项待您亲裁` : ''}`,
+                `- 【🏁 一站式战报回执】L3 强介入已顺序推进 ${batchOut.executedCount} 项安全建议${batchOut.blockedCount ? ` · 安全防护拦禁 ${batchOut.blockedCount} 项` : ''}${batchOut.skippedGoalCount ? ` · 保留高危/结项/全局项 ${batchOut.skippedGoalCount} 项待您亲裁` : ''}`,
                 ...(batchOut.summaries || []).map(line => `  ${line}`),
               ].join('\n'),
               actions: [

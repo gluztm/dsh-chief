@@ -595,14 +595,33 @@ export async function askOrCommandChief(deps, {
       : []),
   ]
 
-  const isBlankContext = liveDigest.summaryLines.length === 0 && !board.objective && !(board.plan || []).length
+  const liveSessObj = (() => {
+    try {
+      const sessSvc = deps && deps.runtime && typeof deps.runtime.get === 'function' ? deps.runtime.get('sessions') : null
+      return sessSvc && typeof sessSvc.get === 'function' ? sessSvc.get(rootId) : null
+    } catch {
+      return null
+    }
+  })()
+  const hasLiveSessionHistory = Boolean(liveSessObj && liveSessObj.blank !== true && Number(liveSessObj.seq || 0) > 0)
+  const isBlankContext = Boolean(
+    liveDigest.summaryLines.length === 0
+    && !board.objective
+    && !(board.plan || []).length
+    && !(board.tasks || []).length
+    && !(board.memory || []).length
+    && !(board.log || []).length
+    && !Object.keys(board.sessions || {}).length
+    && !Number(ownWs && ownWs.runtimeGuard && ownWs.runtimeGuard.lastCompactedSeq)
+    && !hasLiveSessionHistory,
+  )
   const resolvedCwd = deps && typeof deps.getSessionCwd === 'function' ? deps.getSessionCwd(rootId) : ''
   const cwdForPromptWalls = resolveSessionWorkspaceCwd(deps, rootId) || resolvedCwd
   const activeDynamicWalls = listGuardWalls({ cwd: cwdForPromptWalls }).filter(w => w && w.scope !== 'paused')
   if (activeDynamicWalls.length > 0) {
     promptLines.push(
       '',
-      '## 6.8 当前生效动态物理驻墙参考（仅作阻断排查，严禁私拆；仅代理撞墙无法绕过上报且确无法继续时才可请示审批）',
+      '## 6.8 当前生效自定义拦截规则参考（仅作阻断排查，严禁私拆；仅代理命中拦截无法绕过上报且确无法继续时才可请示审批）',
       ...activeDynamicWalls.slice(0, 8).map(w => `- [${w.id}] (${w.scope}/${w.ruleType}) ${w.title} :: ${Array.isArray(w.patterns) ? w.patterns.join(', ') : ''}`),
     )
   }
@@ -632,10 +651,10 @@ export async function askOrCommandChief(deps, {
     ...(_wallBlockerEscalation
       ? [
           '',
-          '🧱 【当前正在评估主/子代理提交的“撞墙阻断上报”】：',
-          '- 请严格核对代理是否真的撞到了上述动态物理驻墙，以及**是否真的没有任何合法替代途径继续完成任务**；',
-          '- 若有替代做法（如改用只读核查、调整目标路径/命令或分步处理），**绝不申请拆墙**，直接在 `reply` 中给出合法绕行路径即可；',
-          '- 只有确认确被某堵动态墙彻底卡死无法推进时，才可在 `"wallRemovalProposals"` 中提出针对该精确 `wallId` 的暂挂/拆墙申请单供人类逐项批示！',
+          '🚧 【当前正在评估主/子代理提交的“阻断上报”】：',
+          '- 请严格核对代理是否真的命中了上述自定义拦截规则，以及**是否真的没有任何合法替代途径继续完成任务**；',
+          '- 若有替代做法（如改用只读核查、调整目标路径/命令或分步处理），**绝不申请关闭规则**，直接在 `reply` 中给出合法绕行路径即可；',
+          '- 只有确认确被某条规则彻底卡死无法推进时，才可在 `"wallRemovalProposals"` 中提出针对该精确 `wallId` 的暂停/删除申请单供人类逐项批示！',
         ]
       : []),
     ...(isBlankContext
@@ -666,7 +685,7 @@ export async function askOrCommandChief(deps, {
 
   const askReasonKind = statusOnlyInquiry
     ? 'quick_status'
-    : (/筑墙|物理墙|guard.?wall/i.test(input)
+    : (/筑墙|物理墙|拦截规则|guard.?wall/i.test(input)
         ? 'craft_wall'
         : (isBlankContext
             ? 'blank_explore'
@@ -1073,6 +1092,7 @@ export async function askOrCommandChief(deps, {
 
   // Execute decomposed relays with strict 4-tier workflow permission gating
   const relayResults = []
+  const deliveryFailures = []
   const actionBadges = [...loopBadges]
   const relayGate = evaluateChiefPermissionGate({
     permissionMode,
@@ -1126,7 +1146,7 @@ export async function askOrCommandChief(deps, {
         impact: isLeadTarget
           ? '将向主对话注入工作流指令并触发继续推进'
           : (extHarnessHit
-              ? '将启动外部工具独立进程执行任务，自动附带禁止红线与物理驻墙并锁死协同水泡'
+              ? '将启动外部工具独立进程执行任务，自动附带禁止红线与自定义拦截规则并锁死协同水泡'
               : '将唤醒或引导子代理执行新任务指令'),
         preview: clamp(r.text, 240),
         kind: 'relay',
@@ -1175,7 +1195,7 @@ export async function askOrCommandChief(deps, {
       imageBlocks,
       savedImagePaths,
     })
-    if (isLeadTarget && (!deliv.ok || (isBlankContext && !deliv.deliveredPhysical)) && typeof deps.stagePendingTransfer === 'function') {
+    if (isLeadTarget && !deliv.deliveryError && (!deliv.ok || (isBlankContext && !deliv.deliveredPhysical)) && typeof deps.stagePendingTransfer === 'function') {
       const staged = deps.stagePendingTransfer(
         `[DSH 参谋长预派发指令${r.subject ? ' · ' + r.subject : ''}]\n${r.text}`,
         rootId,
@@ -1188,6 +1208,8 @@ export async function askOrCommandChief(deps, {
         continue
       }
     }
+    const hardFailed = Boolean(!deliv.deliveredPhysical && deliv.deliveryError)
+    const relayOk = Boolean(deliv.ok && !hardFailed)
     relayResults.push(deliv)
     appendChiefAuditLog(rootId, {
       mode: permissionMode,
@@ -1195,11 +1217,14 @@ export async function askOrCommandChief(deps, {
       decision: 'executed',
       operation: isLeadTarget ? '主对话递话' : (extHarnessHit ? '外部工具派单' : '子代理递话'),
       target: String(deliv.target || targetName),
-      reason: clamp(r.subject || r.text, 120),
-      outcome: deliv.ok ? 'ok' : 'error',
+      reason: clamp(hardFailed ? deliv.deliveryError : (r.subject || r.text), 160),
+      outcome: relayOk ? 'ok' : 'error',
       by: 'chief',
     })
-    if (deliv.ok) {
+    if (hardFailed) {
+      deliveryFailures.push(deliv.deliveryError)
+      actionBadges.push('⚠️ 未送达主对话')
+    } else if (deliv.ok) {
       actionBadges.push(
         deliv.deliveryMode === 'bubble-harness'
           ? `⚡ 外部派单 → ${deliv.target}`
@@ -1512,6 +1537,9 @@ export async function askOrCommandChief(deps, {
         ? `（⚠️ 实测压缩提示：${compactToolRec.error || '压缩未完成'}）`
         : '')
   const permissionStatusNotes = []
+  for (const failMsg of [...new Set(deliveryFailures)]) {
+    permissionStatusNotes.push(`- 【⚠️ 主对话通道受阻】${failMsg}`)
+  }
   if (queuedApprovals.length > 0 && !/操作授权|允许本次操作/.test(cleanedParsedReply)) {
     permissionStatusNotes.push(`- 【🛡️ 待逐项确认】已为您弹出「操作授权请求」弹窗（共 ${queuedApprovals.length} 项受控操作），点击「允许本次操作」后才会实际执行。`)
   }
@@ -1542,7 +1570,7 @@ export async function askOrCommandChief(deps, {
     if (rawWallRemovalProposals.length > 0) {
       const hasWallBlockLog = (Array.isArray(ws.auditLog) ? ws.auditLog : [])
         .some(e => e && e.stage === 'guard_wall' && e.outcome === 'blocked')
-      const mentionsBlocker = /(?:撞墙|物理驻墙|物理墙|无法绕过|事前物理拦截|guard_wall|wall-)/i.test(input)
+      const mentionsBlocker = /(?:撞墙|物理驻墙|物理墙|自定义拦截规则|拦截规则|无法绕过|事前物理拦截|guard_wall|wall-)/i.test(input)
       const hasWallBlockerEvidence = Boolean(_wallBlockerEscalation || (hasWallBlockLog && mentionsBlocker))
       if (!hasWallBlockerEvidence) {
         pushAuditToWs(ws, {
@@ -1582,17 +1610,17 @@ export async function askOrCommandChief(deps, {
           const patStr = Array.isArray(matchedWall.patterns) ? matchedWall.patterns.join(', ') : ''
           const sug = normalizeSuggestion({
             kind: 'wall_removal',
-            fromAgent: '⚠️ 参谋请示拆墙（极低概率 · 阻断复核）',
-            title: `请示${actMode === 'remove' ? '拆除' : '暂挂'}物理墙：${clamp(matchedWall.title, 28)}`,
+            fromAgent: '⚠️ 参谋请示关闭拦截规则（阻断复核）',
+            title: `请示${actMode === 'remove' ? '删除' : '暂停'}自定义拦截规则：${clamp(matchedWall.title, 28)}`,
             reason: clamp(removeReason, 200),
             target: 'guard_walls',
             targetLabel: clamp(matchedWall.title, 36),
             mode: 'silent',
             draftText: [
-              `目标物理驻墙：${matchedWall.title} (${matchedWall.id})`,
+              `目标自定义拦截规则：${matchedWall.title} (${matchedWall.id})`,
               `拦截规则：[${matchedWall.ruleType}] ${patStr}`,
               `代理阻断依据：${blockerEv}`,
-              `拟批准操作：${actMode === 'remove' ? '永久移除该物理驻墙' : '暂挂休眠该物理驻墙（可随时恢复）'}`,
+              `拟批准操作：${actMode === 'remove' ? '永久删除该自定义拦截规则' : '暂停休眠该自定义拦截规则（可随时恢复）'}`,
             ].join('\n'),
             evidence: blockerEv,
             wallRemovalSpec: {
@@ -1693,11 +1721,11 @@ export async function askOrCommandChief(deps, {
         if (dupPendingWall) continue
         const sug = normalizeSuggestion({
           kind: 'guard_wall',
-          fromAgent: '🧱 参谋长筑墙提案',
-          title: `拟筑物理墙：${clamp(val.wall.title, 30)}`,
+          fromAgent: '🚧 参谋长拦截规则提案',
+          title: `拟启用拦截规则：${clamp(val.wall.title, 30)}`,
           reason: clamp(val.wall.reason || '事前硬拦截高危命令或敏感路径，确认后写入 guard-walls 持久落锁。', 180),
           target: 'guard_walls',
-          targetLabel: val.wall.scope === 'workspace' ? '📁 本工程驻墙' : '🌐 全局随身驻墙',
+          targetLabel: val.wall.scope === 'workspace' ? '📁 本工程拦截规则' : '🌐 全局拦截规则',
           mode: 'silent',
           draftText: `[${val.wall.ruleType}] ${val.wall.patterns.join(', ')}`,
           wallSpec: val.wall,
@@ -1706,7 +1734,7 @@ export async function askOrCommandChief(deps, {
           ws.suggestions.push(sug)
           if (ws.suggestions.length > SUGGESTIONS_CAP) ws.suggestions = ws.suggestions.slice(-SUGGESTIONS_CAP)
           proposedWalls.push(sug)
-          actionBadges.push(`🧱 呈批驻墙：${clamp(val.wall.title, 18)}`)
+          actionBadges.push(`🚧 呈批拦截规则：${clamp(val.wall.title, 18)}`)
         }
       }
 

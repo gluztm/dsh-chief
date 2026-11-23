@@ -505,21 +505,22 @@ export function readAnswer(session, turn) {
 }
 
 const PREMATURE_ASK_OR_STOP_RE = /(?:请确认|请选择|是否继续|需要您|您看|请指示|请拍板|全部完成|已交付完毕|已完成交付|本轮无进展|卡住了，因为|已暂停待命|优雅退出|收工待命)/
-const COMPLETED_ACTION_PHRASE_RE = /(?:(?:已|已经|刚|刚刚|刚才)?(?:重启|拉起|补跑|续跑|写入?|跑)(?:完成|完毕|好了?|了|成功)|(?:重启|补跑|拉起)前|已(?:重启|拉起|补跑|续跑|写完|完成)|无需(?:重启|补跑|继续))/g
-const PREMATURE_PROMISE_CUE_RE = /(?:重启|拉起|补跑|续跑|继续跑|继续执行|开始跑|开始写|写[^\n。]{0,20}驱动|接下来(?:我|先|去|开始|将)|下面(?:我|先|开始)|马上(?:去|执行|重启|补跑|修复)|这就去|现在(?:去|开始|重启|补跑))/
+const COMPLETED_ACTION_PHRASE_RE = /(?:(?:已|已经|刚|刚刚|刚才)?(?:重启|拉起|补跑|续跑|写入?|跑|执行|验证|核验|确认|测试|排查|检查)(?:完成|完毕|好了?|了|成功|通过)|(?:重启|补跑|拉起)前|已(?:重启|拉起|补跑|续跑|写完|完成|执行|验证|核验|确认|通过)|无需(?:重启|补跑|继续|验证)|[，,]?\s*已(?:通过|完成|落盘|跑完|核验))/g
+const PREMATURE_PROMISE_CUE_RE = /(?:重启|拉起|补跑|续跑|继续跑|继续执行|开始跑|开始写|开始验证|开始排查|补充验证|补充测试|补充核验|确认[^\n。]{0,24}一致性|写[^\n。]{0,20}驱动|接下来(?:我|先|去|开始|将|执行|验证)|下面(?:我|先|开始|执行|验证|确认)|下一步(?:我|先|将|执行|验证|核验|确认)|马上(?:去|执行|重启|补跑|修复|验证)|这就去|现在(?:去|开始|重启|补跑|执行|验证|核验))/
 
 /**
  * Detect short wrap-up answers that merely promise the next concrete action
- * (e.g. "重启 ComfyUI 补跑。" / "写 round-5 驱动。") while stopping the turn.
+ * (e.g. "重启 ComfyUI 补跑。" / "写 round-5 驱动。" / "补充验证：确认一致性。") while stopping the turn.
  */
 export function detectPrematurePromiseText(text) {
   const clean = String(text || '').replace(/\s+/g, ' ').trim()
-  if (!clean || clean.length > 320) return ''
+  if (!clean || clean.length > 380) return ''
   if (/[?？]\s*$/.test(clean) || PREMATURE_ASK_OR_STOP_RE.test(clean)) return ''
   const segs = clean.split(/[。！？\n]+/).map(s => s.trim()).filter(Boolean)
-  const tailSegs = segs.slice(-2)
+  const tailSegs = segs.slice(-4)
   for (let idx = tailSegs.length - 1; idx >= 0; idx -= 1) {
     const seg = tailSegs[idx]
+    if (PREMATURE_ASK_OR_STOP_RE.test(seg)) continue
     const pendingPart = seg.replace(COMPLETED_ACTION_PHRASE_RE, ' ').trim()
     if (PREMATURE_PROMISE_CUE_RE.test(pendingPart)) {
       return seg.slice(0, 120)

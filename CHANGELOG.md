@@ -5,6 +5,33 @@ All notable changes to **`dsh-chief`** (**DSH 参谋长**) will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.7.1] - 2026-11-23
+
+> 紧急修复 DSH `0.2.3-alpha.2`（Cordis `4.2.0-alpha.1`）升级后系统提示词注册失败、严格无损 JSON 校验拦截及主对话断链吞错问题；同时根治安全拦截开关死锁、将安全/规矩概念缩减统一为简明大白话，并优化空转守卫与智选压缩配合。
+
+### Fixed
+- **适配 DSH `0.2.3-alpha.2`（Cordis `4.2.0-alpha.1`）提示词注入与事件监听（`runtime-hooks.js`）**：
+  - 修复 `ctx.inject(['systemPrompt' | 'llm' | 'subprocess'], ...)` 中对未注入上下文属性的直接点号访问导致系统提示词「参谋看板」段落静默注册失败的问题，全部改为 `ctx.get(...)` 安全读取。
+  - 会话活跃时间戳刷新补齐对 `0.2.3-alpha.2` `user/message` 事件名的识别。
+- **适配严格无损 JSON 校验与预设隔离域压缩（`chief-network.js` / `subagent-runtime.js`）**：
+  - `buildMessageEnvelope` 自动清理 `source` 中的 `undefined` / `NaN` / `Infinity` 字段并规整 `-0`，消除被宿主 `walkJsonValue` 拒收的风险。
+  - `executeHostSessionCompaction` 优先通过 `agentPresets.serviceFor(ag, 'compaction')` 穿透隔离预设调用压缩，并在失败时带出真实错误详情。
+- **修复主对话递话吞错与空白会话误判劫持（`chief-network.js` / `subagent-runtime.js` / `chief-commands.js` / `chief-approvals.js`）**：
+  - 解除 `deliverSinglePeer` 中 `agentsSvc` 前置门控，真实透传 `sessionController.resolveAgent` 返回的错误（如预设不可用 `agent-preset/not-found`），上层如实展示未送达原因与 `⚠️ 未送达主对话` 标识。
+  - 收紧 `isBlankContext` 判定（校验任务、记忆、日志、活跃记录、`lastCompactedSeq` 与实时会话状态），并在明确投递失败时禁止写入 `pending-transfer.json` 劫持后续新会话。
+- **修复安全拦截开关死锁与确认弹窗失灵（`chief-state.js` / `src/client/tabs/chief.js` / `src/client/api/chief.js` / `src/client/components/modals/safety.js` / `src/client/components/modals/intervention.js`）**：
+  - 修复控制面板开关变更透传全量 `...tm` 导致关闭安全拦截后其余开关全部被拒的死锁问题（改为仅发送变更字段，且后端仅在开关真实从开启变为关闭时要求风险确认）。
+  - 在 `updateSecConfig` 的 `catch` 分支补齐 `requireSafetyGuardConfirm` 弹窗唤起，避免只弹顶部红条却无法打开确认窗。
+  - 新增控制面板「🛡️ 安全拦截（自动防误操作）」一键开关，确认关闭弹窗用大白话说明风险，支持原地切换「仅关闭当前对话 / 关闭全部对话」并可勾选同时暂停「自定义拦截规则」；按实际触发源拆分 `safety_guard_blocked` 与 `guard_wall_blocked` 告警，拦截回执常驻记录。
+- **概念缩减与全界面大白话统一（`src/client/*` / `runtime-hooks.js` / `chief-review.js` / `board-actions.js` / `chief-approvals.js` / `chief-commands.js` / `README*.md`）**：
+  - 将原先重叠的「安全卫兵 / 红线哨兵 / 物理驻墙 / 禁止红线 / 必做事项」收束为仅 2 个互不重叠的大白话概念：**`🛡️ 安全拦截`**（程序直接拦住，AI 绕不过：包含「自动防误操作」内置防线 + `🚧 自定义拦截规则`）与 **`📝 给 AI 的规矩`**（每轮提醒 AI 照着做：分为 `✅ 必须做`、`🚫 不要做`、`💡 注意` 三栏）；移除控制面板与底栏中多余的「红线哨兵 / 拦截播报与巡检」开关。
+  - 优化顶栏 `⏸ 关停 / 🛡 巡检 / 🤖 托管` 悬停大白话说明，并在「边界」页顶部新增「自动防误操作」状态卡与「自定义拦截规则」的 `⏸ 全部暂停 / ▶ 全部启用` 一键按钮；保留全部后端字段以兼容既有工作区预设。
+- **优化空转守卫与智选压缩配合（`idle-guard.js` / `chief-review.js`）**：
+  - 扩充 `detectPrematurePromiseText` 对「现在执行 / 补充验证 / 确认…一致性」等口头预告词的检测并放宽句数扫描（最后 4 句、380 字内）。
+  - 为 `smartCompact` 增加低上下文（`<20%` 且 `<35K tokens`）与空转停顿双防线，避免 10% 上下文时抢在续跑前发起 `/compact`，并在无强介入时给出 `⏸ 空转提醒` 一键催跑建议卡。
+- **回归测试补强（`tests/verify-v170-dsh023-compat.mjs` / `package.json`）**：
+  - 覆盖 Cordis 4.2 严格代理、严格无损 JSON、错误透传、防交接单劫持、压缩态判断、`user/message` 与隔离域压缩（S1–S6），以及开关防死锁、空转守卫扩充与智选压缩防早产/拦截分类（S7–S9），全面接入 `test:ci` / `test`。
+
 ## [1.7.0] - 2026-11-22
 
 > 全新「协同系统」直连本机 `Codex` / `Claude Code`、主页面大屏模式、会话级按需启用、人类专控安全卫兵开关，以及模块拆分与文档更新（Fixes [#5](https://github.com/gluztm/dsh-chief/issues/5), [#6](https://github.com/gluztm/dsh-chief/issues/6)）。

@@ -1493,7 +1493,7 @@ export function HandoffTab({ view }) {
             h('div', { style: { minWidth: 0 } },
               h('div', { style: { fontSize: 12 } }, bi('本会话启用参谋长', 'Enable Chief for this session')),
               h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
-                bi('关闭后本会话恢复普通聊天窗口，不注入看板也不触发安全卫兵', 'When off, this chat runs clean with zero prompt injection or safety guard checks')),
+                bi('关闭后本会话恢复普通聊天窗口，不提示也不自动拦截', 'When off, this chat runs clean with no prompts or safety blocking')),
             ),
             h(Switch, {
               checked: meta.sessionEnabled !== false,
@@ -1507,7 +1507,7 @@ export function HandoffTab({ view }) {
         h('div', { style: { minWidth: 0 } },
           h('div', { style: { fontSize: 12 } }, bi('新会话默认自动启用参谋长', 'Auto-enable Chief in new sessions')),
           h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
-            bi('默认关闭：只有主动开启或操作过参谋长的会话才会加载提示词与安全卫兵', 'Off by default: Chief only activates in sessions where you enable or use it')),
+            bi('默认关闭：只有你点过开启或用过参谋功能的对话，才会启用参谋和安全拦截', 'Off by default: Chief and Safety Block only turn on when you enable or use them')),
         ),
         h(Switch, {
           checked: Boolean(meta.defaultAutoEnableSessions),
@@ -1521,19 +1521,19 @@ export function HandoffTab({ view }) {
       ),
     ),
 
-    // 1.8 Built-in Safety Guard Toggles (Per-Session + Global Master Switch — GitHub Issue #6)
+    // 1.8 Built-in Safety Block Toggles (Per-Session + Global Master Switch — GitHub Issue #6)
     h(
       AccCard,
       {
         open: safetyOpen,
         onToggle: () => setSafetyOpen(v => !v),
         tone: 'rose',
-        title: bi('🛡️ 内置安全卫兵（越界 / 凭据 / 高危命令）', '🛡️ Built-in Safety Guard (Bounds / Secrets / Shell)'),
+        title: bi('🛡️ 安全拦截（自动防误操作）', '🛡️ Safety Block (Auto Protection)'),
         badges: h('span', { className: 'dnb-acc-badge', 'data-tone': effectiveSafetyOn ? 'green' : 'red' },
           effectiveSafetyOn ? bi('保护开启', 'Active') : bi('已关闭', 'Disabled')),
         preview: effectiveSafetyOn
-          ? bi('默认开启，防越界与高危命令', 'Active by default')
-          : (!globalSafetyOn ? bi('全局总开关已关闭', 'Disabled globally') : bi('本会话已关闭', 'Disabled in session')),
+          ? bi('默认开启，防删文件、越界与读密钥', 'Active by default')
+          : (!globalSafetyOn ? bi('全部对话已关闭', 'Disabled for all chats') : bi('当前对话已关闭', 'Disabled in this chat')),
         bodyStyle: { padding: 0 },
       },
       view && view.sessionId
@@ -1541,11 +1541,11 @@ export function HandoffTab({ view }) {
             'div',
             { className: 'dnb-cell', style: { justifyContent: 'space-between', gap: 8 } },
             h('div', { style: { minWidth: 0 } },
-              h('div', { style: { fontSize: 12 } }, bi('本会话启用安全卫兵（默认开）', 'Enable Safety Guard in this session')),
+              h('div', { style: { fontSize: 12 } }, bi('当前对话开启安全拦截（默认开）', 'Enable Safety Block in this chat')),
               h('div', { style: { fontSize: 10.5, color: globalSafetyOn ? 'var(--dnb-text-3)' : '#f87171', marginTop: 1 } },
                 globalSafetyOn
-                  ? bi('仅控制当前会话；关闭会放行工作区外路径、凭据路径与内置命令拦截', 'Controls this session only; disabling lets workspace escapes, credentials, and destructive checks pass')
-                  : bi('已被下方全局总开关关闭，请先开启全局总开关', 'Overridden by the global switch below; re-enable the global switch first')),
+                  ? bi('自动拦住删文件、改项目外文件、读密钥等危险操作', 'Automatically blocks dangerous deletes, out-of-project edits, and secret reads')
+                  : bi('已被下方全部对话总开关关闭，请先打开总开关', 'Overridden by the global switch below; turn it on first')),
             ),
             h(Switch, {
               checked: globalSafetyOn && sessionSafetyOn,
@@ -1559,6 +1559,7 @@ export function HandoffTab({ view }) {
                     safetyGuardModalOpen: true,
                     safetyGuardModalScope: 'session',
                     safetyGuardAgreed: false,
+                    safetyGuardPauseWalls: false,
                   })
                 }
               },
@@ -1569,9 +1570,9 @@ export function HandoffTab({ view }) {
         'div',
         { className: 'dnb-cell', style: { justifyContent: 'space-between', gap: 8 } },
         h('div', { style: { minWidth: 0 } },
-          h('div', { style: { fontSize: 12 } }, bi('全局安全卫兵总开关（默认开）', 'Global Safety Guard master switch')),
+          h('div', { style: { fontSize: 12 } }, bi('全部对话安全拦截总开关（默认开）', 'Safety Block for all chats (master switch)')),
           h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
-            bi('关闭后全部已启用会话均不再触发内置安全卫兵（与右侧栏「红线哨兵」互不影响；手工物理驻墙仍独立生效）', 'Applies across all active sessions (independent of Redline Sentinel; custom Guard Walls remain active)')),
+            bi('关闭后所有对话都不会再触发自动拦截（边界页里自己加的拦截规则仍独立生效）', 'Turns off built-in blocking across all chats (your Custom Block Rules stay active)')),
         ),
         h(Switch, {
           checked: globalSafetyOn,
@@ -1583,6 +1584,7 @@ export function HandoffTab({ view }) {
                 safetyGuardModalOpen: true,
                 safetyGuardModalScope: 'global',
                 safetyGuardAgreed: false,
+                safetyGuardPauseWalls: false,
               })
             }
           },
@@ -1630,7 +1632,7 @@ export function HandoffTab({ view }) {
         h('div', { style: { minWidth: 0 } },
           h('div', { style: { fontSize: 12.5 } }, bi('重要节点弹出电脑桌面通知', 'Desktop alerts at key moments')),
           h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
-            bi('需要你批准、命中物理驻墙（拦截规则）、重连或到上限时通知', 'On approvals, guard-wall blocks, retries, or limits')),
+            bi('需要你批准、被安全拦截或自定义规则挡住、断线重连或到上限时通知', 'On approvals, safety or custom rule blocks, retries, or limits')),
         ),
         h(Switch, {
           checked: meta.notifyEnabled !== false,

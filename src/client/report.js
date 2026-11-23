@@ -135,11 +135,11 @@ export function buildSessionReportMarkdown({
     for (const f of facts.slice(0, 15)) {
       lines.push(`- **[${f.category || 'fact'}]** ${f.text}`)
     }
-    for (const item of forbidden) lines.push(`- 🚫 **${L('禁止红线', 'Forbidden')}**: ${item}`)
-    for (const item of allowed) lines.push(`- ✅ **${L('必做事项', 'Must Do')}**: ${item}`)
-    for (const item of notes) lines.push(`- 💡 **${L('注意事项', 'Watchout')}**: ${item}`)
+    for (const item of forbidden) lines.push(`- 🚫 **${L('不要做', 'Don\'t Do')}**: ${item}`)
+    for (const item of allowed) lines.push(`- ✅ **${L('必须做', 'Must Do')}**: ${item}`)
+    for (const item of notes) lines.push(`- 💡 **${L('注意', 'Watchout')}**: ${item}`)
     for (const w of activeWalls.slice(0, 12)) {
-      lines.push(`- 🧱 **${L('物理驻墙', 'Guard Wall')}** [${w.ruleType}]: ${w.title}`)
+      lines.push(`- 🚧 **${L('自定义拦截规则', 'Custom Block Rule')}** [${w.ruleType}]: ${w.title}`)
     }
     lines.push('')
   }

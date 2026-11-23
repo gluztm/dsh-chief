@@ -41,7 +41,7 @@ flowchart LR
   C --> G["Chief checks first"]
   G --> A["Safe: run normally"]
   G --> B["Risky: ask you first"]
-  G --> D["Hits redline: block"]
+  G --> D["Hits safety block: stop"]
   G -.-> M["Also saves notes and tracks steps"]
 ```
 
@@ -52,7 +52,8 @@ flowchart LR
 - **Plain chats stay untouched by default**: New chats and their subagents skip prompt injection, pre-execute blocks, and stray board files until you click **Enable for This Session** (or turn global auto-enable back on in Settings).
 - **Save before compacting**: When context fills up, Chief writes paths, commands, and errors to local archives before running `/compact`.
 - **Keep tasks from stopping halfway**: Once you lock an objective, stalled steps get nudged forward, and 3 identical errors stop the loop.
-- **Check edits and commands first**: Active sessions check Guard Walls and the Safety Guard before running writes or shell commands; you can toggle the built-in Safety Guard in Settings with confirmation.
+- **Check edits and commands first**: Active sessions use only **Safety Block** (built-in Auto Mistake Prevention + your Custom Block Rules) to block risky edits or shell commands before they run; you can toggle Safety Block in one click from Control Panel or Settings (with confirmation and an option to pause all custom rules).
+- **Two plain concepts instead of overlapping switches**: **🛡️ Safety Block** (enforced by code before tools run) and **📝 Rules for AI** (reminded to AI every turn: Must Do / Don't Do / Notes).
 - **Read-only by default**: Even after enabling a session, Chief observes without touching workspace files until you raise the permission tier (`L0`–`L3`).
 - **Keep prompt tokens low**: Only items pinned to the Cognitive Desktop (up to `2,400 tokens / 6 items`) go into each turn; everything else stays on disk until pulled.
 - **Main tab + right sidebar**: Switch to the top `Chief` tab (hiding the duplicate host input bar), connect local `Codex` / `Claude Code` in Peers, and open subagents as tabs in the existing sidebar.
@@ -79,7 +80,7 @@ Open the `⚙️` gear in the top bar to switch between these three built-in pre
 | Your situation | Pick this | What it does | Extra background calls? |
 | :--- | :--- | :--- | :--- |
 | Just want to watch without touching files | `👁 Observer` (`L0 · ⏸ Off`) | Read-only; answers only when you ask | No background model calls |
-| Everyday coding (recommended) | `🤝 Daily Co-Pilot` (`L2 · 🛡 Patrol`, sentinel on) | Steps in only on errors or blocked rules; asks before major edits | None while idle |
+| Everyday coding (recommended) | `🤝 Daily Co-Pilot` (`L2 · 🛡 Patrol`) | Quiet & zero cost at idle; steps in only on errors, disconnects, or safety blocks, asks before edits | None while idle |
 | Leaving your desk while a task runs | `🚀 Away Mode` (`L3 · 🤖 Managed`) | Supervises continuously, auto-compacts at 80%, alerts at milestones (requires double confirmation) | Yes, stops at `30 calls / 300K tokens` by default |
 
 ---
@@ -96,13 +97,13 @@ The sidebar has 5 tabs plus a top-bar Settings page:
 | `Tasks` tab | Lock your Core Objective, inspect Flow Canvas or Org Tree, click `Explain` on steps, and export handoffs. |
 | `Peers` tab | Coordinate `@lead`, subagents, linked windows, and local `Codex` / `Claude Code` CLIs with dormant scan & cross-window mailbox. |
 | `Archives` tab | Manage the pinned Cognitive Desktop and three folded drawers to control prompt tokens. |
-| `Guards` tab | Set up Guard Walls (pre-execute rules), must-do checks, and global redlines. |
+| `Guards` tab | Top: **🛡️ Safety Block** (built-in auto prevention + `🚧 Custom Block Rules`). Bottom: **📝 Rules for AI** (`✅ Must Do` / `🚫 Don't Do` / `💡 Notes`). |
 | Top-bar `⚙️` | Switch presets, placement (`Main Tab / Sidebar`), corner/subagent-tab toggles, session opt-in, alerts, budget caps, and `zh / en`. |
 
 ### 01 · Chief Cockpit (`参谋` Tab)
 **In one sentence:** Give Chief plain-language instructions, switch permission and run tiers, or hit the red halt button from this tab.
 
-- Use the bottom composer to delegate research, draft Guard Walls, or organize notes; toggle `⚡ 强介入`, `✦ 智选压缩`, `🛡 红线哨兵`, `L0–L3` tiers, and `⏹ 急停` on the control strip, or change `⏸ Off / 🛡 Patrol / 🤖 Managed` and the `180°` effort gauge in the top bar.
+- Use the bottom composer to delegate research, draft Custom Block Rules, or organize notes; open the `+` Control Panel to toggle `🛡️ Safety Block`, `⚡ 强介入`, `✦ 智选压缩`, `✓ Verify Evidence`, `📄 Plain Briefs`, or switch `L0–L3`, `⏹ Halt`, `⏸ Off / 🛡 Patrol / 🤖 Managed` (hover for plain explanations) and the `180°` effort gauge in the top bar.
 - When Dream Roam or auto-review dims the panel with a translucent overlay, **click anywhere on the overlay to dismiss it while the outer border stays lit to show background activity**.
 
 ![01 - Chief Cockpit Overview](assets/screenshots/01-chief-cockpit-overview.png)
@@ -137,28 +138,28 @@ The sidebar has 5 tabs plus a top-bar Settings page:
 ### 05 · Collaboration System & Local CLIs (`Peers` Tab)
 **In one sentence:** Connect the main chat, subagents, peer windows, and local `Codex` / `Claude Code` on one canvas—locking active squads automatically and staying visually still when idle.
 
-- **Direct Local CLI Dispatch**: Auto-detects local `Codex` / `Claude Code` without `ccSwitch` (including Windows `.cmd` shims), injects active redlines and Guard Walls on dispatch, auto-locks editing while busy (`HTTP 409`), and supports one-click `⏹ Halt`.
+- **Direct Local CLI Dispatch**: Auto-detects local `Codex` / `Claude Code` without `ccSwitch` (including Windows `.cmd` shims), injects Rules for AI and Custom Block Rules on dispatch, auto-locks editing while busy (`HTTP 409`), and supports one-click `⏹ Halt`.
 - **Cross-Window Mail & Standby Scan**: One-click **Refresh Scan** discovers dormant DSH windows without tab-switching while filtering out background maintenance (`Mnemon`) and blank shells; external messages group cleanly under cross-window pairs, detaching clears caches, and pasted images save to `<cwd>/.dsh-chief/uploads/`.
 
 <div align="center">
   <img src="assets/screenshots/05-cross-session-collab-bus.png" alt="05 - Collaboration System idle and active-locked views with local Codex/Claude Code dispatch and cross-window mailbox" width="88%" />
 </div>
 
-### 06 · Guard Walls, Pinned Redlines & Must-Do Checks (`边界` Tab)
-**In one sentence:** Add pre-execute rules to Guard Walls at the top to block commands or file paths before they run, and manage must-do, forbidden, and note lists below.
+### 06 · Safety Block & Rules for AI (`Guards` Tab)
+**In one sentence:** Top section is **🛡️ Safety Block · Enforced before tools run** (built-in protection + Custom Block Rules); bottom section is **📝 Rules for AI · Reminded every turn**.
 
-- The top **🧱 Physical Guard Walls** area blocks dangerous commands or paths before execution: add rules manually or ask Chief to draft them, toggle `🌐 Global`, `📁 Workspace`, or `⏸ Paused`, and merge same-type rules.
-- Below, `allowed`, `forbidden`, and `notes` separate global `📌` rules from session-only ones. No L0–L3 model can delete locked walls without an approved removal ticket.
+- **🛡️ Safety Block**: Shows the live status of built-in Auto Mistake Prevention (with a quick link to Control Panel) followed by **🚧 Custom Block Rules** (`⏸ Pause All / ▶ Enable All`, `+ Add Rule`, `✨ Ask Chief`, `🌐 Global / 📁 Workspace`, and merge similar rules).
+- **📝 Rules for AI**: Split into `✅ Must Do (allowed)`, `🚫 Don't Do (forbidden)` (which also enforces matching shell command blocks when Safety Block is on), and `💡 Notes (notes)`. No L0–L3 model can delete locked rules without human approval.
 
 <div align="center">
   <img src="assets/screenshots/06-pinned-bounds-and-handoff.png" alt="06 - Pinned Global Redlines and Proposals" width="68%" />
 </div>
 
 ### 07 · Top-Bar Settings: Presets, Placement, Toggles & Budget Cap (`⚙️` Settings)
-**In one sentence:** Click the `⚙️` gear in the top bar to pick a preset, switch placement and shortcuts, toggle session opt-in or the Safety Guard, or set alerts and budget caps.
+**In one sentence:** Click the `⚙️` gear in the top bar to pick a preset, switch placement and shortcuts, toggle session opt-in or the Safety Shield, or set alerts and budget caps.
 
 - **Presets & placement**: Pick from **Observer / Co-Pilot / Away Mode** presets, switch `Sidebar + Main Tab / Main Tab Only / Sidebar Only`, toggle composer or floating corner shortcuts, choose `Sidebar Tab / New Split Pane` for subagents, and toggle per-session or default auto-enable.
-- **Safety Guard, alerts & budget**: Toggle the per-session or global built-in Safety Guard (requires confirmation), configure 7 milestone desktop alerts and chimes, monitor the `chat / review / dream` LLM ledger & budget cap, and switch `zh / en` live.
+- **Safety Block, alerts & budget**: Toggle per-session or global built-in Safety Block (requires plain-language confirmation with an option to pause custom rules), configure 7 milestone desktop alerts and chimes, monitor the `chat / review / dream` LLM ledger & budget cap, and switch `zh / en` live.
 - **Session handoff**: `📌 Pin Lock` Session Handoff and redacted `.md` report export sit at the bottom of **Tasks**. Pick how much archive scope moves into a new window while Strong Intervention resets off for safety.
 
 <div align="center">
@@ -175,9 +176,10 @@ The sidebar has 5 tabs plus a top-bar Settings page:
 | `Chief` | The sidebar supervisor AI in this plugin that tracks progress, saves notes, and checks risky calls. |
 | `Subagents` | Worker agents launched by `@lead` to run tasks in parallel (such as `@arch`, `@dev`, `@bench`). |
 | `L0–L3 tiers` | Permission levels: L0 read-only default, L1 assistant, L2 asks before writes, L3 full delegation. |
-| `Off / Patrol / Managed` | Header run modes: Off stays quiet, Patrol wakes on failures/blocks, Managed supervises continuously. |
-| `Guard Walls` | Pre-execute rules checked before file writes or shell commands run, blocking or prompting you. |
-| `Forbidden / Must Do` | Rules in the Guards tab listing blocked actions and required checks before completion. |
+| `Off / Patrol / Managed` | Header run modes: Off = hands-off; Patrol = quiet & zero cost until an error, disconnect, or safety block happens; Managed = stays on watch until done. |
+| `🛡️ Safety Block` | Code-enforced protection before tools run (cannot be bypassed by AI): includes built-in Auto Mistake Prevention and your Custom Block Rules. |
+| `🚧 Custom Block Rules` | Pre-execute rules you add in the Guards tab (with one-click Pause/Enable All or per-rule pause). |
+| `📝 Rules for AI` | Three reminder lists in the Guards tab (`✅ Must Do / 🚫 Don't Do / 💡 Notes`) sent to AI every turn; "Don't Do" also blocks matching commands while Safety Block is on. |
 | `Cognitive Desktop` | The top pinned archive area (max `2,400 tokens / 6 items`)—the only notes injected every turn. |
 | `Archive Vaults` | Three drawers (Session, Global, Precipitated) that keep unpinned notes at 0 prompt tokens. |
 | `🪝 Hooks` | Keyword tags on folded notes so the model can pull exact items when needed. |
@@ -200,7 +202,7 @@ No. Under `⏸ Off` and `🛡 Patrol`, idle sessions make zero background LLM ca
 No. Starting with `v1.7.0`, new chats start unactivated by default—Chief skips prompt injection, pre-execute workspace checks, idle guards, and disk writes until you click **Enable for This Session** or invoke a Chief feature. If you prefer every new session protected automatically, turn on **Auto-enable Chief in new sessions** under `⚙️ Settings -> Panel Placement`.
 
 **Can it edit or delete my files by mistake?**
-New sessions default to `L0` read-only. In `L2`, important edits and commands pop up for per-action approval. Hard rules (disk formatting, force pushes, `git reset --hard`) stay blocked whenever the Safety Guard is on, and no L0–L3 model can remove locked Guard Walls or flip Safety Guard switches (only humans can confirm turning it off in Settings).
+New sessions default to `L0` read-only. In `L2`, important edits and commands pop up for per-action approval. Hard rules (disk formatting, force pushes, `git reset --hard`) stay blocked whenever **Safety Block** is on, and no L0–L3 model can remove locked Custom Block Rules or flip Safety Block switches (only humans can confirm turning it off in Control Panel or Settings).
 
 **How do I stop it right now?**
 Click the red `⏹ 急停` button at the right end of the input strip to stop background activity immediately, or switch the header mode to `⏸ Off`.
@@ -321,19 +323,19 @@ Read the full story and tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md
 Search **`dsh-chief`** inside [dshmarket](https://github.com/dsh-market/dsh-market) / DSH Plugin Market, or install via CLI (replace `desktop` with `web` for the web profile):
 
 ```bash
-# Option 1: Install latest release (v1.7.0) from npm
+# Option 1: Install latest release (v1.7.1) from npm
 dsh plugin --profile desktop add dsh-chief
 
 # Option 2: Install directly from GitHub main branch
 dsh plugin --profile desktop add github:gluztm/dsh-chief
 
-# Option 3: Install prebuilt GitHub Release tarball (v1.7.0)
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.7.0/dsh-chief-1.7.0.tgz
+# Option 3: Install prebuilt GitHub Release tarball (v1.7.1)
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.7.1/dsh-chief-1.7.1.tgz
 ```
 
 | DeepSeek Harness (DSH) Version | Panel / Board / Vaults / Pre-Execute Walls | Named Subagent Tree (`task.dispatch` / `team.*`) | Notes |
 | :--- | :---: | :---: | :--- |
-| **`>= 0.2.2-rc.5` (current desktop target)** | Full support | Full support | Matches `dsh-tool-fs`, `str_replace_editor`, dynamic `reasoningEffort` switching, and native `{ kind: 'ask' }` dialogs |
+| **`>= 0.2.2-rc.5` (incl. `0.2.3-alpha.2`)** | Full support | Full support | Adapted for `0.2.3-alpha.2` (Cordis 4.2 & isolated presets), `dsh-tool-fs`, `str_replace_editor`, dynamic `reasoningEffort` switching, and native `{ kind: 'ask' }` dialogs |
 | `0.2.2-rc.2 ~ 0.2.2-rc.4` | Full support | Full support | Provides native `subagents.resolveName`, `rootOf`, `namesOf`, and `tools/pre-execute` |
 | `0.2.0 ~ 0.2.2-rc.1` | Panel works | Upgrade notice | Blocks unsafe `team.*` dispatch and prompts host upgrade |
 

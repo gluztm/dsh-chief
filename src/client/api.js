@@ -7,7 +7,7 @@
  *
  * 【模块拆分布局（`src/client/api/`）】
  *   - `api/transport.js` 底层 HTTP `call`、`applySecView`、工作态流光动效与 `apiBridge`
- *   - `api/board.js`     任务板 `act` / `refresh`、交接单、记忆检索、边界红线与物理驻墙
+ *   - `api/board.js`     任务板 `act` / `refresh`、交接单、记忆检索、红线与自定义拦截规则
  *   - `api/archives.js`  档案柜加载、收割/沉淀/蒸馏、跨窗口接力与目标审批
  *   - `api/chief.js`     参谋视图、模型目录、协同水泡控制与许愿盒对话提交
  */
@@ -37,6 +37,7 @@ import {
   toggleBoundSelect,
   saveGuardWallApi,
   setGuardWallScopeApi,
+  setAllGuardWallsScopeApi,
   removeGuardWallApi,
   toggleGuardWallSelect,
   mergeGuardWallsApi,
@@ -106,6 +107,7 @@ export {
   toggleBoundSelect,
   saveGuardWallApi,
   setGuardWallScopeApi,
+  setAllGuardWallsScopeApi,
   removeGuardWallApi,
   toggleGuardWallSelect,
   mergeGuardWallsApi,

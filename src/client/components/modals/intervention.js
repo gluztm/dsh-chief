@@ -271,15 +271,15 @@ export function InterventionConfirmModal({ view, board }) {
             { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap', minWidth: 0 } },
             h('strong', null, '🛡️ 安全规则检查：'),
             noDefenseRules
-              ? h('span', { style: { color: '#ff453a', fontWeight: 600 } }, '还没设物理驻墙和禁止红线（直接自动跑风险较高）')
+              ? h('span', { style: { color: '#ff453a', fontWeight: 600 } }, '还没设自定义拦截规则，也没给 AI 写「不要做」的规矩（直接自动跑风险较高）')
               : h(
                   React.Fragment,
                   null,
                   h('span', { style: { color: activeWalls.length > 0 ? '#f87171' : 'var(--dnb-text-3)', fontWeight: 700 } },
-                    `🧱 物理驻墙 ${activeWalls.length} 条`),
+                    `🚧 自定义拦截规则 ${activeWalls.length} 条`),
                   h('span', { style: { color: 'var(--dnb-text-3)' } }, '·'),
                   h('span', { style: { color: forbiddenList.length > 0 ? '#34d399' : 'var(--dnb-text-3)', fontWeight: 700 } },
-                    `🚫 禁止红线 ${forbiddenList.length} 条`),
+                    `🚫 不要做 ${forbiddenList.length} 条`),
                 ),
           ),
           h(
@@ -289,7 +289,7 @@ export function InterventionConfirmModal({ view, board }) {
               ? h('button', {
                   type: 'button',
                   className: 'dnb-mini-btn',
-                  title: allDefenseCollapsed ? '展开查看物理驻墙和红线详情' : '收起物理驻墙和红线详情',
+                  title: allDefenseCollapsed ? '展开查看自定义拦截规则和「不要做」详情' : '收起自定义拦截规则和「不要做」详情',
                   onClick: toggleAllDefense,
                 }, allDefenseCollapsed ? '↕ 一键拉开' : '↕ 一键收起')
               : null,
@@ -301,7 +301,7 @@ export function InterventionConfirmModal({ view, board }) {
             }, '管理边界'),
           ),
         ),
-        // Sub-section 1: Physical Guard Walls
+        // Sub-section 1: Custom Block Rules
         h(
           'div',
           {
@@ -327,7 +327,7 @@ export function InterventionConfirmModal({ view, board }) {
               onClick: () => setWallsSecCollapsed(v => !v),
             },
             h('span', { style: { fontSize: 11, fontWeight: 700, color: '#f87171' } },
-              `🧱 物理驻墙（踩线直接拦住 · 已生效 ${activeWalls.length} 条${pausedWallsCount > 0 ? ` · ${pausedWallsCount} 条暂停` : ''}）`),
+              `🚧 自定义拦截规则（踩线直接拦住 · 已生效 ${activeWalls.length} 条${pausedWallsCount > 0 ? ` · ${pausedWallsCount} 条暂停` : ''}）`),
             h(Icon, {
               name: 'chevron',
               size: 12,
@@ -361,15 +361,15 @@ export function InterventionConfirmModal({ view, board }) {
                       }),
                       activeWalls.length > 4
                         ? h('div', { key: 'more-walls', style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
-                            `…还有 ${activeWalls.length - 4} 条物理驻墙正在生效`)
+                            `…还有 ${activeWalls.length - 4} 条自定义拦截规则正在生效`)
                         : null,
                     ]
                   : h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
-                      '还没设物理驻墙（可点右上角「管理边界」添加）'),
+                      '还没设自定义拦截规则（可点右上角「管理边界」添加）'),
               )
             : null,
         ),
-        // Sub-section 2: Forbidden Redlines
+        // Sub-section 2: Don't Do Rules
         h(
           'div',
           {
@@ -395,7 +395,7 @@ export function InterventionConfirmModal({ view, board }) {
               onClick: () => setRedlinesSecCollapsed(v => !v),
             },
             h('span', { style: { fontSize: 11, fontWeight: 700, color: forbiddenList.length > 0 ? '#34d399' : 'var(--dnb-text-2)' } },
-              `🚫 禁止红线（全局和当前规则 · 共 ${forbiddenList.length} 条）`),
+              `🚫 不要做（当前和全局规矩 · 共 ${forbiddenList.length} 条）`),
             h(Icon, {
               name: 'chevron',
               size: 12,
@@ -420,10 +420,10 @@ export function InterventionConfirmModal({ view, board }) {
                       ),
                       forbiddenList.length > 4
                         ? h('div', { key: 'more-redlines', style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
-                            `…还有 ${forbiddenList.length - 4} 条禁止红线正在生效`)
+                            `…还有 ${forbiddenList.length - 4} 条「不要做」规矩正在生效`)
                         : null,
                     ]
-                  : h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, '还没设禁止红线'),
+                  : h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, '还没写「不要做」的规矩'),
               )
             : null,
         ),
@@ -503,7 +503,7 @@ export function InterventionConfirmModal({ view, board }) {
             try {
               const curMax = normalizeMaxTurnsVal(tm.maxInterventionTurns)
               const ok = await updateSecConfig({
-                tacticalModes: { ...tm, intervention: true, maxInterventionTurns: curMax },
+                tacticalModes: { intervention: true, maxInterventionTurns: curMax },
                 confirmedInterventionRisk: true,
                 ...(curMax === 0 ? { confirmedUnlimitedTurns: true } : {}),
                 coreObjective: trimmedDraft,
@@ -574,7 +574,7 @@ export function UnlimitedTurnsConfirmModal({ view }) {
           style: { height: 32, padding: '0 15px', fontSize: 12.5, background: '#f59e0b', color: '#111', fontWeight: 700 },
           onClick: async () => {
             const ok = await updateSecConfig({
-              tacticalModes: { ...tm, maxInterventionTurns: 0 },
+              tacticalModes: { maxInterventionTurns: 0 },
               confirmedUnlimitedTurns: true,
             })
             if (ok) patch({ unlimitedTurnsModalOpen: false })
@@ -695,13 +695,13 @@ export function AwayPresetConfirmModal({ view }) {
         'div',
         { className: 'dnb-risk-box' },
         h('div', { style: { fontSize: 12.5, fontWeight: 700, color: '#f59e0b' } },
-          bi('⚠️ 开启后会同时打开以下设置（仍受物理驻墙和红线限制）：', '⚠️ Turns on these settings (still bound by guard walls and rules):')),
+          bi('⚠️ 开启后会同时打开以下设置（仍受安全拦截与规矩限制）：', '⚠️ Turns on these settings (still bound by Safety Block and your rules):')),
         h(
           'ul',
           { style: { margin: '0 0 0 18px', padding: 0, display: 'flex', flexDirection: 'column', gap: 4, fontSize: 12, color: 'var(--dnb-text)' } },
           h('li', null, bi('权限升到 L3 · 参谋长模式（可自动调度对话和子代理、断线续跑）', 'Permission: L3 · Chief (auto-guides chats, subagents, and resumes)')),
-          h('li', null, bi('工作方式切到 🤖 托管（后台盯进度，用梦境漫游整理档案，闲置 15 分钟自动停）', 'Run mode: 🤖 Managed (watches progress, runs Dream Roam cleanup, auto-pauses after 15m idle)')),
-          h('li', null, bi('对话满 80% 自动压缩，并开启 🛡 红线哨兵提醒越界风险', 'Auto-compacts at 80% context and turns on 🛡 Sentinel alerts')),
+          h('li', null, bi('工作方式切到 🤖 托管（后台盯进度，有空整理资料，闲置 15 分钟自动停）', 'Run mode: 🤖 Managed (watches progress, tidies archives, auto-pauses after 15m idle)')),
+          h('li', null, bi('对话满 80% 自动压缩，并保持 🛡️ 安全拦截生效', 'Auto-compacts at 80% context with 🛡️ Safety Block active')),
           h('li', null, bi('设置费用上限（30 次调用或 300K Tokens 自动停），关键节点发桌面通知', 'Stops at budget limit (30 calls or 300K tokens) and sends desktop alerts')),
         ),
       ),
