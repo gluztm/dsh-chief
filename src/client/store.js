@@ -5,10 +5,26 @@
  */
 
 import { React } from './react-runtime.js'
-import { SIDE_ID, BRAND_NAME } from './constants.js'
+import { SIDE_ID, BRAND_NAME, DEFAULT_UI_SKIN, UI_SKIN_OPTIONS } from './constants.js'
 import { readSavedUiLang } from './i18n.js'
 
 const PLACEMENT_STORAGE_KEY = 'dsh-chief:placement-pref'
+const SKIN_STORAGE_KEY = 'dsh-chief:ui-skin'
+
+export function normalizeUiSkin(raw) {
+  const clean = String(raw || '').trim().toLowerCase()
+  return UI_SKIN_OPTIONS.some(o => o.key === clean) ? clean : DEFAULT_UI_SKIN
+}
+
+export function readSavedUiSkin() {
+  try {
+    if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+      const raw = localStorage.getItem(SKIN_STORAGE_KEY)
+      if (raw) return normalizeUiSkin(raw)
+    }
+  } catch {}
+  return DEFAULT_UI_SKIN
+}
 
 const DEFAULT_PLACEMENT_PREF = {
   placement: 'both',
@@ -71,6 +87,7 @@ export const store = {
   editTaskBlockedBy: [],
   selectedTaskId: '',
   focusTaskId: '',
+  taskBoardMode: 'beam',
   taskViewMode: 'canvas',
   planObjCollapsed: false,
   topoSectionCollapsed: true,
@@ -125,8 +142,17 @@ export const store = {
   wallDraftPattern: '',
   wallDraftField: 'forbid_cmd',
   wallDraftScope: 'global',
+  githubStarState: {
+    starCount: null,
+    starred: null,
+    ghAvailable: false,
+    ghAuthenticated: false,
+    syncedVia: 'public',
+    busy: false,
+  },
   // DSH Chief state
   chiefMeta: {
+    chiefName: '',
     runMode: 'off',
     managedIdleTimeoutMs: 15 * 60 * 1000,
     notifyEnabled: true,
@@ -226,6 +252,8 @@ export const store = {
   awayPresetModalOpen: false,
   awayPresetAgreed: false,
   uiLangPref: readSavedUiLang(),
+  uiSkin: readSavedUiSkin(),
+  skinMenuOpen: false,
   placementPref: readSavedPlacementPref(),
   seenAlertEventIds: {},
   ledgerExpanded: false,
@@ -624,6 +652,23 @@ export function switchConversationView(targetViewId) {
     } catch {}
   }
   return false
+}
+
+export function saveUiSkin(nextSkin) {
+  const clean = normalizeUiSkin(nextSkin)
+  try {
+    if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
+      localStorage.setItem(SKIN_STORAGE_KEY, clean)
+    }
+  } catch {}
+  try {
+    if (typeof document !== 'undefined') {
+      if (document.documentElement) document.documentElement.setAttribute('data-dnb-skin', clean)
+      if (document.body) document.body.setAttribute('data-dnb-skin', clean)
+    }
+  } catch {}
+  patch({ uiSkin: clean })
+  return clean
 }
 
 export function savePlacementPref(nextPartial) {

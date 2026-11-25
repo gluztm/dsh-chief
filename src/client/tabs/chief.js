@@ -18,7 +18,7 @@ import {
   SEC_MAX_IMAGES,
   THINKING_EFFORT_OPTIONS,
 } from '../constants.js'
-import { bi, getUiLangPref, permLabel } from '../i18n.js'
+import { bi, permLabel, chiefDisplayName, chiefShortName } from '../i18n.js'
 import { store, patch, runtimeRefs } from '../store.js'
 import {
   normalizeMaxTurnsVal,
@@ -48,6 +48,8 @@ import {
   renderStructuredItem,
   renderStructuredText,
   parseSixGoalBrief,
+  isBenignQuietStatusText,
+  extractReplySummaryLine,
   orderChatHistoryNewestFirst,
   groupChatHistoryTurnsNewestFirst,
 } from '../components/common.js'
@@ -65,6 +67,8 @@ export function isReceiptChatItem(item) {
 export function ChiefTab({ board, view }) {
   const [showHistory, setShowHistory] = React.useState(true)
   const [chatFilter, setChatFilter] = React.useState('all')
+  const [emptyStatusExpanded, setEmptyStatusExpanded] = React.useState(false)
+  const [expandedReplyIds, setExpandedReplyIds] = React.useState({})
 
   React.useEffect(() => {
     void loadChiefView(false)
@@ -111,11 +115,6 @@ export function ChiefTab({ board, view }) {
       copyText(md, bi('📄 复盘报告已复制到剪贴板', '📋 Report copied to clipboard'))
     }
   }
-  const nextLangPref = () => {
-    const cur = view.uiLangPref || getUiLangPref()
-    return cur === 'auto' ? 'en' : (cur === 'en' ? 'zh' : 'auto')
-  }
-
   const digestStatusText = (narrative.summarizing || view.secRegenerating)
     ? bi('正在整理最新进展…', 'Updating summary…')
     : narrative.isLiveZeroToken
@@ -131,207 +130,293 @@ export function ChiefTab({ board, view }) {
   const ledgerChipLabel = ledgerTotalTok >= 1000
     ? `${ledgerTotalCalls}${bi('次', 'x')} · ${(ledgerTotalTok / 1000).toFixed(1).replace(/\.0$/, '')}K`
     : `${ledgerTotalCalls}${bi('次', 'x')} · ${ledgerTotalTok}`
+  const modelLabel = narrative.byModel
+    ? shortModelName(narrative.byModel, view.secModelsCatalog || (sec && sec.models), true)
+    : ''
+
+  // Partition 6-row goal brief into Goal / Real Alert / Core Prose / Quiet Empty Status
+  const goalRow = useSixBriefCards ? (sixGoalRows.find(r => r.role === 'goal') || null) : null
+  const blockedRow = useSixBriefCards ? (sixGoalRows.find(r => r.role === 'blocked') || null) : null
+  const userNeedRow = useSixBriefCards ? (sixGoalRows.find(r => r.role === 'userNeed') || null) : null
+  const alertRows = []
+  const quietEmptyRows = []
+  if (blockedRow) {
+    if (isBenignQuietStatusText(blockedRow.body)) {
+      quietEmptyRows.push({
+        key: blockedRow.key,
+        label: bi('受阻目标', 'Blockers'),
+        shortPhrase: bi('暂无明确受阻', 'No active blockers'),
+        body: blockedRow.body,
+      })
+    } else {
+      alertRows.push({
+        ...blockedRow,
+        alertTone: 'coral',
+        alertLabel: bi('当前受阻', 'Blocked'),
+      })
+    }
+  }
+  if (userNeedRow) {
+    if (isBenignQuietStatusText(userNeedRow.body)) {
+      quietEmptyRows.push({
+        key: userNeedRow.key,
+        label: bi('需你提供', 'Your input'),
+        shortPhrase: bi('暂无需你额外提供', 'No input needed'),
+        body: userNeedRow.body,
+      })
+    } else {
+      alertRows.push({
+        ...userNeedRow,
+        alertTone: 'amber',
+        alertLabel: bi('需你确认', 'Needs you'),
+      })
+    }
+  }
+  const mainBriefRows = useSixBriefCards
+    ? sixGoalRows.filter(r => r.role !== 'goal' && r.role !== 'blocked' && r.role !== 'userNeed')
+    : []
+
+  const renderEditorialMeta = () => (
+    h(
+      'div',
+      { className: 'dnb-editorial-meta' },
+      modelLabel
+        ? h('span', { title: narrative.byModel }, modelLabel)
+        : null,
+      ledgerTotalCalls > 0
+        ? h('button', {
+            type: 'button',
+            className: 'dnb-editorial-meta-btn',
+            title: bi('查看用量统计和托管模式上限', 'View usage stats and Managed mode limits'),
+            onClick: e => {
+              e.stopPropagation()
+              patch({ settingsOpen: true })
+            },
+          }, ledgerChipLabel)
+        : null,
+      h('span', null, digestStatusText),
+    )
+  )
 
   return h(
     'div',
     { className: 'dnb-view' },
-    // Clean Header Bar + Quick Actions
-    h(
-      'div',
-      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 10, flexWrap: 'wrap' } },
-      h(
-        'div',
-        { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0 } },
-        h(Icon, { name: 'sparkles', size: 13, style: { color: 'var(--dnb-accent)', flexShrink: 0 } }),
-        h('span', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } }, bi('参谋总览', 'Chief Overview')),
-      ),
-      h(
-        'div',
-        { style: { display: 'flex', alignItems: 'center', gap: 5, justifyContent: 'flex-end' } },
-        h('button', {
-          type: 'button',
-          className: 'dnb-pill',
-          style: { height: 25, padding: '0 9px', fontSize: 11, gap: 4 },
-          disabled: Boolean(view.secBusy),
-          title: bi('问问参谋长现在进展顺不顺、卡在哪、接下来怎么走', 'Ask Chief how things are going, what is blocked, and what to do next'),
-          onClick: () => void submitChiefBar(
-            '请结合当前任务进展、对话上下文、边界红线与团队状态，给我坦诚、接地气的参谋建议：当前有什么需要关注的卡点或更好的推进方向？若一切顺利暂无建议，或涉及非参谋与会话能处理的事项，直接实话告诉我即可，不要强行凑执行项。',
-            'consult_chief',
-          ),
-        }, h(Icon, { name: 'sparkles', size: 11 }), bi('咨询', 'Consult')),
-        h('button', {
-          className: 'dnb-pill',
-          style: {
-            height: 25,
-            padding: '0 10px',
-            fontSize: 11,
-            gap: 4,
-            color: (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
-              ? 'var(--dnb-accent)'
-              : undefined,
-          },
-          disabled: view.secRegenerating || narrative.summarizing,
-          title: narrative.hasUnsummarizedChanges
-            ? bi('对话有了新内容，点这里更新摘要（平时不后台自动跑，省 Token）', 'New chat updates found. Click to update the summary without extra background cost.')
-            : bi('让参谋长重新整理一份最新摘要', 'Update the summary now'),
-          onClick: () => void loadChiefView(true, { syncHandoff: !isHandoffPinned && syncOnDigest }),
-        },
-          (view.secRegenerating || narrative.summarizing)
-            ? h(Icon, { name: 'refresh', size: 11, style: { animation: 'dnb-spin 0.9s linear infinite' } })
-            : h(Icon, { name: 'sparkles', size: 11 }),
-          (view.secRegenerating || narrative.summarizing) ? bi('整理中…', 'Updating…') : bi('更新摘要', 'Update Summary'),
-          (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
-            ? h('span', {
-                style: {
-                  width: 5,
-                  height: 5,
-                  borderRadius: '50%',
-                  background: 'var(--dnb-accent)',
-                  flexShrink: 0,
-                },
-              })
-            : null,
-        ),
-        h(
-          'div',
-          { className: 'dnb-more-wrap', onClick: e => e.stopPropagation() },
-          h('button', {
-            type: 'button',
-            className: 'dnb-pill',
-            style: { height: 25, padding: '0 7px', fontSize: 11 },
-            'data-active': view.chiefMoreMenuOpen ? '1' : '0',
-            title: bi('导出报告、更新交接单或切换语言', 'Export report, sync handoff, or switch language'),
-            onClick: () => patch({ chiefMoreMenuOpen: !view.chiefMoreMenuOpen }),
-          }, '⋯'),
-          view.chiefMoreMenuOpen
-            ? h(
-                'div',
-                { className: 'dnb-more-menu', style: { minWidth: 212 } },
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-more-item',
-                  onClick: () => {
-                    patch({ chiefMoreMenuOpen: false })
-                    exportReport(false)
-                  },
-                }, h('span', null, bi('📄 导出复盘报告 (.md)', '📄 Export Report (.md)'))),
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-more-item',
-                  onClick: () => {
-                    patch({ chiefMoreMenuOpen: false })
-                    exportReport(true)
-                  },
-                }, h('span', null, bi('📋 复制复盘报告 (Markdown)', '📋 Copy Report (Markdown)'))),
-                h('div', { className: 'dnb-more-sep' }),
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-more-item',
-                  'data-active': (!isHandoffPinned && syncOnDigest) ? '1' : '0',
-                  disabled: isHandoffPinned,
-                  title: isHandoffPinned
-                    ? bi('交接单已被你定住防改，参谋长不会覆盖它', 'Handoff is pinned by you, so Chief will not overwrite it.')
-                    : bi('开启后，每次更新摘要时都会顺便更新交接单', 'Update the handoff card automatically whenever you refresh the summary.'),
-                  onClick: () => {
-                    patch({ chiefMoreMenuOpen: false })
-                    void toggleSyncHandoffOnDigest(!syncOnDigest)
-                  },
-                },
-                  h('span', null, isHandoffPinned ? bi('🔒 交接单已定住', '🔒 Handoff Pinned') : bi('更新摘要时同步交接单', 'Auto-sync handoff on update')),
-                  h('span', { style: { fontSize: 10.5, opacity: 0.78 } }, isHandoffPinned ? bi('锁定', 'Locked') : (syncOnDigest ? bi('开', 'On') : bi('关', 'Off'))),
-                ),
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-more-item',
-                  disabled: isHandoffPinned || view.secRegenerating || narrative.summarizing,
-                  title: isHandoffPinned ? bi('交接单已定住防改，不能覆盖', 'Handoff is pinned and cannot be overwritten.') : bi('把当前摘要写进交接单', 'Copy the current summary into the handoff card'),
-                  onClick: () => {
-                    patch({ chiefMoreMenuOpen: false })
-                    void loadChiefView(false, { syncHandoff: true })
-                  },
-                }, h('span', null, isHandoffPinned ? bi('🔒 交接单已定住', '🔒 Handoff Pinned') : bi('↪ 立即更新交接单', '↪ Sync Handoff Now'))),
-                h('div', { className: 'dnb-more-sep' }),
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-more-item',
-                  onClick: () => {
-                    patch({ chiefMoreMenuOpen: false })
-                    void updateSecConfig({ uiLang: nextLangPref() })
-                  },
-                },
-                  h('span', null, bi('🌐 切换界面语言', '🌐 Switch Language')),
-                  h('span', { style: { fontSize: 10.5, opacity: 0.78 } }, (view.uiLangPref || getUiLangPref()).toUpperCase()),
-                ),
-              )
-            : null,
-        ),
-      ),
-    ),
-
-    // Concise 6-Sentence Goal Brief or Standard Structured Digest
+    // Editorial Goal Brief or Standard Structured Digest
     h(
       AccCard,
       {
         open: !view.chiefDigestCollapsed,
         onToggle: () => patch({ chiefDigestCollapsed: !view.chiefDigestCollapsed }),
-        tone: 'blue',
-        title: useSixBriefCards ? bi('⚡ 极简目标汇报', '⚡ Brief Goal Summary') : bi('当前进展摘要', 'Current Summary'),
+        tone: 'slate',
+        title: useSixBriefCards ? bi('当前目标进展', 'Current Goal Brief') : bi('当前进展摘要', 'Current Summary'),
         headTitle: view.chiefDigestCollapsed ? bi('点击展开摘要', 'Click to expand summary') : bi('点击收起摘要', 'Click to collapse summary'),
         preview: digestPreview,
-        headerExtra: !view.chiefDigestCollapsed
-          ? h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', whiteSpace: 'nowrap' } }, digestStatusText)
-          : null,
-        badges: h(
-          React.Fragment,
-          null,
-          narrative.byModel
-            ? h('span', {
-                className: 'dnb-acc-badge',
-                title: narrative.byModel,
-              }, shortModelName(narrative.byModel, view.secModelsCatalog || (sec && sec.models), true))
-            : null,
-          ledgerTotalCalls > 0
-            ? h('button', {
-                type: 'button',
-                className: 'dnb-acc-badge',
-                style: { cursor: 'pointer', border: '1px solid var(--dnb-border)', background: 'var(--dnb-fill)' },
-                title: bi('查看用量统计和托管模式上限', 'View usage stats and Managed mode limits'),
-                onClick: e => {
-                  e.stopPropagation()
-                  patch({ settingsOpen: true })
-                },
-              }, '⚡ ' + ledgerChipLabel)
-            : null,
+        headerExtra: null,
+        badges: null,
+        actions: h(
+          'div',
+          {
+            style: { display: 'inline-flex', alignItems: 'center', gap: 2 },
+            onClick: e => e.stopPropagation(),
+          },
+          h('button', {
+            type: 'button',
+            className: 'dnb-ghost-btn',
+            disabled: Boolean(view.secBusy),
+            title: bi('问问参谋长现在进展顺不顺、卡在哪、接下来怎么走', 'Ask Chief how things are going, what is blocked, and what to do next'),
+            onClick: () => void submitChiefBar(
+              '请结合当前任务进展、对话上下文、边界红线与团队状态，给我坦诚、接地气的参谋建议：当前有什么需要关注的卡点或更好的推进方向？若一切顺利暂无建议，或涉及非参谋与会话能处理的事项，直接实话告诉我即可，不要强行凑执行项。',
+              'consult_chief',
+            ),
+          }, bi('咨询', 'Consult')),
+          h('button', {
+            type: 'button',
+            className: 'dnb-ghost-btn',
+            style: {
+              color: (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
+                ? 'var(--dnb-accent)'
+                : undefined,
+            },
+            disabled: view.secRegenerating || narrative.summarizing,
+            title: narrative.hasUnsummarizedChanges
+              ? bi('对话有了新内容，点这里更新摘要（平时不后台自动跑，省 Token）', 'New chat updates found. Click to update the summary without extra background cost.')
+              : bi('让参谋长重新整理一份最新摘要', 'Update the summary now'),
+            onClick: () => void loadChiefView(true, { syncHandoff: !isHandoffPinned && syncOnDigest }),
+          },
+            (view.secRegenerating || narrative.summarizing)
+              ? h(Icon, { name: 'refresh', size: 10.5, style: { animation: 'dnb-spin 0.9s linear infinite' } })
+              : null,
+            (view.secRegenerating || narrative.summarizing) ? bi('整理中…', 'Updating…') : bi('更新摘要', 'Update'),
+            (!view.secRegenerating && !narrative.summarizing && narrative.hasUnsummarizedChanges)
+              ? h('span', {
+                  style: {
+                    width: 5,
+                    height: 5,
+                    borderRadius: '50%',
+                    background: 'var(--dnb-accent)',
+                    flexShrink: 0,
+                  },
+                })
+              : null,
+          ),
+          h(
+            'div',
+            { className: 'dnb-more-wrap' },
+            h('button', {
+              type: 'button',
+              className: 'dnb-ghost-btn',
+              style: { padding: '0 6px' },
+              'data-active': view.chiefMoreMenuOpen ? '1' : '0',
+              title: bi('导出报告或同步交接单', 'Export report or sync handoff'),
+              onClick: () => patch({ chiefMoreMenuOpen: !view.chiefMoreMenuOpen }),
+            }, '⋯'),
+            view.chiefMoreMenuOpen
+              ? h(
+                  'div',
+                  { className: 'dnb-more-menu', style: { minWidth: 212 } },
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-more-item',
+                    onClick: () => {
+                      patch({ chiefMoreMenuOpen: false })
+                      exportReport(false)
+                    },
+                  }, h('span', null, bi('📄 导出复盘报告 (.md)', '📄 Export Report (.md)'))),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-more-item',
+                    onClick: () => {
+                      patch({ chiefMoreMenuOpen: false })
+                      exportReport(true)
+                    },
+                  }, h('span', null, bi('📋 复制复盘报告 (Markdown)', '📋 Copy Report (Markdown)'))),
+                  h('div', { className: 'dnb-more-sep' }),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-more-item',
+                    'data-active': (!isHandoffPinned && syncOnDigest) ? '1' : '0',
+                    disabled: isHandoffPinned,
+                    title: isHandoffPinned
+                      ? bi('交接单已被你定住防改，参谋长不会覆盖它', 'Handoff is pinned by you, so Chief will not overwrite it.')
+                      : bi('开启后，每次更新摘要时都会顺便更新交接单', 'Update the handoff card automatically whenever you refresh the summary.'),
+                    onClick: () => {
+                      patch({ chiefMoreMenuOpen: false })
+                      void toggleSyncHandoffOnDigest(!syncOnDigest)
+                    },
+                  },
+                    h('span', null, isHandoffPinned ? bi('🔒 交接单已定住', '🔒 Handoff Pinned') : bi('更新摘要时同步交接单', 'Auto-sync handoff on update')),
+                    h('span', { style: { fontSize: 10.5, opacity: 0.78 } }, isHandoffPinned ? bi('锁定', 'Locked') : (syncOnDigest ? bi('开', 'On') : bi('关', 'Off'))),
+                  ),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-more-item',
+                    disabled: isHandoffPinned || view.secRegenerating || narrative.summarizing,
+                    title: isHandoffPinned ? bi('交接单已定住防改，不能覆盖', 'Handoff is pinned and cannot be overwritten.') : bi('把当前摘要写进交接单', 'Copy the current summary into the handoff card'),
+                    onClick: () => {
+                      patch({ chiefMoreMenuOpen: false })
+                      void loadChiefView(false, { syncHandoff: true })
+                    },
+                  }, h('span', null, isHandoffPinned ? bi('🔒 交接单已定住', '🔒 Handoff Pinned') : bi('↪ 立即更新交接单', '↪ Sync Handoff Now'))),
+                )
+              : null,
+          ),
         ),
-        bodyStyle: { padding: '10px 12px 12px' },
+        bodyStyle: { padding: '6px 14px 12px' },
       },
       useSixBriefCards
         ? h(
             'div',
-            { className: 'dnb-six-brief' },
-            sixGoalRows.map(row =>
-              h(
-                'div',
-                { key: row.key, className: 'dnb-six-row' },
-                h(
-                  'span',
-                  {
-                    className: 'dnb-six-tag',
-                    style: { color: row.color, background: row.bg },
-                  },
-                  row.key,
-                ),
-                h('span', { style: { flex: 1, fontSize: 12.2, color: 'var(--dnb-text)', lineHeight: 1.5 } }, row.body),
-              ),
+            { className: 'dnb-editorial-body' },
+            goalRow
+              ? h(
+                  'div',
+                  { className: 'dnb-editorial-goal' },
+                  h('div', { className: 'dnb-editorial-goal-kicker' }, bi('总目标', 'Main Goal')),
+                  h('div', { className: 'dnb-editorial-goal-text' }, goalRow.body),
+                )
+              : null,
+            alertRows.length > 0
+              ? h(
+                  'div',
+                  { className: 'dnb-editorial-alert' },
+                  alertRows.map(ar =>
+                    h(
+                      'div',
+                      { key: ar.key, className: 'dnb-editorial-alert-row', 'data-tone': ar.alertTone },
+                      h('span', { className: 'dnb-editorial-alert-key' }, ar.alertLabel),
+                      h('span', { className: 'dnb-editorial-alert-val' }, ar.body),
+                    ),
+                  ),
+                )
+              : null,
+            mainBriefRows.length > 0
+              ? h(
+                  'div',
+                  { className: 'dnb-six-brief' },
+                  mainBriefRows.map(row =>
+                    h(
+                      'div',
+                      { key: row.key, className: 'dnb-six-row', 'data-role': row.role || 'plain' },
+                      h('span', { className: 'dnb-six-tag' }, row.shortKey || row.key),
+                      h('span', { className: 'dnb-six-body' }, row.body),
+                    ),
+                  ),
+                )
+              : null,
+            h(
+              'div',
+              { className: 'dnb-editorial-foot' },
+              quietEmptyRows.length > 0
+                ? h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dnb-editorial-quiet-btn',
+                      onClick: () => setEmptyStatusExpanded(v => !v),
+                    },
+                    h('span', { className: 'dnb-editorial-quiet-check' }, '✓'),
+                    h('span', null, quietEmptyRows.map(q => q.shortPhrase).join(' · ')),
+                    h('span', { className: 'dnb-editorial-quiet-more' },
+                      emptyStatusExpanded ? bi('收起原文', 'Hide') : bi('查看原文', 'Details')),
+                  )
+                : (alertRows.length > 0
+                    ? h('span', { className: 'dnb-editorial-alert-badge' },
+                        bi(`● 存在 ${alertRows.length} 项待确认阻塞`, `● ${alertRows.length} item(s) need attention`))
+                    : h('span', null)),
+              renderEditorialMeta(),
             ),
+            emptyStatusExpanded && quietEmptyRows.length > 0
+              ? h(
+                  'div',
+                  { className: 'dnb-editorial-quiet-orig' },
+                  quietEmptyRows.map(q =>
+                    h(
+                      'div',
+                      { key: q.key, className: 'dnb-editorial-quiet-orig-row' },
+                      h('span', { className: 'dnb-editorial-quiet-orig-key' }, q.label + '：'),
+                      h('span', null, q.body),
+                    ),
+                  ),
+                )
+              : null,
           )
         : blocks.length
-          ? blocks.map((blk, i) =>
+          ? h(
+              'div',
+              { className: 'dnb-editorial-body' },
+              blocks.map((blk, i) =>
+                h(
+                  'div',
+                  { key: i, style: { marginTop: i === 0 ? 0 : 10 } },
+                  blk.heading ? renderStructuredHeading(blk.heading, false) : null,
+                  (blk.items || []).map((it, j) => renderStructuredItem(it, `${i}-${j}`)),
+                ),
+              ),
               h(
                 'div',
-                { key: i, style: { marginTop: i === 0 ? 0 : 12 } },
-                blk.heading ? renderStructuredHeading(blk.heading, false) : null,
-                (blk.items || []).map((it, j) => renderStructuredItem(it, `${i}-${j}`)),
+                { className: 'dnb-editorial-foot' },
+                h('span', null),
+                renderEditorialMeta(),
               ),
             )
           : h('p', { className: 'dnb-prose-p' },
@@ -353,71 +438,126 @@ export function ChiefTab({ board, view }) {
             if (!eff) return ''
             const opt = THINKING_EFFORT_OPTIONS.find(o => o.key === eff)
             const label = opt ? opt.shortLabel : eff
-            return (it && it.thinkingEffortMode === 'auto') ? `🪄 自动→${label}` : `🧠 ${label}`
+            return (it && it.thinkingEffortMode === 'auto') ? `自动→${label}` : `${label}`
+          }
+
+          const isExpandableReply = (item) => {
+            if (!item) return false
+            if (isReceiptChatItem(item)) return true
+            const txt = String(item.text || '')
+            return txt.includes('\n') || txt.length > 96
           }
 
           const renderTurnReplyCard = (item) => {
             const isReceipt = isReceiptChatItem(item)
             const effortBadge = formatChiefReplyEffortBadge(item)
+            const expandable = isExpandableReply(item)
+            const isReplyOpen = !expandable || Boolean(expandedReplyIds[item.id])
+            const actionsArr = Array.isArray(item.actions) ? item.actions.filter(Boolean) : []
+            const primaryActionLabel = actionsArr[0] || (isReceipt ? bi('操作记录', 'Log') : bi('参谋回答', 'Reply'))
+            const isSleepAction = /休眠|关停/.test(primaryActionLabel)
+            const actionTone = isSleepAction ? 'muted' : (isReceipt ? 'sage' : 'accent')
+            const summaryLine = extractReplySummaryLine(item.text) || clampTitle(String(item.text || ''), 88)
+            const toggleReply = () => setExpandedReplyIds(prev => ({
+              ...prev,
+              [item.id]: !prev[item.id],
+            }))
+
+            if (!expandable) {
+              return h(
+                'div',
+                {
+                  key: item.id,
+                  className: 'dnb-turn-reply-item',
+                  'data-role': isReceipt ? 'receipt' : (item.role === 'chief' ? 'chief' : 'user'),
+                  'data-open': '1',
+                },
+                h(
+                  'div',
+                  { className: 'dnb-reply-short-head' },
+                  h('span', { className: 'dnb-reply-action-txt', 'data-tone': actionTone },
+                    item.isOneStopReport
+                      ? bi('一站式战报', 'Report')
+                      : (item.resumeTaskId ? bi('授权后继续', 'Resumed') : primaryActionLabel)),
+                  h(
+                    'span',
+                    { className: 'dnb-reply-time' },
+                    effortBadge ? `${effortBadge} · ${timeLabel(item.at)}` : timeLabel(item.at),
+                  ),
+                ),
+                renderStructuredText(item.text),
+              )
+            }
+
             return h(
               'div',
               {
                 key: item.id,
                 className: 'dnb-turn-reply-item',
                 'data-role': isReceipt ? 'receipt' : (item.role === 'chief' ? 'chief' : 'user'),
+                'data-open': isReplyOpen ? '1' : '0',
               },
               h(
-                'div',
-                { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6, flexWrap: 'wrap' } },
+                'button',
+                {
+                  type: 'button',
+                  className: 'dnb-reply-summary-btn',
+                  title: isReplyOpen ? bi('点击收起详情', 'Click to collapse') : bi('点击展开详情', 'Click to expand'),
+                  onClick: toggleReply,
+                },
                 h(
-                  'div',
-                  { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                  isReceipt
-                    ? h('span', { className: 'dnb-receipt-badge' },
-                        item.isOneStopReport
-                          ? '🏁 一站式战报回执'
-                          : (item.resumeTaskId ? '⚡ 授权后继续结果' : '📋 操作记录'))
-                    : h('span', { className: 'dnb-qa-badge', 'data-role': 'chief' }, '✦ 参谋回答'),
+                  'span',
+                  { className: 'dnb-reply-summary-left' },
+                  h('span', { className: 'dnb-reply-chevron' }, isReplyOpen ? '▾' : '▸'),
+                  h('span', { className: 'dnb-reply-summary-text' }, summaryLine),
                 ),
                 h(
-                  'div',
-                  { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                  effortBadge
-                    ? h('span', {
-                        className: 'dnb-chat-effort-badge',
-                        title: item.thinkingEffortMode === 'auto' ? '这次回答自动选的思考深度' : '这次回答手动设的思考深度',
-                      }, effortBadge)
-                    : null,
-                  h('span', null, timeLabel(item.at)),
+                  'span',
+                  { className: 'dnb-reply-summary-right' },
+                  h('span', { className: 'dnb-reply-action-txt', 'data-tone': actionTone }, primaryActionLabel),
+                  h('span', { className: 'dnb-reply-time' }, timeLabel(item.at)),
                 ),
               ),
-              renderStructuredText(item.text),
-              Array.isArray(item.actions) && item.actions.length
+              isReplyOpen
                 ? h(
                     'div',
-                    { style: { display: 'flex', gap: 4, flexWrap: 'wrap', marginTop: 2 } },
-                    item.actions.map((actTag, idx) =>
-                      h('span', { key: idx, className: 'dnb-tag', style: { color: isReceipt ? '#34d399' : 'var(--dnb-accent)' } }, actTag)),
+                    { className: 'dnb-reply-detail' },
+                    renderStructuredText(item.text),
+                    (effortBadge || actionsArr.length > 1 || item.isOneStopReport || item.resumeTaskId)
+                      ? h(
+                          'div',
+                          { className: 'dnb-reply-detail-meta' },
+                          item.isOneStopReport ? h('span', null, bi('一站式战报回执', 'One-stop report')) : null,
+                          item.resumeTaskId ? h('span', null, bi('授权后继续结果', 'Resumed after approval')) : null,
+                          effortBadge ? h('span', null, `${bi('思考深度', 'Effort')}: ${effortBadge}`) : null,
+                          actionsArr.map((actTag, idx) => h('span', { key: idx }, actTag)),
+                        )
+                      : null,
                   )
                 : null,
             )
           }
 
           const collapsedMap = view.qaCollapsedTurnIds || {}
-          const allTurnsCollapsed = showHistory && filteredTurns.length > 0 && filteredTurns.every(t => Boolean(collapsedMap[t.id]))
+          const anyTurnCollapsed = filteredTurns.some(t => Boolean(collapsedMap[t.id]))
+          const allRepliesExpanded = filteredTurns.every(t =>
+            t.replies.every(r => !isExpandableReply(r) || Boolean(expandedReplyIds[r.id])),
+          )
+          const allExpandedNow = showHistory && filteredTurns.length > 0 && !anyTurnCollapsed && allRepliesExpanded
 
           return h(
             AccCard,
             {
               open: showHistory,
               onToggle: () => setShowHistory(v => !v),
-              tone: 'violet',
-              title: bi('问答与操作记录', 'Q&A & Action Log'),
+              tone: 'slate',
+              className: 'dnb-qa-section',
+              title: bi('问答与记录', 'Q&A & Log'),
               count: `${turns.length}`,
               bodyStyle: { padding: 0 },
               actions: h(
                 'div',
-                { className: 'dnb-text-filter-bar', style: { padding: 0, gap: 3 } },
+                { className: 'dnb-text-filter-bar dnb-qa-filter-quiet', style: { padding: 0, gap: 4 } },
                 [
                   { key: 'all', label: `${bi('全部', 'All')} ${turns.length}` },
                   { key: 'qa', label: `${bi('问答', 'Q&A')} ${qaCount}` },
@@ -435,26 +575,45 @@ export function ChiefTab({ board, view }) {
                   }, opt.label),
                 ),
                 filteredTurns.length > 0
-                  ? h('button', {
-                      type: 'button',
-                      className: 'dnb-text-filter-btn',
-                      style: { marginLeft: 2 },
-                      title: allTurnsCollapsed ? bi('展开全部记录', 'Expand all items') : bi('收起全部记录', 'Collapse all items'),
-                      onClick: () => {
-                        if (!showHistory) {
-                          setShowHistory(true)
-                          patch({ qaCollapsedTurnIds: {} })
-                          return
-                        }
-                        if (allTurnsCollapsed) {
-                          patch({ qaCollapsedTurnIds: {} })
-                        } else {
-                          const nextMap = {}
-                          for (const t of filteredTurns) nextMap[t.id] = true
-                          patch({ qaCollapsedTurnIds: nextMap })
-                        }
-                      },
-                    }, allTurnsCollapsed ? bi('全展开', 'Expand') : bi('全收起', 'Collapse'))
+                  ? h(
+                      React.Fragment,
+                      null,
+                      h('span', { className: 'dnb-qa-filter-sep', 'aria-hidden': 'true' }, '|'),
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-text-filter-btn',
+                        title: allExpandedNow ? bi('全部折叠', 'Collapse all') : bi('全部展开', 'Expand all'),
+                        onClick: () => {
+                          if (!showHistory) {
+                            setShowHistory(true)
+                            patch({ qaCollapsedTurnIds: {} })
+                            const nextExpanded = {}
+                            for (const t of filteredTurns) {
+                              for (const r of t.replies) {
+                                if (isExpandableReply(r)) nextExpanded[r.id] = true
+                              }
+                            }
+                            setExpandedReplyIds(nextExpanded)
+                            return
+                          }
+                          if (allExpandedNow) {
+                            const nextMap = {}
+                            for (const t of filteredTurns) nextMap[t.id] = true
+                            patch({ qaCollapsedTurnIds: nextMap })
+                            setExpandedReplyIds({})
+                          } else {
+                            patch({ qaCollapsedTurnIds: {} })
+                            const nextExpanded = {}
+                            for (const t of filteredTurns) {
+                              for (const r of t.replies) {
+                                if (isExpandableReply(r)) nextExpanded[r.id] = true
+                              }
+                            }
+                            setExpandedReplyIds(nextExpanded)
+                          }
+                        },
+                      }, allExpandedNow ? bi('全部折叠', 'Collapse all') : bi('全部展开', 'Expand all')),
+                    )
                   : null,
               ),
             },
@@ -492,18 +651,27 @@ export function ChiefTab({ board, view }) {
                             },
                             h(
                               'div',
-                              { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6 } },
+                              { className: 'dnb-turn-q-row' },
                               h(
                                 'div',
-                                { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                                h('span', { className: 'dnb-qa-badge', 'data-role': 'user' }, '🙋 你的提问'),
-                                repliesToShow.length > 0
-                                  ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `${repliesToShow.length} 条回复`)
+                                { className: 'dnb-turn-q-main' },
+                                h('span', { className: 'dnb-qa-who', 'data-role': 'user' }, bi('你', 'You')),
+                                q.imageCount > 0
+                                  ? h('span', { className: 'dnb-qa-img-pill' }, `🖼 ×${q.imageCount}`)
+                                  : null,
+                                q.text
+                                  ? h('span', {
+                                      className: 'dnb-turn-q-text',
+                                      'data-clamped': isTurnCollapsed ? '1' : '0',
+                                    }, q.text)
                                   : null,
                               ),
                               h(
                                 'div',
-                                { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
+                                { className: 'dnb-turn-q-meta' },
+                                isTurnCollapsed && repliesToShow.length > 0
+                                  ? h('span', null, `${repliesToShow.length} 条`)
+                                  : null,
                                 h('span', null, timeLabel(q.at)),
                                 h(Icon, {
                                   name: 'chevron',
@@ -516,40 +684,6 @@ export function ChiefTab({ board, view }) {
                                 }),
                               ),
                             ),
-                            !isTurnCollapsed && q.imageCount > 0
-                              ? h(
-                                  'div',
-                                  {
-                                    style: {
-                                      display: 'inline-flex',
-                                      alignItems: 'center',
-                                      gap: 4,
-                                      padding: '1px 7px',
-                                      width: 'fit-content',
-                                      borderRadius: 999,
-                                      background: 'rgba(10, 132, 255, 0.15)',
-                                      color: '#409cff',
-                                      fontSize: 10.5,
-                                      fontWeight: 600,
-                                    },
-                                  },
-                                  `🖼 附图 ×${q.imageCount}`,
-                                )
-                              : null,
-                            q.text
-                              ? h('div', {
-                                  style: isTurnCollapsed
-                                    ? {
-                                        fontSize: 12,
-                                        color: 'var(--dnb-text)',
-                                        lineHeight: 1.45,
-                                        overflow: 'hidden',
-                                        textOverflow: 'ellipsis',
-                                        whiteSpace: 'nowrap',
-                                      }
-                                    : { fontSize: 12, color: 'var(--dnb-text)', lineHeight: 1.5, whiteSpace: 'pre-wrap' },
-                                }, q.text)
-                              : null,
                           )
                         : h(
                             'div',
@@ -560,18 +694,20 @@ export function ChiefTab({ board, view }) {
                             },
                             h(
                               'div',
-                              { style: { display: 'flex', width: '100%', justifyContent: 'space-between', alignItems: 'center', fontSize: 11, color: 'var(--dnb-text-3)', gap: 6 } },
+                              { className: 'dnb-turn-q-row' },
                               h(
                                 'div',
-                                { style: { display: 'flex', alignItems: 'center', gap: 5 } },
-                                h('span', { className: 'dnb-receipt-badge' }, '📋 系统自动记录'),
-                                repliesToShow.length > 0
-                                  ? h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, `${repliesToShow.length} 条记录`)
-                                  : null,
+                                { className: 'dnb-turn-q-main' },
+                                h('span', { className: 'dnb-qa-who', 'data-role': 'system' }, bi('系统', 'Sys')),
+                                h('span', { className: 'dnb-turn-q-text', style: { color: 'var(--dnb-text-2)', fontWeight: 450 } },
+                                  bi('系统自动记录', 'System log')),
                               ),
                               h(
                                 'div',
-                                { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
+                                { className: 'dnb-turn-q-meta' },
+                                repliesToShow.length > 0
+                                  ? h('span', null, `${repliesToShow.length} 条`)
+                                  : null,
                                 turn.at ? h('span', null, timeLabel(turn.at)) : null,
                                 h(Icon, {
                                   name: 'chevron',
@@ -741,6 +877,7 @@ export function ChiefComposerBar({ view, barRef }) {
   const activeChipsCount = (tm.intervention ? 1 : 0)
     + (tm.autoCompact ? 1 : 0)
     + (!effectiveSafetyOn ? 1 : 0)
+  const showUrgentStrip = Boolean(tm.intervention || !effectiveSafetyOn || guard.circuitBroken)
   const commitTokenThresholdInput = (rawText) => {
     const valStr = String(rawText ?? '').trim() || '64K'
     void updateSecConfig({
@@ -792,7 +929,7 @@ export function ChiefComposerBar({ view, barRef }) {
   const placeholder = secImages.length > 0
     ? bi('已放 ' + secImages.length + ' 张图，按回车直接发送，或写点说明…', `${secImages.length} image(s) attached. Press Enter to send or add text…`)
     : (activeTarget === 'auto'
-        ? bi('直接说你想让它做什么：整理档案、加拦截规则、改计划或问问题…', 'Tell Chief what to do: organize archives, add block rules, edit plans, or ask…')
+        ? bi(`直接说你想让${chiefShortName(view)}做什么：整理档案、加拦截规则、改计划或问问题…`, `Tell ${chiefShortName(view)} what to do: organize archives, add block rules, edit plans, or ask…`)
         : activeTarget === 'all'
           ? bi('给所有人发消息（', 'Message everyone (') + modeObj.label + ')…'
           : (bi('给 @', 'To @') + shortAgentName(activePeer ? activePeer.name : activeTarget, true) + ' ' + modeObj.label + '…'))
@@ -832,7 +969,9 @@ export function ChiefComposerBar({ view, barRef }) {
           h(
             'div',
             { className: 'dnb-tactical-head' },
-            h('span', { style: { fontSize: 12, fontWeight: 700, color: 'var(--dnb-text)' } }, '🎛 参谋长控制面板'),
+            h('span', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)', display: 'inline-flex', alignItems: 'center', gap: 6 } },
+              h(Icon, { name: 'sliders', size: 13, style: { color: 'var(--dnb-accent)' } }),
+              bi('参谋长控制面板', 'Chief Control Panel')),
             h('button', {
               type: 'button',
               className: 'dnb-icon-btn',
@@ -852,15 +991,16 @@ export function ChiefComposerBar({ view, barRef }) {
               { style: { flex: 1, minWidth: 0 } },
               h(
                 'div',
-                { style: { fontSize: 12, fontWeight: 600, color: effectiveSafetyOn ? '#34d399' : '#f87171', display: 'flex', alignItems: 'center', gap: 5 } },
-                '🛡️ 安全拦截',
+                { style: { fontSize: 12, fontWeight: 500, color: effectiveSafetyOn ? 'var(--dnb-sage, #63d1b0)' : 'var(--dnb-coral, #f28b88)', display: 'flex', alignItems: 'center', gap: 6 } },
+                h(Icon, { name: effectiveSafetyOn ? 'shieldCheck' : 'shieldOff', size: 13 }),
+                bi('安全拦截', 'Safety Block'),
                 !effectiveSafetyOn
-                  ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: '#fca5a5', borderColor: 'rgba(239,68,68,0.4)' } }, !globalSafetyOn ? '全部对话已关' : '当前对话已关')
+                  ? h('span', { className: 'dnb-tag', style: { fontSize: 10, color: 'var(--dnb-coral)', borderColor: 'var(--dnb-border-strong)' } }, !globalSafetyOn ? '全部对话已关' : '当前对话已关')
                   : null,
               ),
               h(
                 'div',
-                { style: { fontSize: 11, color: effectiveSafetyOn ? 'var(--dnb-text-3)' : '#fca5a5', marginTop: 1 } },
+                { style: { fontSize: 11, color: effectiveSafetyOn ? 'var(--dnb-text-3)' : 'var(--dnb-coral)', marginTop: 1 } },
                 effectiveSafetyOn
                   ? `自动拦住删文件、改项目外文件、读密码等危险操作${totalWallCount ? ` · 自定义规则 ${activeWallCount}/${totalWallCount} 条生效` : ''}`
                   : `已关闭（${!globalSafetyOn ? '全部对话已关' : '当前对话已关'}）${activeWallCount ? ` · 还有 ${activeWallCount} 条自定义规则生效` : ' · 已全部放行'}`,
@@ -895,7 +1035,9 @@ export function ChiefComposerBar({ view, barRef }) {
             h(
               'div',
               { style: { flex: 1, minWidth: 0 } },
-              h('div', { style: { fontSize: 12, fontWeight: 600, color: tm.intervention ? '#f59e0b' : 'var(--dnb-text)' } }, '⚡ 强介入（权限越高，管得越直接）'),
+              h('div', { style: { fontSize: 12, fontWeight: 500, color: tm.intervention ? 'var(--dnb-amber, #f3be6d)' : 'var(--dnb-text)', display: 'flex', alignItems: 'center', gap: 6 } },
+                h(Icon, { name: 'zap', size: 12.5, style: { color: tm.intervention ? 'var(--dnb-amber)' : 'var(--dnb-text-3)' } }),
+                '强介入（权限越高，管得越直接）'),
               h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } },
                 INTERVENTION_TIER_DESC[permMode] || INTERVENTION_TIER_DESC.advisor),
             ),
@@ -904,18 +1046,18 @@ export function ChiefComposerBar({ view, barRef }) {
               { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
               h(
                 'div',
-                { className: 'dnb-stepper', title: '最多连续推动多少轮（降到 1 轮后再点「-」可改为 ♾️ 不限轮数）' },
+                { className: 'dnb-stepper', title: '最多连续推动多少轮（降到 1 轮后再点「-」可改为不限轮数）' },
                 h('button', {
                   type: 'button',
                   disabled: isUnlimitedTurns,
                   style: isUnlimitedTurns ? { opacity: 0.35, cursor: 'not-allowed' } : undefined,
-                  title: isUnlimitedTurns ? '现在是不限轮数' : (maxTurns <= 1 ? '再点一次会弹窗确认开启 ♾️ 不限轮数' : '减少轮数上限'),
+                  title: isUnlimitedTurns ? '现在是不限轮数' : (maxTurns <= 1 ? '再点一次会弹窗确认开启不限轮数' : '减少轮数上限'),
                   onClick: () => {
                     if (isUnlimitedTurns) return
                     toggleTacticalField('maxInterventionTurns', maxTurns <= 1 ? 0 : maxTurns - 1)
                   },
                 }, '-'),
-                h('span', { style: isUnlimitedTurns ? { color: 'var(--dnb-accent)', fontWeight: 700 } : undefined }, isUnlimitedTurns ? '♾️' : `${maxTurns}轮`),
+                h('span', { style: isUnlimitedTurns ? { color: 'var(--dnb-accent)', fontWeight: 600 } : undefined }, isUnlimitedTurns ? '∞' : `${maxTurns}轮`),
                 h('button', {
                   type: 'button',
                   disabled: !isUnlimitedTurns && maxTurns >= 30,
@@ -929,7 +1071,7 @@ export function ChiefComposerBar({ view, barRef }) {
               h(Switch, { checked: Boolean(tm.intervention), onChange: v => toggleTacticalField('intervention', v) }),
             ),
           ),
-          // Row 2: Auto-Compact + Smart Co-Managed Mode (✦ 智选) + Dual Threshold (Pct 10%-95% | Context Tokens)
+          // Row 2: Auto-Compact + Smart Co-Managed Mode (智选) + Dual Threshold (Pct 10%-95% | Context Tokens)
           h(
             'div',
             { className: 'dnb-tactical-row', style: { flexDirection: 'column', alignItems: 'stretch', gap: 7 } },
@@ -939,11 +1081,12 @@ export function ChiefComposerBar({ view, barRef }) {
               h(
                 'div',
                 { style: { flex: 1, minWidth: 0 } },
-                h('div', { style: { fontSize: 12, fontWeight: 600, color: isSmartCompact ? 'var(--dnb-accent)' : 'var(--dnb-text)' } },
-                  '🗜 存好资料再自动压缩（每轮检查）'),
+                h('div', { style: { fontSize: 12, fontWeight: 500, color: isSmartCompact ? 'var(--dnb-accent)' : 'var(--dnb-text)', display: 'flex', alignItems: 'center', gap: 6 } },
+                  h(Icon, { name: 'layers', size: 12.5, style: { color: isSmartCompact ? 'var(--dnb-accent)' : 'var(--dnb-text-3)' } }),
+                  '存好资料再自动压缩（每轮检查）'),
                 h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1, lineHeight: 1.4 } },
                   isSmartCompact
-                    ? '✦ 智选压缩已开：会在每段任务做完时，先存好关键资料再压缩'
+                    ? '智选压缩已开：会在每段任务做完时，先存好关键资料再压缩'
                     : (thresholdMode === 'tokens'
                         ? `每轮检查：对话长度到 ${thresholdInputVal} 时先存档再自动压缩`
                         : `每轮检查：对话占满 ${pct}% 时先存档再自动压缩`)),
@@ -956,10 +1099,10 @@ export function ChiefComposerBar({ view, barRef }) {
                   className: 'dnb-mini-btn',
                   'data-tone': isSmartCompact ? 'accent' : undefined,
                   title: isSmartCompact
-                    ? '已开启 ✦ 智选压缩，点这里切回按固定大小压缩'
-                    : '开启 ✦ 智选压缩：在每段任务做完时自动先存档再压缩',
+                    ? '已开启智选压缩，点这里切回按固定大小压缩'
+                    : '开启智选压缩：在每段任务做完时自动先存档再压缩',
                   onClick: () => toggleTacticalField('smartCompact', !isSmartCompact),
-                }, isSmartCompact ? '✦ 智选中' : '✦ 智选'),
+                }, isSmartCompact ? '智选中' : '智选'),
                 h(Switch, { checked: Boolean(tm.autoCompact), onChange: v => toggleTacticalField('autoCompact', v) }),
               ),
             ),
@@ -1005,11 +1148,11 @@ export function ChiefComposerBar({ view, barRef }) {
                           height: 26,
                           minWidth: 74,
                           borderRadius: 8,
-                          border: isLowPctThreshold ? '1px solid rgba(245, 158, 11, 0.7)' : '1px solid var(--dnb-border-strong)',
+                          border: isLowPctThreshold ? '1px solid var(--dnb-amber)' : '1px solid var(--dnb-border-strong)',
                           background: 'var(--dnb-card)',
                           color: 'var(--dnb-text)',
                           fontSize: 11.5,
-                          fontWeight: 600,
+                          fontWeight: 500,
                           padding: '0 8px',
                           cursor: 'pointer',
                         },
@@ -1029,7 +1172,7 @@ export function ChiefComposerBar({ view, barRef }) {
                             width: 112,
                             height: 26,
                             borderRadius: 8,
-                            border: isLowTokenThreshold ? '1px solid rgba(245, 158, 11, 0.7)' : '1px solid var(--dnb-border-strong)',
+                            border: isLowTokenThreshold ? '1px solid var(--dnb-amber)' : '1px solid var(--dnb-border-strong)',
                             background: 'var(--dnb-card)',
                             color: 'var(--dnb-text)',
                             fontSize: 11.5,
@@ -1061,17 +1204,17 @@ export function ChiefComposerBar({ view, barRef }) {
               ? h('div', {
                   style: {
                     fontSize: 10.5,
-                    color: '#f59e0b',
-                    background: 'rgba(245, 158, 11, 0.1)',
-                    border: '1px solid rgba(245, 158, 11, 0.32)',
-                    borderRadius: 6,
-                    padding: '3px 7px',
+                    color: 'var(--dnb-amber, #f3be6d)',
+                    background: 'var(--dnb-amber-soft, rgba(245, 158, 11, 0.1))',
+                    border: '1px solid var(--dnb-border)',
+                    borderRadius: 8,
+                    padding: '4px 8px',
                   },
                 }, isLowTokenThreshold
-                  ? `⚠️ 你填的 ${tm.compactThresholdInput || '低于 32K'} 太小了（建议至少 32K），压缩太勤容易丢细节`
+                  ? `你填的 ${tm.compactThresholdInput || '低于 32K'} 太小了（建议至少 32K），压缩太勤容易丢细节`
                   : (view.compactLowWarning
-                      ? ('⚠️ ' + view.compactLowWarning)
-                      : `⚠️ 现在设的 ${pct}% 太低了，压缩太勤容易丢细节，建议选 30%–80%`))
+                      ? view.compactLowWarning
+                      : `现在设的 ${pct}% 太低了，压缩太勤容易丢细节，建议选 30%–80%`))
               : null,
           ),
           // Row 3: Strict Verify
@@ -1081,7 +1224,9 @@ export function ChiefComposerBar({ view, barRef }) {
             h(
               'div',
               { style: { flex: 1, minWidth: 0 } },
-              h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '✓ 完工前核实证据'),
+              h('div', { style: { fontSize: 12, fontWeight: 500, color: 'var(--dnb-text)', display: 'flex', alignItems: 'center', gap: 6 } },
+                h(Icon, { name: 'checkCircle', size: 12.5, style: { color: tm.strictVerify ? 'var(--dnb-sage)' : 'var(--dnb-text-3)' } }),
+                '完工前核实证据'),
               h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '必须贴出文件或命令运行结果，没核实就不算完工'),
             ),
             h(Switch, { checked: Boolean(tm.strictVerify), onChange: v => toggleTacticalField('strictVerify', v) }),
@@ -1093,18 +1238,23 @@ export function ChiefComposerBar({ view, barRef }) {
             h(
               'div',
               { style: { flex: 1, minWidth: 0 } },
-              h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '📝 极简汇报模式'),
+              h('div', { style: { fontSize: 12, fontWeight: 500, color: 'var(--dnb-text)', display: 'flex', alignItems: 'center', gap: 6 } },
+                h(Icon, { name: 'alignLeft', size: 12.5, style: { color: tm.conciseBrief ? 'var(--dnb-accent)' : 'var(--dnb-text-3)' } }),
+                '极简汇报模式'),
               h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '只用几句大白话汇报重点，少放复杂数字'),
             ),
             h(Switch, { checked: Boolean(tm.conciseBrief), onChange: v => toggleTacticalField('conciseBrief', v) }),
           ),
-          // Row 6: Chief Thinking Effort Fan Gauge + Team Effort Mode (Auto / Manual)
+          // Row 6: Chief Thinking Effort Adaptive Control + Team Effort Mode (Auto / Manual)
           h(
             'div',
             { className: 'dnb-tactical-row', style: { flexDirection: 'column', alignItems: 'stretch', gap: 6 } },
-            h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } }, '🧠 参谋长思考强度'),
+            h('div', { style: { fontSize: 12, fontWeight: 500, color: 'var(--dnb-text)', display: 'flex', alignItems: 'center', gap: 6 } },
+              h(Icon, { name: 'sparkles', size: 12.5, style: { color: 'var(--dnb-accent)' } }),
+              '参谋长思考强度'),
             h(EffortFanGauge, {
               value: meta.thinkingEffort || 'auto',
+              skin: view.uiSkin,
               onChange: nextKey => void updateSecConfig({ thinkingEffort: nextKey }),
             }),
             (() => {
@@ -1208,8 +1358,8 @@ export function ChiefComposerBar({ view, barRef }) {
         )
       : null,
 
-    // Active Tactical Mode Strip (shows smart-compact or hard threshold chip)
-    activeChipsCount > 0 || guard.circuitBroken
+    // Active Tactical Mode Strip (shows urgent modes only: intervention, safety off, circuit broken)
+    showUrgentStrip
       ? h(
           'div',
           { className: 'dnb-tactical-strip' },
@@ -1219,20 +1369,7 @@ export function ChiefComposerBar({ view, barRef }) {
                 className: 'dnb-tac-chip',
                 'data-tone': 'amber',
                 onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen }),
-              }, `⚡ 强介入 ${Number(guard.interventionTurns ?? guard.consecutiveInterventionTurns ?? 0)}/${isUnlimitedTurns ? '♾️' : maxTurns}`)
-            : null,
-          tm.autoCompact
-            ? h('button', {
-                type: 'button',
-                className: 'dnb-tac-chip',
-                'data-tone': 'accent',
-                onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen }),
-                title: isSmartCompact
-                  ? '✦ 智选压缩已开：会在合适时机先存档再压缩'
-                  : (thresholdMode === 'tokens'
-                      ? `到 ${tm.compactThresholdInput || '64K'} 时自动存档并压缩`
-                      : `占用达 ${pct}% 时自动存档并压缩`),
-              }, isSmartCompact ? '✦ 智选压缩' : `🗜 自动压缩 ${thresholdMode === 'tokens' ? (tm.compactThresholdInput || '64K') : (pct + '%')}`)
+              }, h(Icon, { name: 'zap', size: 11 }), `强介入 ${Number(guard.interventionTurns ?? guard.consecutiveInterventionTurns ?? 0)}/${isUnlimitedTurns ? '∞' : maxTurns}`)
             : null,
           !effectiveSafetyOn
             ? h('button', {
@@ -1241,14 +1378,14 @@ export function ChiefComposerBar({ view, barRef }) {
                 'data-tone': 'red',
                 onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen }),
                 title: '安全拦截当前已关闭，点开控制面板可一键开启',
-              }, '🛡️ 安全拦截已关')
+              }, h(Icon, { name: 'shieldOff', size: 11 }), '安全拦截已关')
             : null,
           guard.circuitBroken
             ? h('span', {
                 className: 'dnb-tac-chip',
-                style: { borderColor: 'rgba(255,69,58,0.45)', color: '#ff453a', background: 'rgba(255,69,58,0.1)' },
+                style: { borderColor: 'var(--dnb-coral)', color: 'var(--dnb-coral)', background: 'var(--dnb-coral-soft)' },
                 title: guard.circuitReason || '连续出错太多次，已自动停下',
-              }, '⛔ 已停机')
+              }, h(Icon, { name: 'alert', size: 11 }), '已停机')
             : null,
           tm.intervention
             ? h('button', {
@@ -1256,7 +1393,7 @@ export function ChiefComposerBar({ view, barRef }) {
                 className: 'dnb-stop-btn',
                 title: '马上打断后台推进，当前任务计划会保留',
                 onClick: () => void updateSecConfig({ emergencyStopIntervention: true }),
-              }, '⏹ 急停')
+              }, h(Icon, { name: 'stop', size: 10.5 }), '急停')
             : null,
         )
       : null,
@@ -1276,13 +1413,13 @@ export function ChiefComposerBar({ view, barRef }) {
             h(
               'div',
               { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, padding: '2px 2px 2px' } },
-              h('span', { style: { fontSize: 12.5, fontWeight: 700, color: 'var(--dnb-text)' } }, '权限档位（只对当前对话有效）'),
+              h('span', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)' } }, '权限档位（只对当前对话有效）'),
               h('button', {
                 type: 'button',
                 className: 'dnb-mini-btn',
                 title: '查看每次操作的安全检查记录',
                 onClick: () => patch({ secPermMenuOpen: false, auditLogModalOpen: true }),
-              }, `📜 安全记录 (${auditCount})`),
+              }, h(Icon, { name: 'fileText', size: 11 }), `安全记录 (${auditCount})`),
             ),
             PERM_OPTIONS.map(opt => {
               const active = permMode === opt.key
@@ -1313,17 +1450,17 @@ export function ChiefComposerBar({ view, barRef }) {
                 h(
                   'div',
                   { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
-                  h('span', { style: { fontSize: 12.5, fontWeight: 700, color: opt.key === 'chief' ? '#f59e0b' : 'var(--dnb-text)' } }, opt.title),
+                  h('span', { style: { fontSize: 12.5, fontWeight: 600, color: opt.key === 'chief' ? 'var(--dnb-amber)' : 'var(--dnb-text)' } }, opt.title),
                   h(
                     'div',
                     { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
                     opt.badgeText
                       ? h('span', { className: 'dnb-perm-badge', 'data-tone': opt.badgeTone }, opt.badgeText)
                       : null,
-                    active ? h(Icon, { name: 'check', size: 13, style: { color: opt.key === 'chief' ? '#f59e0b' : 'var(--dnb-accent)' } }) : null,
+                    active ? h(Icon, { name: 'check', size: 13, style: { color: opt.key === 'chief' ? 'var(--dnb-amber)' : 'var(--dnb-accent)' } }) : null,
                   ),
                 ),
-                h('div', { className: 'dnb-perm-subcode', style: opt.key === 'chief' ? { color: '#d97706' } : undefined }, opt.code),
+                h('div', { className: 'dnb-perm-subcode', style: opt.key === 'chief' ? { color: 'var(--dnb-amber)' } : undefined }, opt.code),
                 h(
                   'ul',
                   { className: 'dnb-perm-bullets' },
@@ -1335,7 +1472,7 @@ export function ChiefComposerBar({ view, barRef }) {
             h(
               'div',
               { className: 'dnb-pipe-bar', title: '每次操作都要经过这 6 道安全检查' },
-              h('span', { style: { fontWeight: 700, color: 'var(--dnb-text-2)', marginRight: 2 } }, '检查流程:'),
+              h('span', { style: { fontWeight: 600, color: 'var(--dnb-text-2)', marginRight: 2 } }, '检查流程:'),
               ['当前权限', '发起请求', '硬红线检查', '权限检查', '执行操作', '记入日志'].map((step, idx, arr) =>
                 h(
                   React.Fragment,
@@ -1356,9 +1493,9 @@ export function ChiefComposerBar({ view, barRef }) {
           {
             className: 'dnb-pending-banner',
             style: {
-              background: 'rgba(37, 99, 235, 0.14)',
-              border: '1px solid rgba(37, 99, 235, 0.42)',
-              color: '#60a5fa',
+              background: 'var(--dnb-accent-soft)',
+              border: '1px solid var(--dnb-border-strong)',
+              color: 'var(--dnb-accent)',
             },
             onClick: () => {
               const nextDismissed = { ...(view.dismissedElevationIds || {}) }
@@ -1366,8 +1503,9 @@ export function ChiefComposerBar({ view, barRef }) {
               patch({ dismissedElevationIds: nextDismissed, elevationAgreed: false, elevationChosenMode: pendingElevationObj.targetMode || 'strategist' })
             },
           },
-          h('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-            `⬆️ 参谋申请升权限：${CHIEF_PERMISSION_LABELS[pendingElevationObj.fromMode] || pendingElevationObj.fromMode} → ${CHIEF_PERMISSION_LABELS[pendingElevationObj.targetMode] || pendingElevationObj.targetMode}`),
+          h('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 5 } },
+            h(Icon, { name: 'arrowUp', size: 11.5 }),
+            `参谋申请升权限：${CHIEF_PERMISSION_LABELS[pendingElevationObj.fromMode] || pendingElevationObj.fromMode} → ${CHIEF_PERMISSION_LABELS[pendingElevationObj.targetMode] || pendingElevationObj.targetMode}`),
           h('span', { style: { flexShrink: 0, textDecoration: 'underline' } }, '去确认 →'),
         )
       : null,
@@ -1378,9 +1516,9 @@ export function ChiefComposerBar({ view, barRef }) {
           {
             className: 'dnb-pending-banner',
             style: {
-              background: 'rgba(245, 158, 11, 0.14)',
-              border: '1px solid rgba(245, 158, 11, 0.45)',
-              color: '#fbbf24',
+              background: 'var(--dnb-amber-soft)',
+              border: '1px solid var(--dnb-amber)',
+              color: 'var(--dnb-amber)',
             },
             onClick: () => {
               const first = pendingApprovalsList[0]
@@ -1389,8 +1527,9 @@ export function ChiefComposerBar({ view, barRef }) {
               patch({ dismissedApprovalIds: nextDismissed, openApprovalModalId: (first && first.id) || '' })
             },
           },
-          h('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-            `🛡️ ${pendingApprovalsList[0].operationLabel || '敏感操作'}（还有 ${pendingApprovalsList.length} 项等你确认）`),
+          h('span', { style: { minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 5 } },
+            h(Icon, { name: 'shieldCheck', size: 11.5 }),
+            `${pendingApprovalsList[0].operationLabel || '敏感操作'}（还有 ${pendingApprovalsList.length} 项等你确认）`),
           h('span', { style: { flexShrink: 0, textDecoration: 'underline' } }, '点此确认 →'),
         )
       : null,
@@ -1413,8 +1552,8 @@ export function ChiefComposerBar({ view, barRef }) {
             borderRadius: '50%',
             flexShrink: 0,
             background: permMode === 'chief'
-              ? '#f59e0b'
-              : (permMode === 'strategist' ? '#60a5fa' : (permMode === 'advisor' ? '#34d399' : '#94a3b8')),
+              ? 'var(--dnb-amber)'
+              : (permMode === 'strategist' ? 'var(--dnb-accent)' : (permMode === 'advisor' ? 'var(--dnb-sage)' : 'var(--dnb-text-3)')),
           },
         }),
         activePermObj.shortLabel,
@@ -1422,9 +1561,9 @@ export function ChiefComposerBar({ view, barRef }) {
       h('button', {
         className: 'dnb-sec-chip',
         'data-active': activeTarget === 'auto' ? '1' : '0',
-        title: bi('发给参谋长处理：它会自动查进度、协调子代理或转达消息', 'Send to DSH Chief to check progress, coordinate subagents, or pass messages'),
+        title: bi(`发给${chiefDisplayName(view)}处理：它会自动查进度、协调子代理或转达消息`, `Send to ${chiefDisplayName(view)} to check progress, coordinate subagents, or pass messages`),
         onClick: () => patch({ secTarget: 'auto' }),
-      }, bi('✦ 找参谋长', '✦ Chief')),
+      }, h(Icon, { name: 'sparkles', size: 10.5 }), `${bi('找', '')}${chiefShortName(view)}`),
       targetChips.map(p =>
         h('button', {
           key: p.key,
@@ -1436,7 +1575,7 @@ export function ChiefComposerBar({ view, barRef }) {
           }),
         },
           p.status === 'running'
-            ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '7.5px', color: '#409cff' } })
+            ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '7.5px', color: 'var(--dnb-accent)' } })
             : h(Icon, { name: p.key === 'lead' ? 'agentLead' : 'agentSub', size: 10.5 }),
           '@' + clampTitle(p.key === 'lead' ? '主对话' : shortAgentName(p.name, true), 9.5),
         ),
@@ -1543,7 +1682,7 @@ export function ChiefComposerBar({ view, barRef }) {
       h('input', {
         ref: el => { runtimeRefs.secInputEl = el },
         className: 'dnb-sec-input',
-        placeholder: view.secBusy ? '参谋长正在处理…' : placeholder,
+        placeholder: view.secBusy ? bi(`${chiefShortName(view)}正在处理…`, `${chiefShortName(view)} is thinking…`) : placeholder,
         disabled: view.secBusy,
         value: view.secInput || '',
         onChange: e => patch({ secInput: e.target.value }),
@@ -1572,7 +1711,7 @@ export function ChiefComposerBar({ view, barRef }) {
         type: 'button',
         className: 'dnb-sec-send',
         disabled: !canSend,
-        title: '发给 DSH 参谋长',
+        title: bi(`发给 ${chiefDisplayName(view)}`, `Send to ${chiefDisplayName(view)}`),
         onClick: () => void submitChiefBar(),
       },
         view.secBusy

@@ -413,6 +413,31 @@ export function resolveAlignedModelEffort(desiredEffort, supportedEfforts = []) 
 
 const SECRET_PATTERN = /(?:sk-[a-zA-Z0-9_-]{16,}|ghp_[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|Bearer\s+[A-Za-z0-9._~+/=-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/
 
+const CHIEF_NAME_SECRET_RES = [
+  /\bsk-(?:proj-)?[a-zA-Z0-9_-]{12,}/i,
+  /\bghp_[a-zA-Z0-9]{16,}/,
+  /\bgho_[a-zA-Z0-9]{16,}/,
+  /\bgithub_pat_[a-zA-Z0-9_]{20,}/,
+  /\bAKIA[0-9A-Z]{16}\b/,
+  /\bAIza[0-9A-Za-z_-]{24,}/,
+  /\bxox[baprs]-[a-zA-Z0-9-]{16,}/,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/i,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----/i,
+  /(?:api[_-]?key|secret|token|password|passwd)\s*[:=]\s*['"]?[A-Za-z0-9._~+/=-]{12,}['"]?/i,
+]
+
+export function containsChiefNameSecret(raw) {
+  const s = String(raw == null ? '' : raw).trim()
+  if (!s) return false
+  return SECRET_PATTERN.test(s) || CHIEF_NAME_SECRET_RES.some(re => re.test(s))
+}
+
+export function normalizeChiefName(raw) {
+  const s = String(raw == null ? '' : raw).replace(/[\r\n]+/g, ' ').replace(/\s+/g, ' ').trim()
+  if (!s || containsChiefNameSecret(s)) return ''
+  return s.slice(0, 24)
+}
+
 let idSeq = 0
 
 export function nextId(prefix) {
@@ -820,6 +845,10 @@ export function normalizeMail(raw) {
     : []
   const validChannels = ['internal', 'pair', 'multi', 'broadcast']
   const channelType = validChannels.includes(raw.channelType) ? raw.channelType : ''
+  const validRoutedStatuses = ['delivered', 'queued', 'unrouted', 'stale_target']
+  const routedStatus = validRoutedStatuses.includes(raw.routedStatus) ? raw.routedStatus : ''
+  const resolvedAgentId = typeof raw.resolvedAgentId === 'string' ? raw.resolvedAgentId.trim().slice(0, 128) : ''
+  const resolvedVia = typeof raw.resolvedVia === 'string' ? raw.resolvedVia.trim().slice(0, 64) : ''
   return {
     id: typeof raw.id === 'string' && raw.id ? raw.id : nextId('mail'),
     from: clamp(raw.from || 'agent', 48),
@@ -836,6 +865,9 @@ export function normalizeMail(raw) {
     ...(imageCount > 0 ? { imageCount } : {}),
     mode: ['steer', 'followup', 'silent'].includes(raw.mode) ? raw.mode : 'steer',
     deliveredPhysical: Boolean(raw.deliveredPhysical),
+    ...(routedStatus ? { routedStatus } : {}),
+    ...(resolvedAgentId ? { resolvedAgentId } : {}),
+    ...(resolvedVia ? { resolvedVia } : {}),
     readBy: Array.isArray(raw.readBy) ? raw.readBy.map(String).slice(0, 32) : [],
     at: Number(raw.at) || Date.now(),
   }
@@ -925,6 +957,14 @@ export function normalizeWorkspace(raw) {
     lastActivityAt: Math.max(0, Number(rg.lastActivityAt) || 0),
     lastDreamRoamAt: Math.max(0, Number(rg.lastDreamRoamAt) || 0),
     lastAutoArchiveOrgAt: Math.max(0, Number(rg.lastAutoArchiveOrgAt) || 0),
+    peerDropState: rg.peerDropState && typeof rg.peerDropState === 'object' && Number(rg.peerDropState.at) > 0
+      ? {
+          at: Math.max(0, Number(rg.peerDropState.at) || 0),
+          reason: clamp(rg.peerDropState.reason || '', 180),
+          trigger: clamp(rg.peerDropState.trigger || '', 60),
+          skipped: clamp(rg.peerDropState.skipped || '', 60),
+        }
+      : null,
   }
   base.chiefRiskAck = normalizeChiefRiskAck(src.chiefRiskAck)
   base.pendingApprovals = (Array.isArray(src.pendingApprovals) ? src.pendingApprovals : [])
@@ -1188,6 +1228,7 @@ export function resolveWorkspaceConfig(state, sessionId = '') {
         : DEFAULT_MANAGED_BUDGET_MAX_TOKENS)
   return {
     modelRef,
+    chiefName: normalizeChiefName(base.chiefName),
     sessionEnabled: isChiefSessionEnabled(safeState, sid),
     defaultAutoEnableSessions: Boolean(base.defaultAutoEnableSessions === true),
     paceMode,
@@ -1287,6 +1328,7 @@ export function normalizeState(raw) {
     version: STATE_VERSION,
     config: {
       modelRef: typeof cfg.modelRef === 'string' ? cfg.modelRef.trim() : '',
+      chiefName: normalizeChiefName(cfg.chiefName),
       defaultAutoEnableSessions: Boolean(cfg.defaultAutoEnableSessions),
       paceMode,
       runMode: stopped ? 'off' : normalizeRunMode(cfg.runMode, { stopped, paceMode }),
@@ -1473,6 +1515,13 @@ export const OFFICIAL_HARNESS_CATALOG = [
     packageName: '@deepseek-ai/dsh-subagent-claude-code',
     accent: '#f59e0b',
     roleHint: '架构审查 / 深度排障 / 代码评审',
+  },
+  {
+    provider: 'gemini',
+    label: 'Gemini CLI',
+    packageName: '@deepseek-ai/dsh-subagent-gemini',
+    accent: '#38bdf8',
+    roleHint: '长上下文分析 / 多文件检索 / 架构推演',
   },
   {
     provider: 'acp',

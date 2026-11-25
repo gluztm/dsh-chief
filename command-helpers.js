@@ -122,6 +122,7 @@ export const ASK_CHIEF_SYSTEM = [
   '  1) 总结踩坑红线或必做要求时，生成 `boundProposals` 呈交用户拍板（若用户提到「全局定住/以后所有任务都生效」则设 `"pinGlobal": true`）；只有用户明确下令「直接写进禁止/必做边界」时才用 `boardOps`。',
   '  2) 当用户要求「把重要的零散边界总结成一条 / 合并重复边界」时，仔细阅读现有边界，保留关键命令名/路径/硬红线，浓缩为 1 条精炼总则放入 `boundProposals[0].item`，并把被它吸收替代的旧条文原样放进 `replaces` 数组（若被合并旧规中含 📌 全局定住项，则 `"pinGlobal": true`）。',
   '- 【看图与带图拆话】：当用户附带上传图片时，请直接结合图片画面诊断 UI 样式、报错截图或架构图；若你在 relays 中向代理拆话派活，系统会自动把用户附带的图片一并转送给目标代理。',
+  '- 【短期对话衔接与防失忆】：上下文中若附带「您与参谋长最近几轮对话（短期衔接）」，当用户出现“刚才 / 上面 / 第 X 点 / 展开讲讲 / 就按你说的办”等承接指代时，务必优先对照该区精准衔接，严禁装作没聊过或推倒重来；若用户在本轮敲定了跨轮有效的偏好、决定或规矩，主动顺手写入 `memoryChanges` 沉淀。',
 ].join('\n')
 
 export const CONCISE_BRIEF_ASK_EXTRA = [
@@ -566,3 +567,40 @@ export const OBJECTIVE_SUGGEST_SYSTEM = [
  * Suggest (with repeated intent guessing) or micro-tune an existing draft Core Objective
  * when enabling Strong Intervention mode.
  */
+
+const SYSTEM_RECEIPT_PREFIX_RE = /^-\s*【(?:✦\s*智选压缩|🤖→⏸\s*托管自动休眠|🛡️\s*逐项授权|✅\s*已允许并执行|⛔\s*已拒绝本次操作|📌\s*参谋长主动取档上桌|⚡\s*强介入督导|⚠️\s*强介入督导|🏁\s*一站式战报回执|🌙\s*梦境漫游|🎯\s*核心目标已达成)/
+
+/**
+ * Build a fixed-budget short-term sliding window of recent Chief <-> user turns
+ * (up to 6 turns / 12 entries, receipt-filtered & redacted) so lightweight models
+ * keep multi-turn conversational continuity without inflating prompt context.
+ */
+export function buildRecentChiefChatWindow(chatEntries, {
+  maxMessages = 12,
+  maxUserChars = 360,
+  maxChiefChars = 420,
+  totalBudget = 2800,
+} = {}) {
+  const list = Array.isArray(chatEntries) ? chatEntries : []
+  if (!list.length) return []
+  const picked = []
+  let usedChars = 0
+  for (let i = list.length - 1; i >= 0 && picked.length < maxMessages; i -= 1) {
+    const entry = list[i]
+    if (!entry || typeof entry !== 'object') continue
+    const role = entry.role === 'user' ? 'user' : (entry.role === 'chief' ? 'chief' : '')
+    if (!role) continue
+    if (entry.kind === 'receipt' || entry.isOneStopReport === true) continue
+    const rawText = stripCheckpointNoise(String(entry.text || '')).replace(/\r\n/g, '\n').trim()
+    if (!rawText) continue
+    if (role === 'chief' && SYSTEM_RECEIPT_PREFIX_RE.test(rawText)) continue
+    if (secretLike(rawText)) continue
+    const limit = role === 'user' ? maxUserChars : maxChiefChars
+    const compactText = clamp(rawText.replace(/\n{3,}/g, '\n\n'), limit)
+    const line = `${role === 'user' ? '- 用户' : '- 参谋长'}: ${compactText}`
+    if (usedChars + line.length > totalBudget && picked.length > 0) break
+    picked.push(line)
+    usedChars += line.length + 1
+  }
+  return picked.reverse()
+}

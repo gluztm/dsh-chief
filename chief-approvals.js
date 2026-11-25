@@ -528,6 +528,7 @@ export async function handleApprovalDecision(deps, {
   sessionId = '',
   approvalId = '',
   decision = 'reject',
+  reason = '',
 } = {}) {
   const rootId = (deps && typeof deps.resolveRootSessionId === 'function' ? deps.resolveRootSessionId(sessionId) : '') || String(sessionId || 'global')
   let found = null

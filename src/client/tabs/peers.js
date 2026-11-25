@@ -78,6 +78,29 @@ function HarnessLogoIcon({ provider, size = 18 }) {
       ),
     )
   }
+  if (provider === 'gemini') {
+    return h(
+      'span',
+      { className: 'dnb-brand-badge', 'data-provider': 'gemini' },
+      h(
+        'svg',
+        {
+          width: size,
+          height: size,
+          viewBox: '0 0 24 24',
+          fill: 'none',
+          'data-official-logo': '1',
+          'data-provider': 'gemini',
+          'aria-hidden': 'true',
+          style: { display: 'block', flexShrink: 0 },
+        },
+        h('path', {
+          d: 'M12 2c.35 4.7 3.85 9.65 10 10-6.15.35-9.65 5.3-10 10-.35-4.7-3.85-9.65-10-10 6.15-.35 9.65-5.3 10-10z',
+          fill: '#38bdf8',
+        }),
+      ),
+    )
+  }
   return h(
     'span',
     { className: 'dnb-brand-badge', 'data-provider': provider || 'custom' },
@@ -116,7 +139,7 @@ function buildSquadHierarchy({
 
   // First pass: primary lead and linked peer-session roots
   for (const peer of peerList) {
-    if (peer.kind === 'subagent') continue
+    if (!peer || peer.kind === 'subagent' || peer.kind === 'stale') continue
     const isPeer = peer.kind === 'peer-session'
     const rid = isPeer ? String(peer.id || getRootKey(peer)) : getRootKey(peer)
     const accent = colorForRootSession(rid, selfRootId)
@@ -347,7 +370,7 @@ export function PeersTab({ view }) {
     ? []
     : rawPeers.filter(p => p && p.kind === 'subagent' && p.status !== 'running' && isInternalProbeName(p.name || p.key))
   const hiddenProbeSet = new Set(hiddenProbePeers)
-  const peers = rawPeers.filter(p => !hiddenProbeSet.has(p))
+  const peers = rawPeers.filter(p => p && p.kind !== 'stale' && !hiddenProbeSet.has(p))
   const otherSessions = Array.isArray(sec.otherSessions) ? sec.otherSessions : []
   const mailbox = Array.isArray(sec.mailbox) ? sec.mailbox : []
 
@@ -530,6 +553,9 @@ export function PeersTab({ view }) {
   const [confirmStop, setConfirmStop] = React.useState(false)
   const [dispatchTarget, setDispatchTarget] = React.useState('')
   const [dispatchText, setDispatchText] = React.useState('')
+  const [chainNextProvider, setChainNextProvider] = React.useState('')
+  const [chainInstruction, setChainInstruction] = React.useState('')
+  const [selectedStreamKey, setSelectedStreamKey] = React.useState('')
   const [lockShake, setLockShake] = React.useState(false)
   const [dragOverZone, setDragOverZone] = React.useState('')
   const [linkLayout, setLinkLayout] = React.useState({ w: 0, h: 0, links: [] })
@@ -1315,20 +1341,26 @@ export function PeersTab({ view }) {
           ),
         ),
 
-        // Inline External Harness One-Click Dispatch Bar
+        // Inline External Harness One-Click Dispatch Bar (+ Optional 2-Hop Chain Relay)
         dispatchTarget
           ? h(
               'form',
               {
                 className: 'dnb-bubble-dispatch-bar',
+                style: { flexWrap: 'wrap' },
                 onSubmit: async (e) => {
                   e.preventDefault()
                   const txt = dispatchText.trim()
                   if (!txt) return
                   const p = dispatchTarget
+                  const nextChain = (chainNextProvider && chainNextProvider !== p)
+                    ? { provider: chainNextProvider, instruction: chainInstruction.trim() }
+                    : null
                   setDispatchText('')
                   setDispatchTarget('')
-                  await dispatchBubbleHarness(p, txt)
+                  setChainNextProvider('')
+                  setChainInstruction('')
+                  await dispatchBubbleHarness(p, txt, '', nextChain)
                 },
               },
               h(HarnessLogoIcon, { provider: dispatchTarget, size: 16 }),
@@ -1336,7 +1368,7 @@ export function PeersTab({ view }) {
               h('input', {
                 type: 'text',
                 className: 'dnb-input',
-                style: { flex: 1, height: 28, fontSize: 11.5 },
+                style: { flex: 1, minWidth: 160, height: 28, fontSize: 11.5 },
                 value: dispatchText,
                 placeholder: bi(`向 @${dispatchTarget} 下达任务（自动入队锁定并附带规矩与拦截规则）…`, `Task for @${dispatchTarget} (auto-enrolls, locks & prepends rules)…`),
                 onChange: e => setDispatchText(e.target.value),
@@ -1350,10 +1382,104 @@ export function PeersTab({ view }) {
                 type: 'button',
                 className: 'dnb-pill',
                 style: { height: 28, padding: '0 8px', fontSize: 11 },
-                onClick: () => setDispatchTarget(''),
+                onClick: () => {
+                  setDispatchTarget('')
+                  setChainNextProvider('')
+                  setChainInstruction('')
+                },
               }, bi('取消', 'Cancel')),
+              (() => {
+                const chainCandidates = [...harnessWing, ...readyStandbyHarnesses]
+                  .filter((it, idx, arr) => it && it.provider && it.provider !== dispatchTarget && arr.findIndex(x => x && x.provider === it.provider) === idx)
+                if (!chainCandidates.length) return null
+                return h(
+                  'div',
+                  { className: 'dnb-chain-row' },
+                  h('span', { style: { fontWeight: 600, whiteSpace: 'nowrap' } }, bi('🔗 完工自动转交：', '🔗 Chain after finish:')),
+                  h(
+                    'select',
+                    {
+                      className: 'dnb-input',
+                      style: { width: 'auto', height: 24, fontSize: 10.5, padding: '0 6px' },
+                      value: chainNextProvider,
+                      onChange: e => setChainNextProvider(e.target.value),
+                    },
+                    h('option', { value: '' }, bi('做完即止（不转交）', 'Single run (no chain)')),
+                    chainCandidates.map(c =>
+                      h('option', { key: c.provider, value: c.provider }, '@' + (c.label || c.provider))),
+                  ),
+                  chainNextProvider
+                    ? h('input', {
+                        type: 'text',
+                        className: 'dnb-input',
+                        style: { flex: 1, minWidth: 140, height: 24, fontSize: 10.5 },
+                        value: chainInstruction,
+                        placeholder: bi(`交接给 @${chainNextProvider} 后让它干嘛（如：复核改动并补单测）…`, `Instruction for @${chainNextProvider}…`),
+                        onChange: e => setChainInstruction(e.target.value),
+                      })
+                    : null,
+                )
+              })(),
             )
           : null,
+
+        // Live & Recent External Harness Output Streams
+        (() => {
+          const liveArr = Array.isArray(bubble.liveStreams) ? bubble.liveStreams : []
+          const recentArr = Array.isArray(bubble.recentRuns) ? bubble.recentRuns : []
+          const streamEntries = [
+            ...liveArr.map(r => ({ ...r, _live: true })),
+            ...recentArr.filter(r => !liveArr.some(l => l.runId === r.runId)).map(r => ({ ...r, _live: false })),
+          ]
+          if (!streamEntries.length) return null
+          const activeStream = streamEntries.find(r => r.runId === selectedStreamKey) || streamEntries[0]
+          return h(
+            'div',
+            { className: 'dnb-stream-box' },
+            h(
+              'div',
+              { className: 'dnb-stream-head' },
+              h(
+                'div',
+                { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } },
+                activeStream._live
+                  ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#34d399' } })
+                  : h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: activeStream.status === 'error' ? '#f87171' : '#34d399' } }),
+                h('span', null, bi('📡 外协实时输出流', '📡 Harness Output Stream')),
+                activeStream.chainNextProvider
+                  ? h('span', { style: { fontSize: 10, color: '#38bdf8', fontWeight: 500 } }, `→ @${activeStream.chainNextProvider}`)
+                  : null,
+              ),
+              activeStream.tail
+                ? h('button', {
+                    type: 'button',
+                    className: 'dnb-pill',
+                    style: { height: 20, padding: '0 7px', fontSize: 10 },
+                    onClick: () => copyText(activeStream.tail, bi('📋 已复制输出日志', '📋 Copied stream output')),
+                  }, bi('复制', 'Copy'))
+                : null,
+            ),
+            streamEntries.length > 1
+              ? h(
+                  'div',
+                  { className: 'dnb-stream-tabs' },
+                  streamEntries.slice(0, 5).map(item =>
+                    h('button', {
+                      key: item.runId,
+                      type: 'button',
+                      className: 'dnb-stream-tab',
+                      'data-active': item.runId === activeStream.runId ? '1' : '0',
+                      onClick: () => setSelectedStreamKey(item.runId),
+                    }, `@${item.provider} · ${item._live ? bi('运行中', 'Live') : (item.status === 'error' ? bi('出错', 'Err') : bi('完成', 'Done'))}`)),
+                )
+              : null,
+            h(
+              'pre',
+              { className: 'dnb-stream-pre' },
+              activeStream.tail || (activeStream._live ? bi('等待外部进程返回首段输出…', 'Waiting for external process output…') : bi('（该次运行无文本输出）', '(No text output recorded)')),
+            ),
+          )
+        })(),
 
         // Compact Standby Pill Dock (Strictly ONLY locally installed Harnesses & open DSH windows)
         h(
@@ -1474,211 +1600,221 @@ export function PeersTab({ view }) {
     ),
 
     // Section 2: Clean Grouped Card-Stream Collaboration Mailbox
-    h(
-      AccCard,
-      {
-        open: !view.peersMailCollapsed,
-        onToggle: () => patch({ peersMailCollapsed: !view.peersMailCollapsed }),
-        tone: 'indigo',
-        icon: h(Icon, { name: 'mail', size: 12.5, style: { color: 'var(--dnb-text-2)' } }),
-        title: bi('协同消息记录', 'Team Messages'),
-        count: mailbox.length ? String(mailbox.length) : '',
-        preview: drawerList.length ? bi(`${drawerList.length} 组对话`, `${drawerList.length} threads`) : bi('还没有消息记录', 'No messages yet'),
-        actions: h(
-          'div',
-          { className: 'dnb-text-filter-bar', style: { padding: 0, gap: 3 } },
-          [
-            { key: 'all', label: bi('全部', 'All') },
-            { key: 'broadcast', label: bi('广播', 'Broadcast') },
-            { key: 'cross', label: bi('跨窗', 'Cross') },
-            { key: 'internal', label: bi('内部', 'Internal') },
-          ].map(f =>
-            h('button', {
-              key: f.key,
-              type: 'button',
-              className: 'dnb-text-filter-btn',
-              'data-active': mailFilter === f.key ? '1' : '0',
-              onClick: () => patch({ mailChannelFilter: f.key }),
-            }, f.label),
-          ),
-        ),
-      },
-      drawerList.length
-        ? h(
+    (() => {
+      const visibleMailIds = drawerList
+        .flatMap(d => d.items.slice(0, 15))
+        .map(m => m && m.id)
+        .filter(Boolean)
+      const allMailExpanded = visibleMailIds.length > 0 && visibleMailIds.every(id => Boolean(expandedMailIds[id]))
+      return h(
+        AccCard,
+        {
+          open: !view.peersMailCollapsed,
+          onToggle: () => patch({ peersMailCollapsed: !view.peersMailCollapsed }),
+          tone: 'indigo',
+          icon: h(Icon, { name: 'mail', size: 12.5, style: { color: 'var(--dnb-text-2)' } }),
+          title: bi('协同消息记录', 'Team Messages'),
+          count: mailbox.length ? String(mailbox.length) : '',
+          preview: drawerList.length ? bi(`${drawerList.length} 组对话`, `${drawerList.length} threads`) : bi('还没有消息记录', 'No messages yet'),
+          actions: h(
             'div',
-            { className: 'dnb-mail-threads' },
-            drawerList.map(drawer => {
-              const hasExplicit = Object.prototype.hasOwnProperty.call(openDrawers, drawer.key)
-              const isOpen = hasExplicit ? Boolean(openDrawers[drawer.key]) : drawer.defaultOpen
-              const primaryColor = drawer.colors[0] || SESSION_PALETTE[0]
-              const secondColor = drawer.colors[1] || primaryColor
-              const accentBorder = drawer.colors.length > 1
-                ? `linear-gradient(180deg, ${primaryColor.dot}, ${secondColor.dot})`
-                : primaryColor.dot
+            { className: 'dnb-text-filter-bar dnb-qa-filter-quiet', style: { padding: 0, gap: 2 } },
+            [
+              { key: 'all', label: bi('全部', 'All') },
+              { key: 'broadcast', label: bi('广播', 'Broadcast') },
+              { key: 'cross', label: bi('跨窗', 'Cross') },
+              { key: 'internal', label: bi('内部', 'Internal') },
+            ].map(f =>
+              h('button', {
+                key: f.key,
+                type: 'button',
+                className: 'dnb-text-filter-btn',
+                'data-active': mailFilter === f.key ? '1' : '0',
+                onClick: () => patch({ mailChannelFilter: f.key }),
+              }, f.label),
+            ),
+            visibleMailIds.length > 0
+              ? h('span', { className: 'dnb-qa-filter-sep' }, '|')
+              : null,
+            visibleMailIds.length > 0
+              ? h(
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dnb-text-filter-btn',
+                    onClick: () => {
+                      const next = { ...expandedMailIds }
+                      for (const id of visibleMailIds) next[id] = !allMailExpanded
+                      setExpandedMailIds(next)
+                    },
+                  },
+                  allMailExpanded ? bi('全部收起', 'Collapse all') : bi('全部展开', 'Expand all'),
+                )
+              : null,
+          ),
+        },
+        drawerList.length
+          ? h(
+              'div',
+              { className: 'dnb-mail-threads' },
+              drawerList.map(drawer => {
+                const hasExplicit = Object.prototype.hasOwnProperty.call(openDrawers, drawer.key)
+                const isOpen = hasExplicit ? Boolean(openDrawers[drawer.key]) : drawer.defaultOpen
 
-              return h(
-                'div',
-                {
-                  key: drawer.key,
-                  className: 'dnb-mail-thread',
-                  'data-open': isOpen ? '1' : '0',
-                  'data-kind': drawer.kind,
-                },
-                h(
+                return h(
                   'div',
                   {
-                    className: 'dnb-mail-thread-head',
-                    style: { '--dnb-thread-tint': primaryColor.bg },
-                    onClick: () => patch({
-                      mailOpenDrawers: { ...openDrawers, [drawer.key]: !isOpen },
-                    }),
+                    key: drawer.key,
+                    className: 'dnb-mail-thread',
+                    'data-open': isOpen ? '1' : '0',
+                    'data-kind': drawer.kind,
+                    'data-single': drawerList.length === 1 ? '1' : '0',
                   },
-                  h('span', {
-                    className: 'dnb-mail-thread-bar',
-                    style: { background: accentBorder },
-                  }),
                   h(
                     'div',
-                    { className: 'dnb-mail-thread-meta' },
-                    h(Icon, {
-                      name: 'chevron',
-                      size: 12,
-                      style: {
-                        color: 'var(--dnb-text-3)',
-                        transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
-                        transition: 'transform 0.16s ease',
-                        flexShrink: 0,
-                      },
-                    }),
+                    {
+                      className: 'dnb-mail-thread-head',
+                      onClick: () => patch({
+                        mailOpenDrawers: { ...openDrawers, [drawer.key]: !isOpen },
+                      }),
+                    },
                     h(
-                      'span',
-                      { style: { display: 'inline-flex', alignItems: 'center', gap: 2, flexShrink: 0 } },
-                      drawer.colors.map((c, idx) =>
-                        h('span', {
-                          key: idx,
-                          style: {
-                            width: 7,
-                            height: 7,
-                            borderRadius: '50%',
-                            background: c.dot,
-                            marginLeft: idx > 0 ? -2 : 0,
-                            boxShadow: '0 0 0 1px var(--dnb-card)',
-                          },
-                        })),
-                    ),
-                    drawer.channelTag
-                      ? h('span', { className: 'dnb-mail-channel-pill', 'data-kind': drawer.kind }, drawer.channelTag)
-                      : null,
-                    h('span', { className: 'dnb-mail-thread-title' }, drawer.title),
-                    h('span', { className: 'dnb-acc-count', style: { fontSize: 10 } }, `${drawer.items.length}`),
-                  ),
-                  h('span', { className: 'dnb-acc-pull-hint' }, isOpen ? bi('收起 ▴', 'Collapse ▴') : bi('展开 ▾', 'Expand ▾')),
-                ),
-                isOpen
-                  ? h(
                       'div',
-                      { className: 'dnb-mail-feed' },
-                      drawer.items.slice(0, 15).map(mail => {
-                        const modeKey = mail.mode === 'steer' ? 'steer' : (mail.mode === 'silent' ? 'silent' : 'followup')
-                        const modeLabel = modeKey === 'steer'
-                          ? bi('⚡ 插话', '⚡ Steer')
-                          : (modeKey === 'silent' ? bi('📌 备忘', '📌 Silent') : bi('📨 递话', '📨 Follow-up'))
-                        const fromName = String(mail.from || '参谋长')
-                        const toName = String(mail.to || 'lead')
-                        const lowFrom = fromName.toLowerCase()
-                        const senderRole = drawer.kind === 'detached'
-                          ? 'detached'
-                          : (lowFrom.includes('参谋') || lowFrom.includes('chief')
-                              ? 'chief'
-                              : (lowFrom.includes('claude') || lowFrom.includes('codex') || lowFrom.includes('harness') || lowFrom.includes('外协')
-                                  ? 'harness'
-                                  : (lowFrom.includes('lead') || lowFrom.includes('主对话') || lowFrom === 'agent'
-                                      ? 'lead'
-                                      : 'subagent')))
-                        const extMailProvider = detectExternalHarnessProvider(mail)
-                        const fRoot = String(mail.fromRootId || mail.fromSession || selfRootId || '')
-                        const fColor = (fRoot.startsWith('harness:') || senderRole === 'harness')
-                          ? colorForHarness(fRoot.startsWith('harness:') ? fRoot.slice(8) : extMailProvider)
-                          : colorForRootSession(fRoot, selfRootId)
-                        const toDisplay = '@' + String(toName || 'lead').replace(/^@+/, '')
-                        const rawBody = String(mail.text || '')
-                        const cleanSubject = String(mail.subject || '').trim()
-                        const showSubject = Boolean(cleanSubject && !rawBody.trim().startsWith(cleanSubject))
-                        const isLongBody = rawBody.length > 180 || rawBody.split(/\r?\n/).length > 4
-                        const isBodyExpanded = Boolean(expandedMailIds[mail.id])
+                      { className: 'dnb-mail-thread-meta' },
+                      h(Icon, {
+                        name: 'chevron',
+                        size: 12,
+                        style: {
+                          color: 'var(--dnb-text-3)',
+                          transform: isOpen ? 'rotate(90deg)' : 'rotate(0deg)',
+                          transition: 'transform 0.16s ease',
+                          flexShrink: 0,
+                        },
+                      }),
+                      drawer.channelTag
+                        ? h('span', { className: 'dnb-mail-channel-pill', 'data-kind': drawer.kind }, drawer.channelTag)
+                        : null,
+                      h('span', { className: 'dnb-mail-thread-title' }, drawer.title),
+                      h('span', { className: 'dnb-acc-count', style: { fontSize: 10 } }, `${drawer.items.length}`),
+                    ),
+                  ),
+                  isOpen
+                    ? h(
+                        'div',
+                        { className: 'dnb-mail-feed' },
+                        drawer.items.slice(0, 15).map(mail => {
+                          const modeKey = mail.mode === 'steer' ? 'steer' : (mail.mode === 'silent' ? 'silent' : 'followup')
+                          const modeLabel = modeKey === 'steer'
+                            ? bi('插话', 'Steer')
+                            : (modeKey === 'silent' ? bi('备忘', 'Silent') : bi('递话', 'Follow-up'))
+                          const fromName = String(mail.from || '参谋长')
+                          const senderShort = fromName.replace(/[（(]执行请求[）)]/g, '').trim() || fromName
+                          const toName = String(mail.to || 'lead')
+                          const lowFrom = fromName.toLowerCase()
+                          const senderRole = drawer.kind === 'detached'
+                            ? 'detached'
+                            : (lowFrom.includes('参谋') || lowFrom.includes('chief')
+                                ? 'chief'
+                                : (lowFrom.includes('claude') || lowFrom.includes('codex') || lowFrom.includes('harness') || lowFrom.includes('外协')
+                                    ? 'harness'
+                                    : (lowFrom.includes('lead') || lowFrom.includes('主对话') || lowFrom === 'agent'
+                                        ? 'lead'
+                                        : 'subagent')))
+                          const toDisplay = '@' + String(toName || 'lead').replace(/^@+/, '')
+                          const rawBody = String(mail.text || '')
+                          const trimmedBody = rawBody.trim()
+                          const cleanSubject = String(mail.subject || '').trim()
+                          const showSubject = Boolean(cleanSubject && !trimmedBody.startsWith(cleanSubject))
+                          const firstBodyLine = trimmedBody.split(/\r?\n/).map(s => s.trim()).find(Boolean) || ''
+                          const headline = cleanSubject || firstBodyLine || bi('协同消息', 'Message')
+                          const afterHeadline = showSubject
+                            ? trimmedBody
+                            : trimmedBody.slice(firstBodyLine.length).trim()
+                          const previewLine = afterHeadline.replace(/\s+/g, ' ').trim()
+                          const isBodyExpanded = Boolean(expandedMailIds[mail.id])
 
-                        return h(
-                          'div',
-                          {
-                            key: mail.id,
-                            className: 'dnb-mail-msg',
-                            'data-role': senderRole,
-                          },
-                          h(
-                            'div',
-                            { className: 'dnb-mail-msg-head' },
-                            h(
-                              'div',
-                              { className: 'dnb-mail-msg-route' },
-                              h(
-                                'span',
-                                { className: 'dnb-mail-sender' },
-                                h('span', { className: 'dnb-mail-dot', style: { background: fColor.dot } }),
-                                h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, fromName),
-                              ),
-                              h('span', { className: 'dnb-mail-arrow' }, '→'),
-                              h(
-                                'span',
-                                { className: 'dnb-mail-target', 'data-all': toName === 'all' ? '1' : '0' },
-                                toDisplay,
-                              ),
-                              h('span', { className: 'dnb-mail-mode', 'data-mode': modeKey }, modeLabel),
-                            ),
-                            h(
-                              'div',
-                              { className: 'dnb-mail-msg-meta' },
-                              rawBody
-                                ? h('button', {
-                                    type: 'button',
-                                    className: 'dnb-mail-copy-btn',
-                                    title: bi('复制消息正文', 'Copy message text'),
-                                    onClick: e => {
-                                      e.stopPropagation()
-                                      copyText(rawBody, bi('已复制消息内容', 'Message copied'))
-                                    },
-                                  }, h(Icon, { name: 'copy', size: 11 }))
-                                : null,
-                              h('span', { className: 'dnb-mail-time' }, relativeTimeLabel(mail.at)),
-                            ),
-                          ),
-                          showSubject ? h('div', { className: 'dnb-mail-subject' }, cleanSubject) : null,
-                          h(
+                          return h(
                             'div',
                             {
-                              className: 'dnb-mail-body',
-                              'data-clamped': isLongBody && !isBodyExpanded ? '1' : '0',
+                              key: mail.id,
+                              className: 'dnb-mail-msg',
+                              'data-role': senderRole,
+                              'data-expanded': isBodyExpanded ? '1' : '0',
                             },
-                            rawBody,
-                          ),
-                          isLongBody
-                            ? h('button', {
+                            h(
+                              'button',
+                              {
                                 type: 'button',
-                                className: 'dnb-mail-expand-btn',
-                                onClick: e => {
-                                  e.stopPropagation()
-                                  setExpandedMailIds(prev => ({ ...prev, [mail.id]: !isBodyExpanded }))
-                                },
-                              }, isBodyExpanded ? bi('收起正文 ▴', 'Collapse ▴') : bi('展开全文 ▾', 'Show full message ▾'))
-                            : null,
-                        )
-                      }),
-                    )
-                  : null,
-              )
-            }),
-          )
-        : h('div', { className: 'dnb-empty', style: { padding: '16px 12px' } }, bi('这个分类下还没有消息', 'No messages in this filter')),
-    ),
+                                className: 'dnb-mail-row-btn',
+                                'aria-expanded': isBodyExpanded ? 'true' : 'false',
+                                onClick: () => setExpandedMailIds(prev => ({ ...prev, [mail.id]: !isBodyExpanded })),
+                              },
+                              h(
+                                'div',
+                                { className: 'dnb-mail-row-top' },
+                                h(
+                                  'div',
+                                  { className: 'dnb-mail-row-left' },
+                                  h('span', { className: 'dnb-mail-chevron' }, isBodyExpanded ? '▾' : '▸'),
+                                  h('span', { className: 'dnb-mail-subject', title: headline }, headline),
+                                ),
+                                h(
+                                  'div',
+                                  { className: 'dnb-mail-row-right' },
+                                  h('span', { className: 'dnb-mail-dot', 'data-role': senderRole }),
+                                  h('span', {
+                                    className: 'dnb-mail-route-quiet',
+                                    title: `${fromName} → ${toDisplay}`,
+                                  }, `${senderShort} → ${toDisplay}`),
+                                  h('span', { className: 'dnb-mail-mode', 'data-mode': modeKey }, modeLabel),
+                                  h('span', { className: 'dnb-mail-time' }, relativeTimeLabel(mail.at)),
+                                ),
+                              ),
+                              !isBodyExpanded && previewLine
+                                ? h('div', { className: 'dnb-mail-preview' }, previewLine)
+                                : null,
+                            ),
+                            isBodyExpanded
+                              ? h(
+                                  'div',
+                                  { className: 'dnb-mail-detail' },
+                                  rawBody ? h('div', { className: 'dnb-mail-body' }, rawBody) : null,
+                                  h(
+                                    'div',
+                                    { className: 'dnb-mail-detail-foot' },
+                                    h('span', null, `${fromName} → ${toDisplay}`),
+                                    h(
+                                      'div',
+                                      { style: { display: 'inline-flex', alignItems: 'center', gap: 10 } },
+                                      rawBody
+                                        ? h('button', {
+                                            type: 'button',
+                                            className: 'dnb-mail-foot-btn',
+                                            onClick: e => {
+                                              e.stopPropagation()
+                                              copyText(rawBody, bi('已复制消息内容', 'Message copied'))
+                                            },
+                                          }, bi('复制全文', 'Copy'))
+                                        : null,
+                                      h('button', {
+                                        type: 'button',
+                                        className: 'dnb-mail-foot-btn',
+                                        onClick: () => setExpandedMailIds(prev => ({ ...prev, [mail.id]: false })),
+                                      }, bi('收起', 'Collapse')),
+                                    ),
+                                  ),
+                                )
+                              : null,
+                          )
+                        }),
+                      )
+                    : null,
+                )
+              }),
+            )
+          : h('div', { className: 'dnb-empty', style: { padding: '16px 12px' } }, bi('这个分类下还没有消息', 'No messages in this filter')),
+      )
+    })(),
   )
 }
 

@@ -15,8 +15,10 @@ import {
   DOCK_POLL_MS,
   RUN_MODE_OPTIONS,
   THINKING_EFFORT_OPTIONS,
+  DEFAULT_UI_SKIN,
+  UI_SKIN_OPTIONS,
 } from '../constants.js'
-import { bi, tabLabel, runModeMeta, effortMeta } from '../i18n.js'
+import { bi, tabLabel, runModeMeta, effortMeta, chiefDisplayName } from '../i18n.js'
 import {
   store,
   patch,
@@ -34,6 +36,7 @@ import {
   closeChief,
   toggleChief,
   reserveCornerSpace,
+  saveUiSkin,
   runtimeRefs,
 } from '../store.js'
 import {
@@ -52,12 +55,13 @@ import {
   loadArchives,
   refresh,
   adoptSession,
+  fetchGithubStarStatus,
+  toggleGithubStarApi,
 } from '../api.js'
 import { Style } from '../styles.js'
 import { Icon, ChiefErrorBoundary, SearchDrawer } from './common.js'
 import {
   ModelPickerPopover,
-  PacePickerPopover,
   SuggestionBanner,
   InterventionConfirmModal,
   UnlimitedTurnsConfirmModal,
@@ -82,6 +86,195 @@ import { BoundariesTab } from '../tabs/boundaries.js'
 import { ChiefTab, ChiefComposerBar } from '../tabs/chief.js'
 import { PeersTab } from '../tabs/peers.js'
 import { HandoffTab } from '../tabs/plan.js'
+
+const GITHUB_REPO_STAR_URL = 'https://github.com/gluztm/dsh-chief'
+const GITHUB_STAR_STORAGE_KEY = 'dsh-chief:github-starred'
+
+function readSavedStarState() {
+  try {
+    return typeof localStorage !== 'undefined' && localStorage.getItem(GITHUB_STAR_STORAGE_KEY) === '1'
+  } catch {
+    return false
+  }
+}
+
+function formatGithubStarCount(n) {
+  const num = Number(n)
+  if (!Number.isFinite(num) || num < 0) return ''
+  if (num >= 1000) return (num / 1000).toFixed(1).replace(/\.0$/, '') + 'k'
+  return String(Math.round(num))
+}
+
+function GithubStarButton({ ghState }) {
+  const gs = ghState && typeof ghState === 'object' ? ghState : {}
+  const [localStarred, setLocalStarred] = React.useState(readSavedStarState)
+  const [burstKey, setBurstKey] = React.useState(0)
+  const [bursting, setBursting] = React.useState(false)
+  const pendingWebReturnRef = React.useRef(false)
+  const countAtLeaveRef = React.useRef(null)
+
+  const ghSynced = gs.syncedVia === 'gh' && typeof gs.starred === 'boolean'
+  const starred = ghSynced ? Boolean(gs.starred) : localStarred
+  const starCountText = typeof gs.starCount === 'number' ? formatGithubStarCount(gs.starCount) : ''
+
+  React.useEffect(() => {
+    const t = setTimeout(() => {
+      void fetchGithubStarStatus({ checkPersonal: true })
+    }, 180)
+    return () => clearTimeout(t)
+  }, [])
+
+  React.useEffect(() => {
+    if (!ghSynced) return
+    setLocalStarred(Boolean(gs.starred))
+    try {
+      if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
+        localStorage.setItem(GITHUB_STAR_STORAGE_KEY, gs.starred ? '1' : '0')
+      }
+    } catch {}
+  }, [ghSynced, gs.starred])
+
+  React.useEffect(() => {
+    if (typeof window === 'undefined' || typeof window.addEventListener !== 'function') return undefined
+    const onFocus = async () => {
+      if (!pendingWebReturnRef.current) return
+      pendingWebReturnRef.current = false
+      const prevCnt = countAtLeaveRef.current
+      const res = await fetchGithubStarStatus({ checkPersonal: true, force: true })
+      if (res && typeof res.starCount === 'number' && typeof prevCnt === 'number' && res.starCount > prevCnt) {
+        setBurstKey(k => k + 1)
+        patch({
+          notice: bi('🎉 检测到仓库 Star +1，感谢你的支持！', '🎉 Star count increased — thanks for supporting dsh-chief!'),
+        })
+      }
+    }
+    window.addEventListener('focus', onFocus)
+    return () => window.removeEventListener('focus', onFocus)
+  }, [])
+
+  React.useEffect(() => {
+    if (!burstKey) return undefined
+    setBursting(true)
+    const timer = setTimeout(() => setBursting(false), 720)
+    return () => clearTimeout(timer)
+  }, [burstKey])
+
+  const handleStarClick = (e) => {
+    if (e && typeof e.stopPropagation === 'function') e.stopPropagation()
+
+    // Case A: Local GitHub CLI authenticated & Shift+Click when already starred -> unstar cleanly
+    if (ghSynced && starred && e && e.shiftKey) {
+      e.preventDefault()
+      setBurstKey(k => k + 1)
+      void toggleGithubStarApi({ desired: false }).then(res => {
+        if (res && res.mode === 'gh_direct') {
+          patch({ notice: bi('☆ 已通过本机 gh CLI 取消仓库 Star 同步', '☆ Unstarred via local GitHub CLI') })
+        }
+      })
+      return
+    }
+
+    // Case B: Local GitHub CLI available & not yet starred -> Direct 1-click real GitHub star!
+    if (gs.ghAvailable && gs.ghAuthenticated && !starred) {
+      if (e && typeof e.preventDefault === 'function') e.preventDefault()
+      setBurstKey(k => k + 1)
+      setLocalStarred(true)
+      void toggleGithubStarApi({ desired: true }).then(res => {
+        if (res && res.mode === 'gh_direct') {
+          try {
+            if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
+              localStorage.setItem(GITHUB_STAR_STORAGE_KEY, '1')
+            }
+          } catch {}
+          patch({
+            notice: bi(
+              '⭐ 已通过本机 GitHub CLI 直连为 gluztm/dsh-chief 点亮 Star！',
+              '⭐ Starred gluztm/dsh-chief directly via local GitHub CLI!',
+            ),
+          })
+          return
+        }
+        if (res && res.mode === 'already_starred') {
+          patch({ notice: bi('✨ 你的 GitHub 账号此前已点亮过本仓库～', '✨ You already starred gluztm/dsh-chief on GitHub!') })
+          return
+        }
+        // Fallback: open GitHub repo page if CLI lacked scope or failed
+        pendingWebReturnRef.current = true
+        countAtLeaveRef.current = typeof gs.starCount === 'number' ? gs.starCount : null
+        try {
+          if (typeof window !== 'undefined' && typeof window.open === 'function') {
+            window.open(GITHUB_REPO_STAR_URL, '_blank', 'noopener,noreferrer')
+          }
+        } catch {}
+        patch({ notice: bi('已打开 GitHub 仓库页，顺手点亮 Star 支持一下～', 'Opened GitHub repo — tap Star to support us!') })
+      })
+      return
+    }
+
+    // Case C: Already starred (normal click) or web fallback -> open GitHub repo directly
+    setBurstKey(k => k + 1)
+    if (!starred) {
+      setLocalStarred(true)
+      try {
+        if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
+          localStorage.setItem(GITHUB_STAR_STORAGE_KEY, '1')
+        }
+      } catch {}
+      pendingWebReturnRef.current = true
+      countAtLeaveRef.current = typeof gs.starCount === 'number' ? gs.starCount : null
+    }
+    patch({
+      notice: ghSynced && starred
+        ? bi('✨ 已通过 GitHub CLI 同步点亮状态 · 正在前往仓库主页', '✨ Synced via gh CLI · Opening repository')
+        : bi('⭐ 感谢点亮！已直达 GitHub 仓库，点亮后切回自动同步人数～', '⭐ Opened GitHub repo — count syncs when you return!'),
+    })
+  }
+
+  return h(
+    'a',
+    {
+      href: GITHUB_REPO_STAR_URL,
+      target: '_blank',
+      rel: 'noopener noreferrer',
+      className: 'dnb-star-btn',
+      'data-starred': starred ? '1' : '0',
+      'data-burst': bursting ? '1' : '0',
+      'data-synced': ghSynced ? 'gh' : 'web',
+      'aria-label': bi('前往 GitHub 点赞 Star', 'Star on GitHub'),
+      title: ghSynced
+        ? (starred
+            ? bi('已通过本机 GitHub CLI 同步点亮（点击查看仓库 / Shift+点击可取消）', 'Starred & synced via gh CLI (click to open repo / Shift+click to unstar)')
+            : bi('检测到本机已登录 gh CLI：点击直接为 gluztm/dsh-chief 点亮真实 Star！', 'gh CLI detected: click to star gluztm/dsh-chief directly!'))
+        : (starred
+            ? bi('已点亮 ✨ 感谢你的 Star（点击前往 GitHub 仓库）', 'Starred ✨ Click to open GitHub repo')
+            : bi('点亮这颗星 ⭐ 直达 GitHub 给个 Star 支持一下', 'Click to light up & Star gluztm/dsh-chief on GitHub')),
+      onClick: handleStarClick,
+    },
+    bursting && burstKey > 0
+      ? h(
+          React.Fragment,
+          { key: 'burst-' + burstKey },
+          h('span', { className: 'dnb-star-ring', 'aria-hidden': true }),
+          [0, 60, 120, 180, 240, 300].map(ang =>
+            h('span', {
+              key: ang,
+              className: 'dnb-star-spark',
+              'aria-hidden': true,
+              style: { '--ang': ang + 'deg' },
+            })),
+        )
+      : null,
+    h(
+      'span',
+      { className: 'dnb-star-svg', key: 'icon-' + burstKey },
+      h(Icon, { name: 'star', size: 12.5, filled: starred }),
+    ),
+    h('span', { className: 'dnb-star-label' }, starred ? 'Starred' : 'Star'),
+    starCountText
+      ? h('span', { className: 'dnb-star-count' }, starCountText)
+      : null,
+  )
+}
 
 function ChiefWorkStageOverlay({ fx }) {
   const fxKey = fx && fx.label ? String(fx.token || fx.id || (fx.tone || 'neon') + ':' + String(fx.label)) : ''
@@ -149,12 +342,35 @@ function ChiefWorkStageOverlay({ fx }) {
 function PanelInner(props) {
   const view = useStore()
   const [gearDeg, setGearDeg] = React.useState(0)
+  const [skinMenuOpen, setSkinMenuOpen] = React.useState(false)
   const isPage = !!(props && props.variant === 'main')
   const isDock = !!(props && props.variant === 'dock')
   const inConvView = !!(props && props.inConversationView)
   const selfRef = React.useRef(null)
 
   const secBarRef = React.useRef(null)
+  const activeSkin = (view && view.uiSkin) || DEFAULT_UI_SKIN
+
+  React.useEffect(() => {
+    try {
+      if (typeof document !== 'undefined') {
+        if (document.documentElement) document.documentElement.setAttribute('data-dnb-skin', activeSkin)
+        if (document.body) document.body.setAttribute('data-dnb-skin', activeSkin)
+      }
+      if (typeof window !== 'undefined' && typeof window.dispatchEvent === 'function' && typeof CustomEvent === 'function') {
+        window.dispatchEvent(new CustomEvent('dnb-skin-change', { detail: { skin: activeSkin } }))
+      }
+    } catch {}
+  }, [activeSkin])
+
+  React.useEffect(() => {
+    if (!skinMenuOpen) return undefined
+    const onKey = e => {
+      if (e && e.key === 'Escape') setSkinMenuOpen(false)
+    }
+    document.addEventListener('keydown', onKey)
+    return () => document.removeEventListener('keydown', onKey)
+  }, [skinMenuOpen])
 
   React.useEffect(() => {
     const host = isDock || isPage || view.open ? selfRef.current : null
@@ -207,6 +423,8 @@ function PanelInner(props) {
     ),
   )
 
+  const chiefTitleLabel = chiefDisplayName(view)
+
   const body = view.settingsOpen
     ? h(
         'div',
@@ -255,6 +473,7 @@ function PanelInner(props) {
       'div',
       {
         className: isDock ? 'dnb-panel dnb-main dnb-dock' : isPage ? 'dnb-panel dnb-main' : 'dnb-panel',
+        'data-dnb-skin': activeSkin,
         role: isPage || isDock ? 'region' : 'dialog',
         'aria-label': BRAND_NAME,
         ref: node => {
@@ -269,12 +488,90 @@ function PanelInner(props) {
         h('span', {
           className: 'dnb-title',
           style: { display: 'inline-flex', alignItems: 'center', gap: 5 },
-          title: `${bi(BRAND_NAME, 'DSH Chief')} v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? (view.staleBackendDetected ? bi(`（后台还是旧版 v${meta.backendBuild}，重启 DSH 后生效）`, ` (background is still v${meta.backendBuild}; restart DSH to update)`) : bi('（版本已同步）', ' (synced)')) : ''}${view.sessionId ? ` · ${bi('对话', 'Chat')} ${shortSession(view.sessionId)}` : ''}`,
+          title: `${chiefTitleLabel} v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? (view.staleBackendDetected ? bi(`（后台还是旧版 v${meta.backendBuild}，重启 DSH 后生效）`, ` (background is still v${meta.backendBuild}; restart DSH to update)`) : bi('（版本已同步）', ' (synced)')) : ''}${view.sessionId ? ` · ${bi('对话', 'Chat')} ${shortSession(view.sessionId)}` : ''}`,
         },
           h('span', { className: 'dnb-brand-status-icon', 'data-working': panelWorking ? '1' : '0' },
             h(Icon, { name: 'sparkles', size: 14, style: { color: 'currentColor' } }),
           ),
-          bi(BRAND_NAME, 'DSH Chief'),
+          chiefTitleLabel,
+        ),
+        h(GithubStarButton, { ghState: view.githubStarState }),
+        h(
+          'div',
+          {
+            style: { position: 'relative', display: 'inline-flex', alignItems: 'center' },
+          },
+          h('button', {
+            type: 'button',
+            className: 'dnb-gear-btn dnb-skin-head-btn',
+            'data-active': skinMenuOpen ? '1' : '0',
+            'aria-label': bi('切换外观主题', 'Switch Appearance Theme'),
+            'aria-pressed': skinMenuOpen ? 'true' : 'false',
+            title: bi('切换插件外观主题（晨雾琉璃 / 温润纸感 / 静谧森系 / 星夜幻想）', 'Switch UI theme (Frosted Mist / Warm Paper / Botanical / Starlight)'),
+            onClick: e => {
+              e.stopPropagation()
+              setSkinMenuOpen(v => !v)
+              patch({
+                secModelMenuOpen: false,
+                secPaceMenuOpen: false,
+                secPermMenuOpen: false,
+              })
+            },
+          }, h(Icon, { name: 'palette', size: 13.5 })),
+          skinMenuOpen
+            ? h(
+                React.Fragment,
+                null,
+                h('div', {
+                  style: { position: 'fixed', inset: 0, zIndex: 140 },
+                  onClick: e => {
+                    e.stopPropagation()
+                    setSkinMenuOpen(false)
+                  },
+                }),
+                h(
+                  'div',
+                  {
+                    className: 'dnb-skin-pop',
+                    role: 'menu',
+                    'aria-label': bi('选择视觉主题', 'Choose UI Theme'),
+                    onClick: e => e.stopPropagation(),
+                  },
+                  h('div', { className: 'dnb-skin-pop-title' }, bi('视觉主题 · 一键换肤', 'Appearance · Select Theme')),
+                  UI_SKIN_OPTIONS.map(opt => {
+                    const isCur = activeSkin === opt.key
+                    return h(
+                      'button',
+                      {
+                        key: opt.key,
+                        type: 'button',
+                        className: 'dnb-skin-pop-item',
+                        'data-active': isCur ? '1' : '0',
+                        title: bi(opt.descZh, opt.descEn),
+                        onClick: e => {
+                          e.stopPropagation()
+                          saveUiSkin(opt.key)
+                          setSkinMenuOpen(false)
+                          patch({ notice: bi('已切换主题：', 'Theme set to: ') + bi(opt.zh, opt.en) })
+                        },
+                      },
+                      h(
+                        'div',
+                        { style: { display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 } },
+                        h('span', { style: { fontSize: 12, fontWeight: isCur ? 600 : 500 } }, bi(opt.zh, opt.en)),
+                        h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, bi(opt.tagZh, opt.tagEn)),
+                      ),
+                      h(
+                        'div',
+                        { className: 'dnb-skin-swatches' },
+                        opt.swatches.map(hex =>
+                          h('span', { key: hex, className: 'dnb-skin-swatch-dot', style: { background: hex } })),
+                      ),
+                    )
+                  }),
+                ),
+              )
+            : null,
         ),
         h('button', {
           type: 'button',
@@ -282,9 +579,10 @@ function PanelInner(props) {
           'data-active': view.settingsOpen ? '1' : '0',
           'aria-label': bi('设置', 'Settings'),
           'aria-pressed': view.settingsOpen ? 'true' : 'false',
-          title: bi('设置：模式预设、桌面通知、用量上限和语言', 'Settings: presets, alerts, usage caps, and language'),
+          title: bi('设置：外观主题、给参谋长取名、模式预设、桌面通知和用量上限', 'Settings: theme, Chief name, presets, alerts, and caps'),
           onClick: () => {
             setGearDeg(d => d + 180)
+            setSkinMenuOpen(false)
             patch({
               settingsOpen: !view.settingsOpen,
               secModelMenuOpen: false,
@@ -293,13 +591,13 @@ function PanelInner(props) {
             })
           },
         }, h(Icon, { name: 'settings', size: 13.5, style: { transform: `rotate(${gearDeg}deg)` } })),
-        h('span', {
-          className: 'dnb-ver-chip',
-          'data-stale': view.staleBackendDetected ? '1' : '0',
-          title: view.staleBackendDetected
-            ? bi(`面板已更新到 v${EXPECTED_BACKEND_BUILD}，后台还是 v${meta.backendBuild || '旧版'}，重启 DSH 后即可同步`, `UI is v${EXPECTED_BACKEND_BUILD}, background is still v${meta.backendBuild || 'older'}. Restart DSH to sync.`)
-            : bi(`DSH 参谋长 v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? '（版本已同步）' : ''}`, `DSH Chief v${EXPECTED_BACKEND_BUILD}${meta.backendBuild ? ' (synced)' : ''}`),
-        }, view.staleBackendDetected ? `${bi('待重启', 'Restart')} · v${EXPECTED_BACKEND_BUILD}` : ('v' + EXPECTED_BACKEND_BUILD)),
+        view.staleBackendDetected
+          ? h('span', {
+              className: 'dnb-ver-chip',
+              'data-stale': '1',
+              title: bi(`面板已更新到 v${EXPECTED_BACKEND_BUILD}，后台还是 v${meta.backendBuild || '旧版'}，重启 DSH 后即可同步`, `UI is v${EXPECTED_BACKEND_BUILD}, background is still v${meta.backendBuild || 'older'}. Restart DSH to sync.`),
+            }, `${bi('待重启', 'Restart')} · v${EXPECTED_BACKEND_BUILD}`)
+          : null,
         meta.linkedPeersCount > 0
           ? h('button', {
               className: 'dnb-head-pill',
@@ -324,6 +622,7 @@ function PanelInner(props) {
             })(),
             onClick: () => {
               const nextOpen = !view.secModelMenuOpen
+              setSkinMenuOpen(false)
               patch({ secModelMenuOpen: nextOpen, secPaceMenuOpen: false, secPermMenuOpen: false })
               if (nextOpen) void loadChiefModels(true)
             },
@@ -332,7 +631,7 @@ function PanelInner(props) {
             const eff = meta.modelRef || meta.resolvedModelRef || meta.followModelRef || ''
             const effortKey = meta.thinkingEffort || 'auto'
             const effortOpt = effortMeta(effortKey) || THINKING_EFFORT_OPTIONS.find(x => x.key === effortKey)
-            const effBadge = effortOpt ? effortOpt.shortLabel : bi('🪄 自动', '🪄 Auto')
+            const effBadge = effortOpt ? effortOpt.shortLabel : bi('自动', 'Auto')
             const tag = eff ? clampTitle(shortModelName(eff, cat, true), 14) : bi('自动', 'Auto')
             return `${tag} · ${effBadge}`
           })()),
@@ -355,6 +654,7 @@ function PanelInner(props) {
                   'data-rm': opt.key,
                   title: rm.hint || opt.hint,
                   onClick: () => {
+                    setSkinMenuOpen(false)
                     if (opt.key === 'managed' && curRunMode !== 'managed') {
                       patch({ autoPilotConfirmOpen: true, secPaceMenuOpen: false })
                       return
@@ -415,41 +715,29 @@ function PanelInner(props) {
           }, h(Icon, { name: 'x', size: 15 })),
         ),
         h(ModelPickerPopover, { view }),
-        h(PacePickerPopover, { view }),
       ),
 
       // Live Cursor Pill (only when active; clickable to spotlight advancing/blocked subagents)
       cursorText
         ? h(
             'div',
-            { style: { padding: '0 12px 8px', flexShrink: 0 } },
+            { className: 'dnb-live-cursor-wrap', style: { padding: '0 12px 8px', flexShrink: 0 } },
             h(
               'div',
               {
-                style: {
-                  padding: '5px 10px',
-                  borderRadius: 10,
-                  background: cursorBlocked ? STATUS_BG.blocked : 'rgba(10, 132, 255, 0.13)',
-                  border: cursorBlocked ? '1px solid rgba(255, 69, 58, 0.30)' : '1px solid rgba(10, 132, 255, 0.30)',
-                  color: cursorBlocked ? '#ff453a' : '#409cff',
-                  fontSize: 11.5,
-                  fontWeight: 600,
-                  display: 'flex',
-                  alignItems: 'center',
-                  gap: 6.5,
-                  cursor: 'pointer',
-                },
-                title: '点这里查看正在跑或卡住的子代理',
+                className: 'dnb-live-cursor-bar',
+                'data-blocked': cursorBlocked ? '1' : '0',
+                title: bi('点这里查看正在跑或卡住的子代理', 'Click to view active or blocked subagents'),
                 onClick: () => {
                   const targetTask = (board.cursor.expectedTaskId && tasks.find(t => t && t.id === board.cursor.expectedTaskId))
                     || tasks.find(t => t && (cursorBlocked ? t.status === 'blocked' : t.status === 'doing'))
                   if (targetTask) focusObjectiveInPyramid(targetTask.id)
-                  else patch({ tab: 'tasks', taskViewMode: 'graph', topoSectionCollapsed: false, settingsOpen: false })
+                  else patch({ tab: 'tasks', taskBoardMode: 'beam', settingsOpen: false })
                 },
               },
               cursorBlocked
-                ? '⚠ '
-                : h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '10px', color: '#409cff' } }),
+                ? h(Icon, { name: 'alert', size: 12.5, style: { flexShrink: 0 } })
+                : h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '10px', color: 'currentColor' } }),
               h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', minWidth: 0 } }, cursorText),
             ),
           )
@@ -517,9 +805,9 @@ function PanelInner(props) {
                 ? h('span', {
                     className: 'dnb-seg-dot',
                     style: tab.key === 'chief'
-                      ? { color: 'var(--dnb-accent)', opacity: 1, fontWeight: 700 }
+                      ? { color: 'var(--dnb-accent)', opacity: 1, fontWeight: 600 }
                       : tab.key === 'archive'
-                        ? { color: '#f59e0b', opacity: 1, fontWeight: 700 }
+                        ? { color: 'var(--dnb-amber, #f3be6d)', opacity: 1, fontWeight: 600 }
                         : undefined,
                   }, String(count))
                 : null,

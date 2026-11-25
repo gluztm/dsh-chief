@@ -7,6 +7,7 @@
 import crypto from 'node:crypto'
 import { stripToolCallMarkup, listGuardWalls } from './chief-executor.js'
 import {
+  buildChiefIdentityPromptLine,
   AUTO_SUMMARY_COOLDOWN_MS,
   CHAT_OPPORTUNISTIC_SUMMARY_COOLDOWN_MS,
   SUMMARY_MAX_TOKENS,
@@ -416,9 +417,11 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
       ? ''
       : beginChiefActiveWork(rootId, { tone: 'neon', tab: 'chief', label: '参谋长正在自动提炼全局摘要中...' })
     const job = (async () => {
+      const identityLine = buildChiefIdentityPromptLine(effCfgBefore)
+      const sysBase = identityLine ? `${NARRATIVE_SYSTEM}\n${identityLine}` : NARRATIVE_SYSTEM
       const sysPrompt = isConciseBrief
-        ? (NARRATIVE_SYSTEM + CONCISE_BRIEF_NARRATIVE_EXTRA)
-        : NARRATIVE_SYSTEM
+        ? (sysBase + CONCISE_BRIEF_NARRATIVE_EXTRA)
+        : sysBase
       const res = await callChiefLlm(deps, {
         sessionId: rootId,
         reasonKind: chatTriggered ? 'chat_summary' : 'auto_summary',
@@ -524,6 +527,7 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
   const finalView = clusterView(finalState, rootId)
   const ownWs = (finalState.workspaces && finalState.workspaces[rootId]) || emptyWorkspace()
   const effectiveConfig = resolveWorkspaceConfig(finalState, rootId)
+  const wsCwd = resolveSessionWorkspaceCwd(deps, rootId)
   const narrativeAt = hasLatestSaved
     ? (latestView.narrative.at || 0)
     : (ownWs.narrative && ownWs.narrative.at ? ownWs.narrative.at : (board.updatedAt || 0))
@@ -533,7 +537,10 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
   return {
     ok: true,
     rootId,
-    config: effectiveConfig,
+    config: {
+      ...effectiveConfig,
+      chiefName: effectiveConfig.chiefName || '',
+    },
     models: modelsInfo,
     narrative: {
       text: finalNarrativeText,
@@ -567,7 +574,7 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
     pendingElevation: ownWs.pendingElevation ? { ...ownWs.pendingElevation } : null,
     taskLedger: (Array.isArray(ownWs.taskLedger) ? ownWs.taskLedger : []).slice(-15).reverse(),
     inquiries: (Array.isArray(ownWs.inquiries) ? ownWs.inquiries : []).slice(-12).reverse(),
-    guardWalls: listGuardWalls({ cwd: resolveSessionWorkspaceCwd(deps, rootId) }),
+    guardWalls: listGuardWalls({ cwd: wsCwd }),
     activeWork: getChiefActiveWork(rootId),
     llmLedger: summarizeLlmLedger(ownWs.llmLedger, effectiveConfig),
     alertEvents: (Array.isArray(ownWs.alertEvents) ? ownWs.alertEvents : []).slice(-12),

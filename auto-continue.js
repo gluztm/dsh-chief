@@ -53,6 +53,16 @@ const PERMANENT_ERROR_PATTERNS = [
 const TRANSIENT_STATUS_CODES = new Set([408, 425, 429, 500, 502, 503, 504, 520, 521, 522, 523, 524])
 const PERMANENT_STATUS_CODES = new Set([400, 401, 402, 403, 404, 422])
 
+const EXTERNAL_WAIT_OR_DELEGATION_TOOLS = new Set([
+  'wait_agent',
+  'wait_subagent',
+  'agent_wait',
+  'subagent',
+  'subagent_fork',
+  'send_message',
+])
+const EXTERNAL_WAIT_BOARD_ACTION_RE = /"action"\s*:\s*"(?:mail\.send|task\.dispatch|team\.steer|chief\.request|permission\.request|bounds\.propose)"/
+
 function clampText(text, maxLen = 240) {
   const s = String(text || '').replace(/\s+/g, ' ').trim()
   return s.length > maxLen ? s.slice(0, maxLen) + '...' : s
@@ -66,18 +76,30 @@ export class ToolInvocationTracker {
   constructor() {
     this.pending = new Map()
     this.done = new Set()
+    this.hadExternalWaitTool = false
     this.seq = 0
   }
 
   reset() {
     this.pending.clear()
     this.done.clear()
+    this.hadExternalWaitTool = false
     this.seq = 0
   }
 
   onCall(data = {}) {
     const rawId = data.toolCallId || data.callId || data.id
     const name = String(data.name || data.toolName || 'tool').trim() || 'tool'
+    const rawArgs = data.arguments ?? data.args ?? data.input
+    const argsStr = typeof rawArgs === 'string'
+      ? rawArgs
+      : (rawArgs && typeof rawArgs === 'object' ? JSON.stringify(rawArgs) : '')
+    if (
+      EXTERNAL_WAIT_OR_DELEGATION_TOOLS.has(name)
+      || (name === 'chief_board' && EXTERNAL_WAIT_BOARD_ACTION_RE.test(argsStr))
+    ) {
+      this.hadExternalWaitTool = true
+    }
     const key = rawId ? String(rawId) : `${name}#${++this.seq}`
     this.pending.set(key, { key, name, at: Date.now() })
     return key
@@ -119,6 +141,7 @@ export class ToolInvocationTracker {
       doneCount: this.done.size,
       pendingNames: [...this.pending.values()].map(x => x.name),
       doneNames: [...this.done.values()],
+      hadExternalWaitTool: this.hadExternalWaitTool,
     }
   }
 }
@@ -234,12 +257,35 @@ export function createAutoContinueEngine(options = {}) {
     canAutoContinue = null,
     resolveRootSessionId = (sid) => sid,
     onLog = () => {},
+    onRecoveryBlocked = null,
     baseDelayMs = 1500,
     maxConsecutive = MAX_CONSECUTIVE_AUTO_CONTINUE,
     echoTtlMs = 30_000,
   } = options
 
   const sessions = new Map()
+  const BLOCKED_NOTIFY_SKIPPED = new Set([
+    'run-mode-off',
+    'advisor-readonly',
+    'assistant-no-workflow',
+    'pending-approval',
+    'guard-wall-blocked',
+    'permission-error',
+  ])
+
+  function notifyBlocked(sessionId, rootId, trigger, skipped, reason) {
+    if (typeof onRecoveryBlocked !== 'function') return
+    if (rootId && sessionId && rootId !== sessionId) return
+    try {
+      onRecoveryBlocked({
+        sessionId,
+        rootId: rootId || sessionId,
+        trigger: String(trigger || ''),
+        skipped: String(skipped || ''),
+        reason: String(reason || skipped || trigger || ''),
+      })
+    } catch {}
+  }
 
   function getSessionState(sessionId) {
     const sid = String(sessionId || '').trim()
@@ -250,8 +296,10 @@ export function createAutoContinueEngine(options = {}) {
         sessionId: sid,
         consecutive: 0,
         lastAttemptAt: 0,
+        lastIncomingWorkAt: 0,
+        pendingIncomingRelay: false,
         lastFailure: null,
-        lastToolSummary: { pendingCount: 0, doneCount: 0, pendingNames: [], doneNames: [] },
+        lastToolSummary: { pendingCount: 0, doneCount: 0, pendingNames: [], doneNames: [], hadExternalWaitTool: false },
         turnOutput: 'none', // 'none' | 'silent' | 'visible'
         sawModelActivity: false,
         tools: new ToolInvocationTracker(),
@@ -281,7 +329,7 @@ export function createAutoContinueEngine(options = {}) {
     const data = event && event.data ? event.data : {}
     const msg = data.message && typeof data.message === 'object' ? data.message : data
     const srcKind = String((data.source && data.source.kind) || (msg.source && msg.source.kind) || '').trim()
-    if (srcKind === AUTO_CONTINUE_SOURCE_KIND || srcKind === 'dsh-chief' || srcKind === 'dsh-chief-relay') {
+    if (srcKind === AUTO_CONTINUE_SOURCE_KIND) {
       return true
     }
     const id = String(data.id || data.messageId || msg.id || '').trim()
@@ -320,18 +368,30 @@ export function createAutoContinueEngine(options = {}) {
     if (isChiefStopped(rootId, sessionId)) {
       st.stats.skippedStopped += 1
       onLog(sessionId, '参谋长处于停止状态（stopped），跳过自动续跑')
+      notifyBlocked(sessionId, rootId, trigger, 'chief-stopped', '参谋长处于停机状态')
       return { ok: false, skipped: 'chief-stopped' }
     }
 
     let verdict = null
     if (!bypassGate && typeof canAutoContinue === 'function') {
-      verdict = await Promise.resolve(canAutoContinue({ sessionId, rootId, trigger, detail }))
+      verdict = await Promise.resolve(canAutoContinue({
+        sessionId,
+        rootId,
+        trigger,
+        detail,
+        toolSummary: st.lastToolSummary,
+        lastIncomingWorkAt: st.lastIncomingWorkAt,
+      }))
       if (verdict && verdict.allowed === false) {
         st.stats.skippedStopped += 1
         if (verdict.logMessage) onLog(sessionId, verdict.logMessage)
+        const sk = verdict.skipped || 'permission-mode'
+        if (BLOCKED_NOTIFY_SKIPPED.has(sk)) {
+          notifyBlocked(sessionId, rootId, trigger, sk, verdict.logMessage || sk)
+        }
         return {
           ok: false,
-          skipped: verdict.skipped || 'permission-mode',
+          skipped: sk,
           approvalId: verdict.approvalId,
           ...(verdict.taskId ? { taskId: verdict.taskId } : {}),
         }
@@ -339,13 +399,16 @@ export function createAutoContinueEngine(options = {}) {
     }
 
     if (st.consecutive >= maxConsecutive) {
-      onLog(sessionId, `已达连续自动续跑上限（${maxConsecutive} 次），等待人工确认或成功回合恢复`)
+      const msg = `已达连续自动续跑上限（${maxConsecutive} 次），等待人工确认或成功回合恢复`
+      onLog(sessionId, msg)
+      notifyBlocked(sessionId, rootId, trigger, 'max-consecutive', msg)
       return { ok: false, skipped: 'max-consecutive' }
     }
 
     const agent = typeof getAgent === 'function' ? await getAgent(sessionId) : null
     if (!agent) {
       onLog(sessionId, `未找到活跃会话句柄，跳过续跑（${trigger}）`)
+      notifyBlocked(sessionId, rootId, trigger, 'no-agent', '未找到活跃会话句柄')
       return { ok: false, skipped: 'no-agent' }
     }
     if (agent.status === 'running') {
@@ -353,6 +416,7 @@ export function createAutoContinueEngine(options = {}) {
     }
     if (typeof agent.followup !== 'function') {
       onLog(sessionId, `会话不支持 followup 接口，无法发送断线续跑（${trigger}）`)
+      notifyBlocked(sessionId, rootId, trigger, 'no-followup', '会话不支持 followup 唤醒接口')
       return { ok: false, skipped: 'no-followup' }
     }
 
@@ -393,6 +457,7 @@ export function createAutoContinueEngine(options = {}) {
       st.pendingEchoes.delete(msgId)
       const msg = String(err && err.message ? err.message : err)
       onLog(sessionId, `断线续跑投递失败（${trigger}）：${msg}`)
+      notifyBlocked(sessionId, rootId, trigger, 'delivery-error', msg)
       return { ok: false, error: msg }
     }
   }
@@ -433,6 +498,7 @@ export function createAutoContinueEngine(options = {}) {
         cancelPending(sessionId)
         st.sawModelActivity = false
         st.turnOutput = 'none'
+        st.pendingIncomingRelay = false
         st.tools.reset()
         return { action: 'turn-started' }
 
@@ -499,10 +565,31 @@ export function createAutoContinueEngine(options = {}) {
         if (event.surfaceOp) return null
         if (isOurMessage(st, event)) return { action: 'ignored-echo' }
         {
-          const srcKind = String((data.source && data.source.kind) || '').trim()
+          const msg = data.message && typeof data.message === 'object' ? data.message : data
+          const srcKind = String((data.source && data.source.kind) || (msg.source && msg.source.kind) || '').trim()
+          const senderSid = String((data.source && data.source.senderSessionId) || (msg.source && msg.source.senderSessionId) || '').trim()
+          if (srcKind === 'dsh-chief-update' || srcKind === 'dsh-chief-inquiry' || srcKind === 'dsh-chief') {
+            return { action: 'ignored-echo' }
+          }
+          if (srcKind === 'dsh-chief-relay' || srcKind === 'dsh-chief-exec-req') {
+            st.turnOutput = 'none'
+            st.pendingIncomingRelay = true
+            st.tools.reset()
+            st.lastIncomingWorkAt = Date.now()
+            cancelPending(sessionId)
+            if (senderSid && senderSid !== sessionId) {
+              st.consecutive = 0
+              st.lastFailure = null
+            }
+            return { action: 'incoming-relay-tracked' }
+          }
           if (!srcKind || srcKind === 'user') {
             st.consecutive = 0
             st.lastFailure = null
+            st.turnOutput = 'none'
+            st.pendingIncomingRelay = false
+            st.tools.reset()
+            st.lastIncomingWorkAt = Date.now()
             cancelPending(sessionId, '用户发送了新消息')
             return { action: 'user-intervened' }
           }
@@ -513,6 +600,8 @@ export function createAutoContinueEngine(options = {}) {
         const parsed = classifyTurnEndReason(data.reason, data)
         if (!parsed) return null
         st.lastToolSummary = st.tools.summary()
+        const hadPendingRelay = st.pendingIncomingRelay
+        st.pendingIncomingRelay = false
         const rootId = resolveRootSessionId(sessionId) || sessionId
         const stopped = isChiefStopped(rootId, sessionId)
 
@@ -521,6 +610,7 @@ export function createAutoContinueEngine(options = {}) {
           st.consecutive = 0
           st.lastFailure = null
           cancelPending(sessionId, '人工停止回合')
+          notifyBlocked(sessionId, rootId, 'turn/end:aborted', 'aborted', '对端回合被中止')
           return { action: 'aborted', scheduled: false }
         }
 
@@ -529,15 +619,42 @@ export function createAutoContinueEngine(options = {}) {
           return { action: 'blocked', scheduled: false }
         }
 
+        const isNoVisibleOutput = parsed.kind === 'no-visible-output'
+        const isSilentCompleted = parsed.kind === 'completed'
+          && (st.turnOutput === 'silent' || (hadPendingRelay && st.turnOutput === 'none'))
+          && st.lastToolSummary.doneCount === 0
+        const isAbnormalEnd = isNoVisibleOutput || isSilentCompleted || parsed.kind === 'max-tokens' || parsed.kind === 'interrupted' || parsed.kind === 'error'
+
         if (stopped) {
           st.stats.skippedStopped += 1
           cancelPending(sessionId, '参谋长已停止')
+          if (isAbnormalEnd) {
+            notifyBlocked(sessionId, rootId, `turn/end:${parsed.kind}`, 'chief-stopped', '对端参谋长处于停机状态，未触发自动续跑')
+          }
           return { action: 'chief-stopped', scheduled: false }
         }
 
-        if (parsed.kind === 'no-visible-output' || (parsed.kind === 'completed' && st.turnOutput === 'silent' && st.lastToolSummary.doneCount === 0)) {
+        const isChildSession = Boolean(rootId && sessionId && rootId !== sessionId)
+        if (isNoVisibleOutput || isSilentCompleted) {
+          // 子代理生命周期由父代理与宿主管理，严禁因静默/空文本收尾将其从 inactive 误唤醒回 running
+          if (isChildSession) {
+            st.consecutive = 0
+            st.lastFailure = null
+            cancelPending(sessionId)
+            return { action: 'child-silent-skipped', scheduled: false }
+          }
+          // 本轮前面已产出可见文本，或已执行 wait_agent/subagent/mail.send 等外部等待/协同动作时，尾部空文本不构成断流
+          if (st.turnOutput === 'visible' || st.lastToolSummary.hadExternalWaitTool) {
+            st.consecutive = 0
+            st.lastFailure = null
+            return { action: 'completed', scheduled: false }
+          }
           st.lastFailure = null
-          const res = schedule(sessionId, `turn/end:${parsed.kind}:silent`)
+          const trig = `turn/end:${parsed.kind}:silent`
+          const res = schedule(sessionId, trig)
+          if (res && res.scheduled === false && res.reason === 'max-consecutive') {
+            notifyBlocked(sessionId, rootId, trig, 'max-consecutive', `已达连续自动续跑上限（${maxConsecutive} 次）`)
+          }
           return { action: 'silent-scheduled', ...res }
         }
 
@@ -552,6 +669,9 @@ export function createAutoContinueEngine(options = {}) {
         if (parsed.kind === 'max-tokens') {
           st.lastFailure = null
           const res = schedule(sessionId, 'turn/end:max-tokens')
+          if (res && res.scheduled === false && res.reason === 'max-consecutive') {
+            notifyBlocked(sessionId, rootId, 'turn/end:max-tokens', 'max-consecutive', `已达连续自动续跑上限（${maxConsecutive} 次）`)
+          }
           return { action: 'max-tokens-scheduled', ...res }
         }
 
@@ -559,11 +679,16 @@ export function createAutoContinueEngine(options = {}) {
           if (parsed.nestedKind === 'error' && parsed.failure && !isTransientFailure(parsed.failure)) {
             st.lastFailure = parsed.failure
             st.stats.skippedPermanent += 1
-            onLog(sessionId, `检测到永久性错误（${parsed.failure.code}${parsed.failure.status ? ` HTTP ${parsed.failure.status}` : ''}），跳过自动续跑`)
+            const errHint = `检测到永久性错误（${parsed.failure.code}${parsed.failure.status ? ` HTTP ${parsed.failure.status}` : ''}）`
+            onLog(sessionId, `${errHint}，跳过自动续跑`)
+            notifyBlocked(sessionId, rootId, 'turn/end:interrupted', 'permanent-error', errHint)
             return { action: 'permanent-error-skipped', failure: parsed.failure, scheduled: false }
           }
           st.lastFailure = parsed.failure || null
           const res = schedule(sessionId, 'turn/end:interrupted')
+          if (res && res.scheduled === false && res.reason === 'max-consecutive') {
+            notifyBlocked(sessionId, rootId, 'turn/end:interrupted', 'max-consecutive', `已达连续自动续跑上限（${maxConsecutive} 次）`)
+          }
           return { action: 'interrupted-scheduled', ...res }
         }
 
@@ -574,10 +699,15 @@ export function createAutoContinueEngine(options = {}) {
           st.lastFailure = failure
           if (!isTransientFailure(failure)) {
             st.stats.skippedPermanent += 1
-            onLog(sessionId, `检测到永久性错误（${failure.code}${failure.status ? ` HTTP ${failure.status}` : ''}），跳过自动续跑`)
+            const errHint = `检测到永久性错误（${failure.code}${failure.status ? ` HTTP ${failure.status}` : ''}）`
+            onLog(sessionId, `${errHint}，跳过自动续跑`)
+            notifyBlocked(sessionId, rootId, 'turn/end:error', 'permanent-error', errHint)
             return { action: 'permanent-error-skipped', failure, scheduled: false }
           }
           const res = schedule(sessionId, 'turn/end:error')
+          if (res && res.scheduled === false && res.reason === 'max-consecutive') {
+            notifyBlocked(sessionId, rootId, 'turn/end:error', 'max-consecutive', `已达连续自动续跑上限（${maxConsecutive} 次）`)
+          }
           return { action: 'transient-error-scheduled', failure, ...res }
         }
         return null

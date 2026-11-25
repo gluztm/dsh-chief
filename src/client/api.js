@@ -81,6 +81,8 @@ import {
   prefillSuggestion,
   ingestSecImageFiles,
   submitChiefBar,
+  fetchGithubStarStatus,
+  toggleGithubStarApi,
 } from './api/chief.js'
 
 export {
@@ -147,6 +149,8 @@ export {
   prefillSuggestion,
   ingestSecImageFiles,
   submitChiefBar,
+  fetchGithubStarStatus,
+  toggleGithubStarApi,
 }
 
 function clearBoundSessionToBlank() {

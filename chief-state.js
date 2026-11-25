@@ -63,6 +63,8 @@ import {
   clamp,
   cleanMultiline,
   secretLike,
+  containsChiefNameSecret,
+  normalizeChiefName,
   computeApprovalPayloadHash,
   hasValidChiefRiskAck,
   normalizePendingApproval,
@@ -173,6 +175,8 @@ export {
   clamp,
   cleanMultiline,
   secretLike,
+  containsChiefNameSecret,
+  normalizeChiefName,
   computeApprovalPayloadHash,
   hasValidChiefRiskAck,
   recoverTaskLedgerEntriesOnDiskLoad,
@@ -207,6 +211,16 @@ export {
   archiveTargetForRoot,
   persistChiefImagesToWorkspace,
   admitChiefImages,
+}
+
+/** Render lightweight Chief-only identity instruction (0-byte isolated from @lead). */
+export function buildChiefIdentityPromptLine(cfgOrState) {
+  const src = cfgOrState && typeof cfgOrState === 'object'
+    ? (cfgOrState.config && typeof cfgOrState.config === 'object' ? cfgOrState.config : cfgOrState)
+    : loadChiefState().config
+  const name = normalizeChiefName(src && src.chiefName)
+  if (!name) return ''
+  return `🏷️ 【你的专属称呼】：用户为你取的专属名字是「${name}」。在回复用户时自然以「${name}」自称即可（此设定对主对话 0 字节隔离）。`
 }
 
 export function touchWorkspaceActivity(sessionId) {
@@ -1115,7 +1129,14 @@ export function updateChiefConfig(patch) {
       }
     : rawInput
   const sid = String(safePatch.sessionId || safePatch.session || '').trim() || 'global'
-  const GLOBAL_ONLY_CFG_KEYS = new Set(['defaultAutoEnableSessions', 'uiLang', 'notifyEnabled', 'notifySound'])
+  if (typeof safePatch.chiefName === 'string' && containsChiefNameSecret(safePatch.chiefName)) {
+    return {
+      ok: false,
+      blocked: true,
+      error: '参谋长名称检测到疑似密钥/令牌，已硬拦截拒绝写入',
+    }
+  }
+  const GLOBAL_ONLY_CFG_KEYS = new Set(['defaultAutoEnableSessions', 'uiLang', 'notifyEnabled', 'notifySound', 'chiefName'])
   const META_CFG_KEYS = new Set([
     'sessionId',
     'session',
@@ -1237,6 +1258,9 @@ export function updateChiefConfig(patch) {
       }
       if (typeof safePatch.notifySound === 'boolean') {
         state.config.notifySound = safePatch.notifySound
+      }
+      if (typeof safePatch.chiefName === 'string') {
+        state.config.chiefName = normalizeChiefName(safePatch.chiefName)
       }
       const nextCfg = resolveWorkspaceConfig(state, sid)
       return {
@@ -1645,6 +1669,9 @@ export function updateChiefConfig(patch) {
     }
     if (typeof safePatch.defaultAutoEnableSessions === 'boolean') {
       state.config.defaultAutoEnableSessions = safePatch.defaultAutoEnableSessions
+    }
+    if (typeof safePatch.chiefName === 'string') {
+      state.config.chiefName = normalizeChiefName(safePatch.chiefName)
     }
     if (typeof safePatch.sessionEnabled === 'boolean') {
       ws.config.sessionEnabled = safePatch.sessionEnabled

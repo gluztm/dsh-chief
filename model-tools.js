@@ -141,7 +141,7 @@ export function createModelTools(deps) {
           'Board operation (MUST be called whenever recording tasks/status/conclusions or relaying messages; plain text alone does NOT update the board or notify peers). '
           + 'Use "graph.plan" (or "task.batch") to plan a hierarchical/DAG task graph in one call (supports parentId, blockedBy, planStepId, targetPlanStepId, owner/subagent, intent, evidence). '
           + 'For multi-step workflows, define ordered steps via "plan.set" first and bind tasks/subagents with "planStepId" (and optional "targetPlanStepId") so the workflow topology displays step-by-step progress and subagent return arrows. '
-          + 'Use "task.dispatch" to spawn or message a subagent, "team.steer" to steer a subagent, and "mail.send" to relay messages or dispatch work across lead/subagents/linked sessions/enrolled Bubble harnesses (pass provider id as target). '
+          + 'Use "task.dispatch" to spawn or message a subagent, "team.steer" to steer a subagent, and "mail.send" to relay messages or dispatch work across lead/subagents/linked sessions/enrolled Bubble harnesses (pass provider id as target). For cross-session challenges/requests, send directly to the peer session handle/id (target peer lead) rather than only "chief" (which only notifies your own local Chief); for a remote subagent use "PeerTitle/subagentName". '
           + 'Use "inquiry.reply" (inquiryId, text) whenever you see a priority [INQUIRY #id] from DSH Chief — answer accurately and continue your current work immediately without stopping. '
           + 'Use "chief.request" (subject, text) to ask DSH Chief for cross-session coordination, permission elevation, to report exploration & planning results, or when blocked by an insurmountable guard wall that cannot be bypassed safely. '
           + 'Use "wall.list" (read-only) to inspect currently active persistent guard walls defending high-risk paths/commands. '
@@ -364,7 +364,17 @@ export function createModelTools(deps) {
             lines.push('🗄️ archived dossier «' + view.archiveSaved.title + '» → drawer [' + view.archiveSaved.folder + '] (' + view.archiveSaved.id + ', cold-sealed)')
           }
           if (view.mailDelivered) {
-            lines.push('📨 mail delivered → ' + view.mailDelivered.target + ' (' + view.mailDelivered.mode + ')')
+            const md = view.mailDelivered
+            const idPart = md.resolvedAgentId ? `, agentId=${md.resolvedAgentId}` : ''
+            const viaPart = md.resolvedVia ? ` via ${md.resolvedVia}` : ''
+            const scopeTag = md.targetKind
+              ? ` [${md.targetKind}${md.targetKind !== 'broadcast' ? (md.crossSession ? ', cross-session' : ', local-session') : ''}]`
+              : ''
+            if (md.routedStatus === 'unrouted' || md.routedStatus === 'stale_target') {
+              lines.push(`⚠️ mail ${md.routedStatus} → ${md.target}${scopeTag} (${md.mode}${idPart}${viaPart})`)
+            } else {
+              lines.push(`📨 mail delivered → ${md.target}${scopeTag} (${md.mode}${idPart}${viaPart})`)
+            }
           }
           if (view.boundProposed) {
             lines.push('🏛 ' + view.boundProposed.message)
@@ -385,7 +395,13 @@ export function createModelTools(deps) {
               lines.push('  ' + (m.unread ? '[NEW] ' : '') + m.from + ' → ' + m.to + (m.subject ? ' (' + m.subject + ')' : '') + ': ' + String(m.text || '').slice(0, 140))
             }
             if (Array.isArray(view.peers) && view.peers.length) {
-              lines.push('📡 addressable peers: ' + view.peers.map(p => p.handle + '[' + p.status + ']').join(' · '))
+              const peerLabels = view.peers.map(p =>
+                p.handle
+                + '[' + (p.kind || 'peer') + ':' + p.status
+                + (p.interrupted ? ', ⚠️ interrupted' + (p.dropReason ? '(' + String(p.dropReason).slice(0, 32) + ')' : '') : '')
+                + (p.id ? ', id=' + p.id : ', no-instance') + ']',
+              )
+              lines.push('📡 addressable peers: ' + peerLabels.join(' · '))
             }
           }
           if (view.dispatched) {
@@ -397,7 +413,9 @@ export function createModelTools(deps) {
           if (view.messageId && view.agent) {
             lines.push('💬 steered subagent ' + view.agent + ' (messageId: ' + view.messageId + ')')
           }
-          const subagents = Array.isArray(view.subagents) ? view.subagents.filter(a => a && a.name !== 'lead') : []
+          const subagents = Array.isArray(view.subagents)
+            ? view.subagents.filter(a => a && a.name !== 'lead' && a.verifiedInstance !== false && !a.stale && a.status !== 'stale')
+            : []
           if (subagents.length) {
             lines.push('子代理团队 (' + subagents.length + '): ' + subagents.map(a => a.name + '[' + a.status + ']').join(' · '))
           }
@@ -558,7 +576,16 @@ export function createModelTools(deps) {
             text: msgText,
             mode: ['steer', 'followup', 'silent'].includes(passed.delivery) ? passed.delivery : 'steer',
           })
-          if (!deliv.ok) return { ok: false, error: deliv.error }
+          if (!deliv.ok) {
+            return {
+              ok: false,
+              error: deliv.error,
+              ...(deliv.routedStatus ? { routedStatus: deliv.routedStatus } : {}),
+              ...(deliv.resolvedAgentId ? { resolvedAgentId: deliv.resolvedAgentId } : {}),
+              ...(deliv.resolvedVia ? { resolvedVia: deliv.resolvedVia } : {}),
+              ...(deliv.ambiguousTargets ? { ambiguousTargets: deliv.ambiguousTargets } : {}),
+            }
+          }
           const board = session ? loadBoard(boardFileFor(session)) : emptyBoard()
           const roster = session ? await refreshSubagentTree(runtime, session, board) : []
           return {
@@ -566,6 +593,12 @@ export function createModelTools(deps) {
             mailDelivered: {
               target: deliv.broadcast ? 'all' : deliv.target,
               mode: deliv.broadcast ? 'broadcast' : deliv.deliveryMode,
+              routedStatus: deliv.broadcast ? 'delivered' : (deliv.routedStatus || 'queued'),
+              resolvedAgentId: deliv.resolvedAgentId || deliv.targetId || '',
+              resolvedVia: deliv.resolvedVia || '',
+              targetKind: deliv.broadcast ? 'broadcast' : (deliv.targetKind || ''),
+              targetRootId: deliv.targetRootId || '',
+              crossSession: Boolean(deliv.crossSession),
             },
             ...summary(board, roster),
           }

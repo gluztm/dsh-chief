@@ -284,6 +284,7 @@ export const CSS_BASE = `
   }
 
   @media (min-width: 820px) {
+    .dnb-panel.dnb-main .dnb-live-cursor-wrap > .dnb-live-cursor-bar,
     .dnb-panel.dnb-main .dnb-seg-wrap > .dnb-seg,
     .dnb-panel.dnb-main .dnb-session-optin-wrap > .dnb-session-optin-banner,
     .dnb-panel.dnb-main .dnb-body > .dnb-view,
@@ -585,6 +586,18 @@ export const CSS_BASE = `
     font-size: 11.5px;
     font-weight: 500;
     color: var(--dnb-text-2);
+  }
+  .dnb-bound-sec-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+    padding: 6px 2px 7px;
+    margin-bottom: 8px;
+    border-bottom: 1px solid var(--dnb-border);
+    color: var(--dnb-text-2);
+    font-weight: 600;
   }
   .dnb-cell {
     display: flex;
@@ -1227,6 +1240,70 @@ export const CSS_BASE = `
   html[data-ds-theme-source="light"] .dnb-session-optin-dot,
   html[data-ds-theme="light"] .dnb-session-optin-dot {
     background: #0284c7;
+  }
+
+  /* Shared Indicators & Focus Banner */
+  .dnb-spin-ring {
+    width: var(--dnb-spin-size, 10px);
+    height: var(--dnb-spin-size, 10px);
+    border-radius: 50%;
+    border: 1.65px solid rgba(161, 161, 170, 0.28);
+    border-top-color: currentColor;
+    display: inline-block;
+    flex-shrink: 0;
+    box-sizing: border-box;
+    animation: dnb-spin 0.85s linear infinite;
+  }
+  .dnb-status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    height: 20px;
+    padding: 0 7.5px;
+    border-radius: 99px;
+    font-size: 10.5px;
+    font-weight: 600;
+    letter-spacing: 0.1px;
+    white-space: nowrap;
+    flex-shrink: 0;
+    border: 1px solid transparent;
+  }
+  .dnb-status-badge[data-status="doing"] {
+    background: rgba(10, 132, 255, 0.16);
+    border-color: rgba(10, 132, 255, 0.44);
+    color: #409cff;
+  }
+  .dnb-status-badge[data-status="blocked"] {
+    background: rgba(255, 69, 58, 0.2);
+    border-color: rgba(255, 69, 58, 0.56);
+    color: #ff453a;
+  }
+  .dnb-status-badge[data-status="todo"] {
+    background: rgba(142, 142, 147, 0.16);
+    border-color: rgba(142, 142, 147, 0.34);
+    color: #a1a1aa;
+  }
+  .dnb-status-badge[data-status="done"] {
+    background: rgba(48, 209, 88, 0.14);
+    border-color: rgba(48, 209, 88, 0.34);
+    color: #30d158;
+  }
+  .dnb-focus-banner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    padding: 7px 10px;
+    margin-bottom: 8px;
+    border-radius: 11px;
+    border: 1px solid rgba(10, 132, 255, 0.45);
+    background: rgba(10, 132, 255, 0.13);
+    font-size: 11.5px;
+    animation: dnb-enter 0.18s ease-out;
+  }
+  .dnb-focus-banner[data-blocked="1"] {
+    border-color: rgba(255, 69, 58, 0.5);
+    background: rgba(255, 69, 58, 0.14);
   }
 
 `

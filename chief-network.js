@@ -29,6 +29,7 @@ import {
   mutateChiefState,
   answerChiefInquiry,
   appendChiefAuditLog,
+  recordWorkspaceAlertEvent,
   getLinkedCluster,
   ensureWorkspace,
   resolveWorkspaceConfig,
@@ -134,12 +135,169 @@ function summarizeBoardProgress(board) {
   return parts.join(' · ')
 }
 
+export const PEER_DROP_TTL_MS = 15 * 60_000
+
+/**
+ * Find cross-session (`pair`) incoming messages in `targetRootId`'s mailbox within `maxAgeMs`
+ * that have not yet received a reply from `targetRootId` back to the sender.
+ */
+export function findUnansweredIncomingPeerMails(state, targetRootId, maxAgeMs = PEER_DROP_TTL_MS) {
+  const target = String(targetRootId || '').trim()
+  if (!state || typeof state !== 'object' || !target || target === 'global') return []
+  const workspaces = state.workspaces && typeof state.workspaces === 'object' ? state.workspaces : {}
+  const targetWs = workspaces[target]
+  if (!targetWs || !Array.isArray(targetWs.mailbox) || !targetWs.mailbox.length) return []
+
+  const now = Date.now()
+  const cutoff = now - Math.max(1000, Number(maxAgeMs) || PEER_DROP_TTL_MS)
+  const latestBySender = new Map()
+
+  for (const m of targetWs.mailbox) {
+    if (!m || m.detachedFromCluster) continue
+    if (m.routedStatus === 'unrouted' || m.routedStatus === 'stale_target') continue
+    if (m.channelType !== 'pair') continue
+    if (m.toRootId !== target) continue
+    const fromRoot = String(m.fromRootId || '').trim()
+    if (!fromRoot || fromRoot === target || fromRoot.startsWith('harness:')) continue
+    const at = Number(m.at) || 0
+    if (at < cutoff) continue
+    const prev = latestBySender.get(fromRoot)
+    if (!prev || at >= (Number(prev.at) || 0)) {
+      latestBySender.set(fromRoot, m)
+    }
+  }
+
+  if (!latestBySender.size) return []
+  const out = []
+  for (const [fromRoot, incoming] of latestBySender.entries()) {
+    const incomingAt = Number(incoming.at) || 0
+    const senderWs = workspaces[fromRoot]
+    const searchPools = [targetWs.mailbox, ...(senderWs && Array.isArray(senderWs.mailbox) ? [senderWs.mailbox] : [])]
+    let hasReply = false
+    for (const pool of searchPools) {
+      for (const r of pool) {
+        if (!r || r.detachedFromCluster) continue
+        if (r.routedStatus === 'unrouted' || r.routedStatus === 'stale_target') continue
+        if (r.channelType !== 'pair' && r.channelType !== 'broadcast') continue
+        if (r.fromRootId !== target) continue
+        if (r.toRootId !== fromRoot && r.toRootId !== 'all') continue
+        if ((Number(r.at) || 0) >= incomingAt) {
+          hasReply = true
+          break
+        }
+      }
+      if (hasReply) break
+    }
+    if (!hasReply) out.push({ fromRootId: fromRoot, incoming })
+  }
+  return out
+}
+
+export function hasUnansweredIncomingPeerMail(state, targetRootId, maxAgeMs = PEER_DROP_TTL_MS) {
+  return findUnansweredIncomingPeerMails(state, targetRootId, maxAgeMs).length > 0
+}
+
+export function clearPeerDropState(rootId) {
+  const rid = String(rootId || '').trim()
+  if (!rid || rid === 'global') return false
+  const snap = loadChiefState()
+  const existing = snap?.workspaces?.[rid]?.runtimeGuard?.peerDropState
+  if (!existing) return false
+  let cleared = false
+  mutateChiefState((state) => {
+    const ws = state && state.workspaces ? state.workspaces[rid] : null
+    if (ws && ws.runtimeGuard && ws.runtimeGuard.peerDropState) {
+      ws.runtimeGuard.peerDropState = null
+      cleared = true
+    }
+  })
+  return cleared
+}
+
+export function syncPeerDropToWaitingSenders(deps, { droppedRootId, reason = '', trigger = '', skipped = '' } = {}) {
+  const dropped = String(droppedRootId || '').trim()
+  if (!dropped || dropped === 'global') return { notified: [] }
+  const runtime = deps && deps.runtime
+  const droppedTitle = (deps && typeof deps.sessionName === 'function' ? deps.sessionName(runtime, dropped) : '')
+    || ('会话 ' + dropped.replace(/^session-/, '').slice(0, 8))
+  const cleanReason = clamp(reason || skipped || trigger || '中途断流', 180)
+  const cleanTrigger = clamp(trigger || '', 60)
+  const cleanSkipped = clamp(skipped || '', 60)
+  const pendingAlerts = []
+  const notified = []
+
+  mutateChiefState((state) => {
+    const droppedWs = ensureWorkspace(state, dropped)
+    droppedWs.runtimeGuard.peerDropState = {
+      at: Date.now(),
+      reason: cleanReason,
+      trigger: cleanTrigger,
+      skipped: cleanSkipped,
+    }
+    const cluster = getLinkedCluster(state, dropped)
+    const waiting = findUnansweredIncomingPeerMails(state, dropped)
+      .filter(item => item && item.fromRootId && cluster.includes(item.fromRootId))
+    for (const { fromRootId, incoming } of waiting) {
+      const senderWs = ensureWorkspace(state, fromRootId)
+      const dedupeKey = `peerdrop:${dropped}:${incoming.id}`
+      if (senderWs.mailbox.some(m => m && m.broadcastId === dedupeKey)) continue
+      const noticeText = `⚠️ 协同对端「${droppedTitle}」(${dropped.slice(0, 16)}) 中途断流未恢复（原因：${cleanReason}），其对你的跨窗消息尚未回传结果。请勿继续干等：可重发 mail.send 续催，或提示用户检查对端窗口。`
+      const syncMail = normalizeMail({
+        id: nextId('mail'),
+        from: 'DSH 参谋长 (跨窗状态同步)',
+        fromSession: dropped,
+        fromRootId: dropped,
+        to: 'lead',
+        toSession: fromRootId,
+        toRootId: fromRootId,
+        participantRoots: [dropped, fromRootId].sort(),
+        channelType: 'internal',
+        broadcastId: dedupeKey,
+        subject: `对端断流提醒 · ${droppedTitle}`,
+        text: noticeText,
+        mode: 'silent',
+        deliveredPhysical: false,
+        routedStatus: 'queued',
+        resolvedVia: 'peer-drop-sync',
+        readBy: [],
+        at: Date.now(),
+      })
+      if (syncMail) {
+        senderWs.mailbox.push(syncMail)
+        if (senderWs.mailbox.length > MAIL_CAP) senderWs.mailbox = senderWs.mailbox.slice(-MAIL_CAP)
+      }
+      notified.push(fromRootId)
+      pendingAlerts.push({ fromRootId, dedupeKey, noticeText })
+    }
+  })
+
+  for (const item of pendingAlerts) {
+    try {
+      recordWorkspaceAlertEvent(item.fromRootId, {
+        kind: 'peer_session_dropped',
+        level: 'warn',
+        title: '⚠️ 协同对端中途断流',
+        body: clamp(item.noticeText, 180),
+        dedupeKey: item.dedupeKey,
+      })
+    } catch {}
+    try {
+      if (deps && typeof deps.appendBoardLog === 'function') {
+        deps.appendBoardLog(item.fromRootId, item.noticeText, 'chief')
+      }
+    } catch {}
+  }
+  return { notified }
+}
+
 export function collectClusterPeerProgress(deps, cluster = [], selfRootId = '') {
   const self = String(selfRootId || '').trim()
   const members = Array.isArray(cluster) ? cluster.filter(sid => sid && sid !== self) : []
   if (!members.length) return []
   const runtime = deps && deps.runtime
   const agentsSvc = runtime ? runtime.get('agents') : null
+  const state = loadChiefState()
+  const now = Date.now()
   const out = []
   for (const sid of members) {
     let board = null
@@ -152,6 +310,10 @@ export function collectClusterPeerProgress(deps, cluster = [], selfRootId = '') 
       rootAgent = agentsSvc && typeof agentsSvc.get === 'function' ? agentsSvc.get(sid) : null
     } catch {}
     const name = (deps.sessionName && deps.sessionName(runtime, rootAgent || sid)) || ('会话 ' + sid.replace(/^session-/, '').slice(0, 8))
+    const isRunning = Boolean(rootAgent && rootAgent.status === 'running')
+    const peerWs = state && state.workspaces ? state.workspaces[sid] : null
+    const drop = peerWs && peerWs.runtimeGuard ? peerWs.runtimeGuard.peerDropState : null
+    const isDropped = Boolean(drop && Number(drop.at) > 0 && (now - Number(drop.at) < PEER_DROP_TTL_MS) && !isRunning)
     const tasks = Array.isArray(board.tasks) ? board.tasks : []
     const doneCount = tasks.filter(t => t && t.status === 'done').length
     const doingCount = tasks.filter(t => t && t.status === 'doing').length
@@ -166,10 +328,13 @@ export function collectClusterPeerProgress(deps, cluster = [], selfRootId = '') 
       .slice(-2)
       .map(m => clamp(stripCheckpointNoise(m.title || m.text), 72))
       .filter(Boolean)
+    const baseProg = summarizeBoardProgress(board)
+    const dropBanner = isDropped ? `⚠️ 断流未恢复(${clamp(drop.reason || drop.skipped || '中断', 36)})` : ''
     out.push({
       rootId: sid,
       name,
-      status: rootAgent && rootAgent.status === 'running' ? 'running' : 'idle',
+      status: isRunning ? 'running' : 'idle',
+      ...(isDropped ? { interrupted: true, dropReason: drop.reason || '' } : {}),
       objective: clamp(board.objective || '', 120),
       cursorStep: clamp(board.cursor && board.cursor.step ? board.cursor.step : '', 90),
       cursorNext: clamp(board.cursor && board.cursor.next ? board.cursor.next : '', 90),
@@ -180,7 +345,7 @@ export function collectClusterPeerProgress(deps, cluster = [], selfRootId = '') 
       todoCount,
       topTasks,
       recentConclusions,
-      progressSummary: summarizeBoardProgress(board),
+      progressSummary: [dropBanner, baseProg].filter(Boolean).join(' · '),
     })
   }
   return out
@@ -238,7 +403,10 @@ export async function listPeerDirectory(deps, sessionId) {
   })()
 
   const targets = []
-  const seenIds = new Set()
+  const seenKeys = new Set()
+  const seenComposite = new Set()
+  const clusterSnapshots = []
+  const peerSessionTitles = new Set()
 
   for (const memberRootId of cluster) {
     const isCurrentRoot = memberRootId === rootId
@@ -252,31 +420,70 @@ export async function listPeerDirectory(deps, sessionId) {
       || (dormantCached && dormantCached.title)
       || ('会话 ' + memberRootId.replace(/^session-/, '').slice(0, 8))
     const memberProgressSummary = summarizeBoardProgress(board)
+    if (!isCurrentRoot && rootTitle) peerSessionTitles.add(String(rootTitle).trim().toLowerCase())
+    clusterSnapshots.push({ memberRootId, isCurrentRoot, board, roster, rootTitle, memberProgressSummary })
+  }
 
+  for (const snap of clusterSnapshots) {
+    const { memberRootId, isCurrentRoot, board, roster, rootTitle, memberProgressSummary } = snap
     for (const entry of roster) {
       if (!entry) continue
       const isLead = entry.name === 'lead'
+      const hasVerifiedChild = !isLead && Boolean(
+        entry.verifiedInstance !== false
+        && !entry.stale
+        && entry.id
+        && entry.id !== memberRootId
+        && entry.status !== 'stale'
+        && entry.status !== 'unavailable',
+      )
+      const entryNameLower = String(entry.name || '').trim().toLowerCase()
+      if (!isLead && !hasVerifiedChild && entryNameLower && peerSessionTitles.has(entryNameLower)) {
+        continue
+      }
+      const kind = isLead
+        ? (isCurrentRoot ? 'lead' : 'peer-session')
+        : (hasVerifiedChild ? 'subagent' : 'stale')
+      const resolvedId = isLead
+        ? memberRootId
+        : (hasVerifiedChild ? String(entry.id) : '')
       const key = isCurrentRoot
         ? (isLead ? 'lead' : entry.name)
         : (isLead ? memberRootId : `${memberRootId}:${entry.name}`)
-      if (seenIds.has(key)) continue
-      seenIds.add(key)
+      const compositeId = `${kind}:${resolvedId || key}`
+      if (seenKeys.has(key) || seenComposite.has(compositeId)) continue
+      seenKeys.add(key)
+      seenComposite.add(compositeId)
+      const peerWs = isLead && !isCurrentRoot && state && state.workspaces ? state.workspaces[memberRootId] : null
+      const peerDrop = peerWs && peerWs.runtimeGuard ? peerWs.runtimeGuard.peerDropState : null
+      const isPeerInterrupted = Boolean(
+        peerDrop && Number(peerDrop.at) > 0 && (Date.now() - Number(peerDrop.at) < PEER_DROP_TTL_MS) && entry.status !== 'running',
+      )
       targets.push({
         key,
-        id: entry.id || (isLead ? memberRootId : ''),
+        id: resolvedId,
+        agentId: resolvedId,
         rootId: memberRootId,
+        parentRootId: memberRootId,
         name: isLead ? (isCurrentRoot ? '主对话' : rootTitle) : entry.name,
         handle: isCurrentRoot ? (isLead ? 'lead' : entry.name) : (isLead ? rootTitle : `${rootTitle}/${entry.name}`),
-        kind: isLead ? (isCurrentRoot ? 'lead' : 'peer-session') : 'subagent',
+        kind,
         isCurrentRoot,
-        status: entry.status === 'running' ? 'running' : 'idle',
+        verifiedInstance: isLead || hasVerifiedChild,
+        routable: isLead || hasVerifiedChild,
+        status: kind === 'stale' ? 'stale' : (entry.status === 'running' ? 'running' : 'idle'),
+        ...(isPeerInterrupted ? { interrupted: true, dropReason: peerDrop.reason || peerDrop.skipped || '' } : {}),
         taskTitle: entry.taskTitle || entry.description || (board && board.objective ? clamp(board.objective, 48) : ''),
         ...(isLead ? { progressSummary: memberProgressSummary, objective: clamp(board && board.objective ? board.objective : '', 80) } : {}),
-        parentId: entry.parentId || memberRootId,
+        parentId: isLead ? memberRootId : (hasVerifiedChild ? (entry.parentId || memberRootId) : ''),
         mode: entry.mode || 'continuable',
       })
     }
   }
+  const routableFirst = targets.filter(t => t.kind !== 'stale')
+  const staleLast = targets.filter(t => t.kind === 'stale')
+  targets.length = 0
+  targets.push(...routableFirst, ...staleLast)
 
   // Other top-level standalone sessions on this machine (live + dormant/unvisited) that can be linked into the federation
   const liveSessBySid = new Map()
@@ -431,27 +638,83 @@ export async function listPeerDirectory(deps, sessionId) {
 }
 
 function matchTargetPeer(targets, rawTarget) {
-  const q = String(rawTarget || '').trim().replace(/^@/, '')
+  let q = String(rawTarget || '').trim().replace(/^@/, '')
   if (!q) return null
-  const lower = q.toLowerCase()
-  if (lower === 'lead' || lower === 'main' || lower === '主对话' || lower === '主代理') {
-    return targets.find(t => t.kind === 'lead' && t.isCurrentRoot) || targets[0] || null
+  let kindFilter = ''
+  const kindMatch = q.match(/^(lead|peer-session|subagent|stale):(.*)$/i)
+  if (kindMatch) {
+    kindFilter = kindMatch[1].toLowerCase()
+    q = String(kindMatch[2] || '').trim()
+    if (!q) return null
   }
-  // Exact match by key, id, name, or handle
-  for (const t of targets) {
+  const pool = kindFilter
+    ? targets.filter(t => t && String(t.kind || '').toLowerCase() === kindFilter)
+    : targets
+  const routable = pool.filter(t => t && t.kind !== 'stale' && t.routable !== false)
+  const stale = pool.filter(t => t && (t.kind === 'stale' || t.routable === false))
+  const lower = q.toLowerCase()
+  if (!kindFilter && (lower === 'lead' || lower === 'main' || lower === '主对话' || lower === '主代理')) {
+    return routable.find(t => t.kind === 'lead' && t.isCurrentRoot) || routable[0] || null
+  }
+  const kindPriority = t => (t.kind === 'lead' || t.kind === 'peer-session' ? 0 : 1)
+  const sortCandidates = list => list.slice().sort((a, b) =>
+    (kindPriority(a) - kindPriority(b)) || (Number(Boolean(b.isCurrentRoot)) - Number(Boolean(a.isCurrentRoot))),
+  )
+  // 1. Exact id / agentId / key match on live/routable targets first
+  for (const t of routable) {
     if (
-      t.key.toLowerCase() === lower
-      || (t.id && t.id.toLowerCase() === lower)
-      || t.name.toLowerCase() === lower
-      || t.handle.toLowerCase() === lower
-      || t.name.split('/').pop().toLowerCase() === lower
+      (t.id && t.id.toLowerCase() === lower)
+      || (t.agentId && t.agentId.toLowerCase() === lower)
+      || t.key.toLowerCase() === lower
     ) {
       return t
     }
   }
-  // Partial substring match
-  return targets.find(t =>
+  // 2a. Exact handle match on live/routable targets
+  const handleHits = routable.filter(t => String(t.handle || '').toLowerCase() === lower)
+  if (handleHits.length === 1) return handleHits[0]
+  if (handleHits.length > 1) return sortCandidates(handleHits)[0]
+
+  // 2b. Exact name match with cross-session disambiguation
+  const exactNameHits = routable.filter(t => String(t.name || '').toLowerCase() === lower)
+  if (exactNameHits.length === 1) return exactNameHits[0]
+  if (exactNameHits.length > 1) {
+    const sessionHits = exactNameHits.filter(t => t.kind === 'lead' || t.kind === 'peer-session')
+    if (sessionHits.length === 1) return sessionHits[0]
+    const localHits = exactNameHits.filter(t => t.isCurrentRoot)
+    if (localHits.length === 1) return localHits[0]
+    return { _ambiguous: true, candidates: sortCandidates(exactNameHits) }
+  }
+
+  // 2c. Short-name match with local-first resolution or ambiguity error
+  const shortHits = routable.filter(t => String(t.name || '').split('/').pop().toLowerCase() === lower)
+  if (shortHits.length === 1) return shortHits[0]
+  if (shortHits.length > 1) {
+    const localHits = shortHits.filter(t => t.isCurrentRoot)
+    if (localHits.length === 1) return localHits[0]
+    return { _ambiguous: true, candidates: sortCandidates(shortHits) }
+  }
+
+  // 3. Partial substring match prioritizing lead / peer-session, then local subagents, then remote
+  const leadOrPeerFuzzy = routable.find(t =>
+    (t.kind === 'lead' || t.kind === 'peer-session')
+    && (t.name.toLowerCase().includes(lower) || t.handle.toLowerCase().includes(lower)),
+  )
+  if (leadOrPeerFuzzy) return leadOrPeerFuzzy
+  const localFuzzy = routable.find(t =>
+    t.isCurrentRoot && (t.name.toLowerCase().includes(lower) || t.handle.toLowerCase().includes(lower)),
+  )
+  if (localFuzzy) return localFuzzy
+  const remoteFuzzy = routable.find(t =>
     t.name.toLowerCase().includes(lower) || t.handle.toLowerCase().includes(lower),
+  )
+  if (remoteFuzzy) return remoteFuzzy
+  // 4. Fallback exact match against stale entries so deliverSinglePeer emits a precise stale_target rejection
+  return stale.find(t =>
+    t.key.toLowerCase() === lower
+    || t.handle.toLowerCase() === lower
+    || t.name.toLowerCase() === lower
+    || t.name.split('/').pop().toLowerCase() === lower,
   ) || null
 }
 
@@ -616,7 +879,9 @@ export async function deliverCrossMessage(deps, {
 
   // Broadcast support: 'all' / '全体' / 'team' (deduplicated single mailbox record for clean drawer UI)
   if (['all', 'team', '全体', '所有人'].includes(rawTarget.toLowerCase())) {
-    const recipients = directory.targets.filter(t => t.id !== fromSession)
+    const recipients = directory.targets.filter(t =>
+      t && t.kind !== 'stale' && t.routable !== false && t.id && t.id !== fromSession,
+    )
     const deliveries = []
     const deliveredReadMarks = []
     for (const peer of recipients) {
@@ -682,7 +947,7 @@ export async function deliverCrossMessage(deps, {
     const seenKeys = new Set()
     for (const part of parts) {
       const hit = matchTargetPeer(directory.targets, part)
-      if (hit && !seenKeys.has(hit.key)) {
+      if (hit && !hit._ambiguous && hit.kind !== 'stale' && hit.routable !== false && !seenKeys.has(hit.key)) {
         seenKeys.add(hit.key)
         matched.push(hit)
       }
@@ -746,6 +1011,13 @@ export async function deliverCrossMessage(deps, {
   }
 
   const peer = matchTargetPeer(directory.targets, rawTarget)
+  if (peer && peer._ambiguous) {
+    return {
+      ok: false,
+      error: `目标 "${rawTarget}" 在多个联动会话中存在同名代理（${peer.candidates.map(c => c.handle).join('、')}），请使用带会话前缀的完整句柄（如 "${peer.candidates[0].handle}"）或直接发给目标会话 lead。`,
+      ambiguousTargets: peer.candidates.map(c => c.handle),
+    }
+  }
   if (!peer) {
     const extHit = resolveExternalHarnessTarget(deps && deps.runtime, deps && deps.hostState, senderRootId, rawTarget)
     if (extHit) {
@@ -783,7 +1055,10 @@ export async function deliverCrossMessage(deps, {
     const availHarnesses = [...(bAvail.enrolledHarnesses || []), ...(bAvail.availableHarnesses || [])]
       .filter(h => h && h.installed !== false)
       .map(h => h.provider)
-    const targetChoices = [...directory.targets.map(t => t.handle), ...new Set(availHarnesses)].filter(Boolean)
+    const targetChoices = [
+      ...directory.targets.filter(t => t && t.kind !== 'stale' && t.routable !== false).map(t => t.handle),
+      ...new Set(availHarnesses),
+    ].filter(Boolean)
     return {
       ok: false,
       error: `未找到目标对话 "${rawTarget}"。当前可用目标：${targetChoices.join('、') || '无'}`,
@@ -847,10 +1122,91 @@ async function deliverSinglePeer(deps, directory, peer, {
 
   let deliveredPhysical = false
   let deliveryMode = 'mailbox-queued'
+  let routedStatus = 'queued'
+  let resolvedAgentId = ''
+  let resolvedVia = ''
   let errorNote = ''
   let resolveErrorCode = ''
   let resolveError = ''
   let hadHardError = false
+  let pathBBlocked = false
+
+  const senderRoot = String(fromRootId || (fromSession && deps.resolveRootSessionId && deps.resolveRootSessionId(fromSession)) || directory.rootId || '').trim()
+  const targetRoot = String(peer.rootId || directory.rootId || '').trim()
+  const participantRoots = [...new Set([senderRoot, targetRoot].filter(Boolean))].sort()
+  const channelType = participantRoots.length >= 2 ? 'pair' : 'internal'
+  const auditRootId = targetRoot || directory.rootId || ''
+
+  // Gate 0: Refuse unbacked / stale phantom entries outright (no Path A/B, never mark readBy)
+  if (peer.kind === 'stale' || peer.routable === false) {
+    deliveryMode = 'unrouted'
+    routedStatus = 'stale_target'
+    resolvedAgentId = ''
+    resolvedVia = 'rejected:stale_target'
+    errorNote = `目标 "${peer.handle}" 当前无运行实例（kind=stale），已拒绝投递以防误投主对话`
+    hadHardError = true
+    const mailItem = normalizeMail({
+      id: nextId('mail'),
+      from: fromLabel,
+      fromSession,
+      fromRootId: senderRoot,
+      to: peer.handle,
+      toSession: peer.key || '',
+      toRootId: targetRoot,
+      participantRoots,
+      channelType,
+      subject,
+      text: imgCount > 0 ? `${textWithImagePaths}${imgSuffix}` : textWithImagePaths,
+      imageCount: imgCount,
+      mode,
+      deliveredPhysical: false,
+      routedStatus: 'stale_target',
+      resolvedAgentId: '',
+      resolvedVia: 'rejected:stale_target',
+      readBy: [],
+      at: Date.now(),
+    })
+    if (recordMailbox && mailItem) {
+      mutateChiefState((state) => {
+        const ws = ensureWorkspace(state, auditRootId || directory.rootId)
+        ws.mailbox.push(mailItem)
+        if (ws.mailbox.length > MAIL_CAP) ws.mailbox = ws.mailbox.slice(-MAIL_CAP)
+      })
+    }
+    if (recordBoardLog && auditRootId) {
+      deps.appendBoardLog(auditRootId, `⚠️ 未送达 ${fromLabel} → ${peer.handle}（${clamp(errorNote, 110)}）：${clamp(text, 48)}${imgSuffix}`, fromLabel)
+    }
+    if (auditRootId) {
+      try {
+        appendChiefAuditLog(auditRootId, {
+          stage: 'mail_routing',
+          decision: 'blocked',
+          operation: 'mail.send',
+          target: peer.handle,
+          reason: `kind=stale expected=none@${targetRoot || 'none'} resolved=none via=rejected:stale_target err=${errorNote}`,
+          outcome: 'stale_target',
+          by: clamp(fromLabel || 'agent', 40),
+        })
+      } catch {}
+    }
+    return {
+      ok: false,
+      error: errorNote,
+      deliveryError: errorNote,
+      mail: mailItem,
+      target: peer.handle,
+      targetId: '',
+      deliveredPhysical: false,
+      deliveryMode: 'unrouted',
+      routedStatus: 'stale_target',
+      resolvedAgentId: '',
+      resolvedVia: 'rejected:stale_target',
+      targetKind: peer.kind || '',
+      targetRootId: targetRoot,
+      crossSession: Boolean(senderRoot && targetRoot && senderRoot !== targetRoot),
+      savedImagePaths: safePaths,
+    }
+  }
 
   if (mode !== 'silent') {
     // Path A: Subagent delivery via DSH native subagents service
@@ -858,9 +1214,15 @@ async function deliverSinglePeer(deps, directory, peer, {
       const caller = (agentsSvc && peer.rootId && agentsSvc.get(peer.rootId)) || deps.findLiveCallerAgent(runtime, peer.rootId, null)
       if (caller) {
         try {
-          let targetChildId = peer.id
+          let targetChildId = (peer.id && peer.id !== peer.rootId && (!fromSession || peer.id !== fromSession))
+            ? String(peer.id).trim()
+            : ''
           if (!targetChildId && typeof subagentsSvc.resolveName === 'function') {
-            targetChildId = await subagentsSvc.resolveName(caller, peer.name, AbortSignal.timeout(5000))
+            const candId = await subagentsSvc.resolveName(caller, peer.name, AbortSignal.timeout(5000))
+            const cleanCand = candId ? String(candId).trim() : ''
+            if (cleanCand && cleanCand !== peer.rootId && cleanCand !== caller.id && (!fromSession || cleanCand !== fromSession)) {
+              targetChildId = cleanCand
+            }
           }
           if (targetChildId) {
             await subagentsSvc.sendMessage(caller, targetChildId, [...safeBlocks, { type: 'text', text: formatted }], {
@@ -868,39 +1230,94 @@ async function deliverSinglePeer(deps, directory, peer, {
             })
             deliveredPhysical = true
             deliveryMode = 'subagent-send'
+            routedStatus = 'delivered'
+            resolvedAgentId = targetChildId
+            resolvedVia = 'subagents.sendMessage'
+          } else {
+            errorNote = `原生 subagents 服务未解析到 "${peer.name}" 的有效子代理实例`
+            resolvedVia = 'subagents.resolveName:empty'
           }
         } catch (err) {
           errorNote = String(err && err.message ? err.message : err)
+          resolvedVia = 'subagents.sendMessage:error'
           hadHardError = true
         }
       }
     }
 
-    // Path B: Direct Agent handle delivery (for root lead, peer standalone sessions, or fallback live child agent)
+    // Path B: Direct Agent handle delivery (strictly verified against self-bounce & root mismatch)
     if (!deliveredPhysical && peer.id) {
-      let targetAgent = agentsSvc && typeof agentsSvc.get === 'function' ? agentsSvc.get(peer.id) : null
-      const controller = runtime && typeof runtime.get === 'function' ? runtime.get('sessionController') : null
-      if (!targetAgent && controller && typeof controller.resolveAgent === 'function') {
-        try {
-          const resolved = await controller.resolveAgent(peer.id)
-          if (resolved && resolved.agent) {
-            targetAgent = resolved.agent
-          } else if (resolved && resolved.error) {
-            resolveErrorCode = String(resolved.error.code || '')
-            resolveError = String(resolved.error.message || resolved.error)
+      if (peer.kind === 'subagent' && (peer.id === peer.rootId || (fromSession && peer.id === fromSession))) {
+        pathBBlocked = true
+        deliveryMode = 'unrouted'
+        routedStatus = 'unrouted'
+        resolvedAgentId = String(peer.id)
+        resolvedVia = 'blocked:subagent_id_matches_root_or_sender'
+        errorNote = '子代理目标 ID 指向根会话或发件人自身，已阻止 Path B 自回旋误投'
+        hadHardError = true
+      } else if (peer.kind === 'peer-session' && fromSession && peer.id === fromSession) {
+        pathBBlocked = true
+        deliveryMode = 'unrouted'
+        routedStatus = 'unrouted'
+        resolvedAgentId = String(peer.id)
+        resolvedVia = 'blocked:self_peer_session'
+        errorNote = '目标联动会话与发件人相同，已阻止自回旋投递'
+        hadHardError = true
+      }
+
+      let targetAgent = null
+      let lookupSource = ''
+      if (!pathBBlocked) {
+        targetAgent = agentsSvc && typeof agentsSvc.get === 'function' ? agentsSvc.get(peer.id) : null
+        if (targetAgent) lookupSource = 'agents.get'
+        const controller = runtime && typeof runtime.get === 'function' ? runtime.get('sessionController') : null
+        if (!targetAgent && controller && typeof controller.resolveAgent === 'function') {
+          try {
+            const resolved = await controller.resolveAgent(peer.id)
+            if (resolved && resolved.agent) {
+              targetAgent = resolved.agent
+              lookupSource = 'sessionController.resolveAgent'
+            } else if (resolved && resolved.error) {
+              resolveErrorCode = String(resolved.error.code || '')
+              resolveError = String(resolved.error.message || resolved.error)
+              errorNote = formatDeliveryFailureHint(resolveErrorCode, resolveError)
+              if (resolveErrorCode !== 'session/not-found') hadHardError = true
+            }
+          } catch (err) {
+            resolveErrorCode = String((err && err.code) || '')
+            resolveError = String((err && err.message) || err)
             errorNote = formatDeliveryFailureHint(resolveErrorCode, resolveError)
             if (resolveErrorCode !== 'session/not-found') hadHardError = true
           }
-        } catch (err) {
-          resolveErrorCode = String((err && err.code) || '')
-          resolveError = String((err && err.message) || err)
-          errorNote = formatDeliveryFailureHint(resolveErrorCode, resolveError)
-          if (resolveErrorCode !== 'session/not-found') hadHardError = true
+        } else if (!targetAgent && !errorNote && !agentsSvc && !controller) {
+          errorNote = '宿主 agents 与 sessionController 服务均未就绪'
         }
-      } else if (!targetAgent && !errorNote && !agentsSvc && !controller) {
-        errorNote = '宿主 agents 与 sessionController 服务均未就绪'
       }
+
       if (targetAgent) {
+        const actualId = String((targetAgent && targetAgent.id) || '').trim()
+        const actualRootId = actualId && typeof deps.resolveRootSessionId === 'function'
+          ? String(deps.resolveRootSessionId(actualId, targetAgent) || '').trim()
+          : ''
+        const bindingViolation = !actualId
+          || actualId !== peer.id
+          || Boolean(peer.rootId && actualRootId && actualRootId !== peer.rootId)
+          || (peer.kind === 'subagent' && (actualId === peer.rootId || (Boolean(fromSession) && actualId === fromSession)))
+          || (peer.kind === 'peer-session' && Boolean(fromSession) && actualId === fromSession)
+        if (bindingViolation) {
+          targetAgent = null
+          pathBBlocked = true
+          deliveryMode = 'unrouted'
+          routedStatus = 'unrouted'
+          resolvedAgentId = actualId
+          resolvedVia = `blocked:binding_mismatch(${lookupSource || 'unknown'})`
+          errorNote = `目标解析绑定校验未通过（expected=${peer.id}@${peer.rootId || 'none'}, actual=${actualId || 'none'}@${actualRootId || 'none'}），已阻止误投并记为 unrouted`
+          hadHardError = true
+        }
+      }
+
+      if (targetAgent) {
+        const actualId = String(targetAgent.id || peer.id).trim()
         const envelopeSourceKind = envelopeKind === 'execution_request'
           ? CHIEF_EXEC_REQ_SOURCE
           : (envelopeKind === 'inquiry' ? CHIEF_INQUIRY_SOURCE : CHIEF_RELAY_SOURCE)
@@ -918,6 +1335,9 @@ async function deliverSinglePeer(deps, directory, peer, {
             if (r && typeof r.then === 'function') await r
             deliveredPhysical = true
             deliveryMode = 'agent-steer'
+            routedStatus = 'delivered'
+            resolvedAgentId = actualId
+            resolvedVia = `${lookupSource}:agent-steer`
             errorNote = ''
             hadHardError = false
           } else if (targetAgent.status !== 'running' && typeof targetAgent.followup === 'function') {
@@ -925,6 +1345,9 @@ async function deliverSinglePeer(deps, directory, peer, {
             if (r && typeof r.then === 'function') await r
             deliveredPhysical = true
             deliveryMode = 'agent-followup'
+            routedStatus = 'delivered'
+            resolvedAgentId = actualId
+            resolvedVia = `${lookupSource}:agent-followup`
             errorNote = ''
             hadHardError = false
           } else if (typeof targetAgent.inject === 'function') {
@@ -932,35 +1355,53 @@ async function deliverSinglePeer(deps, directory, peer, {
             if (r && typeof r.then === 'function') await r
             deliveredPhysical = true
             deliveryMode = 'agent-inject'
+            routedStatus = 'delivered'
+            resolvedAgentId = actualId
+            resolvedVia = `${lookupSource}:agent-inject`
             errorNote = ''
             hadHardError = false
           } else if (typeof targetAgent.steer === 'function') {
             targetAgent.steer(safeBlocks.length ? formatted + imgSuffix : formatted)
             deliveredPhysical = true
             deliveryMode = 'agent-steer-text'
+            routedStatus = 'delivered'
+            resolvedAgentId = actualId
+            resolvedVia = `${lookupSource}:agent-steer-text`
             errorNote = ''
             hadHardError = false
           }
         } catch (err) {
           errorNote = String(err && err.message ? err.message : err)
+          resolvedVia = `${lookupSource || 'pathB'}:error`
           hadHardError = true
         }
       }
     }
+  } else {
+    routedStatus = 'queued'
+    deliveryMode = 'mailbox-queued'
+    resolvedVia = 'silent-mailbox'
   }
 
-  const isHardDeliveryFailure = !deliveredPhysical && mode !== 'silent' && hadHardError && Boolean(errorNote) && resolveErrorCode !== 'session/not-found'
+  if (!deliveredPhysical && mode !== 'silent') {
+    if (pathBBlocked || routedStatus === 'unrouted' || peer.kind === 'subagent') {
+      routedStatus = 'unrouted'
+      deliveryMode = 'unrouted'
+      if (!resolvedVia) resolvedVia = 'unrouted:no_live_subagent'
+      if (!errorNote) errorNote = `目标 "${peer.handle}" 无可用运行实例，消息未投递（已记为 unrouted）`
+    } else {
+      routedStatus = 'queued'
+      deliveryMode = 'mailbox-queued'
+      if (!resolvedVia) resolvedVia = 'mailbox-queued'
+    }
+  }
 
-  // Always record in the shared cluster mailbox; if physical delivery already carried it,
-  // mark the recipient in readBy so `agent/pre-step` will NOT double-deliver it!
-  const recipientMarks = deliveredPhysical
-    ? [peer.id, peer.key, peer.name].filter(Boolean)
+  const isHardDeliveryFailure = !deliveredPhysical && mode !== 'silent' && (routedStatus === 'unrouted' || (hadHardError && Boolean(errorNote) && resolveErrorCode !== 'session/not-found'))
+
+  // Strict readBy invariant: NEVER mark recipient readBy unless physical delivery to a verified agent succeeded!
+  const recipientMarks = (deliveredPhysical && resolvedAgentId)
+    ? [...new Set([resolvedAgentId, peer.id, peer.key, peer.name].filter(Boolean))]
     : []
-
-  const senderRoot = String(fromRootId || (fromSession && deps.resolveRootSessionId && deps.resolveRootSessionId(fromSession)) || directory.rootId || '').trim()
-  const targetRoot = String(peer.rootId || directory.rootId || '').trim()
-  const participantRoots = [...new Set([senderRoot, targetRoot].filter(Boolean))].sort()
-  const channelType = participantRoots.length >= 2 ? 'pair' : 'internal'
 
   const mailItem = normalizeMail({
     id: nextId('mail'),
@@ -977,37 +1418,61 @@ async function deliverSinglePeer(deps, directory, peer, {
     imageCount: imgCount,
     mode,
     deliveredPhysical,
+    routedStatus,
+    resolvedAgentId,
+    resolvedVia,
     readBy: recipientMarks,
     at: Date.now(),
   })
 
   if (recordMailbox && mailItem) {
     mutateChiefState((state) => {
-      const ws = ensureWorkspace(state, peer.rootId || directory.rootId)
+      const ws = ensureWorkspace(state, auditRootId || directory.rootId)
       ws.mailbox.push(mailItem)
       if (ws.mailbox.length > MAIL_CAP) ws.mailbox = ws.mailbox.slice(-MAIL_CAP)
     })
   }
 
-  if (recordBoardLog && (peer.rootId || directory.rootId)) {
+  if (recordBoardLog && auditRootId) {
     const badge = mode === 'steer' ? '⚡ 插话' : mode === 'silent' ? '📌 备忘纸条' : '📨 递话'
     const logMsg = isHardDeliveryFailure
       ? `⚠️ 未送达 ${fromLabel} → ${peer.handle}（${clamp(errorNote, 110)}）：${clamp(text, 48)}${imgSuffix}`
       : `${badge} ${fromLabel} → ${peer.handle}：${clamp(text, 56)}${imgSuffix}`
-    deps.appendBoardLog(
-      peer.rootId || directory.rootId,
-      logMsg,
-      fromLabel,
-    )
+    deps.appendBoardLog(auditRootId, logMsg, fromLabel)
   }
 
+  if (mode !== 'silent' && auditRootId) {
+    try {
+      appendChiefAuditLog(auditRootId, {
+        stage: 'mail_routing',
+        decision: routedStatus === 'unrouted' ? 'blocked' : (routedStatus === 'delivered' ? 'executed' : 'queued'),
+        operation: 'mail.send',
+        target: peer.handle,
+        reason: `kind=${peer.kind} expected=${peer.id || 'none'}@${targetRoot || 'none'} resolved=${resolvedAgentId || 'none'} via=${resolvedVia || deliveryMode}${errorNote ? ' err=' + clamp(errorNote, 90) : ''}`,
+        outcome: routedStatus,
+        by: clamp(fromLabel || 'agent', 40),
+      })
+    } catch {}
+  }
+
+  const finalOk = routedStatus !== 'unrouted' && routedStatus !== 'stale_target'
+  if (channelType === 'pair' && finalOk && senderRoot) {
+    try { clearPeerDropState(senderRoot) } catch {}
+  }
   return {
-    ok: true,
+    ok: finalOk,
+    ...(finalOk ? {} : { error: errorNote || '消息未能路由到已确认的目标运行实例' }),
     mail: mailItem,
     target: peer.handle,
     targetId: peer.id,
     deliveredPhysical,
     deliveryMode,
+    routedStatus,
+    resolvedAgentId,
+    resolvedVia,
+    targetKind: peer.kind || '',
+    targetRootId: targetRoot,
+    crossSession: Boolean(senderRoot && targetRoot && senderRoot !== targetRoot),
     savedImagePaths: safePaths,
     ...(resolveErrorCode ? { resolveErrorCode } : {}),
     ...(resolveError ? { resolveError } : {}),
@@ -1015,7 +1480,7 @@ async function deliverSinglePeer(deps, directory, peer, {
     ...(errorNote && !deliveredPhysical
       ? {
           note: isHardDeliveryFailure
-            ? `未能送达主对话：${errorNote}（消息仅暂存参谋部信箱，未实际唤醒目标会话）`
+            ? `${peer.kind === 'lead' ? '未能送达主对话' : '未能送达目标'}：${errorNote}（未写入 readBy，未触发虚假投递）`
             : `目标暂未在线运行，已存入参谋部协同信箱，将在其下一步自动送达（${errorNote}）`,
         }
       : {}),
@@ -1073,15 +1538,17 @@ export async function consumePreStepDelta(deps, agent) {
     // 1. Unread mailbox messages addressed to this session/handle (STRICT cluster isolation: ignore detached external peers!)
     for (const mail of view.mailbox) {
       if (mail.detachedFromCluster) continue
+      if (mail.routedStatus === 'stale_target' || mail.routedStatus === 'unrouted') continue
       const mailFromRoot = mail.fromRootId || (mail.fromSession && deps.resolveRootSessionId ? deps.resolveRootSessionId(mail.fromSession) : '')
       if (mailFromRoot && !String(mailFromRoot).startsWith('harness:') && mailFromRoot !== rootId && !view.cluster.includes(mailFromRoot)) continue
-      const toLower = String(mail.toSession || mail.to || '').toLowerCase()
-      const toHandleLower = String(mail.to || '').toLowerCase()
+      const toLower = String(mail.toSession || mail.to || '').trim().toLowerCase()
+      const toHandleLower = String(mail.to || '').trim().toLowerCase()
+      const shortHandleLower = toHandleLower.split('/').pop()
+      const isInstanceSpecific = Boolean(toLower && toLower !== 'all' && toLower !== toHandleLower && toLower !== shortHandleLower)
       const isMine = toLower === 'all'
         || toHandleLower === 'all'
         || myHandles.has(toLower)
-        || myHandles.has(toHandleLower)
-        || myHandles.has(toHandleLower.split('/').pop())
+        || (!isInstanceSpecific && (myHandles.has(toHandleLower) || myHandles.has(shortHandleLower)))
       if (!isMine) continue
       if (mail.fromSession && mail.fromSession === sessionId) continue
       const alreadyRead = (mail.readBy || []).some(r => myHandles.has(String(r).toLowerCase()))
@@ -1150,14 +1617,15 @@ export function readMailboxForAgent(deps, { sessionId, callerAgent, unreadOnly =
   mutateChiefState((state) => {
     const view = clusterView(state, rootId)
     for (const m of view.mailbox) {
-      const toLower = String(m.toSession || m.to || '').toLowerCase()
-      const toHandleLower = String(m.to || '').toLowerCase()
+      const toLower = String(m.toSession || m.to || '').trim().toLowerCase()
+      const toHandleLower = String(m.to || '').trim().toLowerCase()
+      const shortHandleLower = toHandleLower.split('/').pop()
+      const isInstanceSpecific = Boolean(toLower && toLower !== 'all' && toLower !== toHandleLower && toLower !== shortHandleLower)
       const relevant = !sid
         || toLower === 'all'
         || toHandleLower === 'all'
         || myHandles.has(toLower)
-        || myHandles.has(toHandleLower)
-        || myHandles.has(toHandleLower.split('/').pop())
+        || (!isInstanceSpecific && (myHandles.has(toHandleLower) || myHandles.has(shortHandleLower)))
         || m.fromSession === sid
       if (!relevant) continue
       const isRead = (m.readBy || []).some(r => myHandles.has(String(r).toLowerCase()))

@@ -74,11 +74,11 @@ try {
     '.dnb-flow-return-badge',
     '.dnb-acc-card',
     '.dnb-flow-done-fold',
-    '.dnb-pyr-node-detail',
+    'TaskBeamFlowView',
+    '.dnb-beam-pipeline',
+    '.dnb-beam-node',
+    '.dnb-beam-agent-node',
     'function AccCard(',
-    'TaskFlowPipelineView',
-    'TaskFlowCanvasView',
-    'computeFlowCanvasLayout',
     'buildTaskFlowModel',
     'topoSectionCollapsed',
     'html[data-ds-theme-source="light"] .dnb-flow-stage',
@@ -415,38 +415,6 @@ try {
     assert.equal(parentBranch.children[0].returnTargetIndex, 3)
     assert.equal(parentBranch.children[0].isCrossStep, true)
 
-    const tdLayout = flowClientMod.computeFlowCanvasLayout(model, false)
-    const lrLayout = flowClientMod.computeFlowCanvasLayout(model, true)
-    assert.equal(tdLayout.stageBoxes.length, 3)
-    assert.equal(tdLayout.agentBoxes.length, 2)
-    assert.equal(tdLayout.returnEdges.length, 2)
-    assert.equal(lrLayout.returnEdges.length, 2)
-    assert.ok(tdLayout.svgW > 300 && tdLayout.svgH > 200)
-
-    const pipeEl = flowClientMod.TaskFlowPipelineView({
-      flowModel: model,
-      board: bClient,
-      collapsed: new Set(),
-      onToggleCollapse: () => {},
-      selectedTask: bClient.tasks[1],
-      renderInspector: () => ({ $$typeof: 'react.el', type: 'div', props: {} }),
-    })
-    const canvasEl = flowClientMod.TaskFlowCanvasView({
-      flowModel: model,
-      flowLayout: tdLayout,
-      board: bClient,
-      isLR: false,
-      zoom: 1,
-      setZoom: () => {},
-      canvasRef: { current: null },
-      panRef: { current: null },
-      selectedTask: bClient.tasks[1],
-      renderInspector: () => ({ $$typeof: 'react.el', type: 'div', props: {} }),
-    })
-    assert.ok(pipeEl && pipeEl.$$typeof === 'react.el')
-    assert.ok(canvasEl && canvasEl.$$typeof === 'react.el')
-
-    // Verify unified board features: done-task folding inside active stage, hideRail, and unified stepApi buttons
     const findInFakeTree = (node, pred) => {
       if (!node || typeof node !== 'object') return false
       if (Array.isArray(node)) return node.some(x => findInFakeTree(x, pred))
@@ -454,6 +422,22 @@ try {
       const ch = node.props && node.props.children
       return Array.isArray(ch) ? ch.some(x => findInFakeTree(x, pred)) : false
     }
+
+    const beamEl = flowClientMod.TaskBeamFlowView({
+      flowModel: model,
+      board: bClient,
+      collapsed: new Set(),
+      onToggleCollapse: () => {},
+      selectedTask: bClient.tasks[1],
+      renderInspector: () => ({ $$typeof: 'react.el', type: 'div', props: {} }),
+    })
+    assert.ok(beamEl && beamEl.$$typeof === 'react.el')
+    assert.equal(findInFakeTree(beamEl, n => String(n.props?.className || '').includes('dnb-beam-pipeline')), true, 'W5 must render dnb-beam-pipeline')
+    assert.equal(findInFakeTree(beamEl, n => String(n.props?.className || '').includes('dnb-beam-node')), true, 'W5 must render dnb-beam-node cards')
+    assert.equal(findInFakeTree(beamEl, n => String(n.props?.className || '').includes('dnb-beam-agent-node')), true, 'W5 must render dnb-beam-agent-node subagent pills')
+    assert.equal(findInFakeTree(beamEl, n => String(n.props?.className || '').includes('dnb-beam-drawer')), true, 'W5 must render dnb-beam-drawer')
+
+    // Verify unified board features: done-task folding inside active stage and unified stepApi buttons
     const bFold = schemaMod.normalizeBoard({
       objective: '注意力量化与折叠测试',
       plan: [
@@ -471,12 +455,11 @@ try {
       focusedTaskScopeSet: new Set(),
       focusedAgentSet: new Set(),
     })
-    const unifiedAll = flowClientMod.TaskFlowPipelineView({
+    const unifiedAll = flowClientMod.TaskBeamFlowView({
       flowModel: foldModel,
       board: bFold,
       collapsed: new Set(),
       onToggleCollapse: () => {},
-      hideRail: true,
       statusFilter: 'all',
       stepApi: {
         consultIdx: -1,
@@ -491,7 +474,6 @@ try {
       },
     })
     assert.equal(findInFakeTree(unifiedAll, n => String(n.props?.className || '').includes('dnb-flow-done-fold')), true, 'W5 active stage must fold done subtasks by default')
-    assert.equal(findInFakeTree(unifiedAll, n => String(n.props?.className || '').includes('dnb-flow-rail')), false, 'W5 hideRail must suppress duplicate rail')
     assert.equal(findInFakeTree(unifiedAll, n => String(n.props?.className || '').includes('dnb-flow-step-text-btn')), true, 'W5 stepApi must render integrated step actions')
 
     const foldDoneOnlyModel = flowClientMod.buildTaskFlowModel(
@@ -501,16 +483,15 @@ try {
       hier,
       { statusFilter: 'done', filterAgent: '', focusedTaskScopeSet: new Set(), focusedAgentSet: new Set() },
     )
-    const unifiedDone = flowClientMod.TaskFlowPipelineView({
+    const unifiedDone = flowClientMod.TaskBeamFlowView({
       flowModel: foldDoneOnlyModel,
       board: bFold,
       collapsed: new Set(),
       onToggleCollapse: () => {},
-      hideRail: true,
       statusFilter: 'done',
     })
     assert.equal(findInFakeTree(unifiedDone, n => String(n.props?.className || '').includes('dnb-flow-done-fold')), false, 'W5 statusFilter=done must show done subtasks directly without double-folding')
-    console.log('[W5 PASS] Client tasks-flow model (with nested grandchildren), TD/LR layouts, done-task folding & React smoke verified')
+    console.log('[W5 PASS] Client tasks-flow model (with nested grandchildren), unified TaskBeamFlowView, done-task folding & React smoke verified')
   } finally {
     if (prevWin === undefined) delete globalThis.window
     else globalThis.window = prevWin

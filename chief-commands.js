@@ -68,6 +68,7 @@ import {
   isInternalCheckpointNoise,
   extractJsonObject,
   resolveSessionWorkspaceCwd,
+  buildChiefIdentityPromptLine,
 } from './chief-state.js'
 import { callChiefLlm } from './chief-models.js'
 import {
@@ -91,6 +92,7 @@ import {
   isExplicitCompactCommand,
   buildSmartFallbackReply,
   describeThreePartyBoundariesForPrompt,
+  buildRecentChiefChatWindow,
 } from './command-helpers.js'
 import {
   applyFactChanges,
@@ -574,6 +576,17 @@ export async function askOrCommandChief(deps, {
     '',
     `## 参谋长执行权限与显示模式：permissionMode=${permissionMode}${isConciseBrief ? ' | 极简战报=开启' : ''}`,
     describeThreePartyBoundariesForPrompt(permissionMode),
+    ...(() => {
+      const recentChiefChatLines = buildRecentChiefChatWindow(ownWs && ownWs.chat)
+      return recentChiefChatLines.length > 0
+        ? [
+            '',
+            '## 10. 您与参谋长最近几轮对话（短期衔接 · 自动过滤系统回执，最多 6 轮）',
+            ...recentChiefChatLines,
+            '',
+          ]
+        : []
+    })(),
     '## 用户刚刚对你说的话：',
     input,
     ...(_resumeCtx && _resumeCtx.resumeTaskId
@@ -617,6 +630,7 @@ export async function askOrCommandChief(deps, {
   )
   const resolvedCwd = deps && typeof deps.getSessionCwd === 'function' ? deps.getSessionCwd(rootId) : ''
   const cwdForPromptWalls = resolveSessionWorkspaceCwd(deps, rootId) || resolvedCwd
+  const chiefIdentityLine = buildChiefIdentityPromptLine(effCfg)
   const activeDynamicWalls = listGuardWalls({ cwd: cwdForPromptWalls }).filter(w => w && w.scope !== 'paused')
   if (activeDynamicWalls.length > 0) {
     promptLines.push(
@@ -646,6 +660,7 @@ export async function askOrCommandChief(deps, {
 
   const effectiveSystem = [
     ASK_CHIEF_SYSTEM,
+    ...(chiefIdentityLine ? [chiefIdentityLine] : []),
     ...(isConciseBrief ? [CONCISE_BRIEF_ASK_EXTRA] : []),
     ...(quickAction === 'consult_chief' ? [CONSULT_CHIEF_EXTRA] : []),
     ...(_wallBlockerEscalation

@@ -101,6 +101,7 @@ export function applySecView(viewData) {
     ...(Array.isArray(viewData.guardWalls) ? { guardWalls: viewData.guardWalls } : {}),
     chiefMeta: {
       ...prevMeta,
+      chiefName: typeof cfg.chiefName === 'string' ? cfg.chiefName : (prevMeta.chiefName || ''),
       sessionEnabled: typeof cfg.sessionEnabled === 'boolean' ? cfg.sessionEnabled : prevMeta.sessionEnabled,
       defaultAutoEnableSessions: typeof cfg.defaultAutoEnableSessions === 'boolean' ? cfg.defaultAutoEnableSessions : Boolean(prevMeta.defaultAutoEnableSessions),
       globalSafetyGuardEnabled: typeof cfg.globalSafetyGuardEnabled === 'boolean' ? cfg.globalSafetyGuardEnabled : (prevMeta.globalSafetyGuardEnabled !== false),

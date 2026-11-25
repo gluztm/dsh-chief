@@ -179,7 +179,7 @@ function subagentHeaderLines(board, extras) {
       lines.push('  ↳ 【强制协同纪律】进展变化必须调 chief_board 更新任务与 evidence；跨代理传话必须调 mail.send；工作中撞墙或发现新禁区必须调 bounds.propose 上报参谋长！')
     }
   } else if (subagents.length > 0) {
-    const children = subagents.filter(a => a && a.name !== 'lead')
+    const children = subagents.filter(a => a && a.name !== 'lead' && a.verifiedInstance !== false && !a.stale && a.status !== 'stale')
     if (children.length > 0) {
       const running = children.filter(a => a.status === 'running')
       const idle = children.filter(a => a.status !== 'running')
@@ -194,7 +194,7 @@ function subagentHeaderLines(board, extras) {
   }
   const squad = extras && extras.bubbleSquad ? extras.bubbleSquad : null
   if (extras && Number(extras.linkedPeersCount) > 0) {
-    lines.push('📡 跨窗口协同已开启: 已与 ' + extras.linkedPeersCount + ' 个外部主对话窗口互通，可用 chief_board({ action: "mail.send", target, text }) 跨对话递话（target 见下方联动对话）。')
+    lines.push('📡 跨窗口协同已开启: 已与 ' + extras.linkedPeersCount + ' 个外部主对话窗口互通，可用 chief_board({ action: "mail.send", target, text }) 跨对话递话（target 见下方联动对话）。跨会话发起挑战/任务请直接发给目标会话名或 ID（对方 lead），勿只发 "chief"（chief 仅通知本会话参谋长）；指向对方子代理须写「对方会话名/子代理名」。')
   }
   const enrolledHarnesses = squad && Array.isArray(squad.enrolledHarnesses) ? squad.enrolledHarnesses : []
   if (enrolledHarnesses.length) {
@@ -536,10 +536,10 @@ export function renderDigest(board, extras) {
     head.push(
       '【强制执行铁律 · 严禁只说不调工具】\n'
       + '  1. 逢变必记：定目标、拆任务、切换推进(doing)/受阻(blocked)/完成(done)、产出结论或断点时，必须当轮调用 chief_board（graph.plan / task.update / cursor.set / note.write）或 chief_memory 落盘，纯文字口头宣告无效。\n'
-      + '  2. 逢协必传：派发子代理、给子代理/主代理/联动窗口传话同步关键发现时，必须调用 chief_board 的 task.dispatch / team.steer / mail.send（务必写明目标代理名）。\n'
+      + '  2. 逢协必传：派发子代理、给子代理/主代理/联动窗口传话同步关键发现时，必须调用 chief_board 的 task.dispatch / team.steer / mail.send（务必写明目标代理名，跨会话子代理须带「会话名/子代理名」）；若调用 wait_agent 或等待跨会话回复，切勿无上限干等，超时后先查 mail.inbox 或主动 mail.send 催促对方 lead。\n'
       + '  3. 撞墙必奏（宰相边界机制）：执行中若撞墙（权限被拒、沙箱受限、目录禁改、路线死胡同）或用户要求总结工作边界（禁止红线/必做事项/注意事项），必须调用 chief_board({ action: "bounds.propose", field: "forbidden"|"allowed"|"notes", item: "简明边界条文", reason: "撞墙原因" }) 呈交 DSH 参谋长（注：allowed 列即「必做事项」，notes 列即「注意事项」），由参谋长请示用户批准后注入全局边界。'
       + (extras && extras.smartCompactActive
-        ? '\n  4. 智选压缩协同：当前已启用「✦ 智选」无阈值共管（硬阈值不触发）；当完成阶段大步、切换任务阶段或上下文已明显臃肿时，调用 chief_board({ action: "context.compact", text: "本阶段关键事实与断点摘要" })，由参谋长归档入本会话档案柜并执行高质量压缩。'
+        ? '\n  4. 智选压缩协同：当前已启用「✦ 智选」无阈值共管（硬阈值不触发）；当完成一个阶段子步、排查收口、或上下文占用接近 35%+ 时，主动调用 chief_board({ action: "context.compact", text: "本阶段关键事实与断点摘要" })，由参谋长自动抢救归档入本会话档案柜并轻装压缩。'
         : ''),
     )
     if (dropped.length) {

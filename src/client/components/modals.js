@@ -6,13 +6,13 @@
  *   让 `Panel.js` 等消费方保持零路径改动的稳定导入面。
  *
  * 【子模块划分（`src/client/components/modals/`）】
- *   - `modals/pickers.js`       `ModelPickerPopover`、`PacePickerPopover`、`SuggestionBanner`
+ *   - `modals/pickers.js`       `ModelPickerPopover`、`SuggestionBanner`
  *   - `modals/intervention.js`  `InterventionConfirmModal`、`UnlimitedTurnsConfirmModal`、`AutoPilotConfirmModal`、`AwayPresetConfirmModal`
  *   - `modals/workflow.js`      `ArchiveRelayModal`、`DistillToGlobalModal`、`ChiefAdviceModal`、`HazardHaltModal`、`PrecipitateConfirmModal`、`PeerLinkConfirmModal`、`HandoffWarnModal`
  *   - `modals/safety.js`        `ChiefRiskConfirmModal`、`OperationApprovalModal`、`ElevationRequestModal`、`AuditLogModal`
  */
 
-import { ModelPickerPopover, PacePickerPopover, SuggestionBanner } from './modals/pickers.js'
+import { ModelPickerPopover, SuggestionBanner } from './modals/pickers.js'
 import {
   InterventionConfirmModal,
   UnlimitedTurnsConfirmModal,
@@ -38,7 +38,6 @@ import {
 
 export {
   ModelPickerPopover,
-  PacePickerPopover,
   SuggestionBanner,
   InterventionConfirmModal,
   UnlimitedTurnsConfirmModal,

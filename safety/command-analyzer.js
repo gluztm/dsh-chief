@@ -72,7 +72,12 @@ export function normalizeCommandForSecurity(command) {
   if (!nfkc) return ''
   const psDecoded = decodeEncodedPowerShell(nfkc)
   const base = psDecoded ? `${nfkc} ${psDecoded}` : nfkc
-  const concatCollapsed = base.replace(/(['"`])\s*\+\s*\1/g, '')
+  let concatCollapsed = base
+  for (let i = 0; i < 4; i += 1) {
+    const next = concatCollapsed.replace(/['"`]\s*\+\s*['"`]/g, '')
+    if (next === concatCollapsed) break
+    concatCollapsed = next
+  }
   const escapedQuotesUnwrapped = concatCollapsed
     .replace(/\\+(["'`])/g, '$1')
     .replace(/(["'`])\\+(?=[a-zA-Z0-9_.-])/g, '$1')

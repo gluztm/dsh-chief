@@ -176,26 +176,28 @@ export const CSS_MODALS = `
   .dnb-six-brief {
     display: flex;
     flex-direction: column;
-    gap: 6px;
+    gap: 8px;
     margin-top: 2px;
   }
   .dnb-six-row {
     display: flex;
-    align-items: flex-start;
-    gap: 8px;
-    padding: 7px 10px;
-    border-radius: 9px;
-    border: 1px solid var(--dnb-border);
-    background: var(--dnb-elevated);
+    align-items: baseline;
+    gap: 12px;
+    padding: 1px 0;
+    border-radius: 0;
+    border: none;
+    background: transparent;
   }
   .dnb-six-tag {
     flex-shrink: 0;
-    font-size: 10.5px;
-    font-weight: 700;
-    padding: 2px 7px;
-    border-radius: 6px;
-    line-height: 1.35;
-    margin-top: 1px;
+    width: 64px;
+    font-size: 11.5px;
+    font-weight: 450;
+    padding: 0;
+    border-radius: 0;
+    color: var(--dnb-text-3);
+    background: transparent;
+    line-height: 1.5;
   }
   .dnb-batch-bar {
     display: flex;
@@ -683,74 +685,80 @@ export const CSS_MODALS = `
   .dnb-qa-stream {
     display: flex;
     flex-direction: column;
-    gap: 11px;
-    padding: 10px;
+    gap: 0;
+    padding: 0;
     border-top: 1px solid var(--dnb-border);
   }
   .dnb-qa-turn-box {
-    border-radius: 14px;
-    border: 2px solid rgba(56, 189, 248, 0.72);
-    background: linear-gradient(180deg, rgba(14, 165, 233, 0.09) 0%, var(--dnb-card) 100%);
-    overflow: hidden;
-    box-shadow:
-      0 6px 18px rgba(0, 0, 0, 0.24),
-      0 0 0 1px rgba(56, 189, 248, 0.20) inset,
-      0 0 14px rgba(14, 165, 233, 0.14);
-    transition: border-color 0.16s ease, box-shadow 0.16s ease;
+    border: none;
+    border-bottom: 1px solid var(--dnb-border);
+    background: transparent;
+    border-radius: 0;
+    padding: 10px 2px;
+    box-shadow: none;
+    transition: background-color 0.15s ease;
+  }
+  .dnb-qa-turn-box:last-child {
+    border-bottom: none;
   }
   .dnb-qa-turn-box[data-turn-kind="system"] {
-    border-color: rgba(16, 185, 129, 0.68);
-    background: linear-gradient(180deg, rgba(16, 185, 129, 0.09) 0%, var(--dnb-card) 100%);
-    box-shadow:
-      0 6px 18px rgba(0, 0, 0, 0.22),
-      0 0 0 1px rgba(16, 185, 129, 0.18) inset,
-      0 0 12px rgba(16, 185, 129, 0.12);
+    border-color: var(--dnb-border);
+    background: transparent;
+    box-shadow: none;
   }
   .dnb-turn-question {
     display: flex;
     flex-direction: column;
     gap: 4px;
-    padding: 9px 12px;
+    padding: 3px 6px 6px;
+    border-radius: 8px;
     cursor: pointer;
     user-select: none;
-    background: rgba(56, 189, 248, 0.12);
-    border-bottom: 1.5px solid rgba(56, 189, 248, 0.36);
+    background: transparent;
+    border-bottom: none;
     transition: background 0.14s ease;
   }
   .dnb-turn-question:hover {
-    background: rgba(56, 189, 248, 0.18);
+    background: var(--dnb-fill);
   }
   .dnb-qa-turn-box[data-turn-kind="system"] .dnb-turn-question {
-    background: rgba(16, 185, 129, 0.11);
-    border-bottom-color: rgba(16, 185, 129, 0.34);
+    background: transparent;
+    border-bottom-color: transparent;
   }
   .dnb-qa-turn-box[data-turn-kind="system"] .dnb-turn-question:hover {
-    background: rgba(16, 185, 129, 0.17);
+    background: var(--dnb-fill);
   }
   .dnb-qa-turn-box[data-collapsed="1"] .dnb-turn-question {
-    border-bottom: none;
+    padding-bottom: 3px;
   }
   .dnb-turn-replies {
     display: flex;
     flex-direction: column;
-    gap: 8px;
-    padding: 9px 12px;
+    gap: 4px;
+    margin-left: 10px;
+    padding: 2px 0 2px 13px;
+    border-left: 1px solid var(--dnb-border-strong);
   }
   .dnb-turn-reply-item {
     display: flex;
     flex-direction: column;
-    align-items: flex-start;
+    align-items: stretch;
     gap: 4px;
-    padding: 7px 10px;
+    padding: 4px 7px;
     border-radius: 9px;
-    border: 1px solid rgba(56, 189, 248, 0.26);
-    border-left: 3.5px solid #38bdf8;
-    background: rgba(14, 165, 233, 0.055);
+    border: none;
+    background: transparent;
+    transition: background 0.14s ease;
+  }
+  .dnb-turn-reply-item:hover {
+    background: var(--dnb-fill);
   }
   .dnb-turn-reply-item[data-role="receipt"] {
-    border-color: rgba(52, 211, 153, 0.28);
-    border-left: 3.5px solid #10b981;
-    background: rgba(16, 185, 129, 0.06);
+    border: none;
+    background: transparent;
+  }
+  .dnb-turn-reply-item[data-role="receipt"]:hover {
+    background: var(--dnb-fill);
   }
   .dnb-qa-card {
     border-radius: 11px;

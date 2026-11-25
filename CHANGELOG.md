@@ -5,6 +5,41 @@ All notable changes to **`dsh-chief`** (**DSH 参谋长**) will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.8.0] - 2026-11-25
+
+> 新增**任务页 Route C Apple Bento 目标圆环全景卡 + 还原经典暗夜点阵 SVG 流程画布 / 流光节点图及全前端 5 套主题视觉统一重构**（默认「晨雾琉璃」，支持「温润纸感 / 静谧森系 / 星夜幻想 / 原生简约」一键秒切、随皮肤自适应变形的可拖拽扇形思考深度仪表盘 `EffortFanGauge`、5 页签/顶栏/输入条/协同 2.0/弹窗深浅双模全量统一与矢量图标降噪）；同时保留轻量全局自定义参谋长取名（对主对话 0 字节隔离）、彻底剥离试验性私有脑、修复协同名录幻影归属、协同摩擦与跨会话断流恢复（`B13–B15`），升级 **✦ 智选压缩** 4 档压力决策与 `40%+` 高水位兜底（`B16`）、新增参谋长**近 6 轮轻量短期记忆滑窗**治好连续追问失忆（`B17`）、加固安全内核混用引号拼接拦截并锁新指纹，以及「协同系统 2.0」（`Gemini CLI` / 实时流 / 2 棒接力）与左上角**真状态同步 GitHub Star 按钮**。
+
+### Added
+- **任务页 Bento 目标圆环全景卡 + 流程画布与流光节点合一视图与全前端 5 套主题系统（`src/client/constants.js` / `store.js` / `i18n.js` / `styles/skins.js` / `styles.js` / `components/common.js` / `components/Panel.js` / `tabs/tasks-flow.js` / `tabs/tasks.js` / `tabs/chief.js` / `tabs/boundaries.js` / `tabs/plan.js`）**：
+  - **5 套双模主题皮肤（深/浅宿主全自动适配）**：新增 `晨雾琉璃`（默认，Apple × Arc 磨砂空气感）、`温润纸感`（Claude × Craft 书卷手帐风）、`静谧森系`（MUJI × Things 3 松烟和纸护眼感）、`星夜幻想`（紫夜星金樱粉温柔陪伴风）与 `原生简约`（中性极简兜底）。支持从**顶栏调色盘按钮气泡**或**设置页 2 列主题卡片**零刷新秒切并持久化到 `localStorage`，顶部游标条与全局弹窗在深/浅色宿主均保纯不透明及清晰层级。
+  - **任务页 Route C + Route B 合一旗舰级重构与全前端减法瘦身**：顶部将核心目标整合为双砖 **Apple Bento 目标圆环全景卡**（`.dnb-bento-hero`，左卡显示清爽可读目标正文、点击即改并附 `战报 / 设为目标 / 拆成步骤`；右卡呈现动态 SVG 进度圆环与推进焦点提示）；下方将原「流程画布」与「流光节点」合一为单一「**任务流光图**」（`TaskBeamFlowView`），去除顶栏常驻版本号与重复弹窗、去掉任务页重复子代理横条/重复进度条/重复按钮、将参谋页操作区合入首卡标题栏并仅在高危/强介入时显示底栏紧急条、将设置页收拢为「3 张常开 + 4 张默认折叠」（合并「外观与基础」），同时彻底删除旧版管道/缩放画布、`NotesTab`、`TaskRow`、`ObjectiveRadarStrip`、`SubagentFleetBar`、`PacePickerPopover`、`styles/tasks-pyramid.js` 与 `tabs/brain.js`（前端模块精简为 `39` 个）。
+  - **思考深度控件还原升级（`EffortFanGauge`）与全前端统一精修**：还原可拖拽指针扇形仪表盘并随 5 套皮肤自适应配色，彻底洗去 5 页签（`参谋 / 任务 / 协同 / 档案 / 边界`）、协同 2.0 气泡竞技场、底部输入条与弹窗中遗留的高饱和霓虹框与散落原生 Emoji，全面收敛为低饱和主题色与克制线性 SVG 图标。
+- **轻量全局参谋长自定义取名 & 私有脑剥离（`state-schema.js` / `chief-state.js` / `chief-view.js` / `chief-commands.js` / `api-routes.js` / `src/client/tabs/plan.js`）**：
+  - **参谋长专属取名（对主对话 0 字节隔离）**：可在设置页直接为参谋长取名（如「哈基米」「贾维斯」），一键恢复默认；经敏感凭据正则硬拦截后写入全局配置，不激活普通聊天会话，实时同步顶栏标题、输入条、外协落款与参谋自身系统提示词身份，严守对 `@lead` 主对话提示词 0 字节隔离。
+  - **剥离试验性私有脑**：移除 `private-brain.js` 与整页私有脑视图及相关内部 `brain.*` 接口，待后续以「仅在参谋模型运行的开放外部记忆插件接口」方式重新架构，避免锁定用户记忆数据格式。
+- **协同闭环名录与防自回旋投递修复（`subagent-runtime.js` / `chief-network.js` / `digest.js` / `model-tools.js` / `src/client/tabs/peers.js`）**：
+  - **禁止看板任务 `owner` 冒充原生子代理**：`refreshSubagentTree` / `getSubagentRoster` 不再将 `board.tasks` 上的 `t.session`（主对话根会话 ID）伪造为子代理 `id` 或假报 `running`，无原生实例或诊断项统一标为 `kind: 'stale'`（`routable: false`, `id: ''`）；与已联动 `peer-session` 同名的遗留任务不再产生同名 `subagent` 幻影。
+  - **Path B 防自回旋铁闸与 `readBy` 铁律**：`deliverSinglePeer` 拦截所有 `stale` 目标、`id === rootId/fromSession` 的子代理回旋以及跨 `rootId` 绑定错配并记为 `unrouted` / `stale_target`，拒绝写入 `readBy` 且记录 `mail_routing` 审计日志（保留合法 `Chief -> lead` 递话通道），同时在 `mail.send` / `mail.inbox` 回显准确路由状态与实例 ID。
+- **左上角真状态同步 GitHub Star 按钮与边界安全模板包（`github-star.js` / `api-routes.js` / `src/client/api/chief.js` / `src/client/components/Panel.js` / `src/client/tabs/boundaries.js` / `src/client/styles/v180.js`）**：
+  - **双模真实 GitHub Star（方案 1）**：通过 `github-star.js` 公开拉取 `gluztm/dsh-chief` 全网真实 Star 数展示在顶栏左上角；若用户本机已安装且登录官方 GitHub CLI（`gh`），通过宿主沙箱 `subprocess.spawn` 读取个人 `/user/starred/gluztm/dsh-chief` 真状态并支持点击直接 `PUT` 点星（`Shift+点击` 取消）；无 `gh` 或未登录时优雅降级为打开 GitHub 仓库页并在回切窗口时自动刷新计数，且绝不触发未启用普通聊天的自动激活。
+  - 「边界」页 `🚧 自定义拦截规则` 新增 **「📦 模板包」**（4 套一键防翻车规则包 + JSON 导出/导入备份，重复规则自动跳过）。
+- **「协同系统 2.0」与 `Gemini CLI` 直连（`state-schema.js` / `network-harness.js` / `api-routes.js` / `src/client/tabs/peers.js`）**：
+  - 本机外协探测新增 **`Gemini CLI`**（含 `DSH_CHIEF_GEMINI_BIN`、`~/.gemini` 与密钥环境识别及前端四芒星官方图标）；
+  - 新增 **「📡 外协实时输出流」** 终端视窗，运行期间实时滚动展示脱敏后的尾部日志并保留近期运行回看；
+  - 外协派单条新增 **「🔗 完工自动转交」** 2 棒链式接力（支持如 `Codex → Claude Code / Gemini CLI` 交卷摘要接力、深度 `<= 1` 防死循环、失败或急停不触发下一棒）。
+  - **回归门禁（`tests/verify-v180-brain-collab-gate.mjs` / `tests/verify-v130-release-gate.mjs`）**：
+  - 全量覆盖 `B1 / B1.5 / B6 / B7 / B10 / B12 / B13 / B14 / B15 / B16 / B17` 与 `G8` 混用引号盲测，全部接入 `test:ci` / `test`。
+- **任务页还原经典点阵 SVG 流程画布 / 流光节点图（`src/client/tabs/tasks-flow.js` / `tasks.js` / `styles/tasks-flow.js` / `styles/skins.js`）**：
+  - 在 Bento 目标卡之下回归深色暗夜点阵 SVG 流程画布与跨步弯弧连线，支持点击节点或子代理芯片原地展开内联详情抽屉。
+- **协同闭环摩擦、断流恢复与防自回旋加固（`auto-continue.js` / `idle-guard.js` / `runtime-hooks.js` / `chief-network.js` / `model-tools.js` / `B14–B15`）**：
+  - 禁止唤醒已完成的子代理、静默续跑精准避让正在运行的子代理与跨会话外部等待状态、同前缀重名子代理强制消歧并用精确 `targetKind`/`crossSession` 回执标注。
+  - 修复辅助会话中途断流导致状态脱节：回合中 `dsh-chief-relay` 插话自动清空旧回合输出状态、未回复跨会话来信免受“看板全完成”误拦截、断流异常时向等待方同步推送去重断流告警并在对方新回合启动时自动清标。
+- **✦ 智选压缩灵敏度升级与参谋长轻量短期记忆滑窗（`chief-review.js` / `digest.js` / `command-helpers.js` / `chief-commands.js` / `B16–B17`）**：
+  - 重构 `✦ 智选压缩` 为 4 档水位决策与提示（轻载禁压 / 中轻度 / ⚡ 中高压甜点区 / 🔥 高水位），修复巡检 12 秒冷却期丢弃复盘，并新增 `≥40%` 或 `≥180K` 高水位防漏压兜底（完整保留 `<20%` 轻载禁压与空转预告防误压底线）。
+  - 为右侧参谋聊天新增「近 6 轮轻量短期记忆滑窗」（自动剔除系统回执与敏感片段、单条限长、总预算 2,800 字封顶）与指代锚定指引，解决 Flash 等轻量模型连续追问“转头失忆”的问题。
+- **安全内核混用引号拼接加固（`safety/command-analyzer.js`）**：
+  - 将引号拼接折叠升级为支持单双引号/反引号多轮交叉混合拼接还原（如 `cat '.'+"env"`），零误杀并同步更新锁定防篡改 MD5 指纹。
+
 ## [1.7.1] - 2026-11-23
 
 > 紧急修复 DSH `0.2.3-alpha.2`（Cordis `4.2.0-alpha.1`）升级后系统提示词注册失败、严格无损 JSON 校验拦截及主对话断链吞错问题；同时根治安全拦截开关死锁、将安全/规矩概念缩减统一为简明大白话，并优化空转守卫与智选压缩配合。

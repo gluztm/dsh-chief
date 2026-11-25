@@ -175,6 +175,9 @@ export async function updateSecConfig(nextCfg) {
     const resolvedTacticalModes = cfgObj && cfgObj.tacticalModes && typeof cfgObj.tacticalModes === 'object'
       ? cfgObj.tacticalModes
       : null
+    const resolvedChiefName = (typeof value.chiefName === 'string')
+      ? value.chiefName
+      : (cfgObj && typeof cfgObj.chiefName === 'string' ? cfgObj.chiefName : null)
     const updatedSubagents = resolvedLocks && Array.isArray(store.subagents)
       ? store.subagents.map(ag => {
           if (!ag || typeof ag !== 'object') return ag
@@ -191,10 +194,11 @@ export async function updateSecConfig(nextCfg) {
     patch({
       compactInputDraft: null,
       compactLowWarning: value.compactLowWarning || '',
-      ...((resolvedLocks || resolvedTeamEffortMode || resolvedSessionEnabled !== null || resolvedDefaultAutoEnable !== null || resolvedRunMode !== null || resolvedPaceMode !== null || resolvedGlobalSafety !== null || resolvedSessionSafety !== null || resolvedTacticalModes)
+      ...((resolvedLocks || resolvedTeamEffortMode || resolvedSessionEnabled !== null || resolvedDefaultAutoEnable !== null || resolvedRunMode !== null || resolvedPaceMode !== null || resolvedGlobalSafety !== null || resolvedSessionSafety !== null || resolvedTacticalModes || resolvedChiefName !== null)
         ? {
             chiefMeta: {
               ...store.chiefMeta,
+              ...(resolvedChiefName !== null ? { chiefName: resolvedChiefName } : {}),
               ...(resolvedLocks ? { lockedModelEfforts: resolvedLocks } : {}),
               ...(resolvedTeamEffortMode ? { teamEffortMode: resolvedTeamEffortMode === 'manual' ? 'manual' : 'auto' } : {}),
               ...(resolvedSessionEnabled !== null ? { sessionEnabled: resolvedSessionEnabled } : {}),
@@ -283,6 +287,12 @@ export async function updateSecConfig(nextCfg) {
       patch({ notice: rmMap[nextCfg.runMode] || '已更新运行方式' })
     } else if (typeof nextCfg.thinkingEffort === 'string') {
       patch({ notice: `🧠 思考深度已切到「${nextCfg.thinkingEffort === 'auto' ? '自动' : nextCfg.thinkingEffort}」` })
+    } else if (typeof nextCfg.chiefName === 'string') {
+      patch({
+        notice: resolvedChiefName
+          ? `🏷️ 参谋长专属名字已设为「${resolvedChiefName}」`
+          : '🏷️ 已恢复参谋长默认名称',
+      })
     } else if (typeof nextCfg.teamEffortMode === 'string') {
       patch({
         notice: nextCfg.teamEffortMode === 'manual'
@@ -330,6 +340,13 @@ export async function updateSecConfig(nextCfg) {
       void refresh()
     } else if (nextCfg.managedBudgetMaxCalls !== undefined || nextCfg.managedBudgetMaxTokens !== undefined) {
       patch({ notice: bi('💰 已更新托管费用上限', '💰 Spending limits updated') })
+    } else if (typeof nextCfg.chiefName === 'string') {
+      const cleanName = nextCfg.chiefName.trim()
+      patch({
+        notice: cleanName
+          ? bi(`🏷️ 参谋长已改名为「${cleanName}」`, `🏷️ Chief renamed to "${cleanName}"`)
+          : bi('🏷️ 参谋长名称已恢复默认', '🏷️ Chief name reset to default'),
+      })
     } else if (typeof nextCfg.paceMode === 'string') {
       const paceNotice = nextCfg.paceMode === 'stopped'
         ? '⏹ 已停止参谋长：自动推进和后台检查都已暂停'
@@ -560,24 +577,37 @@ export async function emergencyStopBubble() {
   }
 }
 
-export async function dispatchBubbleHarness(provider, text, label = '') {
+export async function dispatchBubbleHarness(provider, text, label = '', chainNext = null) {
   try {
+    const bodyObj = {
+      session: store.sessionId,
+      op: 'harness_dispatch',
+      provider,
+      text,
+      label,
+    }
+    if (chainNext && typeof chainNext === 'object' && chainNext.provider) {
+      bodyObj.chainNext = {
+        provider: chainNext.provider,
+        instruction: chainNext.instruction || '',
+      }
+    }
     const value = await call('chief/link', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({
-        session: store.sessionId,
-        op: 'harness_dispatch',
-        provider,
-        text,
-        label,
-      }),
+      body: JSON.stringify(bodyObj),
     })
+    if (value && value.view) applySecView(value.view)
     patch({
-      notice: bi(
-        `⚡ 已向 @${provider} 派发外部协同任务，水泡已自动锁死保护`,
-        `⚡ Dispatched to @${provider}; Bubble structure auto-locked`,
-      ),
+      notice: chainNext && chainNext.provider
+        ? bi(
+            `⚡ 已派发给 @${provider}（完成后将自动转交 @${chainNext.provider}）`,
+            `⚡ Dispatched to @${provider} (will chain to @${chainNext.provider})`,
+          )
+        : bi(
+            `⚡ 已向 @${provider} 派发外部协同任务，水泡已自动锁死保护`,
+            `⚡ Dispatched to @${provider}; Bubble structure auto-locked`,
+          ),
     })
     return value
   } catch (error) {
@@ -940,5 +970,69 @@ export async function submitChiefBar(overrideText = '', quickTag = '') {
   })
 }
 
+
+export async function fetchGithubStarStatus({ checkPersonal = true, force = false } = {}) {
+  try {
+    const value = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'github.star_status',
+        checkPersonal: Boolean(checkPersonal),
+        force: Boolean(force),
+      }),
+    })
+    if (value && value.ok) {
+      patch({
+        githubStarState: {
+          ...(store.githubStarState || {}),
+          starCount: typeof value.starCount === 'number' ? value.starCount : (store.githubStarState && store.githubStarState.starCount) ?? null,
+          starred: typeof value.starred === 'boolean' ? value.starred : null,
+          ghAvailable: Boolean(value.ghAvailable),
+          ghAuthenticated: Boolean(value.ghAuthenticated),
+          syncedVia: value.syncedVia || 'public',
+          busy: false,
+        },
+      })
+    }
+    return value
+  } catch {
+    return null
+  }
+}
+
+export async function toggleGithubStarApi({ desired = null } = {}) {
+  const prevState = store.githubStarState || {}
+  patch({ githubStarState: { ...prevState, busy: true } })
+  try {
+    const value = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'github.star_toggle',
+        ...(typeof desired === 'boolean' ? { desired } : {}),
+      }),
+    })
+    if (value && value.ok) {
+      patch({
+        githubStarState: {
+          ...prevState,
+          starCount: typeof value.starCount === 'number' ? value.starCount : prevState.starCount ?? null,
+          starred: typeof value.starred === 'boolean' ? value.starred : prevState.starred ?? null,
+          ghAvailable: Boolean(value.ghAvailable),
+          ghAuthenticated: Boolean(value.ghAuthenticated),
+          syncedVia: value.syncedVia || 'public',
+          busy: false,
+        },
+      })
+    }
+    return value
+  } catch {
+    patch({ githubStarState: { ...prevState, busy: false } })
+    return null
+  }
+}
 
 apiBridge.loadChiefView = loadChiefView

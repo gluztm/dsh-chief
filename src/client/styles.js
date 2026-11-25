@@ -9,11 +9,10 @@
  * 【模块组成（`src/client/styles/`）】
  *   - `styles/theme.js`          主题探测 & `html[data-ds-theme-source="light"]` 多选择器展开引擎
  *   - `styles/base.js`           全局令牌、顶栏（含 `.dnb-ver-chip`）、通用控件、浮层与手风琴基础样式
- *   - `styles/tasks-pyramid.js`  任务金字塔树、竖脊线与 SVG 全景画布样式
  *   - `styles/modals.js`         战术舱、目标审批、冷库弹窗与四档权限审批卡片样式
  *   - `styles/archives.js`       工程记忆档案柜、回形针卷宗与“一沓纸”叠放档案样式
  *   - `styles/chief.js`          图钉戳、DS-Bot 叙事卡、参谋工作态流光 FX、思考深度仪与预算账本
- *   - `styles/tasks-flow.js`     顺序工作流拓扑、组织展开树与新版任务板样式
+ *   - `styles/tasks-flow.js`     工作流任务抽屉、子代理卡片、交卷角标与任务板亮色适配样式
  *   - `styles/bubble.js`         Option A 液态融合协同水泡、官方 Logo 徽标与待命池样式
  *
  * 【未来新增页签样式的 3 步接入指南】
@@ -26,23 +25,25 @@
 import { React, h } from './react-runtime.js'
 import { detectHostTheme, isHostLightTheme, expandLightThemeSelectors } from './styles/theme.js'
 import { CSS_BASE } from './styles/base.js'
-import { CSS_TASKS_PYRAMID } from './styles/tasks-pyramid.js'
 import { CSS_MODALS } from './styles/modals.js'
 import { CSS_ARCHIVES } from './styles/archives.js'
 import { CSS_CHIEF } from './styles/chief.js'
 import { CSS_TASKS_FLOW } from './styles/tasks-flow.js'
 import { CSS_BUBBLE } from './styles/bubble.js'
+import { CSS_V180 } from './styles/v180.js'
+import { CSS_SKINS } from './styles/skins.js'
 
 export { detectHostTheme, isHostLightTheme }
 
 const STYLE_SHEETS = [
   CSS_BASE,
-  CSS_TASKS_PYRAMID,
   CSS_MODALS,
   CSS_ARCHIVES,
   CSS_CHIEF,
   CSS_TASKS_FLOW,
   CSS_BUBBLE,
+  CSS_V180,
+  CSS_SKINS,
 ]
 
 const RESOLVED_CSS = expandLightThemeSelectors(STYLE_SHEETS.join('\n'))

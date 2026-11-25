@@ -765,6 +765,28 @@ try {
     false,
     'Legitimate %NODE_ENV% and $env:TEMP MUST NOT false-positive',
   )
+  for (const mixedCmd of [
+    `cat '.'+"env"`,
+    `cat "."+'e'+"nv"`,
+    `cat '.cre'+"dentials"`,
+    `cat "id_"+'rsa'`,
+  ]) {
+    assert.equal(
+      execMod.evaluateSafetyGuardHardRules({ command: mixedCmd }).blocked,
+      true,
+      `Mixed-quote credential split (${mixedCmd}) MUST be blocked`,
+    )
+  }
+  for (const safeMixedCmd of [
+    `echo 'hello' + "world"`,
+    `node -e "console.log('a' + 'b')"`,
+  ]) {
+    assert.equal(
+      execMod.evaluateSafetyGuardHardRules({ command: safeMixedCmd }).blocked,
+      false,
+      `Safe mixed-quote command (${safeMixedCmd}) MUST NOT false-positive`,
+    )
+  }
   const r1Deps = makeTestDeps(path.join(tmpHome, 'boards-g8'))
   const r1L3Out = await execMod.executeChiefToolCall(r1Deps, {
     tool: 'run_command',

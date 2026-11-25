@@ -324,7 +324,6 @@ export function renderArchiveFolderDrawer({
                 : null,
             )
           : null,
-        h('span', { className: 'dnb-acc-pull-hint' }, drawerOpen ? '收起 ▴' : '拉起 ▾'),
       ),
       drawerOpen
         ? h(

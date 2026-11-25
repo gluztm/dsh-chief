@@ -82,6 +82,6 @@
 由 [build-client.mjs](scripts/build-client.mjs) 按拓扑顺序打包为单文件 [client.js](client.js)，`package.json`、`board-schema.js`（`BACKEND_BUILD`）与 `src/client/constants.js`（`EXPECTED_BACKEND_BUILD`）版本统一对齐 `1.7.0`：
 
 - **基础与状态**：`react-runtime.js`、`constants.js`、`i18n.js`（`zh/en` 切换）、`store.js`（唯一客户端可变状态）、`utils.js`（含前端 `normalizeCursorBlocked`）、`notify.js`、`report.js`（脱敏复盘导出）。
-- **通信与样式**：`api.js` + `api/{archives,board,chief,transport}.js`；`styles.js` + `styles/{archives,base,bubble,chief,modals,tasks-flow,tasks-pyramid,theme}.js`（含 DSH 浅色主题适配与主页面视口高度规则）。
+- **通信与样式**：`api.js` + `api/{archives,board,chief,transport}.js`；`styles.js` + `styles/{archives,base,bubble,chief,modals,tasks-flow,theme,v180,skins}.js`（含 DSH 浅色主题适配与主页面视口高度规则）。
 - **组件与弹窗**：`components/{common,modals,Panel}.js` + `components/modals/{intervention,pickers,safety,workflow}.js`（含 `SafetyGuardConfirmModal`）。
-- **页签视图**：`tabs/{chief,tasks,tasks-flow,tasks-pyramid,tasks-widgets,peers,archives,archives-cards,boundaries,plan}.js`（顶栏 5 页签 `参谋 / 任务 / 协同 / 档案 / 边界` + 顶栏齿轮 `⚙️` 设置页；支持 `conversation.view` 主页面与右侧栏双模式、本会话启用横幅、安全卫兵双开关与边界页恢复横幅）。
+- **页签视图**：`tabs/{chief,tasks,tasks-flow,tasks-widgets,peers,archives,archives-cards,boundaries,plan}.js`（顶栏 5 页签 `参谋 / 任务 / 协同 / 档案 / 边界` + 顶栏齿轮 `⚙️` 设置页；支持 `conversation.view` 主页面与右侧栏双模式、本会话启用横幅、安全卫兵双开关与边界页恢复横幅）。

@@ -175,8 +175,8 @@ export function runModeMeta(key) {
     case 'off':
       return {
         key: 'off',
-        label: bi('⏸ 关停', '⏸ Off'),
-        shortLabel: bi('⏸ 关停', '⏸ Off'),
+        label: bi('关停', 'Off'),
+        shortLabel: bi('关停', 'Off'),
         hint: bi(
           '平时完全不动不花钱，只有你主动问它或点按钮时才干活。',
           'Completely quiet while idle; responds only when you ask or click.',
@@ -185,8 +185,8 @@ export function runModeMeta(key) {
     case 'patrol':
       return {
         key: 'patrol',
-        label: bi('🛡 巡检', '🛡 Patrol'),
-        shortLabel: bi('🛡 巡检', '🛡 Patrol'),
+        label: bi('巡检', 'Patrol'),
+        shortLabel: bi('巡检', 'Patrol'),
         hint: bi(
           '平时不动不花钱，只有在出错、断线或被安全拦截时才出来帮忙。',
           'No background calls while idle; wakes only on errors, drops, or safety blocks.',
@@ -195,8 +195,8 @@ export function runModeMeta(key) {
     case 'managed':
       return {
         key: 'managed',
-        label: bi('🤖 托管', '🤖 Managed'),
-        shortLabel: bi('🤖 托管', '🤖 Managed'),
+        label: bi('托管', 'Managed'),
+        shortLabel: bi('托管', 'Managed'),
         hint: bi(
           '一直在后台盯着把事做完，有空时顺手整理资料；闲置 15 分钟自动停，带费用上限。',
           'Keeps watching progress and tidies archives in idle time. Auto-sleeps after 15m idle, with a usage cap.',
@@ -212,9 +212,9 @@ export function effortMeta(key) {
     case 'auto':
       return {
         key: 'auto',
-        label: bi('🪄 自适应', '🪄 Auto'),
-        shortLabel: bi('🪄 自动', '🪄 Auto'),
-        badge: bi('🪄 自动换挡', '🪄 Auto Effort'),
+        label: bi('自适应', 'Auto'),
+        shortLabel: bi('自动', 'Auto'),
+        badge: bi('自动换挡', 'Auto Effort'),
         hint: bi(
           '按任务难易自动调思考深度。写摘要或梦境漫游时关闭，排查或设拦截规则时调高。',
           'Adjusts thinking depth by task: off for summaries or Dream Roam, higher for debugging or guard rules.',
@@ -223,41 +223,41 @@ export function effortMeta(key) {
     case 'off':
       return {
         key: 'off',
-        label: bi('⚡ 关闭思考', '⚡ Off'),
-        shortLabel: bi('⚡ 关', '⚡ Off'),
-        badge: bi('⚡ 关闭思考', '⚡ No Thinking'),
+        label: bi('关闭思考', 'Off'),
+        shortLabel: bi('关', 'Off'),
+        badge: bi('关闭思考', 'No Thinking'),
         hint: bi('直接输出回答，不做深度思考，速度最快。', 'Replies directly without deep thinking for the fastest output.'),
       }
     case 'low':
       return {
         key: 'low',
-        label: bi('🔅 低强度', '🔅 Low'),
-        shortLabel: bi('🔅 低', '🔅 Low'),
-        badge: bi('🔅 低思考', '🔅 Low'),
+        label: bi('低强度', 'Low'),
+        shortLabel: bi('低', 'Low'),
+        badge: bi('低思考', 'Low'),
         hint: bi('简单检查和日常问答。', 'Quick checks and everyday Q&A.'),
       }
     case 'medium':
       return {
         key: 'medium',
-        label: bi('⚖️ 中强度', '⚖️ Medium'),
-        shortLabel: bi('⚖️ 中', '⚖️ Med'),
-        badge: bi('⚖️ 中思考', '⚖️ Medium'),
+        label: bi('中强度', 'Medium'),
+        shortLabel: bi('中', 'Med'),
+        badge: bi('中思考', 'Medium'),
         hint: bi('日常推理、写代码和复盘。', 'Balanced thinking for coding, reviews, and daily work.'),
       }
     case 'high':
       return {
         key: 'high',
-        label: bi('🔥 高强度', '🔥 High'),
-        shortLabel: bi('🔥 高', '🔥 High'),
-        badge: bi('🔥 高思考', '🔥 High'),
+        label: bi('高强度', 'High'),
+        shortLabel: bi('高', 'High'),
+        badge: bi('高思考', 'High'),
         hint: bi('处理复杂问题、设拦截规则、强介入和总结经验。', 'Complex debugging, guard rules, strong intervention, and takeaways.'),
       }
     case 'xhigh':
       return {
         key: 'xhigh',
-        label: bi('🧠 极高强度', '🧠 XHigh'),
-        shortLabel: bi('🧠 极高', '🧠 XHigh'),
-        badge: bi('🧠 极高思考', '🧠 XHigh'),
+        label: bi('极高强度', 'XHigh'),
+        shortLabel: bi('极高', 'XHigh'),
+        badge: bi('极高思考', 'XHigh'),
         hint: bi('处理多条规则冲突、严重故障和复杂分析。', 'Resolving rule conflicts, critical issues, and deep analysis.'),
       }
     default:
@@ -278,24 +278,40 @@ export function presetList() {
   return [
     {
       id: 'observer',
-      icon: '👁',
+      icon: '',
       title: bi('只读旁观', 'Observer'),
       tag: bi('L0 · 关停 · 低思考', 'L0 · Off · Low'),
       desc: bi('只看不改：不自动执行任何操作，需要时给摘要和建议。', 'Read-only: no automatic actions or edits; gives summaries and advice when asked.'),
     },
     {
       id: 'collab',
-      icon: '🤝',
+      icon: '',
       title: bi('日常协作', 'Co-Pilot'),
       tag: bi('L2 · 巡检 · 改前先问你', 'L2 · Patrol · Ask First'),
       desc: bi('平时不动不花钱，出错或被拦时才出来帮忙；重要改动会先弹窗问你。', 'No background calls while idle; steps in on errors or blocks and asks before important edits.'),
     },
     {
       id: 'away',
-      icon: '🚀',
+      icon: '',
       title: bi('离桌托管', 'Away Mode'),
       tag: bi('L3 · 托管 · 30次/300K 熔断', 'L3 · Managed · Budget Cap'),
       desc: bi('持续盯进度，上下文到 80% 自动压缩，30 次调用或 300K Token 后自动停，关键节点发通知。', 'Keeps watching progress, auto-compacts at 80%, stops after 30 calls or 300K tokens, and sends alerts at key points.'),
     },
   ]
+}
+
+/** Resolve user-defined Chief name with graceful default fallback (`DSH 参谋长` / `DSH Chief`). */
+export function chiefDisplayName(viewOrMeta) {
+  const v = viewOrMeta && typeof viewOrMeta === 'object' ? viewOrMeta : {}
+  const meta = (v.chiefMeta && typeof v.chiefMeta === 'object') ? v.chiefMeta : v
+  const custom = meta && typeof meta.chiefName === 'string' ? meta.chiefName.trim() : ''
+  return custom || bi('DSH 参谋长', 'DSH Chief')
+}
+
+/** Resolve concise inline Chief label (`<customName>` or `参谋长` / `Chief`). */
+export function chiefShortName(viewOrMeta) {
+  const v = viewOrMeta && typeof viewOrMeta === 'object' ? viewOrMeta : {}
+  const meta = (v.chiefMeta && typeof v.chiefMeta === 'object') ? v.chiefMeta : v
+  const custom = meta && typeof meta.chiefName === 'string' ? meta.chiefName.trim() : ''
+  return custom || bi('参谋长', 'Chief')
 }

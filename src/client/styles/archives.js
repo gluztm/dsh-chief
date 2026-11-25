@@ -320,6 +320,10 @@ export const CSS_ARCHIVES = `
     top: auto;
     bottom: calc(100% + 5px);
   }
+  .dnb-more-menu[data-align="left"] {
+    left: 0;
+    right: auto;
+  }
   .dnb-more-item {
     display: flex;
     align-items: center;

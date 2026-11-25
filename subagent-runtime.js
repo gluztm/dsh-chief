@@ -132,27 +132,52 @@ export function createSubagentRuntime(deps) {
       if (subagents && typeof subagents.listDescendants === 'function') {
         const entries = await subagents.listDescendants(rootId)
         if (Array.isArray(entries)) {
-          for (const entry of entries) {
-            if (entry && entry.id) deps.hostState.subagentRootMap.set(String(entry.id), rootId)
-          }
           const rows = [
             {
               id: rootId,
+              parentId: rootId,
               name: 'lead',
+              isLead: true,
               status: agents && agents.get(rootId)?.status === 'running' ? 'running' : 'inactive',
               description: '主代理 (Root Coordinator)',
               mode: 'continuable',
+              verifiedInstance: true,
+              source: 'root',
+              stale: false,
             },
-            ...entries.map(entry => ({
-              id: String(entry.id || ''),
-              parentId: String(entry.parentId || rootId),
-              name: String(entry.path || entry.name || entry.id || ''),
-              status: entry.kind === 'diagnostic'
-                ? String(entry.reason || 'unavailable')
-                : (agents && agents.get(entry.id)?.status === 'running' ? 'running' : 'inactive'),
-              description: String(entry.label || entry.description || ''),
-              mode: String(entry.mode || 'continuable'),
-            })),
+            ...entries
+              .map(entry => {
+                const rawId = entry && entry.id ? String(entry.id).trim() : ''
+                const isDiagOrUnbacked = !entry || entry.kind === 'diagnostic' || !rawId || rawId === rootId
+                const nm = entry ? String(entry.path || entry.name || rawId || entry.label || '').trim() : ''
+                if (!nm) return null
+                if (isDiagOrUnbacked) {
+                  return {
+                    id: '',
+                    parentId: '',
+                    name: nm,
+                    status: 'stale',
+                    description: String((entry && (entry.reason || entry.label || entry.description)) || 'unavailable'),
+                    mode: String((entry && entry.mode) || 'continuable'),
+                    verifiedInstance: false,
+                    source: 'diagnostic',
+                    stale: true,
+                  }
+                }
+                deps.hostState.subagentRootMap.set(rawId, rootId)
+                return {
+                  id: rawId,
+                  parentId: String(entry.parentId || rootId),
+                  name: nm,
+                  status: agents && agents.get(rawId)?.status === 'running' ? 'running' : 'inactive',
+                  description: String(entry.label || entry.description || ''),
+                  mode: String(entry.mode || 'continuable'),
+                  verifiedInstance: true,
+                  source: 'native',
+                  stale: false,
+                }
+              })
+              .filter(Boolean),
           ]
           deps.hostState.subagentTreeCache.set(rootId, rows)
         }
@@ -213,11 +238,14 @@ export function createSubagentRuntime(deps) {
 
     for (const row of cached) {
       const short = String(row.name || '').split('/').pop()
+      const isVerified = row.verifiedInstance !== false && !row.stale && Boolean(row.id) && (row.name === 'lead' || row.id !== rootId)
       byName.set(row.name, {
         ...row,
-        status: liveStatus(row.id, row.status),
-        reasoningEffort: liveEffort(row.id) || row.reasoningEffort || '',
-        effortLocked: Boolean(locks[row.name] || locks[short] || locks[row.id]),
+        status: isVerified ? liveStatus(row.id, row.status) : 'stale',
+        reasoningEffort: isVerified ? (liveEffort(row.id) || row.reasoningEffort || '') : '',
+        effortLocked: Boolean(locks[row.name] || locks[short] || (row.id && locks[row.id])),
+        verifiedInstance: isVerified,
+        stale: !isVerified,
         tasks: [],
       })
     }
@@ -225,30 +253,43 @@ export function createSubagentRuntime(deps) {
     if (!byName.has('lead') && rootId) {
       byName.set('lead', {
         id: rootId,
+        parentId: rootId,
         name: 'lead',
+        isLead: true,
         status: liveStatus(rootId, 'inactive'),
         reasoningEffort: liveEffort(rootId),
         effortLocked: Boolean(locks.lead || locks[rootId]),
         description: '主代理 (Root Coordinator)',
         mode: 'continuable',
+        verifiedInstance: true,
+        source: 'root',
+        stale: false,
         tasks: [],
       })
     }
 
+    const linkedPeerRoots = new Set(
+      (getLinkedCluster(loadChiefState(), rootId) || []).filter(id => id && id !== rootId),
+    )
     const tasks = Array.isArray(board && board.tasks) ? board.tasks : []
     for (const t of tasks) {
       const ownerRaw = String(t.subagent || t.owner || '').trim()
       if (!ownerRaw || ownerRaw === 'agent' || ownerRaw === 'operator' || ownerRaw === 'user') continue
       if (!byName.has(ownerRaw)) {
+        if (t.session && linkedPeerRoots.has(String(t.session))) continue
         const short = ownerRaw.split('/').pop()
         byName.set(ownerRaw, {
-          id: String(t.session || ''),
+          id: '',
+          parentId: '',
           name: ownerRaw,
-          status: t.status === 'doing' ? liveStatus(t.session, 'running') : 'inactive',
-          reasoningEffort: liveEffort(t.session),
-          effortLocked: Boolean(locks[ownerRaw] || locks[short] || (t.session && locks[t.session])),
+          status: 'stale',
+          reasoningEffort: '',
+          effortLocked: Boolean(locks[ownerRaw] || locks[short]),
           description: t.title || '',
           mode: 'continuable',
+          verifiedInstance: false,
+          source: 'board-task',
+          stale: true,
           tasks: [],
         })
       }
@@ -561,7 +602,8 @@ export function createSubagentRuntime(deps) {
       '   `chief_board({ action: "task.update", id: "' + task.id + '", status: "done", evidence: "写明实测结果、修改的文件或关键结论" })`',
       '2. 若遇到无法绕过的阻塞，调用 `chief_board({ action: "task.update", id: "' + task.id + '", status: "blocked", note: "写明阻塞原因" })`。',
       '3. 如需与主对话 (`lead`)、其他兄弟子代理或跨窗口协同会话直接递话/同步结论，调用：',
-      '   `chief_board({ action: "mail.send", target: "lead 或子代理名", text: "要同步的关键信息" })`。',
+      '   `chief_board({ action: "mail.send", target: "lead 或子代理名", text: "要同步的关键信息" })`（若指向其他联动窗口的子代理，须写「对方会话名/子代理名」）。',
+      '4. 若需等待外部回复或跨会话结果（如 `wait_agent` 或等 `mail.send` 回信），务必设置合理超时，避免长时间干等；超时未果时主动用 `mail.inbox` 查信、`mail.send` 询问目标 `lead`，或调用 `task.update(status="blocked")` 写明阻塞原因后退出等待。',
     )
     return lines.join('\n')
   }
@@ -1070,7 +1112,15 @@ export function createSubagentRuntime(deps) {
             if (!resolvedAgentId) {
               const board = loadBoard(boardFileFor(rootKey))
               const roster = getSubagentRoster(rt, rootKey, board)
-              const matched = roster.find(r => r.name === targetKey || r.name.endsWith('/' + targetKey) || r.id === targetKey)
+              const matched = roster.find(r =>
+                r
+                && r.verifiedInstance !== false
+                && !r.stale
+                && r.status !== 'stale'
+                && r.id
+                && r.id !== rootKey
+                && (r.name === targetKey || r.name.endsWith('/' + targetKey) || r.id === targetKey),
+              )
               if (matched && matched.id) resolvedAgentId = matched.id
             }
             if (!resolvedAgentId && agents && typeof agents.get === 'function' && agents.get(targetKey)) {

@@ -6,6 +6,7 @@
 
 import fs from 'node:fs'
 import path from 'node:path'
+import { getGithubStarStatus, toggleGithubStar } from './github-star.js'
 import { renderDigest } from './digest.js'
 import { memorySections, renderMemoryDigest } from './memory.js'
 import {
@@ -292,6 +293,7 @@ export function createApiRoutes(deps) {
               chiefMeta: {
                 backendBuild: BACKEND_BUILD,
                 hostCompat,
+                chiefName: effCfg.chiefName || '',
                 sessionEnabled: Boolean(effCfg.sessionEnabled),
                 defaultAutoEnableSessions: Boolean(effCfg.defaultAutoEnableSessions),
                 globalSafetyGuardEnabled: effCfg.globalSafetyGuardEnabled !== false,
@@ -859,8 +861,15 @@ export function createApiRoutes(deps) {
             }
             const view = await getChiefView(makeChiefDeps(runtime), sessionId, { autoSummarize: false })
             const latestBoard = targetSessionForBoard ? boardForSession(boardFileFor(targetSessionForBoard)) : null
+            const curChiefName = (updated && updated.config && typeof updated.config.chiefName === 'string')
+              ? updated.config.chiefName
+              : (resolveWorkspaceConfig(loadChiefState(), rootSid).chiefName || '')
             sendJson(res, updated && updated.ok === false ? 400 : 200, {
               ...updated,
+              chiefName: curChiefName,
+              ...(updated && updated.config
+                ? { config: { ...updated.config, chiefName: curChiefName } }
+                : {}),
               ...(effortRes ? { effortRes } : {}),
               ...(immediateKickoff ? { immediateKickoff } : {}),
               ...(latestBoard ? { board: latestBoard } : {}),
@@ -883,6 +892,7 @@ export function createApiRoutes(deps) {
               sessionId,
               approvalId: typeof body?.id === 'string' ? body.id : '',
               decision: body?.decision === 'approve' ? 'approve' : 'reject',
+              reason: typeof body?.reason === 'string' ? body.reason : '',
             })
             const board = out.ok && sessionId ? boardForSession(boardFileFor(sessionId)) : undefined
             sendJson(res, out.ok ? 200 : 400, board ? { ...out, board } : out)
@@ -1092,14 +1102,19 @@ export function createApiRoutes(deps) {
               const provider = clamp(String(body.provider || '').trim(), 64)
               const taskText = typeof body.text === 'string' ? body.text.trim() : ''
               const taskLabel = clamp(String(body.label || taskText || provider).trim(), 48)
+              const rawChain = body.chainNext && typeof body.chainNext === 'object' ? body.chainNext : null
+              const chainNext = rawChain && rawChain.provider
+                ? { provider: clamp(String(rawChain.provider).trim(), 64), instruction: clamp(String(rawChain.instruction || '').trim(), 600) }
+                : null
               const disp = await dispatchBubbleHarness(chiefDeps, {
                 rootId: rootA,
                 provider,
                 text: taskText,
                 label: taskLabel,
-                fromLabel: 'DSH 参谋长',
+                fromLabel: resolveWorkspaceConfig(loadChiefState(), rootA).chiefName || 'DSH 参谋长',
                 force: body.force === true,
                 allowAutoEnroll: true,
+                chainNext,
               })
               if (!disp.ok) {
                 const status = disp.statusCode || (disp.locked ? 409 : 400)
@@ -1191,10 +1206,28 @@ export function createApiRoutes(deps) {
           try {
             const body = await readBody(req)
             const sessionId = typeof body.session === 'string' ? body.session : ''
+            const rawOp = typeof body.op === 'string' ? body.op : 'add'
+            if (rawOp === 'github.star_status' || rawOp === 'github.star_toggle') {
+              const subSvc = (runtime && typeof runtime.get === 'function' ? runtime.get('subprocess') : null)
+                || (deps && deps.hostState && deps.hostState.activeSubprocess)
+                || null
+              const out = rawOp === 'github.star_status'
+                ? await getGithubStarStatus({
+                    subprocessSvc: subSvc,
+                    checkPersonal: Boolean(body.checkPersonal),
+                    force: Boolean(body.force),
+                  })
+                : await toggleGithubStar({
+                    subprocessSvc: subSvc,
+                    desired: typeof body.desired === 'boolean' ? body.desired : null,
+                  })
+              sendJson(res, out && out.ok === false ? 400 : 200, out)
+              return
+            }
             markSessionActivated(sessionId)
             const out = mutateChiefFact(makeChiefDeps(runtime), {
               sessionId,
-              op: typeof body.op === 'string' ? body.op : 'add',
+              op: rawOp,
               id: typeof body.id === 'string' ? body.id : '',
               text: typeof body.text === 'string' ? body.text : '',
               category: typeof body.category === 'string' ? body.category : 'discipline',

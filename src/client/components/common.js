@@ -5,28 +5,19 @@
  */
 
 import { React, h } from '../react-runtime.js'
-import { STATUSES, STATUS_LABEL, STATUS_BADGE, SIX_GOAL_ROWS_META, THINKING_EFFORT_OPTIONS } from '../constants.js'
+import { STATUSES, STATUS_LABEL, STATUS_BADGE, SIX_GOAL_ROWS_META, THINKING_EFFORT_OPTIONS, DEFAULT_UI_SKIN } from '../constants.js'
 import { bi, statusBadge, effortMeta } from '../i18n.js'
-import { store, patch, focusObjectiveInPyramid, openSubagentChat } from '../store.js'
-import {
-  clampTitle,
-  shortAgentName,
-  isInternalProbeName,
-  buildAgentHierarchy,
-  resolveTaskAgents,
-  normalizeCursorBlocked,
-} from '../utils.js'
+import { store, patch } from '../store.js'
 import {
   submitChiefBar,
   loadArchives,
   loadArchiveDetail,
   searchColdArchives,
   refresh,
-  act,
   searchBoard,
 } from '../api.js'
 
-export function Icon({ name, size = 14, style }) {
+export function Icon({ name, size = 14, style, filled = false }) {
   const props = {
     width: size,
     height: size,
@@ -40,6 +31,20 @@ export function Icon({ name, size = 14, style }) {
     style: { display: 'inline-block', verticalAlign: '-2px', flexShrink: 0, ...style },
   }
   switch (name) {
+    case 'star':
+      return h('svg', props,
+        h('polygon', {
+          points: '12 2.4 15.05 8.58 21.88 9.57 16.94 14.39 18.1 21.2 12 17.98 5.9 21.2 7.06 14.39 2.12 9.57 8.95 8.58 12 2.4',
+          fill: filled ? 'currentColor' : 'none',
+          stroke: 'currentColor',
+          strokeWidth: filled ? 1.5 : 1.85,
+        }),
+      )
+    case 'brain':
+      return h('svg', props,
+        h('path', { d: 'M9.5 4.5a3.5 3.5 0 0 0-3.4 4.3A3.4 3.4 0 0 0 4 12a3.5 3.5 0 0 0 1.8 3.1A3.4 3.4 0 0 0 9 19.5c1.3 0 2.5-.6 3-1.5.5.9 1.7 1.5 3 1.5a3.4 3.4 0 0 0 3.2-4.4A3.5 3.5 0 0 0 20 12a3.4 3.4 0 0 0-2.1-3.2 3.5 3.5 0 0 0-3.4-4.3c-1.1 0-2.1.5-2.5 1.3-.4-.8-1.4-1.3-2.5-1.3z' }),
+        h('path', { d: 'M12 5.8v12.2M8.5 9.2c.8.3 1.4 1 1.4 1.9M15.5 9.2c-.8.3-1.4 1-1.4 1.9M8.8 14.5c.7-.3 1.1-.8 1.2-1.4M15.2 14.5c-.7-.3-1.1-.8-1.2-1.4' }),
+      )
     case 'search':
       return h('svg', props, h('circle', { cx: 11, cy: 11, r: 7 }), h('path', { d: 'm20 20-3.5-3.5' }))
     case 'refresh':
@@ -188,6 +193,111 @@ export function Icon({ name, size = 14, style }) {
       return h('svg', props,
         h('rect', { x: 3, y: 4, width: 18, height: 16, rx: 2.5 }),
         h('path', { d: 'M14 4v16' }),
+      )
+    case 'clock':
+      return h('svg', props,
+        h('circle', { cx: 12, cy: 12, r: 9 }),
+        h('path', { d: 'M12 7v5l3 2' }),
+      )
+    case 'compass':
+      return h('svg', props,
+        h('circle', { cx: 12, cy: 12, r: 9 }),
+        h('polygon', { points: '15.8 8.2 13.7 13.7 8.2 15.8 10.3 10.3 15.8 8.2' }),
+      )
+    case 'heartPulse':
+      return h('svg', props,
+        h('path', { d: 'M19.5 12.6C21 10.9 21 8.1 19.2 6.5a4.2 4.2 0 0 0-5.8.2L12 8.1l-1.4-1.4a4.2 4.2 0 0 0-5.8-.2C3 8.1 3 10.9 4.5 12.6L12 20l7.5-7.4z' }),
+        h('path', { d: 'M7.5 12.5h2l1.2-2.2 1.8 4 1.3-1.8h2.2' }),
+      )
+    case 'download':
+      return h('svg', props,
+        h('path', { d: 'M12 3v12M7.5 10.5 12 15l4.5-4.5M4 18.5v1a1.5 1.5 0 0 0 1.5 1.5h13a1.5 1.5 0 0 0 1.5-1.5v-1' }),
+      )
+    case 'upload':
+      return h('svg', props,
+        h('path', { d: 'M12 15V3M7.5 7.5 12 3l4.5 4.5M4 18.5v1a1.5 1.5 0 0 0 1.5 1.5h13a1.5 1.5 0 0 0 1.5-1.5v-1' }),
+      )
+    case 'fileText':
+      return h('svg', props,
+        h('path', { d: 'M14 2.5H6.5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8z' }),
+        h('path', { d: 'M14 2.5V8h5.5M8.5 12.5h7M8.5 16h5' }),
+      )
+    case 'alertTriangle':
+      return h('svg', props,
+        h('path', { d: 'M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z' }),
+        h('path', { d: 'M12 9v4M12 17h.01' }),
+      )
+    case 'layers':
+      return h('svg', props,
+        h('polygon', { points: '12 3 2 8.5 12 14 22 8.5 12 3' }),
+        h('path', { d: 'M2 12.5 12 18l10-5.5M2 16.5 12 22l10-5.5' }),
+      )
+    case 'checkCircle':
+      return h('svg', props,
+        h('circle', { cx: 12, cy: 12, r: 9 }),
+        h('path', { d: 'm8.5 12.2 2.4 2.4 4.6-4.8' }),
+      )
+    case 'palette':
+      return h('svg', props,
+        h('path', { d: 'M12 2.8a9.2 9.2 0 1 0 0 18.4c1.3 0 2-.9 2-1.8 0-.5-.2-.9-.5-1.3-.3-.4-.4-.9 0-1.4.4-.5 1-.7 1.7-.7h2.1A4.7 4.7 0 0 0 22 11.3 8.8 8.8 0 0 0 12 2.8z' }),
+        h('circle', { cx: 8.2, cy: 10.2, r: 1, fill: 'currentColor', stroke: 'none' }),
+        h('circle', { cx: 11.8, cy: 7.6, r: 1, fill: 'currentColor', stroke: 'none' }),
+        h('circle', { cx: 15.6, cy: 9.8, r: 1, fill: 'currentColor', stroke: 'none' }),
+      )
+    case 'sliders':
+      return h('svg', props,
+        h('path', { d: 'M4 21v-7M4 10V3M12 21v-9M12 8V3M20 21v-5M20 12V3M1 14h6M9 8h6M17 16h6' }),
+      )
+    case 'zap':
+      return h('svg', props,
+        h('polygon', { points: '13 2 4 14 12 14 11 22 20 10 12 10 13 2' }),
+      )
+    case 'alignLeft':
+      return h('svg', props,
+        h('path', { d: 'M4 6h16M4 11h11M4 16h16M4 21h9' }),
+      )
+    case 'listChecks':
+      return h('svg', props,
+        h('path', { d: 'M3.5 6.5 5 8l3-3M3.5 12.5 5 14l3-3M3.5 18.5 5 20l3-3M11 6.5h9M11 12.5h9M11 18.5h9' }),
+      )
+    case 'shieldCheck':
+      return h('svg', props,
+        h('path', { d: 'M12 2.8 4.8 5.8v5.5c0 4.8 3 8.9 7.2 10.5 4.2-1.6 7.2-5.7 7.2-10.5V5.8L12 2.8z' }),
+        h('path', { d: 'm9 12.2 2.1 2.1 4.1-4.3' }),
+      )
+    case 'shieldOff':
+      return h('svg', props,
+        h('path', { d: 'M19.2 11.3V5.8L12 2.8 8.3 4.3M4.8 5.8v5.5c0 4.8 3 8.9 7.2 10.5 2-.8 3.8-2.2 5-4M3 3l18 18' }),
+      )
+    case 'globe':
+      return h('svg', props,
+        h('circle', { cx: 12, cy: 12, r: 9 }),
+        h('path', { d: 'M3.5 12h17M12 3a14.5 14.5 0 0 1 0 18M12 3a14.5 14.5 0 0 0 0 18' }),
+      )
+    case 'folder':
+      return h('svg', props,
+        h('path', { d: 'M3 6.5A2 2 0 0 1 5 4.5h4.2l2 2.2H19a2 2 0 0 1 2 2v8.8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2V6.5z' }),
+      )
+    case 'pause':
+      return h('svg', props,
+        h('rect', { x: 6, y: 5, width: 4, height: 14, rx: 1.2 }),
+        h('rect', { x: 14, y: 5, width: 4, height: 14, rx: 1.2 }),
+      )
+    case 'play':
+      return h('svg', props,
+        h('polygon', { points: '6 4.5 19 12 6 19.5 6 4.5' }),
+      )
+    case 'lock':
+      return h('svg', props,
+        h('rect', { x: 4.5, y: 11, width: 15, height: 9.5, rx: 2 }),
+        h('path', { d: 'M8 11V7.5a4 4 0 0 1 8 0V11' }),
+      )
+    case 'workflow':
+      return h('svg', props,
+        h('rect', { x: 3, y: 4, width: 6.5, height: 5.5, rx: 1.4 }),
+        h('rect', { x: 14.5, y: 14.5, width: 6.5, height: 5.5, rx: 1.4 }),
+        h('path', { d: 'M9.5 6.8h3a2.5 2.5 0 0 1 2.5 2.5v2.2M15 11.5h2.7v3' }),
+        h('path', { d: 'M6.2 9.5v4.8a2.5 2.5 0 0 0 2.5 2.5h5.8' }),
       )
     default:
       return null
@@ -361,365 +471,49 @@ export function StatusBadge({ status, style }) {
   )
 }
 
-/**
- * Prominent radar strip highlighting Advancing (`doing`) and Blocked (`blocked`) objectives.
- * Clicking any card jumps straight to the Pyramid Tree view and frames the active subagents!
- */
-export function ObjectiveRadarStrip({ board, compact = false }) {
-  const allTasks = (board && Array.isArray(board.tasks)) ? board.tasks.filter(Boolean) : []
-  const blockedTasks = allTasks.filter(t => t.status === 'blocked')
-  const doingTasks = allTasks.filter(t => t.status === 'doing')
-  const subagents = Array.isArray(store.subagents) ? store.subagents : []
-  const identity = store.agentIdentity || null
-
-  if (!blockedTasks.length && !doingTasks.length) return null
-
-  const items = [
-    ...blockedTasks.map(t => ({ task: t, kind: 'blocked' })),
-    ...doingTasks.map(t => ({ task: t, kind: 'doing' })),
-  ]
-
-  return h(
-    'div',
-    { className: 'dnb-radar-strip' },
-    items.slice(0, compact ? 3 : 6).map(({ task, kind }) => {
-      const isFocused = store.focusTaskId === task.id
-        && store.tab === 'tasks'
-        && (store.taskViewMode === 'graph' || store.taskViewMode === 'canvas')
-      const resolved = resolveTaskAgents(task, allTasks, subagents, identity)
-      const agentLabels = resolved.agentNames.length
-        ? resolved.agentNames.slice(0, 2).map(n => '@' + shortAgentName(n, true)).join('、')
-          + (resolved.agentNames.length > 2 ? ' 等 ' + resolved.agentNames.length + ' 个代理' : '')
-        : '@主代理'
-      const cursorBlocked = normalizeCursorBlocked(board && board.cursor && board.cursor.blocked)
-      const subReason = kind === 'blocked' && (task.note || cursorBlocked)
-        ? clampTitle(task.note || cursorBlocked, 20)
-        : ''
-
-      return h(
-        'div',
-        {
-          key: task.id,
-          className: 'dnb-radar-card',
-          'data-kind': kind,
-          'data-focused': isFocused ? '1' : '0',
-          title: kind === 'blocked'
-            ? '卡住的任务：点这里找负责的子代理'
-            : '进行中的任务：点这里看负责的子代理',
-          onClick: () => {
-            if (isFocused) {
-              patch({ focusTaskId: '' })
-            } else {
-              focusObjectiveInPyramid(task.id)
-            }
-          },
-        },
-        h(StatusBadge, { status: kind }),
-        h(
-          'div',
-          { style: { flex: 1, minWidth: 0 } },
-          h(
-            'div',
-            {
-              style: {
-                fontWeight: 600,
-                fontSize: 12.5,
-                color: 'var(--dnb-text)',
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              },
-            },
-            task.title || task.id,
-          ),
-          h(
-            'div',
-            {
-              style: {
-                fontSize: 11,
-                color: kind === 'blocked' ? 'rgba(255, 110, 100, 0.92)' : 'var(--dnb-text-2)',
-                marginTop: 1.5,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-              },
-            },
-            (kind === 'blocked' ? '卡在：' : '负责：') + agentLabels + (subReason ? ' · ' + subReason : ''),
-          ),
-        ),
-        h(
-          'span',
-          {
-            className: 'dnb-pill',
-            style: {
-              height: 23,
-              padding: '0 8px',
-              fontSize: 10.5,
-              color: isFocused ? '#fff' : (kind === 'blocked' ? '#ff453a' : '#409cff'),
-              background: isFocused
-                ? (kind === 'blocked' ? '#ff453a' : '#0a84ff')
-                : (kind === 'blocked' ? 'rgba(255,69,58,0.12)' : 'rgba(10,132,255,0.12)'),
-              borderColor: kind === 'blocked' ? 'rgba(255,69,58,0.38)' : 'rgba(10,132,255,0.38)',
-              flexShrink: 0,
-            },
-          },
-          h(Icon, { name: 'target', size: 11.5 }),
-          isFocused ? '已选中' : '看代理',
-        ),
-      )
-    }),
-  )
-}
-
-/* ---------------------------------------------------- Subagent Fleet Bar */
-
-export function SubagentFleetBar({ board }) {
-  const subagents = Array.isArray(store.subagents) ? store.subagents : []
-  const [steerAgent, setSteerAgent] = React.useState('')
-  const [steerText, setSteerText] = React.useState('')
-  const hier = buildAgentHierarchy(subagents, store.agentIdentity)
-  const children = hier.children
-  const runningCount = children.filter(a => a.status === 'running').length
-
-  const activeAgentObj = children.find(a => a.name === steerAgent) || null
-
-  const sendSteer = () => {
-    const msg = steerText.trim()
-    if (!steerAgent || !msg) return
-    setSteerText('')
-    void act({ action: 'team.steer', agent: steerAgent, message: msg })
-  }
-
-  if (!children.length && !store.showInternalProbes) return null
-
-  const isCollapsed = Boolean(store.fleetCollapsed)
-  const hasMany = children.length > 10
-  const showAll = Boolean(store.fleetShowAll)
-  const hasAnyProbe = hier.probeCount > 0 || (store.showInternalProbes && hier.allChildren.some(a => isInternalProbeName(a.name)))
-
-  // Determine visible pills when expanded in smart-compact mode
-  let visibleAgents = children
-  let hiddenCount = 0
-  if (!isCollapsed && hasMany && !showAll) {
-    const allTasks = (board && Array.isArray(board.tasks)) ? board.tasks : []
-    const busyNames = new Set(
-      allTasks
-        .filter(t => t && t.status !== 'done')
-        .map(t => {
-          const hit = hier.matchAgentRef(t.subagent || t.owner || t.session)
-          return hit ? hit.name : ''
-        })
-        .filter(Boolean),
-    )
-    const priority = children.filter(
-      a => a.status === 'running' || busyNames.has(a.name) || a.name === store.filterAgent || a.name === steerAgent,
-    )
-    visibleAgents = priority.length > 0 ? priority : children.slice(-3)
-    hiddenCount = Math.max(0, children.length - visibleAgents.length)
-  }
-
-  const FLEET_PALETTE = ['#38bdf8', '#a78bfa', '#34d399', '#fbbf24', '#fb7185']
-
-  return h(
-    'div',
-    { className: 'dnb-group dnb-fleet-card', style: { padding: isCollapsed ? '7px 10px' : '8px 10px', marginBottom: 10 } },
-    h(
-      'div',
-      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: isCollapsed ? 0 : 6 } },
-      h(
-        'div',
-        {
-          style: {
-            display: 'flex',
-            alignItems: 'center',
-            gap: 6,
-            fontSize: 12,
-            fontWeight: 600,
-            color: 'var(--dnb-text)',
-            cursor: 'pointer',
-            minWidth: 0,
-          },
-          onClick: () => patch({ fleetCollapsed: !isCollapsed }),
-          title: isCollapsed ? '展开子代理列表' : '收起子代理列表',
-        },
-        runningCount > 0
-          ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#38bdf8' } })
-          : h('span', {
-              style: {
-                width: 7,
-                height: 7,
-                borderRadius: '50%',
-                background: '#38bdf8',
-                boxShadow: '0 0 0 2px rgba(56, 189, 248, 0.22)',
-                flexShrink: 0,
-              },
-            }),
-        '子代理团队',
-        h(
-          'span',
-          { style: { color: runningCount > 0 ? '#409cff' : 'var(--dnb-text-3)', fontWeight: 500 } },
-          runningCount ? `${runningCount} 个干活中 · 共 ${children.length} 个` : `共 ${children.length} 个`,
-        ),
-      ),
-      h(
-        'div',
-        { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
-        store.filterAgent
-          ? h('button', {
-              className: 'dnb-pill',
-              style: { height: 22, fontSize: 11, padding: '0 8px' },
-              onClick: () => { patch({ filterAgent: '' }); setSteerAgent('') },
-            }, '清除筛选')
-          : null,
-        h('button', {
-          className: 'dnb-pill',
-          style: { height: 22, fontSize: 11, padding: '0 8px' },
-          onClick: () => patch({ fleetCollapsed: !isCollapsed }),
-        },
-          isCollapsed ? `展开 (${children.length})` : '收起',
-          h(Icon, {
-            name: 'chevron',
-            size: 11,
-            style: {
-              transform: isCollapsed ? 'rotate(90deg)' : 'rotate(-90deg)',
-              transition: 'transform 0.16s ease',
-            },
-          }),
-        ),
-      ),
-    ),
-    !isCollapsed
-      ? h(
-          'div',
-          { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
-          visibleAgents.map((agent, idx) => {
-            const isRunning = agent.status === 'running'
-            const isSelected = store.filterAgent === agent.name || steerAgent === agent.name
-            const pKey = hier.parentKeyOf.get(agent.name)
-            const isTier2 = pKey && pKey !== 'lead'
-            const dotHex = FLEET_PALETTE[idx % FLEET_PALETTE.length]
-            return h(
-              'button',
-              {
-                key: agent.name,
-                className: 'dnb-pill',
-                'data-active': isSelected ? '1' : '0',
-                style: {
-                  height: 25,
-                  padding: '0 9px',
-                  borderColor: isSelected
-                    ? undefined
-                    : (isRunning ? 'rgba(56, 189, 248, 0.52)' : 'rgba(148, 163, 184, 0.28)'),
-                },
-                title: '@' + agent.name + (isTier2 ? '（上级：@' + pKey + '）' : '') + (agent.description ? ' — ' + agent.description : ''),
-                onClick: () => {
-                  const next = store.filterAgent === agent.name ? '' : agent.name
-                  patch({ filterAgent: next })
-                  setSteerAgent(steerAgent === agent.name ? '' : agent.name)
-                },
-              },
-              isRunning
-                ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '8px', color: '#409cff' } })
-                : h('span', {
-                    style: {
-                      width: 6.5,
-                      height: 6.5,
-                      borderRadius: '50%',
-                      background: dotHex,
-                    },
-                  }),
-              '@' + shortAgentName(agent.name),
-            )
-          }),
-          hiddenCount > 0
-            ? h('button', {
-                className: 'dnb-pill',
-                style: { height: 25, padding: '0 9px', fontSize: 11, borderStyle: 'dashed', color: 'var(--dnb-text-3)' },
-                title: '展开其他已停下的子代理',
-                onClick: () => patch({ fleetShowAll: true }),
-              }, '还有 ' + hiddenCount + ' 个')
-            : (hasMany && showAll
-                ? h('button', {
-                    className: 'dnb-pill',
-                    style: { height: 25, padding: '0 9px', fontSize: 11, color: 'var(--dnb-text-3)' },
-                    onClick: () => patch({ fleetShowAll: false }),
-                  }, '收起空闲的')
-                : null),
-          hasAnyProbe
-            ? h('button', {
-                className: 'dnb-pill',
-                'data-active': store.showInternalProbes ? '1' : '0',
-                style: { height: 24, padding: '0 8px', fontSize: 10.5, borderStyle: 'dashed', opacity: 0.78 },
-                title: store.showInternalProbes ? '隐藏后台自动核对记忆的小工具 (@mnemon-review)' : '显示后台自动核对记忆的小工具 (@mnemon-review)',
-                onClick: () => patch({ showInternalProbes: !store.showInternalProbes }),
-              }, store.showInternalProbes ? '隐藏后台工具' : `后台工具 (${hier.probeCount})`)
-            : null,
-        )
-      : null,
-    !isCollapsed && steerAgent
-      ? h(
-          'div',
-          { style: { display: 'flex', gap: 6, alignItems: 'center', marginTop: 8, paddingTop: 8, borderTop: '1px solid var(--dnb-border)' } },
-          activeAgentObj && activeAgentObj.id
-            ? h('button', {
-                className: 'dnb-pill',
-                style: { height: 28 },
-                title: '在分屏打开它的对话',
-                onClick: () => {
-                  if (!openSubagentChat(activeAgentObj)) {
-                    patch({ notice: '这个子代理还没有独立的对话窗口' })
-                  }
-                },
-              }, h(Icon, { name: 'chat', size: 12 }), '对话')
-            : null,
-          h('input', {
-            className: 'dnb-input',
-            style: { flex: 1, height: 28, padding: '0 10px', borderRadius: 99, fontSize: 11.5 },
-            placeholder: '给 @' + shortAgentName(steerAgent) + ' 发消息…',
-            value: steerText,
-            onChange: e => setSteerText(e.target.value),
-            onKeyDown: e => { if (e.key === 'Enter') sendSteer() },
-          }),
-          h('button', {
-            className: 'dnb-primary-btn',
-            style: { height: 28, padding: '0 10px' },
-            disabled: !steerText.trim(),
-            onClick: sendSteer,
-          }, '发送'),
-          h('button', {
-            className: 'dnb-pill dnb-pill-danger',
-            style: { height: 28, padding: '0 8px' },
-            title: '停掉它当前这一步',
-            onClick: () => void act({ action: 'team.interrupt', agent: steerAgent }),
-          }, h(Icon, { name: 'stop', size: 11 })),
-        )
-      : null,
-  )
-}
 
 /* ----------------------------------------------- Bottom Sheet Inspector */
 
-function classifyBulletTagTone(tag) {
+function stripLeadingEmoji(label) {
+  const s = String(label || '').trim()
+  if (!s) return ''
+  const cleaned = s.replace(/^[\p{Extended_Pictographic}\uFE0F\u200D\u2600-\u27BF\s]+/u, '').trim()
+  return cleaned || s
+}
+
+export function isBenignQuietStatusText(rawBody) {
+  const text = String(rawBody || '').trim()
+  if (!text) return true
+  if (/(?:能否继续[\s\S]*以实际[\s\S]*为准|以实际执行结果为准|以实际结果为准|以实测为准|待实测验证|此前受拦[\s\S]*以实际[\s\S]*为准)/.test(text)) {
+    return true
+  }
+  if (/(?:暂未解决|暂无法|尚未解决|尚未解除|仍受阻|依然受阻|权限受限|请确认是否|需要您提供|需要你提供|需您确认|需你确认|等待您|等待你|报错|失败|卡住|死锁|待批|尚未通过)/.test(text)) {
+    return false
+  }
+  if (/(?:^(?:无|暂无|没有|无需|不需要|暂无需|暂不需要|目前无|当前无|目前暂无|当前暂无|暂无明确|无明确|暂无已知|无已知)|暂无需(?:您|你)?(?:额外)?提供|无需(?:您|你)?(?:额外)?提供|暂无(?:明确|已知)?(?:技术)?(?:受阻|阻塞|卡点)|阻塞已解除|无受阻|无阻塞|可继续推进)/.test(text)) {
+    return true
+  }
+  return false
+}
+
+function classifyBulletTagTone(tag, body = '') {
   const t = String(tag || '')
   if (
-    /禁止|红线|受阻|错误|失败|撞墙|高危|违规|严禁|崩溃|死锁/.test(t)
+    /禁止|红线|受阻|卡点|错误|失败|撞墙|高危|违规|严禁|崩溃|死锁/.test(t)
     || (/风险|告警|异常/.test(t) && !/保障|兜底|已解|可控|无风险|解除/.test(t))
   ) {
-    return { bg: 'rgba(255, 69, 58, 0.16)', fg: '#ff6961', border: 'rgba(255, 69, 58, 0.30)', spinning: false }
+    return { tone: isBenignQuietStatusText(body) ? 'muted' : 'coral' }
   }
-  if (/完成|已完|结论|必做|允许|已解|就绪|已验证|通过|已执行|已处理|兜底|保障|达成/.test(t)) {
-    return { bg: 'rgba(48, 209, 88, 0.15)', fg: '#30d158', border: 'rgba(48, 209, 88, 0.28)', spinning: false }
+  if (/参谋长建议|参谋建议|建议/.test(t)) {
+    return { tone: 'accent' }
   }
-  if (/待办|待收尾|待推进|未完|未开始|待定|搁置|排队|空闲|休眠/.test(t)) {
-    return { bg: 'rgba(142, 142, 147, 0.16)', fg: '#a1a1aa', border: 'rgba(142, 142, 147, 0.26)', spinning: false }
+  if (/用户需要提供|需用户提供|需你提供|需您提供|需你确认|需您确认/.test(t)) {
+    return { tone: isBenignQuietStatusText(body) ? 'muted' : 'amber' }
   }
-  if (/注意|提醒|警告|警惕|纪律|顺序|验收|待验|核对|原因|约束|谨慎|观察|复核|风险/.test(t)) {
-    return { bg: 'rgba(245, 158, 11, 0.16)', fg: '#fbbf24', border: 'rgba(245, 158, 11, 0.30)', spinning: false }
+  if (/注意|提醒|警告|警惕|纪律|顺序|验收|待验|核对|约束|谨慎/.test(t)) {
+    return { tone: 'amber' }
   }
-  if (/推进|进行中|执行中|运行中|处理中|排查中|构建中|同步中|验证中/.test(t)) {
-    return { bg: 'rgba(10, 132, 255, 0.16)', fg: '#409cff', border: 'rgba(10, 132, 255, 0.32)', spinning: true }
-  }
-  return { bg: 'rgba(10, 132, 255, 0.14)', fg: '#409cff', border: 'rgba(10, 132, 255, 0.26)', spinning: false }
+  return { tone: 'muted' }
 }
 
 function classifySectionHeadingTone(heading) {
@@ -727,21 +521,21 @@ function classifySectionHeadingTone(heading) {
   const hasWarn = /纪律|边界|注意|提醒|警告|风险|约束|验收|待验/.test(s)
   const hasRed = /禁止|红线|受阻|阻塞|错误|告警|故障/.test(s)
   if (hasWarn && hasRed) {
-    return { fg: '#fbbf24', bar: 'linear-gradient(180deg, #f59e0b 0%, #ff453a 100%)' }
+    return { fg: 'var(--dnb-coral, #f28b88)', bar: 'var(--dnb-coral, #f28b88)' }
   }
   if (hasRed) {
-    return { fg: '#ff6961', bar: '#ff453a' }
+    return { fg: 'var(--dnb-coral, #f28b88)', bar: 'var(--dnb-coral, #f28b88)' }
   }
   if (hasWarn) {
-    return { fg: '#fbbf24', bar: '#f59e0b' }
+    return { fg: 'var(--dnb-amber, #f3be6d)', bar: 'var(--dnb-amber, #f3be6d)' }
   }
   if (/已完成|达成|放行|收口/.test(s)) {
-    return { fg: '#34d399', bar: '#30d158' }
+    return { fg: 'var(--dnb-sage, #63d1b0)', bar: 'var(--dnb-sage, #63d1b0)' }
   }
   if (/待办|未完成|遗留|后续/.test(s)) {
-    return { fg: '#a1a1aa', bar: '#8e8e93' }
+    return { fg: 'var(--dnb-text-3)', bar: 'var(--dnb-border-strong)' }
   }
-  return { fg: '#60a5fa', bar: '#0a84ff' }
+  return { fg: 'var(--dnb-text-2)', bar: 'var(--dnb-accent)' }
 }
 
 export function renderStructuredHeading(heading, compact) {
@@ -809,7 +603,16 @@ export function parseNarrativeBlocks(raw) {
 export function renderStructuredItem(item, key) {
   if (!item) return null
   if (item.kind === 'bullet') {
-    const tone = item.badge ? classifyBulletTagTone(item.badge) : null
+    if (item.badge) {
+      const cleanBadge = stripLeadingEmoji(item.badge)
+      const tone = classifyBulletTagTone(cleanBadge, item.body)
+      return h(
+        'div',
+        { key, className: 'dnb-prose-kv-row', 'data-tone': tone.tone },
+        h('span', { className: 'dnb-prose-kv-key' }, cleanBadge),
+        h('span', { className: 'dnb-prose-kv-val' }, item.body),
+      )
+    }
     return h(
       'div',
       {
@@ -817,47 +620,24 @@ export function renderStructuredItem(item, key) {
         style: {
           display: 'flex',
           alignItems: 'flex-start',
-          gap: 7,
-          padding: '3.5px 0',
+          gap: 8,
+          padding: '2.5px 0',
           fontSize: 12.2,
-          lineHeight: 1.52,
-          color: 'var(--dnb-text)',
+          lineHeight: 1.58,
+          color: 'var(--dnb-text-2)',
         },
       },
-      item.badge
-        ? h(
-            'span',
-            {
-              style: {
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 4.5,
-                padding: '1px 6.5px',
-                borderRadius: 6,
-                fontSize: 10.5,
-                fontWeight: 700,
-                background: tone.bg,
-                color: tone.fg,
-                border: '1px solid ' + tone.border,
-                flexShrink: 0,
-                marginTop: 1.5,
-              },
-            },
-            tone.spinning
-              ? h('span', { className: 'dnb-spin-ring', style: { '--dnb-spin-size': '9px', color: tone.fg } })
-              : null,
-            item.badge,
-          )
-        : h('span', {
-            style: {
-              width: 5,
-              height: 5,
-              borderRadius: '50%',
-              background: 'var(--dnb-accent)',
-              flexShrink: 0,
-              marginTop: 7,
-            },
-          }),
+      h('span', {
+        style: {
+          width: 4.5,
+          height: 4.5,
+          borderRadius: '50%',
+          background: 'var(--dnb-text-3)',
+          opacity: 0.72,
+          flexShrink: 0,
+          marginTop: 7.5,
+        },
+      }),
       h('span', { style: { flex: 1, minWidth: 0, wordBreak: 'break-word' } }, item.body),
     )
   }
@@ -900,6 +680,50 @@ export function parseSixGoalBrief(raw) {
   }
   const matched = SIX_GOAL_ROWS_META.filter(r => rowsByKey[r.key]).map(r => rowsByKey[r.key])
   return matched.length >= 2 ? matched : null
+}
+
+export function extractReplySummaryLine(rawText) {
+  const raw = String(rawText || '').trim()
+  if (!raw) return ''
+  const six = parseSixGoalBrief(raw)
+  if (six && six.length) {
+    const blocked = six.find(r => r.role === 'blocked')
+    const hasHardBlocker = Boolean(
+      blocked
+      && blocked.body
+      && /(?:报错|失败|权限受限|卡住|死锁|无法继续|拒绝|被拦|待确认|需确认|待批|中断|超时)/.test(blocked.body)
+      && !/以实际[\s\S]*为准/.test(blocked.body)
+      && !isBenignQuietStatusText(blocked.body),
+    )
+    if (hasHardBlocker) {
+      return `受阻：${blocked.body}`
+    }
+    const preferred = six.find(r => r.role === 'progress')
+      || six.find(r => r.role === 'advice')
+      || six.find(r => r.role === 'goal')
+      || six[0]
+    if (preferred && preferred.body) return preferred.body
+  }
+  const blocks = parseNarrativeBlocks(raw)
+  for (const blk of blocks) {
+    for (const it of (blk.items || [])) {
+      const body = String(it && it.body ? it.body : '').trim()
+      if (!body) continue
+      if (it.kind === 'bullet' && it.badge) {
+        const cleanBadge = stripLeadingEmoji(it.badge)
+        if (cleanBadge && cleanBadge !== body && !body.startsWith(cleanBadge) && body.length < 24) {
+          return `${cleanBadge} · ${body}`
+        }
+      }
+      return body
+    }
+  }
+  const fallback = raw
+    .replace(/\[dsh-mnemon:[^\]]*\][\s\S]*/gi, '')
+    .split(/\r?\n/)
+    .map(l => l.trim().replace(/^#{1,3}\s+/, '').replace(/^(?:[-*•]|\d+[.)、])\s+/, '').replace(/^【[^】]{1,14}】\s*/, '').trim())
+    .find(Boolean)
+  return fallback || raw
 }
 
 export function orderChatHistoryNewestFirst(rawList) {
@@ -955,14 +779,14 @@ export function groupChatHistoryTurnsNewestFirst(rawList) {
   return turns
 }
 
-/* ------------------------------------------- Interactive Fan Thinking Gauge */
+/* ------------------------------------------- Interactive Fan Thinking Gauge (Skin-Harmonized) */
 
 const FAN_EFFORT_STEPS = [
-  { key: 'off', label: '关', deg: -180, color: '#94a3b8' },
-  { key: 'low', label: '低', deg: -135, color: '#38bdf8' },
-  { key: 'medium', label: '中', deg: -90, color: '#6366f1' },
-  { key: 'high', label: '高', deg: -45, color: '#f59e0b' },
-  { key: 'xhigh', label: '极高', deg: 0, color: '#ec4899' },
+  { key: 'off', label: '关', deg: -180, color: 'var(--dnb-text-3, #94a3b8)' },
+  { key: 'low', label: '低', deg: -135, color: 'var(--dnb-sage, #63d1b0)' },
+  { key: 'medium', label: '中', deg: -90, color: 'var(--dnb-accent, #9f8eff)' },
+  { key: 'high', label: '高', deg: -45, color: 'var(--dnb-amber, #f3be6d)' },
+  { key: 'xhigh', label: '极高', deg: 0, color: 'var(--dnb-coral, #f28b88)' },
 ]
 
 function fanPolarPoint(cx, cy, r, deg) {
@@ -999,13 +823,14 @@ function fanAngleToStep(deg) {
   return best
 }
 
-export function EffortFanGauge({ value = 'auto', onChange, compact = false }) {
+export function EffortFanGauge({ value = 'auto', onChange, compact = false, skin }) {
   const svgRef = React.useRef(null)
   const gradIdRef = React.useRef('dnb-fan-grad-' + Math.random().toString(36).slice(2, 8))
   const [dragging, setDragging] = React.useState(false)
   const [dragAngle, setDragAngle] = React.useState(null)
   const [hoverKey, setHoverKey] = React.useState('')
 
+  const activeSkin = skin || store.uiSkin || DEFAULT_UI_SKIN
   const committedKey = THINKING_EFFORT_OPTIONS.some(o => o.key === value) ? value : 'auto'
   const isAuto = committedKey === 'auto'
   const committedStep = FAN_EFFORT_STEPS.find(s => s.key === committedKey) || null
@@ -1088,6 +913,7 @@ export function EffortFanGauge({ value = 'auto', onChange, compact = false }) {
     {
       className: 'dnb-fan-gauge',
       'data-compact': compact ? '1' : '0',
+      'data-skin': activeSkin,
       onClick: e => e.stopPropagation(),
       onMouseLeave: () => setHoverKey(''),
     },
@@ -1112,14 +938,14 @@ export function EffortFanGauge({ value = 'auto', onChange, compact = false }) {
           h(
             'linearGradient',
             { id: gradIdRef.current, x1: '0%', y1: '50%', x2: '100%', y2: '50%' },
-            h('stop', { offset: '0%', stopColor: '#94a3b8' }),
-            h('stop', { offset: '26%', stopColor: '#38bdf8' }),
-            h('stop', { offset: '52%', stopColor: '#6366f1' }),
-            h('stop', { offset: '78%', stopColor: '#f59e0b' }),
-            h('stop', { offset: '100%', stopColor: '#ec4899' }),
+            h('stop', { offset: '0%', stopColor: 'var(--dnb-text-3, #94a3b8)' }),
+            h('stop', { offset: '28%', stopColor: 'var(--dnb-sage, #63d1b0)' }),
+            h('stop', { offset: '58%', stopColor: 'var(--dnb-accent, #9f8eff)' }),
+            h('stop', { offset: '82%', stopColor: 'var(--dnb-amber, #f3be6d)' }),
+            h('stop', { offset: '100%', stopColor: 'var(--dnb-coral, #f28b88)' }),
           ),
         ),
-        // Segmented subtle track background across 5 notches
+        // Calm neutral segmented track background across 5 notches
         FAN_EFFORT_STEPS.map((step, i) => {
           const prevDeg = i === 0 ? -180 : (FAN_EFFORT_STEPS[i - 1].deg + step.deg) / 2
           const nextDeg = i === FAN_EFFORT_STEPS.length - 1 ? 0 : (step.deg + FAN_EFFORT_STEPS[i + 1].deg) / 2
@@ -1130,9 +956,9 @@ export function EffortFanGauge({ value = 'auto', onChange, compact = false }) {
             key: 'seg-' + step.key,
             d: fanDescribeArc(cx, cy, rTrack, Math.max(-180, prevDeg + 1.5), Math.min(0, nextDeg - 1.5)),
             fill: 'none',
-            stroke: step.color,
-            strokeWidth: isLit ? 9 : 7,
-            strokeOpacity: isAuto ? 0.30 : (isLit ? 0.36 : 0.20),
+            stroke: 'var(--dnb-border-strong)',
+            strokeWidth: isLit ? 8 : 7,
+            strokeOpacity: isAuto ? 0.45 : (isLit ? 0.55 : 0.35),
             strokeLinecap: 'round',
           })
         }),
@@ -1169,7 +995,7 @@ export function EffortFanGauge({ value = 'auto', onChange, compact = false }) {
               key: 'hit-' + step.key,
               d: fanDescribeWedge(cx, cy, 30, 96, wStart, wEnd),
               fill: hoverKey === step.key ? step.color : 'transparent',
-              fillOpacity: hoverKey === step.key ? 0.09 : 0,
+              fillOpacity: hoverKey === step.key ? 0.10 : 0,
               style: { cursor: dragging ? 'grabbing' : 'pointer' },
               onMouseEnter: () => setHoverKey(step.key),
               onMouseLeave: () => setHoverKey(prev => (prev === step.key ? '' : prev)),
@@ -1209,7 +1035,7 @@ export function EffortFanGauge({ value = 'auto', onChange, compact = false }) {
             ),
           )
         }),
-        // Static/snapping needle only when manual fixed notch or actively dragging (no auto sweep animation)
+        // Static/snapping needle only when manual fixed notch or actively dragging
         showManualNeedle
           ? h(
               'g',
@@ -1226,7 +1052,7 @@ export function EffortFanGauge({ value = 'auto', onChange, compact = false }) {
                   y1: 0,
                   x2: 0,
                   y2: -54,
-                  stroke: previewStep ? previewStep.color : '#818cf8',
+                  stroke: previewStep ? previewStep.color : 'var(--dnb-accent, #9f8eff)',
                   strokeWidth: 2.6,
                   strokeLinecap: 'round',
                 }),
@@ -1234,20 +1060,20 @@ export function EffortFanGauge({ value = 'auto', onChange, compact = false }) {
                   cx: 0,
                   cy: -54,
                   r: 3.2,
-                  fill: '#ffffff',
-                  stroke: previewStep ? previewStep.color : '#6366f1',
+                  fill: 'var(--dnb-card)',
+                  stroke: previewStep ? previewStep.color : 'var(--dnb-accent, #9f8eff)',
                   strokeWidth: 1.6,
                 }),
               ),
             )
           : null,
-        // Draggable thumb halo on the active track angle (when manual or dragging)
+        // Draggable thumb halo on the active track angle
         showManualNeedle
           ? h('circle', {
               cx: knobPt.x,
               cy: knobPt.y,
               r: dragging ? 7 : 5.5,
-              fill: previewStep ? previewStep.color : '#818cf8',
+              fill: previewStep ? previewStep.color : 'var(--dnb-accent, #9f8eff)',
               fillOpacity: 0.28,
               style: { pointerEvents: 'none' },
             })
@@ -1272,7 +1098,7 @@ export function EffortFanGauge({ value = 'auto', onChange, compact = false }) {
         h('span', { className: 'dnb-fan-hub-main' },
           dragging && previewStep
             ? previewStep.label
-            : (isAuto ? bi('🪄 自动', '🪄 Auto') : (committedStep ? committedStep.label : bi('自动', 'Auto')))),
+            : (isAuto ? bi('自动', 'Auto') : (committedStep ? committedStep.label : bi('自动', 'Auto')))),
         h('span', { className: 'dnb-fan-hub-sub' },
           isAuto && !dragging ? bi('自动调档', 'Auto') : bi('切回自动', 'Set Auto')),
       ),
@@ -1298,7 +1124,7 @@ export function AccCard({
   badges = null,
   headerExtra = null,
   actions = null,
-  showPullHint = true,
+  showPullHint = false,
   pullHintOpen = null,
   pullHintClosed = null,
   className = '',

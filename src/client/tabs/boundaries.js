@@ -28,15 +28,48 @@ import {
 import { Icon, AccCard } from '../components/common.js'
 
 const WALL_TYPE_META = {
-  forbid_cmd: { label: '🚫 禁跑命令', placeholder: '输入禁跑的命令关键词（如 npm publish、git push --force）…' },
-  forbid_path: { label: '🚧 禁碰路径', placeholder: '输入禁止读写的文件夹或文件（如 .github/workflows、DSHGuard）…' },
-  restrict_write: { label: '🔐 仅限某目录可写', placeholder: '输入唯一允许写入的文件夹路径…' },
-  require_approval_cmd: { label: '🛡️ 高危命令先请示', placeholder: '输入运行前要先问你的命令（如 prisma migrate）…' },
-  deny_tool: { label: '⛔ 禁用工具', placeholder: '输入要禁用的工具名（如 run_command、write_file）…' },
+  forbid_cmd: { label: '禁跑命令', placeholder: '输入禁跑的命令关键词（如 npm publish、git push --force）…' },
+  forbid_path: { label: '禁碰路径', placeholder: '输入禁止读写的文件夹或文件（如 .github/workflows、DSHGuard）…' },
+  restrict_write: { label: '仅限某目录可写', placeholder: '输入唯一允许写入的文件夹路径…' },
+  require_approval_cmd: { label: '高危命令先请示', placeholder: '输入运行前要先问你的命令（如 prisma migrate）…' },
+  deny_tool: { label: '禁用工具', placeholder: '输入要禁用的工具名（如 run_command、write_file）…' },
 }
+
+const GUARD_WALL_PRESET_PACKS = [
+  {
+    id: 'git_safety',
+    title: 'Git 危险操作急停',
+    desc: '直接拦住强推 (force push)、清工作区和硬回退',
+    ruleType: 'forbid_cmd',
+    patterns: ['git\\s+push.*--force', 'git\\s+push\\s+-f\\b', 'git\\s+reset\\s+--hard', 'git\\s+clean\\s+-f'],
+  },
+  {
+    id: 'secret_files',
+    title: '敏感凭据与配置禁碰',
+    desc: '防止 AI 误读或改动 .env、.npmrc、私钥与凭据目录',
+    ruleType: 'forbid_path',
+    patterns: ['.env', '.npmrc', '*.pem', 'credentials', '.netrc'],
+  },
+  {
+    id: 'publish_gate',
+    title: '对外发版发布先问你',
+    desc: '运行 npm publish 或建删 GitHub Release 前必须弹窗同意',
+    ruleType: 'require_approval_cmd',
+    patterns: ['npm\\s+publish', 'gh\\s+release\\s+create', 'gh\\s+release\\s+delete'],
+  },
+  {
+    id: 'ci_workflow',
+    title: 'CI 工作流文件保护',
+    desc: '防止 AI 擅自篡改 .github/workflows 自动化流水线',
+    ruleType: 'forbid_path',
+    patterns: ['.github/workflows'],
+  },
+]
 
 function GuardWallsCard({ view }) {
   const [wallMenuOpen, setWallMenuOpen] = React.useState(false)
+  const [tplOpen, setTplOpen] = React.useState(false)
+  const wallImportRef = React.useRef(null)
   React.useEffect(() => {
     if (!wallMenuOpen) return
     const close = () => setWallMenuOpen(false)
@@ -73,6 +106,74 @@ function GuardWallsCard({ view }) {
     })
   }
 
+  const applyWallTemplatePack = async (tpl) => {
+    if (!tpl) return
+    if (walls.some(w => w && w.title === tpl.title)) {
+      patch({ notice: bi(`「${tpl.title}」已经加过了`, `"${tpl.title}" is already added`) })
+      return
+    }
+    await saveGuardWallApi({
+      title: tpl.title,
+      ruleType: tpl.ruleType,
+      pattern: tpl.patterns.join(', '),
+      scope: 'global',
+    })
+  }
+
+  const exportWallsJson = () => {
+    const clean = walls.map(w => ({
+      title: w.title,
+      ruleType: w.ruleType,
+      patterns: w.patterns,
+      scope: w.scope === 'workspace' ? 'workspace' : 'global',
+      reason: w.reason || '',
+    }))
+    const jsonText = JSON.stringify({ version: 1, guardWalls: clean }, null, 2)
+    try {
+      if (typeof document !== 'undefined' && typeof Blob !== 'undefined' && typeof URL !== 'undefined' && URL.createObjectURL) {
+        const blob = new Blob([jsonText], { type: 'application/json;charset=utf-8' })
+        const url = URL.createObjectURL(blob)
+        const a = document.createElement('a')
+        a.href = url
+        a.download = 'dsh-chief-guard-walls.json'
+        document.body.appendChild(a)
+        a.click()
+        setTimeout(() => {
+          try { URL.revokeObjectURL(url) } catch {}
+          try { a.remove() } catch {}
+        }, 400)
+        patch({ notice: bi(`📤 已导出 ${clean.length} 条自定义拦截规则`, `📤 Exported ${clean.length} block rule(s)`) })
+        return
+      }
+    } catch {}
+    copyText(jsonText, bi('📋 已复制拦截规则 JSON 到剪贴板', '📋 Copied block rules JSON'))
+  }
+
+  const handleImportWalls = async (e) => {
+    const file = e && e.target && e.target.files && e.target.files[0]
+    if (e && e.target) e.target.value = ''
+    if (!file) return
+    try {
+      const parsed = JSON.parse(await file.text())
+      const arr = Array.isArray(parsed) ? parsed : (Array.isArray(parsed && parsed.guardWalls) ? parsed.guardWalls : [])
+      let added = 0
+      for (const raw of arr.slice(0, 16)) {
+        if (!raw || !raw.title || !Array.isArray(raw.patterns) || !raw.patterns.length) continue
+        if (walls.some(w => w && w.title === raw.title)) continue
+        await saveGuardWallApi({
+          title: String(raw.title),
+          ruleType: WALL_TYPE_META[raw.ruleType] ? raw.ruleType : 'forbid_cmd',
+          pattern: raw.patterns.join(', '),
+          scope: raw.scope === 'workspace' ? 'workspace' : 'global',
+        })
+        added += 1
+      }
+      patch({ notice: bi(`📥 已导入 ${added} 条自定义拦截规则（重复项已自动跳过）`, `📥 Imported ${added} custom rule(s) (duplicates skipped)`) })
+    } catch (err) {
+      patch({ error: bi('导入拦截规则失败：', 'Import failed: ') + String((err && err.message) || err) })
+    }
+  }
+
   return h(
     AccCard,
     {
@@ -80,8 +181,8 @@ function GuardWallsCard({ view }) {
       onToggle: () => patch({ wallCollapsed: !collapsed }),
       className: 'dnb-wall-box',
       tone: 'rose',
-      icon: h(Icon, { name: 'shieldSentinel', size: 13.5, style: { color: activeCount > 0 ? '#ef4444' : '#f87171', flexShrink: 0 } }),
-      title: bi('🚧 自定义拦截规则', '🚧 Custom Block Rules'),
+      icon: h(Icon, { name: 'shieldSentinel', size: 13.5, style: { color: activeCount > 0 ? 'var(--dnb-coral, #f28b88)' : 'var(--dnb-text-3)', flexShrink: 0 } }),
+      title: bi('自定义拦截规则', 'Custom Block Rules'),
       preview: walls.length
         ? `${activeCount} ${bi('生效', 'active')} · ${walls.slice(0, 2).map(w => w.title).join(bi('、', ', '))}`
         : bi('你指定不能碰的文件或命令，AI 一碰就会被直接拦下', 'Files or commands you forbid are blocked before execution'),
@@ -90,7 +191,7 @@ function GuardWallsCard({ view }) {
         'span',
         {
           className: 'dnb-seg-dot',
-          style: activeCount > 0 ? { background: 'rgba(239,68,68,0.18)', color: '#f87171' } : undefined,
+          style: activeCount > 0 ? { background: 'var(--dnb-coral-soft, rgba(242,139,136,0.14))', color: 'var(--dnb-coral, #f28b88)', padding: '1px 6px', borderRadius: 99 } : undefined,
         },
         bi(`${activeCount}/${walls.length} 生效`, `${activeCount}/${walls.length} active`),
       ),
@@ -104,8 +205,20 @@ function GuardWallsCard({ view }) {
               style: { height: 22, padding: '0 8px', fontSize: 10.5 },
               title: activeCount > 0 ? bi('一键暂停所有自定义拦截规则', 'Pause all custom block rules') : bi('一键启用所有自定义拦截规则', 'Enable all custom block rules'),
               onClick: () => void setAllGuardWallsScopeApi(activeCount > 0 ? 'paused' : 'global'),
-            }, activeCount > 0 ? bi('⏸ 全部暂停', '⏸ Pause All') : bi('▶ 全部启用', '▶ Enable All'))
+            }, h(Icon, { name: activeCount > 0 ? 'pause' : 'play', size: 10.5 }), activeCount > 0 ? bi('全部暂停', 'Pause All') : bi('全部启用', 'Enable All'))
           : null,
+        h('button', {
+          type: 'button',
+          className: 'dnb-pill',
+          'data-active': tplOpen ? '1' : '0',
+          style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+          title: bi('查看常用安全拦截模板包与导出导入备份', 'Browse built-in block rule packs & import/export'),
+          onClick: () => {
+            const nextTpl = !tplOpen
+            setTplOpen(nextTpl)
+            if (nextTpl && collapsed) patch({ wallCollapsed: false })
+          },
+        }, h(Icon, { name: 'layers', size: 10.5 }), tplOpen ? bi('收起模板', 'Hide Packs') : bi('模板包', 'Packs')),
         h('button', {
           type: 'button',
           className: 'dnb-pill',
@@ -179,9 +292,9 @@ function GuardWallsCard({ view }) {
           {
             style: {
               padding: '7px 11px',
-              borderBottom: '1px solid rgba(248, 113, 113, 0.35)',
-              background: 'rgba(239, 68, 68, 0.16)',
-              color: '#fca5a5',
+              borderBottom: '1px solid var(--dnb-coral, #f28b88)',
+              background: 'var(--dnb-coral-soft, rgba(242, 139, 136, 0.13))',
+              color: 'var(--dnb-coral, #f28b88)',
               fontSize: 11.5,
               fontWeight: 600,
               display: 'flex',
@@ -192,6 +305,64 @@ function GuardWallsCard({ view }) {
           },
           h('span', null, view.wallMergeError),
           h('span', { style: { cursor: 'pointer', paddingLeft: 6, flexShrink: 0 }, onClick: () => patch({ wallMergeError: '', error: '' }) }, '×'),
+        )
+      : null,
+    tplOpen
+      ? h(
+          'div',
+          { className: 'dnb-tpl-drawer' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+            h('span', { style: { fontSize: 11.5, fontWeight: 500, color: 'var(--dnb-text)', display: 'inline-flex', alignItems: 'center', gap: 5 } },
+              h(Icon, { name: 'layers', size: 12, style: { color: 'var(--dnb-accent)' } }),
+              bi('常用安全拦截模板包（点一下就能加上）', 'One-Click Safety Rule Packs')),
+            h(
+              'div',
+              { style: { display: 'inline-flex', gap: 5 } },
+              h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+                onClick: exportWallsJson,
+              }, h(Icon, { name: 'download', size: 10.5 }), bi('导出规则', 'Export')),
+              h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+                onClick: () => { if (wallImportRef.current) wallImportRef.current.click() },
+              }, h(Icon, { name: 'upload', size: 10.5 }), bi('导入规则', 'Import')),
+              h('input', {
+                ref: wallImportRef,
+                type: 'file',
+                accept: '.json,application/json',
+                style: { display: 'none' },
+                onChange: e => void handleImportWalls(e),
+              }),
+            ),
+          ),
+          h(
+            'div',
+            { className: 'dnb-tpl-grid' },
+            GUARD_WALL_PRESET_PACKS.map(tpl => {
+              const alreadyOn = walls.some(w => w && w.title === tpl.title)
+              return h(
+                'div',
+                { key: tpl.id, className: 'dnb-tpl-card' },
+                h('div', { className: 'dnb-tpl-title' }, tpl.title),
+                h('div', { className: 'dnb-tpl-desc' }, tpl.desc),
+                h('div', { style: { marginTop: 'auto', paddingTop: 4 } },
+                  h('button', {
+                    type: 'button',
+                    className: alreadyOn ? 'dnb-pill' : 'dnb-pill dnb-pill-accent',
+                    style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+                    disabled: alreadyOn,
+                    onClick: () => void applyWallTemplatePack(tpl),
+                  }, alreadyOn ? bi('已启用', 'Added') : bi('+ 一键启用', '+ Enable')),
+                ),
+              )
+            }),
+          ),
         )
       : null,
     formOpen
@@ -304,7 +475,7 @@ function GuardWallsCard({ view }) {
                 width: '100%',
                 fontSize: 11,
                 lineHeight: 1.45,
-                color: w.activeNow ? '#f87171' : 'var(--dnb-text-3)',
+                color: w.activeNow ? 'var(--dnb-coral, #f28b88)' : 'var(--dnb-text-3)',
                 fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
                 wordBreak: 'break-all',
               },
@@ -313,9 +484,9 @@ function GuardWallsCard({ view }) {
               'div',
               { className: 'dnb-wall-actions-row' },
               [
-                { key: 'global', label: '🌐 全局' },
-                { key: 'workspace', label: '📁 本工程' },
-                { key: 'paused', label: '⏸ 暂挂' },
+                { key: 'global', label: bi('全局', 'Global') },
+                { key: 'workspace', label: bi('本工程', 'Project') },
+                { key: 'paused', label: bi('暂挂', 'Paused') },
               ].map(opt =>
                 h('button', {
                   key: opt.key,
@@ -373,13 +544,14 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
   const pinnedCountInCol = list.filter(x => pinnedSet.has(x)).length
 
   const uiLabel = (label === '必须做' || label === '必做事项' || field === 'allowed')
-    ? bi('✅ 必须做', '✅ Must Do')
+    ? bi('必须做', 'Must Do')
     : ((label === '不要做' || label === '禁止红线' || field === 'forbidden')
-        ? bi('🚫 不要做', '🚫 Don\'t Do')
+        ? bi('不要做', 'Don\'t Do')
         : ((label === '注意' || label === '注意事项' || field === 'notes')
-            ? bi('💡 注意', '💡 Watchouts')
+            ? bi('注意', 'Watchouts')
             : label))
   const boundTone = field === 'allowed' ? 'emerald' : (field === 'forbidden' ? 'rose' : 'amber')
+  const softDot = field === 'allowed' ? 'var(--dnb-sage, #63d1b0)' : (field === 'forbidden' ? 'var(--dnb-coral, #f28b88)' : (dot || 'var(--dnb-amber, #f3be6d)'))
   return h(
     AccCard,
     {
@@ -388,10 +560,12 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
       tone: boundTone,
       title: uiLabel,
       headTitle: isColCollapsed ? bi(`展开「${uiLabel}」`, `Expand ${uiLabel}`) : bi(`收起「${uiLabel}」`, `Collapse ${uiLabel}`),
-      icon: h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: dot, flexShrink: 0 } }),
+      icon: h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: softDot, flexShrink: 0 } }),
       count: list.length ? String(list.length) : '',
       badges: pinnedCountInCol > 0
-        ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, `📌${pinnedCountInCol}`)
+        ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber', style: { display: 'inline-flex', alignItems: 'center', gap: 3 } },
+            h(Icon, { name: 'pin', size: 10 }),
+            String(pinnedCountInCol))
         : null,
       preview: list.length ? list.slice(0, 2).join('；') : '还没有规则',
       bodyStyle: { padding: 0 },
@@ -404,8 +578,8 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
               padding: '0 7px',
               fontSize: 10.5,
               color: selected.length >= 2 ? 'var(--dnb-primary-fg, #fff)' : 'var(--dnb-accent)',
-              background: selected.length >= 2 ? 'var(--dnb-primary-bg, #2563eb)' : 'rgba(37, 99, 235, 0.12)',
-              borderColor: 'rgba(37, 99, 235, 0.28)',
+              background: selected.length >= 2 ? 'var(--dnb-primary-bg, #2563eb)' : 'var(--dnb-accent-soft, rgba(159, 142, 255, 0.14))',
+              borderColor: 'var(--dnb-border-strong)',
             },
             disabled: Boolean(store.secBusy),
             title: selected.length >= 2
@@ -422,11 +596,11 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
     field === 'forbidden'
       ? h('div', {
           style: {
-            padding: '6px 11px',
+            padding: '6px 12px',
             fontSize: 11,
             lineHeight: 1.45,
             color: 'var(--dnb-text-3)',
-            background: 'rgba(244, 63, 94, 0.06)',
+            background: 'var(--dnb-coral-soft, rgba(242, 139, 136, 0.08))',
             borderBottom: '1px solid var(--dnb-border)',
           },
         }, bi(
@@ -447,7 +621,7 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
           style: {
             justifyContent: 'space-between',
             gap: 8,
-            background: isPinned ? 'linear-gradient(90deg, rgba(245, 158, 11, 0.08) 0%, transparent 65%)' : undefined,
+            boxShadow: isPinned ? 'inset 2.5px 0 0 var(--dnb-amber, #f3be6d)' : undefined,
           },
         },
         // Front Pushpin Stamp (小图钉戳)
@@ -520,7 +694,7 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
             : null,
           h('button', {
             className: 'dnb-icon-btn dnb-row-actions',
-            style: { width: 22, height: 22, color: '#ff453a' },
+            style: { width: 22, height: 22, color: 'var(--dnb-coral, #f28b88)' },
             title: '删除这条规则',
             onClick: () => void removeBoundRule(field, item),
           }, h(Icon, { name: 'x', size: 12 })),
@@ -606,58 +780,38 @@ export function BoundariesTab({ store: view }) {
     // Section 1: Safety Block (hard pre-tool blocking)
     h(
       'div',
-      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginBottom: 8, flexWrap: 'wrap' } },
+      { className: 'dnb-bound-sec-head' },
       h(
         'div',
         { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flexWrap: 'wrap' } },
-        h('span', { style: { fontSize: 12.5, fontWeight: 700, color: 'var(--dnb-text)' } }, bi('🛡️ 安全拦截', '🛡️ Safety Block')),
+        h('span', { style: { fontSize: 12.5, fontWeight: 550, color: 'var(--dnb-text)', display: 'inline-flex', alignItems: 'center', gap: 5 } },
+          h(Icon, { name: 'shieldCheck', size: 13.5, style: { color: 'var(--dnb-sage, #63d1b0)' } }),
+          bi('安全拦截', 'Safety Block')),
         h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, bi('程序直接拦住，AI 绕不过', 'Enforced before tools run')),
       ),
     ),
     h(
       'div',
       {
-        style: safetyDisabled
-          ? {
-              marginBottom: 8,
-              padding: '8px 10px',
-              borderRadius: 10,
-              border: '1px solid rgba(239, 68, 68, 0.45)',
-              background: 'rgba(239, 68, 68, 0.12)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 8,
-              flexWrap: 'wrap',
-            }
-          : {
-              marginBottom: 8,
-              padding: '8px 10px',
-              borderRadius: 10,
-              border: '1px solid rgba(52, 211, 153, 0.35)',
-              background: 'rgba(16, 185, 129, 0.08)',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              gap: 8,
-              flexWrap: 'wrap',
-            },
+        className: 'dnb-safety-banner',
+        'data-off': safetyDisabled ? '1' : '0',
       },
       h(
         'div',
         { style: { flex: '1 1 200px', minWidth: 0 } },
         h(
           'div',
-          { style: { fontSize: 12, fontWeight: 600, color: safetyDisabled ? '#f87171' : '#34d399' } },
+          { className: 'dnb-safety-banner-title' },
+          h(Icon, { name: safetyDisabled ? 'shieldOff' : 'shieldCheck', size: 13 }),
           safetyDisabled
             ? (!globalSafetyOn
-                ? bi('⚠️ 自动防误操作 · 已关闭（全部对话）', '⚠️ Auto Protection · Off (All Chats)')
-                : bi('⚠️ 自动防误操作 · 已关闭（当前对话）', '⚠️ Auto Protection · Off (This Chat)'))
-            : bi('🛡️ 自动防误操作 · 已开启', '🛡️ Auto Protection · On'),
+                ? bi('自动防误操作 · 已关闭（全部对话）', 'Auto Protection · Off (All Chats)')
+                : bi('自动防误操作 · 已关闭（当前对话）', 'Auto Protection · Off (This Chat)'))
+            : bi('自动防误操作 · 已开启', 'Auto Protection · On'),
         ),
         h(
           'div',
-          { style: { fontSize: 11, color: safetyDisabled ? '#fca5a5' : 'var(--dnb-text-3)', marginTop: 2, lineHeight: 1.4 } },
+          { className: 'dnb-safety-banner-sub' },
           safetyDisabled
             ? bi(
                 `已放行内置拦截${activeWallCount ? `（下方仍有 ${activeWallCount} 条自定义规则生效）` : ''}`,
@@ -679,7 +833,7 @@ export function BoundariesTab({ store: view }) {
                 ? { globalSafetyGuardEnabled: true, ...(!sessionSafetyOn ? { tacticalModes: { safetyGuardEnabled: true } } : {}) }
                 : { tacticalModes: { safetyGuardEnabled: true } },
             ),
-          }, bi('🛡️ 一键开启', '🛡️ Enable'))
+          }, bi('一键开启', 'Enable'))
         : h('button', {
             type: 'button',
             className: 'dnb-pill',
@@ -696,7 +850,7 @@ export function BoundariesTab({ store: view }) {
     // Section 2: Guidelines for AI (prompt-injected rules)
     h(
       'div',
-      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, marginTop: 14, marginBottom: 8, flexWrap: 'wrap' } },
+      { className: 'dnb-bound-sec-head', style: { marginTop: 16 } },
       h(
         'div',
         {
@@ -706,15 +860,19 @@ export function BoundariesTab({ store: view }) {
             `${totalPinnedCount} global rules pinned (click pin to toggle)`,
           ),
         },
-        h('span', { style: { fontSize: 12.5, fontWeight: 700, color: 'var(--dnb-text)' } }, bi('📝 给 AI 的规矩', '📝 Rules for AI')),
+        h('span', { style: { fontSize: 12.5, fontWeight: 550, color: 'var(--dnb-text)', display: 'inline-flex', alignItems: 'center', gap: 5 } },
+          h(Icon, { name: 'listChecks', size: 13.5, style: { color: 'var(--dnb-accent)' } }),
+          bi('给 AI 的规矩', 'Rules for AI')),
         totalPinnedCount > 0
-          ? h('span', { className: 'dnb-acc-count', style: { fontSize: 10.5 } }, `📌 ${totalPinnedCount}`)
+          ? h('span', { className: 'dnb-acc-count', style: { fontSize: 10.5, display: 'inline-flex', alignItems: 'center', gap: 3 } },
+              h(Icon, { name: 'pin', size: 10 }),
+              String(totalPinnedCount))
           : null,
         h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, bi('每轮提醒 AI 照着做', 'Shown to AI every turn')),
       ),
       h(
         'div',
-        { style: { display: 'flex', alignItems: 'center', gap: 5 } },
+        { style: { display: 'flex', alignItems: 'center', gap: 5, marginLeft: 'auto', flexShrink: 0 } },
         h('button', {
           className: 'dnb-pill',
           style: { height: 25, padding: '0 9px', fontSize: 11 },

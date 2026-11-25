@@ -1,8 +1,8 @@
 /**
- * src/client/components/modals/pickers.js — 模型选择、轮数节奏弹出气泡与主动建议胶囊条
+ * src/client/components/modals/pickers.js — 模型选择弹出气泡与主动建议胶囊条
  *
  * 【核心职责】
- *   承载 `ModelPickerPopover`、`PacePickerPopover` 与 `SuggestionBanner`（含 `describeSuggestionMeta`），
+ *   承载 `ModelPickerPopover` 与 `SuggestionBanner`（含 `describeSuggestionMeta`），
  *   提供轻量内联选择气泡与参谋建议逐条/一键采纳控制。
  *
  * 【边界约定】
@@ -10,8 +10,7 @@
  */
 
 import { React, h } from '../../react-runtime.js'
-import { RUN_MODE_OPTIONS } from '../../constants.js'
-import { bi, getUiLangPref, runModeMeta } from '../../i18n.js'
+import { bi } from '../../i18n.js'
 import { patch } from '../../store.js'
 import { clampTitle, fullModelWithChannel, shortAgentName } from '../../utils.js'
 import {
@@ -78,7 +77,7 @@ export function ModelPickerPopover({ view }) {
         className: 'dnb-menu',
         style: {
           position: 'absolute',
-          top: 42,
+          top: 'calc(100% + 4px)',
           right: 12,
           minWidth: 262,
           maxWidth: 316,
@@ -89,9 +88,10 @@ export function ModelPickerPopover({ view }) {
       },
       h('div', { style: { padding: '6px 10px 8px', borderBottom: '1px solid var(--dnb-border)', marginBottom: 4 } },
         h('div', { style: { fontSize: 10.5, fontWeight: 700, color: 'var(--dnb-text-3)', marginBottom: 4 } },
-          bi('🧠 思考深度（拖弧线调整 · 点中间自动）', '🧠 Thinking Depth (drag arc · tap center for Auto)')),
+          bi('思考深度（拖弧线调整 · 点中间自动）', 'Thinking Depth (drag arc · tap center for Auto)')),
         h(EffortFanGauge, {
           compact: true,
+          skin: view.uiSkin,
           value: (view.chiefMeta && view.chiefMeta.thinkingEffort) || 'auto',
           onChange: nextKey => void updateSecConfig({ thinkingEffort: nextKey }),
         }),
@@ -167,94 +167,6 @@ export function ModelPickerPopover({ view }) {
         ? h('div', { style: { padding: '8px 10px', fontSize: 11, color: 'var(--dnb-text-3)' } },
             catalog ? bi('没有其他可用模型，默认跟随主对话。', 'No extra providers found; following main chat.') : bi('正在加载模型…', 'Loading models…'))
         : null,
-      h(
-        'div',
-        { className: 'dnb-lang-inline-bar', onClick: e => e.stopPropagation() },
-        h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 600 } }, bi('🌐 语言', '🌐 Lang')),
-        h(
-          'div',
-          { className: 'dnb-seg', style: { padding: 1.5, flex: '0 0 auto' } },
-          [
-            { key: 'auto', label: bi('自动', 'Auto') },
-            { key: 'zh', label: '中文' },
-            { key: 'en', label: 'EN' },
-          ].map(opt =>
-            h('button', {
-              key: opt.key,
-              type: 'button',
-              className: 'dnb-seg-btn',
-              style: { padding: '2px 7px', fontSize: 10 },
-              'data-active': (view.uiLangPref || getUiLangPref()) === opt.key ? '1' : '0',
-              onClick: () => void updateSecConfig({ uiLang: opt.key }),
-            }, opt.label),
-          ),
-        ),
-      ),
-    ),
-  )
-}
-
-export function PacePickerPopover({ view }) {
-  if (!view.secPaceMenuOpen) return null
-  const meta = view.chiefMeta || {}
-  const currentRunMode = meta.stopped
-    ? 'off'
-    : (meta.runMode || (meta.paceMode === 'auto' ? 'managed' : (meta.paceMode === 'smart' ? 'patrol' : 'off')))
-  return h(
-    React.Fragment,
-    null,
-    h('div', {
-      style: { position: 'fixed', inset: 0, zIndex: 9998 },
-      onClick: () => patch({ secPaceMenuOpen: false }),
-    }),
-    h(
-      'div',
-      {
-        className: 'dnb-menu',
-        style: {
-          position: 'absolute',
-          top: 42,
-          right: 12,
-          width: 280,
-          zIndex: 9999,
-        },
-      },
-      h('div', { style: { padding: '5px 10px 4px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } },
-        bi('选择参谋长的工作方式', 'Choose how Chief runs')),
-      RUN_MODE_OPTIONS.map(opt => {
-        const rm = runModeMeta(opt.key)
-        const active = currentRunMode === opt.key
-        return h(
-          'div',
-          {
-            key: opt.key,
-            className: 'dnb-menu-item',
-            style: {
-              alignItems: 'flex-start',
-              justifyContent: 'space-between',
-              gap: 8,
-              padding: '7px 10px',
-              color: active ? 'var(--dnb-accent)' : undefined,
-            },
-            onClick: () => {
-              if (opt.key === 'managed' && currentRunMode !== 'managed') {
-                patch({ secPaceMenuOpen: false, autoPilotConfirmOpen: true })
-                return
-              }
-              patch({ secPaceMenuOpen: false })
-              void updateSecConfig({
-                runMode: opt.key,
-                ...(opt.key === 'off' ? { paceMode: 'manual', autoPilot: false } : {}),
-              })
-            },
-          },
-          h('div', { style: { minWidth: 0, flex: 1 } },
-            h('div', { style: { fontSize: 12, fontWeight: active ? 600 : 500, marginBottom: 2 } }, rm.label || opt.label),
-            h('div', { style: { fontSize: 10.5, lineHeight: 1.4, color: 'var(--dnb-text-3)', whiteSpace: 'normal' } }, rm.hint || opt.hint),
-          ),
-          active ? h(Icon, { name: 'check', size: 13, style: { marginTop: 2 } }) : null,
-        )
-      }),
     ),
   )
 }

@@ -5,8 +5,9 @@
  */
 
 import { React, h } from '../react-runtime.js'
-import { bi, getUiLangPref, presetList } from '../i18n.js'
-import { store, patch, savePlacementPref } from '../store.js'
+import { DEFAULT_UI_SKIN, UI_SKIN_OPTIONS, EXPECTED_BACKEND_BUILD } from '../constants.js'
+import { bi, getUiLangPref, presetList, chiefDisplayName } from '../i18n.js'
+import { store, patch, savePlacementPref, saveUiSkin } from '../store.js'
 import { clampTitle, shortSession, timeLabel } from '../utils.js'
 import {
   call,
@@ -31,26 +32,24 @@ import {
   requestNotificationPermission,
 } from '../notify.js'
 import { buildSessionReportMarkdown, downloadSessionReportMarkdown } from '../report.js'
-import { Icon, Switch, ObjectiveRadarStrip, AccCard, renderStructuredText } from '../components/common.js'
+import { Icon, Switch, AccCard, renderStructuredText } from '../components/common.js'
 
 export function PlanTab({
   board,
   topSlot = null,
+  bentoMeta = null,
   taskTopologySlot = null,
   renderUnifiedBoard = null,
-  renderStepTasks = null,
-  orphanTasksSlot = null,
-  taskBoardExtra = null,
   onTriggerPlanGraph = null,
 }) {
   const view = store
   const [objective, setObjective] = React.useState(null)
+  const [editingGoal, setEditingGoal] = React.useState(false)
   const [contextMenu, setContextMenu] = React.useState(null)
   const [consultIdx, setConsultIdx] = React.useState(-1)
   const [consultDraft, setConsultDraft] = React.useState('')
   const [secAnswers, setSecAnswers] = React.useState({})
   const [secAskingIdx, setSecAskingIdx] = React.useState(-1)
-  const [newStepText, setNewStepText] = React.useState('')
   const [rejectingGoal, setRejectingGoal] = React.useState(false)
   const [rejectReason, setRejectReason] = React.useState('')
   const [showHandoffPreview, setShowHandoffPreview] = React.useState(false)
@@ -78,7 +77,7 @@ export function PlanTab({
       ...(resetStalePlan ? { resetStalePlan: true } : {}),
     })
     if (res && res.ok) {
-      patch({ notice: setGoal ? '🎯 已设为目标，会帮你盯着做完' : '目标已保存' })
+      patch({ notice: setGoal ? bi('已设为目标，会帮你盯着做完', 'Goal locked') : bi('目标已保存', 'Goal saved') })
     }
   }
 
@@ -156,13 +155,6 @@ export function PlanTab({
     }
   }
 
-  const addNewStep = () => {
-    const clean = newStepText.trim()
-    if (!clean) return
-    setNewStepText('')
-    addStepWithText(clean)
-  }
-
   const renderStepConsult = (i, stepObj = null) => {
     const step = steps[i] || (stepObj ? { text: stepObj.title, done: stepObj.done } : null)
     if (!step) return null
@@ -181,9 +173,9 @@ export function PlanTab({
               style: {
                 padding: '8px 10px',
                 marginTop: 7,
-                borderRadius: 9,
-                background: 'rgba(10, 132, 255, 0.06)',
-                border: '1px solid rgba(10, 132, 255, 0.22)',
+                borderRadius: 10,
+                background: 'var(--dnb-accent-soft, rgba(159, 142, 255, 0.08))',
+                border: '1px solid var(--dnb-border-strong)',
                 display: 'flex',
                 flexDirection: 'column',
                 gap: 6,
@@ -345,180 +337,327 @@ export function PlanTab({
   return h(
     'div',
     { className: 'dnb-view' },
-    topSlot !== null ? topSlot : h(ObjectiveRadarStrip, { board, compact: true }),
+    topSlot || null,
 
-    // ==================== Zone 1: Collapsible Core Objective Card ====================
-    h(
-      AccCard,
-      {
-        open: !objCollapsed,
-        onToggle: () => patch({ planObjCollapsed: !objCollapsed }),
-        className: 'dnb-obj-card',
-        title: bi('核心目标', 'Core Objective'),
-        headTitle: objCollapsed ? bi('展开并修改目标', 'Expand goal') : bi('收起目标卡片', 'Collapse goal'),
-        showPullHint: false,
-        style: (isInterventionLocked || isGoalMode)
-          ? {
-              borderColor: 'rgba(245, 158, 11, 0.45)',
-              boxShadow: '0 0 0 1px rgba(245, 158, 11, 0.10)',
-            }
-          : undefined,
-        bodyStyle: { padding: 0 },
-        badges: (isInterventionLocked || isGoalMode)
-          ? h(
-              React.Fragment,
-              null,
-              isInterventionLocked
-                ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, bi('🔒 已锁定', '🔒 Locked'))
-                : null,
-              isGoalMode
-                ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, bi('🎯 盯着做', '🎯 Goal On'))
-                : null,
-            )
-          : null,
-        headerExtra: !objCollapsed && board && board.objectiveAt && objective === null
-          ? h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', flexShrink: 0 } }, timeLabel(board.objectiveAt))
-          : null,
-        preview: (current || '').trim() ? clampTitle(String(current).trim(), 30) : bi('还没填目标', 'No goal yet'),
-        actions: h(
-          React.Fragment,
-          null,
-          h('button', {
-            type: 'button',
-            className: 'dnb-pill',
-            style: { height: 22, padding: '0 6px', fontSize: 10.5 },
-            title: bi('导出整理好的任务报告 (.md)', 'Export clean task report (.md)'),
-            onClick: () => {
-              const md = buildSessionReportMarkdown({
-                board,
-                secView: view.secView,
-                chiefMeta: view.chiefMeta,
-                subagents: view.subagents,
-                guardWalls: view.guardWalls,
-                sessionId: view.sessionId,
-              })
-              const dl = downloadSessionReportMarkdown(md, view.sessionId)
-              if (dl && dl.ok) {
-                patch({ notice: bi('📄 已导出任务报告：', '📄 Exported report: ') + dl.filename })
-              } else {
-                copyText(md, bi('📄 任务报告已复制到剪贴板', '📄 Report copied to clipboard'))
-              }
-            },
-          }, bi('📄 战报', '📄 Report')),
-          h('button', {
-            type: 'button',
-            className: 'dnb-pill',
-            style: {
-              height: 22,
-              padding: '0 7px',
-              fontSize: 10.5,
-              borderColor: isGoalMode ? 'rgba(245, 158, 11, 0.45)' : 'rgba(10, 132, 255, 0.35)',
-              background: isGoalMode ? 'rgba(245, 158, 11, 0.14)' : 'rgba(10, 132, 255, 0.09)',
-              color: isGoalMode ? '#fbbf24' : 'var(--dnb-accent)',
-              fontWeight: 600,
-            },
-            title: isGoalMode
-              ? bi('取消目标锁定，切回普通模式', 'Exit goal mode')
-              : bi('设为目标后参谋会盯着做，最后由你确认结束', 'Lock goal; ends only after your approval'),
-            onClick: toggleGoalMode,
-          }, isGoalMode ? bi('退出目标', 'Exit Goal') : bi('🎯 设为目标', '🎯 Set Goal')),
-          h('button', {
-            type: 'button',
-            className: 'dnb-pill dnb-pill-accent',
-            style: { height: 22, padding: '0 8px', fontSize: 10.5 },
-            title: bi('按目标让主对话拆成步骤，再派给子代理做', 'Break goal into steps and assign subagents'),
-            onClick: () => {
-              if (typeof onTriggerPlanGraph === 'function') {
-                onTriggerPlanGraph(current)
-                return
-              }
-              const goalText = (current || '').trim()
-              const prompt = (goalText ? `针对长期目标「${goalText.slice(0, 100)}」，` : '')
-                + '请先调用 chief_board 的 plan.set 定好一二三四五顺序推进步骤，再用 graph.plan（填入对应 planStepId 与可选 targetPlanStepId）和 task.dispatch 将就绪节点并行派发给子代理团队。'
-              void askLeadModel(prompt, '拆解任务图')
-              patch({ tab: 'tasks' })
-            },
-          }, h(Icon, { name: 'sparkles', size: 11 }), bi('拆成步骤', 'Break Down')),
-        ),
-      },
-      h('textarea', {
-        className: 'dnb-bare-area',
-        style: isInterventionLocked
-          ? { minHeight: 50, opacity: 0.9, cursor: 'not-allowed', color: 'var(--dnb-text)' }
-          : { minHeight: 50 },
-        readOnly: isInterventionLocked,
-        placeholder: isInterventionLocked
-          ? bi('强介入开启中，目标暂时不能改…', 'Strong intervention on; goal locked…')
-          : bi('写下你想实现的目标，再点右上「🎯 设为目标」…', 'Write your goal, then click "🎯 Set Goal"…'),
-        value: current,
-        onChange: e => { if (!isInterventionLocked) setObjective(e.target.value) },
-        onBlur: () => { if (!isInterventionLocked) saveObjective() },
-        onKeyDown: e => {
-          if (!isInterventionLocked && (e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-            e.preventDefault()
-            saveObjective()
-          }
+    // ==================== Zone 1: Route C Apple Bento Objective & Ring Hero ====================
+    (() => {
+      const hasGoalText = Boolean((current || '').trim())
+      const showTextarea = !isInterventionLocked && (editingGoal || !hasGoalText)
+      const totalSteps = bentoMeta ? Number(bentoMeta.totalSteps || 0) : steps.length
+      const doneSteps = bentoMeta ? Number(bentoMeta.doneSteps || 0) : doneCount
+      const totalTasks = bentoMeta ? Number(bentoMeta.totalTasks || 0) : 0
+      const doneTasks = bentoMeta ? Number(bentoMeta.doneTasks || 0) : 0
+      const blockedTasks = bentoMeta ? Number(bentoMeta.blockedTasks || 0) : 0
+      const runningAgents = bentoMeta ? Number(bentoMeta.runningAgents || 0) : 0
+      const ratio = totalSteps > 0
+        ? doneSteps / totalSteps
+        : (totalTasks > 0 ? doneTasks / totalTasks : 0)
+      const pct = Math.max(0, Math.min(100, Math.round(ratio * 100)))
+      const ringRadius = 25
+      const ringCircumference = +(2 * Math.PI * ringRadius).toFixed(2)
+      const ringOffset = +(ringCircumference * (1 - pct / 100)).toFixed(2)
+      const ringColor = pct >= 100
+        ? 'var(--dnb-sage)'
+        : (blockedTasks > 0 ? 'var(--dnb-coral)' : 'var(--dnb-accent)')
+      const activeStage = bentoMeta && bentoMeta.activeStage ? bentoMeta.activeStage : null
+
+      return h(
+        'div',
+        {
+          className: 'dnb-obj-card dnb-bento-hero',
+          'data-locked': (isInterventionLocked || isGoalMode) ? '1' : '0',
+          'data-collapsed': objCollapsed ? '1' : '0',
         },
-      }),
-      (isInterventionLocked || isGoalMode || objective !== null || (current || '').trim())
-        ? h(
+        // Left Tile: Core Objective + Clean Text/Edit Toggle + Quick Actions
+        h(
+          'div',
+          { className: 'dnb-bento-goal' },
+          h(
             'div',
-            {
-              style: {
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'space-between',
-                gap: 8,
-                padding: (isInterventionLocked || isGoalMode) ? '5px 10px 7px' : '4px 10px 6px',
-                borderTop: '1px solid var(--dnb-border)',
-                fontSize: 11,
-                color: (isInterventionLocked || isGoalMode) ? '#fbbf24' : 'var(--dnb-text-3)',
-              },
-            },
-            (isInterventionLocked || isGoalMode)
-              ? h('span', { style: { overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } },
-                  isInterventionLocked
-                    ? '🔒 强介入开启时目标已锁，关掉强介入才能改'
-                    : '🎯 正在盯着做完，好了会请你点确认')
-              : h('span', null),
+            { className: 'dnb-bento-goal-head' },
             h(
               'div',
-              { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
+              {
+                className: 'dnb-bento-head-left',
+                style: { cursor: 'pointer' },
+                title: objCollapsed ? bi('展开完整 Bento 目标卡', 'Expand Bento goal card') : bi('收起上方详情', 'Collapse card'),
+                onClick: () => patch({ planObjCollapsed: !objCollapsed }),
+              },
+              h(Icon, {
+                name: 'chevron',
+                size: 12,
+                style: {
+                  color: 'var(--dnb-text-3)',
+                  transform: objCollapsed ? 'rotate(0deg)' : 'rotate(90deg)',
+                  transition: 'transform 0.16s ease',
+                  flexShrink: 0,
+                },
+              }),
+              h('span', { className: 'dnb-bento-title' }, bi('核心目标', 'Core Objective')),
+              !objCollapsed && board && board.objectiveAt && objective === null
+                ? h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', flexShrink: 0 } }, timeLabel(board.objectiveAt))
+                : null,
               isInterventionLocked
-                ? h('button', {
-                    type: 'button',
-                    className: 'dnb-pill',
-                    style: { height: 21, padding: '0 8px', fontSize: 10.5, borderColor: 'rgba(245, 158, 11, 0.42)', color: '#fbbf24' },
-                    title: '关掉强介入后就能改目标',
-                    onClick: () => void updateSecConfig({ emergencyStopIntervention: true }),
-                  }, '🔓 关掉强介入并解锁')
+                ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, h(Icon, { name: 'lock', size: 10 }), bi('已锁定', 'Locked'))
                 : null,
-              !isInterventionLocked && objective !== null
-                ? h('button', {
-                    type: 'button',
-                    className: 'dnb-pill dnb-pill-accent',
-                    style: { height: 21, padding: '0 8px', fontSize: 10.5 },
-                    onClick: saveObjective,
-                  }, '保存')
-                : null,
-              (current || '').trim()
-                ? h('button', {
-                    type: 'button',
-                    className: 'dnb-text-filter-btn',
-                    style: { fontSize: 10.5 },
-                    title: '用大白话讲讲这个目标卡在哪、怎么做',
-                    onClick: () => {
-                      void askLeadModel(
-                        `请用通俗易懂的大白话给我解释一下当前核心目标「${String(current).trim().slice(0, 120)}」：核心卡点是什么、整体打算怎么解决？`,
-                        '咨询核心目标',
-                      )
-                    },
-                  }, '解释目标')
+              isGoalMode
+                ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber' }, h(Icon, { name: 'target', size: 10 }), bi('盯着做', 'Goal On'))
                 : null,
             ),
-          )
-        : null,
-    ),
+            h(
+              'div',
+              { className: 'dnb-bento-head-ops', onClick: e => e.stopPropagation() },
+              h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 22, padding: '0 7px', fontSize: 10.5, gap: 4 },
+                title: bi('导出整理好的任务报告 (.md)', 'Export clean task report (.md)'),
+                onClick: () => {
+                  const md = buildSessionReportMarkdown({
+                    board,
+                    secView: view.secView,
+                    chiefMeta: view.chiefMeta,
+                    subagents: view.subagents,
+                    guardWalls: view.guardWalls,
+                    sessionId: view.sessionId,
+                  })
+                  const dl = downloadSessionReportMarkdown(md, view.sessionId)
+                  if (dl && dl.ok) {
+                    patch({ notice: bi('已导出任务报告：', 'Exported report: ') + dl.filename })
+                  } else {
+                    copyText(md, bi('任务报告已复制到剪贴板', 'Report copied to clipboard'))
+                  }
+                },
+              }, h(Icon, { name: 'fileText', size: 11 }), bi('战报', 'Report')),
+              h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: {
+                  height: 22,
+                  padding: '0 8px',
+                  fontSize: 10.5,
+                  gap: 4,
+                  borderColor: isGoalMode ? 'var(--dnb-amber)' : 'var(--dnb-border-strong)',
+                  background: isGoalMode ? 'var(--dnb-amber-soft)' : 'var(--dnb-accent-soft)',
+                  color: isGoalMode ? 'var(--dnb-amber)' : 'var(--dnb-accent)',
+                  fontWeight: 500,
+                },
+                title: isGoalMode
+                  ? bi('取消目标锁定，切回普通模式', 'Exit goal mode')
+                  : bi('设为目标后参谋会盯着做，最后由你确认结束', 'Lock goal; ends only after your approval'),
+                onClick: toggleGoalMode,
+              }, h(Icon, { name: 'target', size: 11 }), isGoalMode ? bi('退出目标', 'Exit Goal') : bi('设为目标', 'Set Goal')),
+              h('button', {
+                type: 'button',
+                className: 'dnb-pill dnb-pill-accent',
+                style: { height: 22, padding: '0 8px', fontSize: 10.5, gap: 4 },
+                title: bi('按目标让主对话拆成步骤，再派给子代理做', 'Break goal into steps and assign subagents'),
+                onClick: () => {
+                  if (typeof onTriggerPlanGraph === 'function') {
+                    onTriggerPlanGraph(current)
+                    return
+                  }
+                  const goalText = (current || '').trim()
+                  const prompt = (goalText ? `针对长期目标「${goalText.slice(0, 100)}」，` : '')
+                    + '请先调用 chief_board 的 plan.set 定好一二三四五顺序推进步骤，再用 graph.plan（填入对应 planStepId 与可选 targetPlanStepId）和 task.dispatch 将就绪节点并行派发给子代理团队。'
+                  void askLeadModel(prompt, '拆解任务图')
+                  patch({ tab: 'tasks' })
+                },
+              }, h(Icon, { name: 'sparkles', size: 11 }), bi('拆成步骤', 'Break Down')),
+            ),
+          ),
+          !objCollapsed
+            ? h(
+                React.Fragment,
+                null,
+                showTextarea
+                  ? h('textarea', {
+                      className: 'dnb-bare-area dnb-bento-textarea',
+                      style: { minHeight: 46 },
+                      autoFocus: editingGoal,
+                      placeholder: bi('写下你想实现的目标，点右上「设为目标」后由参谋盯着推进…', 'Write your goal, then click "Set Goal"…'),
+                      value: current,
+                      onChange: e => { if (!isInterventionLocked) setObjective(e.target.value) },
+                      onBlur: () => {
+                        setEditingGoal(false)
+                        if (!isInterventionLocked) saveObjective()
+                      },
+                      onKeyDown: e => {
+                        if (!isInterventionLocked && (e.ctrlKey || e.metaKey) && e.key === 'Enter') {
+                          e.preventDefault()
+                          setEditingGoal(false)
+                          saveObjective()
+                        } else if (e.key === 'Escape') {
+                          setEditingGoal(false)
+                        }
+                      },
+                    })
+                  : h(
+                      'div',
+                      {
+                        className: 'dnb-bento-goal-text',
+                        title: isInterventionLocked ? bi('强介入开启时目标已锁定', 'Goal locked during intervention') : bi('点击可直接修改目标', 'Click to edit goal'),
+                        onClick: () => {
+                          if (!isInterventionLocked) setEditingGoal(true)
+                        },
+                      },
+                      hasGoalText ? current : bi('还没设置目标，点击这里写下…', 'No objective set — click to write…'),
+                    ),
+                (isInterventionLocked || isGoalMode || objective !== null || hasGoalText)
+                  ? h(
+                      'div',
+                      { className: 'dnb-bento-goal-foot' },
+                      (isInterventionLocked || isGoalMode)
+                        ? h('span', { style: { fontSize: 11, color: 'var(--dnb-amber)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', display: 'inline-flex', alignItems: 'center', gap: 4 } },
+                            h(Icon, { name: isInterventionLocked ? 'lock' : 'target', size: 11 }),
+                            isInterventionLocked
+                              ? bi('强介入中目标已锁，关掉强介入可修改', 'Locked during strong intervention')
+                              : bi('正在盯着做完，好了请你点确认', 'Monitoring until your final sign-off'))
+                        : h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } },
+                            showTextarea ? bi('失焦或 Ctrl+Enter 保存', 'Blur or Ctrl+Enter to save') : bi('点击正文可修改目标', 'Click text to edit')),
+                      h(
+                        'div',
+                        { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
+                        isInterventionLocked
+                          ? h('button', {
+                              type: 'button',
+                              className: 'dnb-pill',
+                              style: { height: 21, padding: '0 8px', fontSize: 10.5, borderColor: 'var(--dnb-amber)', color: 'var(--dnb-amber)' },
+                              title: bi('关掉强介入后就能改目标', 'Turn off intervention to unlock goal'),
+                              onClick: () => void updateSecConfig({ emergencyStopIntervention: true }),
+                            }, bi('关掉强介入并解锁', 'Stop & Unlock'))
+                          : (!showTextarea
+                              ? h('button', {
+                                  type: 'button',
+                                  className: 'dnb-text-filter-btn',
+                                  style: { fontSize: 10.5, gap: 3 },
+                                  onClick: () => setEditingGoal(true),
+                                }, h(Icon, { name: 'edit', size: 10.5 }), bi('修改', 'Edit'))
+                              : null),
+                        !isInterventionLocked && objective !== null
+                          ? h('button', {
+                              type: 'button',
+                              className: 'dnb-pill dnb-pill-accent',
+                              style: { height: 21, padding: '0 8px', fontSize: 10.5 },
+                              onClick: () => {
+                                setEditingGoal(false)
+                                saveObjective()
+                              },
+                            }, bi('保存', 'Save'))
+                          : null,
+                        hasGoalText
+                          ? h('button', {
+                              type: 'button',
+                              className: 'dnb-text-filter-btn',
+                              style: { fontSize: 10.5 },
+                              title: bi('用大白话讲讲这个目标卡在哪、怎么做', 'Explain this goal in plain words'),
+                              onClick: () => {
+                                void askLeadModel(
+                                  `请用通俗易懂的大白话给我解释一下当前核心目标「${String(current).trim().slice(0, 120)}」：核心卡点是什么、整体打算怎么解决？`,
+                                  '咨询核心目标',
+                                )
+                              },
+                            }, bi('解释目标', 'Explain'))
+                          : null,
+                      ),
+                    )
+                  : null,
+              )
+            : h('div', { className: 'dnb-bento-collapsed-preview' }, hasGoalText ? clampTitle(String(current).trim(), 48) : bi('还没填目标', 'No goal yet')),
+        ),
+
+        // Right Tile: Animated Progress Ring + Active Focus Pill + Quick Mode Switch
+        !objCollapsed && bentoMeta
+          ? h(
+              'div',
+              { className: 'dnb-bento-ring-tile' },
+              h(
+                'div',
+                { className: 'dnb-bento-ring-top' },
+                h(
+                  'div',
+                  { className: 'dnb-bento-ring-wrap' },
+                  h(
+                    'svg',
+                    { className: 'dnb-bento-ring', width: 62, height: 62, viewBox: '0 0 62 62', 'aria-label': `${pct}%` },
+                    h('circle', {
+                      cx: 31,
+                      cy: 31,
+                      r: ringRadius,
+                      fill: 'none',
+                      stroke: 'var(--dnb-border-strong)',
+                      strokeWidth: 4.5,
+                    }),
+                    h('circle', {
+                      cx: 31,
+                      cy: 31,
+                      r: ringRadius,
+                      fill: 'none',
+                      stroke: ringColor,
+                      strokeWidth: 4.5,
+                      strokeLinecap: 'round',
+                      strokeDasharray: String(ringCircumference),
+                      strokeDashoffset: String(ringOffset),
+                      transform: 'rotate(-90 31 31)',
+                      style: { transition: 'stroke-dashoffset 0.45s cubic-bezier(0.22, 1, 0.36, 1), stroke 0.25s ease' },
+                    }),
+                  ),
+                  h(
+                    'div',
+                    { className: 'dnb-bento-ring-val' },
+                    h('span', { className: 'dnb-bento-ring-num' }, String(pct)),
+                    h('span', { className: 'dnb-bento-ring-pct' }, '%'),
+                  ),
+                ),
+                h(
+                  'div',
+                  { className: 'dnb-bento-stats' },
+                  h('div', { className: 'dnb-bento-stat-main' },
+                    totalSteps > 0
+                      ? bi(`已完成 ${doneSteps} / ${totalSteps} 步`, `${doneSteps} / ${totalSteps} steps`)
+                      : bi(`已完成 ${doneTasks} / ${totalTasks} 项`, `${doneTasks} / ${totalTasks} tasks`),
+                  ),
+                  h(
+                    'div',
+                    { className: 'dnb-bento-stat-sub' },
+                    [
+                      totalTasks > 0 ? bi(`${totalTasks} 子任务`, `${totalTasks} tasks`) : '',
+                      runningAgents > 0 ? bi(`${runningAgents} 代理在忙`, `${runningAgents} agents`) : '',
+                      blockedTasks > 0 ? bi(`${blockedTasks} 卡住`, `${blockedTasks} blocked`) : '',
+                    ].filter(Boolean).join(' · ') || bi('按步骤稳步推进', 'Stepping cleanly'),
+                  ),
+                  activeStage
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-bento-focus-pill',
+                        title: bi('定位到当前步骤', 'Jump to active step'),
+                        onClick: () => bentoMeta.onJumpActive && bentoMeta.onJumpActive(activeStage.id),
+                      },
+                        h('span', { className: 'dnb-bento-focus-dot' }),
+                        h('span', { className: 'dnb-bento-focus-txt' }, `${bi('第', 'Step ')}${activeStage.index}${bi('步 · ', ' · ')}${clampTitle(activeStage.title, 18)}`),
+                      )
+                    : (pct === 100 && (totalSteps > 0 || totalTasks > 0)
+                        ? h('span', { className: 'dnb-bento-focus-pill', 'data-done': '1' }, h(Icon, { name: 'check', size: 10.5 }), bi('全部步骤已完成', 'All steps done'))
+                        : null),
+                ),
+              ),
+              h(
+                'div',
+                { className: 'dnb-bento-ring-foot' },
+                h(
+                  'span',
+                  { className: 'dnb-bento-foot-hint' },
+                  runningAgents > 0
+                    ? bi(`${runningAgents} 个子代理并发推进中`, `${runningAgents} subagents active`)
+                    : (totalSteps > 0
+                        ? bi('点击下方流光节点查看子代理与详情', 'Click any node below for branches & details')
+                        : bi('写下目标后点击「拆成步骤」或手动加步', 'Write goal then click Break Down')),
+                ),
+              ),
+            )
+          : null,
+      )
+    })(),
 
     // Inline Stale Plan Reset Prompt when Objective changed and old steps exist
     view.planResetPrompt
@@ -529,14 +668,14 @@ export function PlanTab({
             style: {
               marginTop: 8,
               padding: '8px 10px',
-              borderColor: 'rgba(245, 158, 11, 0.42)',
-              background: 'rgba(245, 158, 11, 0.07)',
+              borderColor: 'var(--dnb-amber)',
+              background: 'var(--dnb-amber-soft)',
               display: 'flex',
               flexDirection: 'column',
               gap: 6,
             },
           },
-          h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text)', fontWeight: 600 } },
+          h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text)', fontWeight: 500 } },
             `你改了目标，下面还有 ${steps.length} 条旧步骤：`),
           h(
             'div',
@@ -567,7 +706,9 @@ export function PlanTab({
       ? h(
           'div',
           { className: 'dnb-goal-approval-card', style: { marginTop: 10 } },
-          h('div', { style: { fontSize: 12, fontWeight: 700, color: '#30d158' } }, '🎯 参谋长觉得目标完成了，等你确认结束'),
+          h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-sage)', display: 'flex', alignItems: 'center', gap: 5 } },
+            h(Icon, { name: 'target', size: 13 }),
+            bi('参谋长觉得目标完成了，等你确认结束', 'Chief believes the goal is complete — awaiting approval')),
           goalApproval.summary
             ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text)', lineHeight: 1.5 } }, goalApproval.summary)
             : null,
@@ -626,19 +767,19 @@ export function PlanTab({
                 h('button', {
                   type: 'button',
                   className: 'dnb-primary-btn',
-                  style: { height: 26, padding: '0 11px', fontSize: 11.5, background: '#30d158', color: '#09180e', fontWeight: 700 },
+                  style: { height: 26, padding: '0 11px', fontSize: 11.5, background: 'var(--dnb-sage)', color: '#0d1915', fontWeight: 600, gap: 4 },
                   disabled: view.busy,
                   onClick: () => void approveGoalApi(),
-                }, '✅ 批准结项'),
+                }, h(Icon, { name: 'check', size: 11 }), bi('批准结项', 'Approve')),
                 h('button', {
                   type: 'button',
                   className: 'dnb-pill',
-                  style: { height: 26, padding: '0 9px', fontSize: 11.5 },
+                  style: { height: 26, padding: '0 9px', fontSize: 11.5, gap: 4 },
                   onClick: () => {
                     setRejectingGoal(true)
                     setRejectReason('')
                   },
-                }, '↩ 退回继续'),
+                }, h(Icon, { name: 'refresh', size: 11 }), bi('退回继续', 'Return')),
               ),
         )
       : null,
@@ -647,182 +788,7 @@ export function PlanTab({
     taskTopologySlot || null,
 
     // ==================== Zone 3: Unified Progress Task Board ====================
-    typeof renderUnifiedBoard === 'function'
-      ? renderUnifiedBoard(stepApi)
-      : h(
-          React.Fragment,
-          null,
-          h(
-            'div',
-            { className: 'dnb-section-head', style: { marginTop: 12, alignItems: 'baseline' } },
-            h(
-              'div',
-              { style: { display: 'flex', alignItems: 'baseline', gap: 6 } },
-              h('span', { style: { fontWeight: 600, color: 'var(--dnb-text)' } }, bi('任务进度板', 'Task Board')),
-              h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } }, bi('点任一条可展开详情或提问', 'Click any item for details or Q&A')),
-            ),
-            (steps.length || taskBoardExtra)
-              ? h('span', null, [steps.length ? `${doneCount} / ${steps.length} 步` : '', taskBoardExtra || ''].filter(Boolean).join(' · '))
-              : null,
-          ),
-          (steps.length > 0 || orphanTasksSlot)
-            ? h(
-                React.Fragment,
-                null,
-                steps.length > 0
-                  ? h(
-                      'div',
-                      { className: 'dnb-progress', style: { marginBottom: 8 } },
-                      h('div', { style: { width: (doneCount / steps.length) * 100 + '%', background: '#30d158', transition: 'width 0.3s ease' } }),
-                    )
-                  : null,
-                h(
-                  'div',
-                  { className: 'dnb-group' },
-                  steps.map((step, i) => {
-                    const isConsulting = consultIdx === i
-                    const stepTasksNode = renderStepTasks ? renderStepTasks(step, i) : null
-
-                    return h(
-                      React.Fragment,
-                      { key: step.id || i },
-                      h(
-                        'div',
-                        {
-                          className: 'dnb-cell dnb-cell-hover',
-                          style: { cursor: 'pointer' },
-                          title: '打开菜单：可提问、标完成或删除',
-                          onClick: e => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            setContextMenu({ stepIndex: i, x: e.clientX, y: e.clientY })
-                          },
-                          onContextMenu: e => {
-                            e.preventDefault()
-                            e.stopPropagation()
-                            setContextMenu({ stepIndex: i, x: e.clientX, y: e.clientY })
-                          },
-                        },
-                        h(
-                          'span',
-                          {
-                            className: 'dnb-ring',
-                            title: step.done ? '改回未完成' : '标为已完成',
-                            style: step.done
-                              ? { background: '#30d158', borderColor: '#30d158', cursor: 'pointer' }
-                              : { cursor: 'pointer' },
-                            onClick: e => {
-                              e.preventDefault()
-                              e.stopPropagation()
-                              const next = keepIds(steps)
-                              next[i] = { ...next[i], done: !step.done }
-                              pushSteps(next)
-                            },
-                          },
-                          step.done ? h(Icon, { name: 'check', size: 11 }) : null,
-                        ),
-                        h(
-                          'span',
-                          {
-                            style: {
-                              flex: 1,
-                              fontSize: 12.5,
-                              color: step.done ? 'var(--dnb-text-3)' : 'var(--dnb-text)',
-                              textDecoration: step.done ? 'line-through' : 'none',
-                            },
-                          },
-                          h('span', { className: 'dnb-step-idx-tag' }, `第 ${i + 1} 步`),
-                          step.text || '',
-                        ),
-                        h(
-                          'span',
-                          { className: 'dnb-row-actions', style: { gap: 4 } },
-                          h('button', {
-                            className: 'dnb-pill',
-                            style: { height: 22, padding: '0 7px', fontSize: 11, color: 'var(--dnb-accent)' },
-                            title: '用大白话解释这一步',
-                            onClick: e => {
-                              e.stopPropagation()
-                              void askLeadModel(buildExplainPrompt(step.text, i), '咨询步骤含义')
-                            },
-                          }, '解释'),
-                          h('button', {
-                            className: 'dnb-pill',
-                            'data-active': isConsulting ? '1' : '0',
-                            style: { height: 22, padding: '0 7px', fontSize: 11 },
-                            title: '打开提问框，问这一步不懂的地方',
-                            onClick: e => {
-                              e.stopPropagation()
-                              setConsultIdx(isConsulting ? -1 : i)
-                              setConsultDraft('')
-                            },
-                          }, '提问'),
-                        ),
-                      ),
-                      renderStepConsult(i, step),
-                      stepTasksNode || null,
-                    )
-                  }),
-
-                  orphanTasksSlot || null,
-
-                  h(
-                    'div',
-                    {
-                      className: 'dnb-cell',
-                      style: { padding: '6px 11px', gap: 6 },
-                    },
-                    h(Icon, { name: 'plus', size: 13, style: { color: 'var(--dnb-text-3)' } }),
-                    h('input', {
-                      className: 'dnb-input',
-                      style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1, fontSize: 12 },
-                      placeholder: '加一个新步骤，按回车保存…',
-                      value: newStepText,
-                      onChange: e => setNewStepText(e.target.value),
-                      onKeyDown: e => {
-                        if (e.key === 'Enter' && newStepText.trim()) {
-                          e.preventDefault()
-                          addNewStep()
-                        }
-                      },
-                    }),
-                    newStepText.trim()
-                      ? h('button', {
-                          className: 'dnb-pill dnb-pill-accent',
-                          style: { height: 22, padding: '0 8px', fontSize: 11 },
-                          onClick: addNewStep,
-                        }, '添加')
-                      : null,
-                  ),
-                ),
-              )
-            : h(
-                'div',
-                { className: 'dnb-group' },
-                h('div', { className: 'dnb-empty', style: { padding: '16px 12px 10px' } }, '还没有步骤和任务。AI 列好计划后会自动显示在这里，你也能自己添加'),
-                h(
-                  'div',
-                  {
-                    className: 'dnb-cell',
-                    style: { padding: '6px 11px', gap: 6, borderTop: '1px solid var(--dnb-border)' },
-                  },
-                  h(Icon, { name: 'plus', size: 13, style: { color: 'var(--dnb-text-3)' } }),
-                  h('input', {
-                    className: 'dnb-input',
-                    style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1, fontSize: 12 },
-                    placeholder: '自己加一步，按回车保存…',
-                    value: newStepText,
-                    onChange: e => setNewStepText(e.target.value),
-                    onKeyDown: e => {
-                      if (e.key === 'Enter' && newStepText.trim()) {
-                        e.preventDefault()
-                        addNewStep()
-                      }
-                    },
-                  }),
-                ),
-              ),
-        ),
+    typeof renderUnifiedBoard === 'function' ? renderUnifiedBoard(stepApi) : null,
 
     // ==================== Zone 4: Collapsible Cross-Session Handoff & Chief Deployment ====================
     (() => {
@@ -844,10 +810,10 @@ export function PlanTab({
       const isCustom = Boolean((handoffObj.customText && handoffObj.customText.trim()) || hMeta.isCustom)
       const hSource = isCustom ? (handoffObj.source || hMeta.source || 'human') : 'auto'
       const sourceBadge = hSource === 'human'
-        ? { label: '✏️ 你改过', tone: 'accent' }
+        ? { label: bi('你改过', 'Edited'), tone: 'accent' }
         : hSource === 'chief'
-          ? { label: '✦ 参谋已更新', tone: 'green' }
-          : { label: '自动生成', tone: undefined }
+          ? { label: bi('参谋已更新', 'Chief updated'), tone: 'green' }
+          : { label: bi('自动生成', 'Auto'), tone: undefined }
 
       const buildTransferOpts = () => ({
         deployChief: true,
@@ -861,7 +827,9 @@ export function PlanTab({
           open: !handoffCollapsed,
           onToggle: () => patch({ handoffSectionCollapsed: !handoffCollapsed }),
           className: 'dnb-handoff-card',
-          title: bi('🚀 换新窗口接着做', '🚀 Continue in New Window'),
+          title: h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
+            h(Icon, { name: 'workflow', size: 12.5, style: { color: 'var(--dnb-amber)' } }),
+            bi('换新窗口接着做', 'Continue in New Window')),
           headTitle: handoffCollapsed ? bi('展开换窗口交接设置', 'Expand handoff options') : bi('收起交接设置', 'Collapse handoff options'),
           bodyStyle: { padding: 10, display: 'flex', flexDirection: 'column', gap: 8 },
           badges: h('span', {
@@ -869,14 +837,14 @@ export function PlanTab({
             style: {
               fontSize: 10,
               background: sourceBadge.tone === 'accent'
-                ? 'rgba(10,132,255,0.14)'
+                ? 'var(--dnb-accent-soft)'
                 : sourceBadge.tone === 'green'
-                  ? 'rgba(48,209,88,0.14)'
+                  ? 'var(--dnb-sage-soft)'
                   : undefined,
               color: sourceBadge.tone === 'accent'
                 ? 'var(--dnb-accent)'
                 : sourceBadge.tone === 'green'
-                  ? '#30d158'
+                  ? 'var(--dnb-sage)'
                   : 'var(--dnb-text-3)',
             },
           }, sourceBadge.label),
@@ -888,7 +856,7 @@ export function PlanTab({
               ? bi('已定住，更新不会盖掉你的修改；再点解锁', 'Pinned: updates keep your edits; click to unpin')
               : bi('定住后，自动更新不会覆盖你的内容', 'Stop auto updates from overwriting your edits'),
             onClick: () => void toggleHandoffPin(!isPinned),
-          }, isPinned ? bi('📌 已定住', '📌 Pinned') : bi('📌 定住防改', '📌 Pin')),
+          }, h(Icon, { name: 'pin', size: 10.5 }), isPinned ? bi('已定住', 'Pinned') : bi('定住防改', 'Pin')),
         },
         h(
           'div',
@@ -932,10 +900,10 @@ export function PlanTab({
           h('button', {
             type: 'button',
             className: 'dnb-primary-btn',
-            style: { flex: 1, height: 30, fontSize: 11.5 },
+            style: { flex: 1, height: 30, fontSize: 11.5, gap: 5 },
             disabled: Boolean(view.handoffBusy),
             onClick: () => void requestTransferWithGuard('create', buildTransferOpts()),
-          }, bi('🚀 新开窗口接着做', '🚀 Open New Window & Continue')),
+          }, h(Icon, { name: 'workflow', size: 12 }), bi('新开窗口接着做', 'Open New Window & Continue')),
           h('button', {
             type: 'button',
             className: 'dnb-pill',
@@ -984,7 +952,7 @@ export function PlanTab({
                 patch({ handoffEditing: true, handoffDraft: curText })
                 setShowHandoffPreview(false)
               },
-            }, view.handoffEditing ? '收起编辑' : '✏️ 修改交接单'),
+            }, view.handoffEditing ? bi('收起编辑', 'Done') : h(React.Fragment, null, h(Icon, { name: 'edit', size: 10.5 }), bi('修改交接单', 'Edit Handoff'))),
             h('button', {
               type: 'button',
               className: 'dnb-mini-btn',
@@ -1023,7 +991,7 @@ export function PlanTab({
                   padding: '8px 10px',
                 },
                 value: view.handoffDraft || '',
-                placeholder: '在这里改交接单（支持 Markdown）。点下方「📌 保存并定住」就不怕被覆盖…',
+                placeholder: '在这里改交接单（支持 Markdown）。点下方「保存并定住」就不怕被覆盖…',
                 onChange: e => patch({ handoffDraft: e.target.value }),
               }),
               h(
@@ -1044,9 +1012,9 @@ export function PlanTab({
                 h('button', {
                   type: 'button',
                   className: 'dnb-primary-btn',
-                  style: { height: 26, padding: '0 11px', fontSize: 11, background: '#f59e0b', color: '#111', fontWeight: 700 },
+                  style: { height: 26, padding: '0 11px', fontSize: 11, background: 'var(--dnb-amber)', color: '#181410', fontWeight: 600, gap: 4 },
                   onClick: () => void saveHandoffCustom(view.handoffDraft, true),
-                }, '📌 保存并定住'),
+                }, h(Icon, { name: 'pin', size: 11 }), bi('保存并定住', 'Save & Pin')),
               ),
             )
           : null,
@@ -1143,172 +1111,40 @@ export function PlanTab({
   )
 }
 
-/* ------------------------------------------------------------ Notes Tab */
-
-function NoteEditor({ note }) {
-  const isNew = !note
-  const submit = () => {
-    if (!(store.editNoteTitle || '').trim() && !(store.editNoteBody || '').trim()) return
-    const tags = String(store.editNoteTags || '').split(/[,，]/).map(t => t.trim()).filter(Boolean)
-    const payload = { action: 'note.write', title: store.editNoteTitle, body: store.editNoteBody, tags }
-    if (!isNew) {
-      payload.noteId = note.id
-      if (note.shared) payload.scope = 'shared'
-    }
-    patch({ editNoteId: '', newNote: false, notice: '笔记已保存' })
-    void act(payload)
-  }
-  return h(
-    'div',
-    { className: 'dnb-group', style: { padding: 10, marginBottom: 12 } },
-    h('input', {
-      className: 'dnb-input',
-      placeholder: '标题',
-      value: store.editNoteTitle || '',
-      onChange: e => patch({ editNoteTitle: e.target.value }),
-    }),
-    h('div', { style: { height: 6 } }),
-    h('textarea', {
-      className: 'dnb-area',
-      style: { minHeight: 84 },
-      placeholder: '写点笔记…',
-      value: store.editNoteBody || '',
-      onChange: e => patch({ editNoteBody: e.target.value }),
-      onKeyDown: e => {
-        if ((e.ctrlKey || e.metaKey) && e.key === 'Enter') {
-          e.preventDefault()
-          submit()
-        }
-      },
-    }),
-    h('div', { style: { height: 6 } }),
-    h('input', {
-      className: 'dnb-input',
-      placeholder: '标签（用逗号隔开）',
-      value: store.editNoteTags || '',
-      onChange: e => patch({ editNoteTags: e.target.value }),
-      onKeyDown: e => { if (e.key === 'Enter') { e.preventDefault(); submit() } },
-    }),
-    h(
-      'div',
-      { style: { display: 'flex', justifyContent: 'flex-end', gap: 6, marginTop: 8 } },
-      h('button', { className: 'dnb-pill', onClick: () => patch({ editNoteId: '', newNote: false }) }, '取消'),
-      h('button', {
-        className: 'dnb-primary-btn',
-        disabled: !(store.editNoteTitle || '').trim() && !(store.editNoteBody || '').trim(),
-        onClick: submit,
-      }, '保存'),
-    ),
-  )
-}
-
-function NotesTab({ board }) {
-  const notes = (board && Array.isArray(board.notes)) ? board.notes : []
-  const editing = store.editNoteId ? notes.find(n => n && n.id === store.editNoteId) : null
-
-  return h(
-    'div',
-    { className: 'dnb-view' },
-    h(
-      'div',
-      { style: { display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 } },
-      h('span', { style: { fontSize: 12, color: 'var(--dnb-text-2)', fontWeight: 500 } }, notes.length ? `共 ${notes.length} 篇` : ''),
-      h('button', {
-        className: 'dnb-primary-btn',
-        onClick: () => patch({ newNote: true, editNoteId: '', editNoteTitle: '', editNoteBody: '', editNoteTags: '' }),
-      }, h(Icon, { name: 'plus', size: 13 }), '新建笔记'),
-    ),
-    store.newNote ? h(NoteEditor, { note: null }) : null,
-    editing ? h(NoteEditor, { note: editing }) : null,
-    notes.length
-      ? notes.map(note => {
-          const pinned = note.pinned === true || (note.tags || []).some(t => String(t).toLowerCase() === 'anchor')
-          return h(
-            'div',
-            {
-              key: note.id,
-              className: 'dnb-group dnb-note-card',
-              style: {
-                padding: '10px 12px',
-                borderColor: pinned ? 'rgba(10, 132, 255, 0.35)' : undefined,
-              },
-            },
-            h(
-              'div',
-              { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
-              h(
-                'div',
-                { style: { fontWeight: 600, fontSize: 13, display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
-                pinned ? h(Icon, { name: 'pin', size: 12, style: { color: 'var(--dnb-accent)' } }) : null,
-                note.title || '无标题',
-                (note.tags || []).map(tag => h('span', { className: 'dnb-tag', key: tag }, tag)),
-              ),
-              h(
-                'div',
-                { className: 'dnb-row-actions' },
-                h('button', {
-                  className: 'dnb-icon-btn',
-                  style: { width: 24, height: 24 },
-                  title: pinned ? '取消置顶' : '置顶',
-                  onClick: () => void act({ action: note.pinned ? 'note.unpin' : 'note.pin', noteId: note.id }),
-                }, h(Icon, { name: 'pin', size: 12 })),
-                h('button', {
-                  className: 'dnb-icon-btn',
-                  style: { width: 24, height: 24 },
-                  title: '编辑',
-                  onClick: () => patch({
-                    editNoteId: note.id,
-                    newNote: false,
-                    editNoteTitle: note.title || '',
-                    editNoteBody: note.body || '',
-                    editNoteTags: (note.tags || []).join(', '),
-                    editNoteShared: note.shared === true,
-                  }),
-                }, h(Icon, { name: 'edit', size: 12 })),
-                h('button', {
-                  className: 'dnb-icon-btn',
-                  style: { width: 24, height: 24, color: '#ff453a' },
-                  title: '删除',
-                  onClick: () => {
-                    if (!confirm('确定删掉笔记「' + clampTitle(note.title || note.body, 16) + '」吗？')) return
-                    void act({ action: 'note.remove', noteId: note.id, scope: note.shared ? 'shared' : '' })
-                  },
-                }, h(Icon, { name: 'trash', size: 12 })),
-              ),
-            ),
-            note.body
-              ? h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)', lineHeight: 1.55, whiteSpace: 'pre-wrap', marginTop: 5, maxHeight: 180, overflow: 'auto' } }, note.body)
-              : null,
-            h(
-              'div',
-              { style: { display: 'flex', gap: 8, alignItems: 'center', marginTop: 6, fontSize: 11, color: 'var(--dnb-text-3)' } },
-              note.shared ? h('span', null, '共享') : null,
-              h('span', null, timeLabel(note.updatedAt)),
-            ),
-          )
-        })
-      : h('div', { className: 'dnb-empty' }, '还没有笔记'),
-  )
-}
-
-/* -------------------------------------- Engineering Memory Archive Tab (档案柜) */
+/* -------------------------------------- Settings & Configuration Tab (设置页) */
 
 export function HandoffTab({ view }) {
+  const meta = view.chiefMeta || {}
+  const ledger = (view.secView && view.secView.llmLedger) || meta.llmLedgerSummary || {}
+  const byCat = ledger.byCategory || {}
+  const mr = ledger.managedRun || {}
+
+  const [appearanceOpen, setAppearanceOpen] = React.useState(true)
   const [presetsOpen, setPresetsOpen] = React.useState(true)
   const [placementOpen, setPlacementOpen] = React.useState(true)
-  const [safetyOpen, setSafetyOpen] = React.useState(true)
-  const [notifyOpen, setNotifyOpen] = React.useState(true)
-  const [ledgerOpen, setLedgerOpen] = React.useState(true)
-  const [langOpen, setLangOpen] = React.useState(true)
-  const [guardPrefOpen, setGuardPrefOpen] = React.useState(true)
+  const [safetyOpen, setSafetyOpen] = React.useState(false)
+  const [notifyOpen, setNotifyOpen] = React.useState(false)
+  const [ledgerOpen, setLedgerOpen] = React.useState(() => Boolean(mr.tripped))
+  const [guardPrefOpen, setGuardPrefOpen] = React.useState(false)
   const [notifPerm, setNotifPerm] = React.useState(() => getNotificationPermissionState())
   const [callsDraft, setCallsDraft] = React.useState(null)
+  const savedChiefName = String(
+    (view.chiefMeta && view.chiefMeta.chiefName) || '',
+  ).trim()
+  const [chiefNameDraft, setChiefNameDraft] = React.useState(savedChiefName)
+
+  React.useEffect(() => {
+    setChiefNameDraft(savedChiefName)
+  }, [savedChiefName])
 
   React.useEffect(() => {
     void loadTargets()
   }, [view.sessionId])
 
-  const meta = view.chiefMeta || {}
+  React.useEffect(() => {
+    if (mr.tripped) setLedgerOpen(true)
+  }, [mr.tripped])
+
   const perm = meta.permissionMode || 'advisor'
   const rm = meta.runMode || 'off'
   const activePreset = (perm === 'advisor' && rm === 'off')
@@ -1318,9 +1154,6 @@ export function HandoffTab({ view }) {
         : ((perm === 'chief' && rm === 'managed') ? 'away' : ''))
 
   const presets = presetList()
-  const ledger = (view.secView && view.secView.llmLedger) || meta.llmLedgerSummary || {}
-  const byCat = ledger.byCategory || {}
-  const mr = ledger.managedRun || {}
   const maxCalls = Number(meta.managedBudgetMaxCalls ?? (ledger.budget && ledger.budget.maxCalls) ?? 30)
   const maxTokens = Number(meta.managedBudgetMaxTokens ?? (ledger.budget && ledger.budget.maxTokens) ?? 300000)
 
@@ -1334,6 +1167,7 @@ export function HandoffTab({ view }) {
   const callsPct = maxCalls > 0 ? Math.min(100, Math.round(((mr.calls || 0) / maxCalls) * 100)) : 0
   const tokensPct = maxTokens > 0 ? Math.min(100, Math.round(((mr.tokens || 0) / maxTokens) * 100)) : 0
   const uiLangVal = view.uiLangPref || meta.uiLang || getUiLangPref()
+  const langSummary = uiLangVal === 'en' ? 'English' : (uiLangVal === 'zh' ? '简体中文' : bi('自动', 'Auto'))
   const notifPermLabel = notifPerm === 'granted'
     ? bi('已允许通知', 'Allowed')
     : notifPerm === 'denied'
@@ -1360,17 +1194,146 @@ export function HandoffTab({ view }) {
     ? bi('仅主页面', 'Main Tab Only')
     : (placementMode === 'sidebar' ? bi('仅右侧栏', 'Sidebar Only') : bi('右侧栏 + 主页面', 'Sidebar + Main Tab'))
 
+  const curSkin = (view && view.uiSkin) || DEFAULT_UI_SKIN
+  const curSkinObj = UI_SKIN_OPTIONS.find(o => o.key === curSkin) || UI_SKIN_OPTIONS[0]
+
   return h(
     React.Fragment,
     null,
-    // 1. Scenario Presets
+    // 1. Appearance, Chief Name & Language (Default Expanded)
+    h(
+      AccCard,
+      {
+        open: appearanceOpen,
+        onToggle: () => setAppearanceOpen(v => !v),
+        tone: 'violet',
+        icon: h(Icon, { name: 'palette', size: 13.5, style: { color: 'var(--dnb-accent)' } }),
+        title: bi('外观与基础', 'Appearance & Basics'),
+        badges: h(
+          React.Fragment,
+          null,
+          h('span', { className: 'dnb-acc-badge', 'data-tone': 'accent' }, bi(curSkinObj.zh, curSkinObj.en)),
+          h('span', { className: 'dnb-acc-badge' }, 'v' + EXPECTED_BACKEND_BUILD),
+        ),
+        preview: `${chiefDisplayName(view)} · ${langSummary}`,
+        bodyStyle: { padding: '8px 11px 10px', display: 'flex', flexDirection: 'column', gap: 10 },
+      },
+      // Chief Name
+      h(
+        'div',
+        null,
+        h('div', { style: { fontSize: 11.5, fontWeight: 500, color: 'var(--dnb-text-2)', marginBottom: 5 } },
+          bi('参谋长称呼（对主对话 0 字节隔离，全局生效）', 'Chief Name (global across workspaces, 0-byte isolated)')),
+        h(
+          'div',
+          { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
+          h('input', {
+            className: 'dnb-input',
+            style: { flex: 1, minWidth: 150, height: 28, fontSize: 12 },
+            maxLength: 24,
+            placeholder: bi('起个专属名字（如：哈基米、贾维斯）…', 'Name your Chief (e.g. Hakimi, Jarvis)…'),
+            value: chiefNameDraft,
+            onChange: e => setChiefNameDraft(e.target.value),
+            onKeyDown: e => {
+              if (e.key === 'Enter') {
+                void updateSecConfig({ chiefName: chiefNameDraft.trim() })
+              }
+            },
+          }),
+          h('button', {
+            type: 'button',
+            className: 'dnb-primary-btn',
+            style: { height: 28, padding: '0 10px', fontSize: 11 },
+            onClick: () => void updateSecConfig({ chiefName: chiefNameDraft.trim() }),
+          }, bi('保存', 'Save')),
+          savedChiefName
+            ? h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 28, padding: '0 9px', fontSize: 11 },
+                onClick: () => {
+                  setChiefNameDraft('')
+                  void updateSecConfig({ chiefName: '' })
+                },
+              }, bi('恢复默认', 'Reset'))
+            : null,
+        ),
+      ),
+      // 5 UI Skins
+      h(
+        'div',
+        { style: { paddingTop: 8, borderTop: '1px solid var(--dnb-border)' } },
+        h('div', { style: { fontSize: 11.5, fontWeight: 500, color: 'var(--dnb-text-2)', marginBottom: 6 } },
+          bi('视觉主题（深浅宿主全自动适配）', 'UI Theme (adapts to dark & light hosts)')),
+        h(
+          'div',
+          { className: 'dnb-skin-grid' },
+          UI_SKIN_OPTIONS.map(opt => {
+            const isCur = curSkin === opt.key
+            return h(
+              'button',
+              {
+                key: opt.key,
+                type: 'button',
+                className: 'dnb-skin-card',
+                'data-active': isCur ? '1' : '0',
+                onClick: () => {
+                  saveUiSkin(opt.key)
+                  patch({ notice: bi('已切换视觉主题：', 'Theme switched to: ') + bi(opt.zh, opt.en) })
+                },
+              },
+              h(
+                'div',
+                { className: 'dnb-skin-card-head' },
+                h('span', { className: 'dnb-skin-card-name' }, bi(opt.zh, opt.en)),
+                h(
+                  'div',
+                  { className: 'dnb-skin-swatches' },
+                  opt.swatches.map(hex =>
+                    h('span', { key: hex, className: 'dnb-skin-swatch-dot', style: { background: hex } })),
+                ),
+              ),
+              h('div', { className: 'dnb-skin-card-tag' }, bi(opt.tagZh, opt.tagEn)),
+              h('div', { className: 'dnb-skin-card-desc' }, bi(opt.descZh, opt.descEn)),
+            )
+          }),
+        ),
+      ),
+      // Interface Language
+      h(
+        'div',
+        { style: { paddingTop: 8, borderTop: '1px solid var(--dnb-border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap' } },
+        h('span', { style: { fontSize: 11.5, fontWeight: 500, color: 'var(--dnb-text-2)' } },
+          bi('界面语言 / Language', 'Interface Language / 语言')),
+        h(
+          'div',
+          { className: 'dnb-seg', style: { padding: 2 } },
+          [
+            { key: 'auto', label: bi('自动 Auto', 'Auto') },
+            { key: 'zh', label: '简体中文' },
+            { key: 'en', label: 'English' },
+          ].map(opt =>
+            h('button', {
+              key: opt.key,
+              type: 'button',
+              className: 'dnb-seg-btn',
+              style: { padding: '4px 9px', fontSize: 11 },
+              'data-active': uiLangVal === opt.key ? '1' : '0',
+              onClick: () => void updateSecConfig({ uiLang: opt.key }),
+            }, opt.label),
+          ),
+        ),
+      ),
+    ),
+
+    // 2. Scenario Presets (Default Expanded)
     h(
       AccCard,
       {
         open: presetsOpen,
         onToggle: () => setPresetsOpen(v => !v),
         tone: 'cyan',
-        title: bi('🚀 常用场景预设', '🚀 Scenario Presets'),
+        title: bi('常用场景预设', 'Scenario Presets'),
         badges: h('span', { className: 'dnb-acc-badge', 'data-tone': activePreset ? 'accent' : undefined },
           activePreset
             ? (presets.find(p => p.id === activePreset)?.title || activePreset)
@@ -1401,16 +1364,17 @@ export function HandoffTab({ view }) {
       ),
     ),
 
-    // 1.5 Panel Placement Mode (Main Page Tab / Right Sidebar — GitHub Issue #5)
+    // 3. Panel Placement Mode & Session Opt-In (Default Expanded)
     h(
       AccCard,
       {
         open: placementOpen,
         onToggle: () => setPlacementOpen(v => !v),
         tone: 'indigo',
-        title: bi('🖥️ 面板显示位置（主页面 / 右侧栏）', '🖥️ Panel Placement (Main Page / Sidebar)'),
+        icon: h(Icon, { name: 'sidebarRight', size: 13.5, style: { color: 'var(--dnb-accent)' } }),
+        title: bi('面板显示位置与会话开关', 'Placement & Session Opt-In'),
         badges: h('span', { className: 'dnb-acc-badge', 'data-tone': 'accent' }, placementLabel),
-        preview: bi('支持把参谋系统放到对话顶部主页面或右侧栏', 'Place Chief in main conversation tab or right sidebar'),
+        preview: bi('主页面 / 右侧栏与新会话自动启用控制', 'Main tab vs sidebar and per-session opt-in'),
         bodyStyle: { padding: '8px 11px 10px' },
       },
       h(
@@ -1521,14 +1485,15 @@ export function HandoffTab({ view }) {
       ),
     ),
 
-    // 1.8 Built-in Safety Block Toggles (Per-Session + Global Master Switch — GitHub Issue #6)
+    // 4. Built-in Safety Block Toggles (Default Collapsed)
     h(
       AccCard,
       {
         open: safetyOpen,
         onToggle: () => setSafetyOpen(v => !v),
         tone: 'rose',
-        title: bi('🛡️ 安全拦截（自动防误操作）', '🛡️ Safety Block (Auto Protection)'),
+        icon: h(Icon, { name: effectiveSafetyOn ? 'shieldCheck' : 'shieldOff', size: 13.5, style: { color: effectiveSafetyOn ? 'var(--dnb-sage)' : 'var(--dnb-coral)' } }),
+        title: bi('安全拦截（自动防误操作）', 'Safety Block (Auto Protection)'),
         badges: h('span', { className: 'dnb-acc-badge', 'data-tone': effectiveSafetyOn ? 'green' : 'red' },
           effectiveSafetyOn ? bi('保护开启', 'Active') : bi('已关闭', 'Disabled')),
         preview: effectiveSafetyOn
@@ -1542,7 +1507,7 @@ export function HandoffTab({ view }) {
             { className: 'dnb-cell', style: { justifyContent: 'space-between', gap: 8 } },
             h('div', { style: { minWidth: 0 } },
               h('div', { style: { fontSize: 12 } }, bi('当前对话开启安全拦截（默认开）', 'Enable Safety Block in this chat')),
-              h('div', { style: { fontSize: 10.5, color: globalSafetyOn ? 'var(--dnb-text-3)' : '#f87171', marginTop: 1 } },
+              h('div', { style: { fontSize: 10.5, color: globalSafetyOn ? 'var(--dnb-text-3)' : 'var(--dnb-coral)', marginTop: 1 } },
                 globalSafetyOn
                   ? bi('自动拦住删文件、改项目外文件、读密钥等危险操作', 'Automatically blocks dangerous deletes, out-of-project edits, and secret reads')
                   : bi('已被下方全部对话总开关关闭，请先打开总开关', 'Overridden by the global switch below; turn it on first')),
@@ -1592,14 +1557,14 @@ export function HandoffTab({ view }) {
       ),
     ),
 
-    // 2. Milestone Notifications & Gentle Sound
+    // 5. Milestone Notifications & Gentle Sound (Default Collapsed)
     h(
       AccCard,
       {
         open: notifyOpen,
         onToggle: () => setNotifyOpen(v => !v),
         tone: 'amber',
-        title: bi('🔔 离开电脑时的提醒和声音', '🔔 Away Alerts & Sound'),
+        title: bi('离开电脑时的提醒和声音', 'Away Alerts & Sound'),
         badges: h('span', { className: 'dnb-acc-badge', 'data-tone': notifPerm === 'granted' ? 'green' : undefined }, notifPermLabel),
         preview: meta.notifyEnabled !== false ? bi('重要节点会通知你', 'Alerts on') : bi('通知已关', 'Alerts off'),
         actions: h('button', {
@@ -1607,7 +1572,8 @@ export function HandoffTab({ view }) {
           className: 'dnb-pill',
           style: { height: 21, padding: '0 7px', fontSize: 10.5 },
           title: bi('发一条测试通知，试试弹窗和声音', 'Send a test alert and sound'),
-          onClick: async () => {
+          onClick: async e => {
+            e.stopPropagation()
             if (notifPerm === 'default') {
               const p = await requestNotificationPermission()
               setNotifPerm(p)
@@ -1661,16 +1627,16 @@ export function HandoffTab({ view }) {
       ),
     ),
 
-    // 3. Chief LLM Ledger & Hard Budget Circuit Breaker
+    // 6. Chief LLM Ledger & Hard Budget Circuit Breaker (Default Collapsed unless Tripped)
     h(
       AccCard,
       {
         open: ledgerOpen,
         onToggle: () => setLedgerOpen(v => !v),
         tone: 'violet',
-        title: bi('📊 参谋花费统计与托管上限', '📊 Chief Usage & Budget Cap'),
+        title: bi('参谋花费统计与托管上限', 'Chief Usage & Budget Cap'),
         badges: mr.tripped
-          ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'red' }, bi('🛑 已到上限停下', '🛑 Cap Reached'))
+          ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'red' }, bi('已到上限停下', 'Cap Reached'))
           : h('span', { className: 'dnb-acc-badge' }, `${ledger.totalCalls || 0}${bi('次', '')} · ${fmtTok(ledger.totalTokens || 0)}`),
         preview: `${bi('本轮托管', 'Managed run')} ${mr.calls || 0}/${maxCalls || '∞'}`,
         actions: h('button', {
@@ -1678,8 +1644,11 @@ export function HandoffTab({ view }) {
           className: 'dnb-pill',
           style: { height: 21, padding: '0 7px', fontSize: 10.5 },
           title: bi('清零本轮托管的次数和 Token，恢复可用', 'Reset call and token counts for this run'),
-          onClick: () => void updateSecConfig({ resetManagedBudget: true }),
-        }, bi('↺ 清零计数', '↺ Reset')),
+          onClick: e => {
+            e.stopPropagation()
+            void updateSecConfig({ resetManagedBudget: true })
+          },
+        }, bi('清零计数', 'Reset')),
         bodyStyle: { padding: '8px 11px 10px' },
       },
       mr.tripped
@@ -1687,18 +1656,18 @@ export function HandoffTab({ view }) {
             'div',
             {
               style: {
-                padding: '6px 9px',
+                padding: '7px 10px',
                 marginBottom: 8,
-                borderRadius: 8,
-                border: '1px solid rgba(239, 68, 68, 0.42)',
-                background: 'rgba(239, 68, 68, 0.12)',
-                color: '#f87171',
+                borderRadius: 10,
+                border: '1px solid var(--dnb-border)',
+                borderLeft: '2.5px solid var(--dnb-coral)',
+                background: 'var(--dnb-coral-soft)',
+                color: 'var(--dnb-coral)',
                 fontSize: 11,
                 lineHeight: 1.45,
               },
             },
-            '🛑 ',
-            mr.trippedReason || bi('本轮托管已到上限，自动切回「⏸ 关停」。你手动提问不受影响。', 'Budget limit reached; switched to "⏸ Off". Manual questions still work.'),
+            mr.trippedReason || bi('本轮托管已到上限，自动切回「关停」。你手动提问不受影响。', 'Budget limit reached; switched to "Off". Manual questions still work.'),
           )
         : null,
       h(
@@ -1791,38 +1760,7 @@ export function HandoffTab({ view }) {
       ),
     ),
 
-    // 4. Interface Language Switch
-    h(
-      AccCard,
-      {
-        open: langOpen,
-        onToggle: () => setLangOpen(v => !v),
-        tone: 'blue',
-        title: bi('🌐 界面语言 / Interface Language', '🌐 Interface Language / 界面语言'),
-        preview: uiLangVal === 'en' ? 'English' : (uiLangVal === 'zh' ? '简体中文' : bi('自动跟随主界面', 'Auto (Follow App)')),
-        bodyStyle: { padding: '8px 11px' },
-      },
-      h(
-        'div',
-        { className: 'dnb-seg', style: { padding: 2 } },
-        [
-          { key: 'auto', label: bi('自动 Auto', 'Auto') },
-          { key: 'zh', label: '简体中文' },
-          { key: 'en', label: 'English' },
-        ].map(opt =>
-          h('button', {
-            key: opt.key,
-            type: 'button',
-            className: 'dnb-seg-btn',
-            style: { padding: '4px 8px', fontSize: 11.5 },
-            'data-active': uiLangVal === opt.key ? '1' : '0',
-            onClick: () => void updateSecConfig({ uiLang: opt.key }),
-          }, opt.label),
-        ),
-      ),
-    ),
-
-    // 5. Existing Automation Guard Preferences Card
+    // 7. Automation Guard Preferences (Default Collapsed)
     h(
       AccCard,
       {
@@ -1831,8 +1769,12 @@ export function HandoffTab({ view }) {
         tone: 'emerald',
         title: bi('自动化设置', 'Automation Settings'),
         showPullHint: false,
+        preview: [
+          view.autoInject ? bi('自动附带摘要', 'Auto-summary on') : bi('摘要手动附带', 'Auto-summary off'),
+          view.guardIdle ? bi('防卡住提醒开', 'Idle guard on') : bi('防卡住提醒关', 'Idle guard off'),
+        ].join(' · '),
         headerExtra: h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', fontWeight: 400 } },
-          bi('换窗口交接的功能在「任务」页最下面', 'Handoff options are at the bottom of Tasks')),
+          bi('交接单在任务页底', 'Handoff is at bottom of Tasks')),
         bodyStyle: { padding: 0 },
       },
       h(

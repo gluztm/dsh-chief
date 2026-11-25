@@ -257,6 +257,56 @@ function probeLocalClaudeBinary() {
   return ''
 }
 
+function probeLocalGeminiBinary() {
+  const envBin = String(process.env.DSH_CHIEF_GEMINI_BIN || '').trim()
+  if (envBin && isRegularFileSafe(envBin)) return envBin
+
+  const fromPath = findInSystemPath(platformBinCandidates('gemini'))
+  if (fromPath) return fromPath
+
+  if (process.platform === 'win32') {
+    const localApp = String(process.env.LOCALAPPDATA || '')
+    const appData = String(process.env.APPDATA || '')
+    const home = os.homedir()
+    for (const cand of [
+      appData ? path.join(appData, 'npm', 'gemini.cmd') : '',
+      localApp ? path.join(localApp, 'pnpm', 'gemini.cmd') : '',
+      path.join(home, 'scoop', 'shims', 'gemini.exe'),
+      path.join(home, 'scoop', 'shims', 'gemini.cmd'),
+      path.join(home, '.local', 'bin', 'gemini.exe'),
+      path.join(home, '.local', 'bin', 'gemini'),
+    ]) {
+      if (isRegularFileSafe(cand)) return cand
+    }
+    return ''
+  }
+
+  for (const cand of posixFallbackPaths('gemini')) {
+    if (isRegularFileSafe(cand)) return cand
+  }
+  return ''
+}
+
+function probeLocalGeminiConfig() {
+  const customHome = String(process.env.GEMINI_HOME || '').trim()
+  const candidates = [
+    customHome ? { dir: customHome, label: 'GEMINI_HOME' } : null,
+    { dir: path.join(os.homedir(), '.gemini'), label: '~/.gemini' },
+  ].filter(Boolean)
+  for (const item of candidates) {
+    if (isRegularFileSafe(path.join(item.dir, 'settings.json')) || isDirSafe(item.dir)) {
+      return { configured: true, configLabel: item.label }
+    }
+  }
+  if (String(process.env.GEMINI_API_KEY || '').trim()) {
+    return { configured: true, configLabel: 'GEMINI_API_KEY' }
+  }
+  if (String(process.env.GOOGLE_API_KEY || '').trim()) {
+    return { configured: true, configLabel: 'GOOGLE_API_KEY' }
+  }
+  return { configured: false, configLabel: '' }
+}
+
 function isDirSafe(p) {
   if (!p) return false
   try {
@@ -320,14 +370,16 @@ function probeLocalClaudeConfig() {
   return { configured: false, configLabel: '' }
 }
 
-/** Pure filesystem detection of local external Harness CLIs (`codex`, `claude-code`) with 60s TTL cache. */
+/** Pure filesystem detection of local external Harness CLIs (`codex`, `claude-code`, `gemini`) with 60s TTL cache. */
 export function detectLocalHarnessBinaries({ force = false } = {}) {
   const now = Date.now()
   const envSig = [
     process.env.DSH_CHIEF_CODEX_BIN || '',
     process.env.DSH_CHIEF_CLAUDE_BIN || '',
+    process.env.DSH_CHIEF_GEMINI_BIN || '',
     process.env.CODEX_HOME || '',
     process.env.CLAUDE_CONFIG_DIR || '',
+    process.env.GEMINI_HOME || '',
     process.env.OPENAI_API_KEY ? '1' : '0',
     process.env.AZURE_OPENAI_API_KEY ? '1' : '0',
     process.env.ANTHROPIC_API_KEY ? '1' : '0',
@@ -335,6 +387,8 @@ export function detectLocalHarnessBinaries({ force = false } = {}) {
     process.env.CLAUDE_CODE_OAUTH_TOKEN ? '1' : '0',
     process.env.CLAUDE_CODE_USE_BEDROCK ? '1' : '0',
     process.env.CLAUDE_CODE_USE_VERTEX ? '1' : '0',
+    process.env.GEMINI_API_KEY ? '1' : '0',
+    process.env.GOOGLE_API_KEY ? '1' : '0',
   ].join('|')
   if (!force && envSig === localHarnessCache.envSig && (now - localHarnessCache.at) < 60_000) {
     return localHarnessCache.map
@@ -360,6 +414,17 @@ export function detectLocalHarnessBinaries({ force = false } = {}) {
       transport: 'local-cli',
       configured: claudeCfg.configured,
       configLabel: claudeCfg.configLabel,
+    })
+  }
+  const geminiBin = probeLocalGeminiBinary()
+  if (geminiBin) {
+    const geminiCfg = probeLocalGeminiConfig()
+    found.set('gemini', {
+      provider: 'gemini',
+      binaryPath: geminiBin,
+      transport: 'local-cli',
+      configured: geminiCfg.configured,
+      configLabel: geminiCfg.configLabel,
     })
   }
   localHarnessCache = { at: now, envSig, map: found }
@@ -512,6 +577,7 @@ export function computeBubbleState(deps, rootId, state, directory = null) {
     .map(t => ({ key: t.key, id: t.id, name: t.name, kind: t.kind }))
 
   const activeExternalRuns = []
+  const liveStreams = []
   const runsMap = deps && deps.hostState && deps.hostState.activeBubbleRuns
   if (runsMap instanceof Map) {
     for (const run of runsMap.values()) {
@@ -523,10 +589,29 @@ export function computeBubbleState(deps, rootId, state, directory = null) {
           childId: run.childId || '',
           transport: run.transport || '',
           startedAt: run.startedAt || 0,
+          chainNextProvider: run.chainNextProvider || '',
+        })
+        liveStreams.push({
+          runId: run.id,
+          provider: run.provider,
+          label: run.label,
+          transport: run.transport || '',
+          startedAt: run.startedAt || 0,
+          updatedAt: run.updatedAt || run.startedAt || 0,
+          bytesOut: Number(run.bytesOut) || 0,
+          tail: String(run.tailText || ''),
+          chainNextProvider: run.chainNextProvider || '',
         })
       }
     }
   }
+  const recentRaw = (deps && deps.hostState && Array.isArray(deps.hostState.recentBubbleRuns))
+    ? deps.hostState.recentBubbleRuns
+    : []
+  const recentRuns = recentRaw
+    .filter(r => r && (!r.rootId || r.rootId === rid))
+    .slice(-4)
+    .reverse()
 
   const hasCrossSquad = cluster.length > 1 || enrolledHarnesses.length > 0
   const interventionActive = Boolean(cfg && cfg.tacticalModes && cfg.tacticalModes.intervention && !cfg.stopped)
@@ -550,6 +635,8 @@ export function computeBubbleState(deps, rootId, state, directory = null) {
     hasCrossSquad,
     activeRunners,
     activeExternalRuns,
+    liveStreams,
+    recentRuns,
     enrolledHarnesses: enrolledHarnesses.map(h => {
       const avail = disc.available.find(a => a.provider === h.provider)
       const official = OFFICIAL_HARNESS_CATALOG.find(item => item.provider === h.provider)
@@ -611,6 +698,22 @@ const CODEX_FORWARD_ENV_KEYS = [
   'AZURE_OPENAI_API_VERSION',
 ]
 
+const GEMINI_FORWARD_ENV_KEYS = [
+  'GEMINI_HOME',
+  'GEMINI_API_KEY',
+  'GOOGLE_API_KEY',
+  'GOOGLE_GENAI_USE_VERTEXAI',
+  'GOOGLE_CLOUD_PROJECT',
+  'GOOGLE_CLOUD_LOCATION',
+]
+
+const STREAM_SECRET_RE = /(?:sk-(?:proj-)?[a-zA-Z0-9_-]{12,}|gh[po]_[a-zA-Z0-9]{16,}|github_pat_[a-zA-Z0-9_]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{24,}|Bearer\s+[A-Za-z0-9._~+/=-]{16,}|-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----|-----BEGIN [A-Z ]*PRIVATE KEY-----)/gi
+
+function sanitizeStreamTail(raw = '', maxChars = 3200) {
+  const s = String(raw || '').replace(STREAM_SECRET_RE, '[REDACTED]')
+  return s.length > maxChars ? s.slice(-maxChars) : s
+}
+
 function resolveLocalCliArgv(binaryPath, cliArgs = []) {
   const bin = String(binaryPath || '').trim()
   if (!bin) return cliArgs
@@ -654,7 +757,9 @@ function resolveLocalCliArgv(binaryPath, cliArgs = []) {
 function buildExternalHarnessEnv(provider) {
   const keys = provider === 'claude-code'
     ? CLAUDE_FORWARD_ENV_KEYS
-    : (provider === 'codex' ? CODEX_FORWARD_ENV_KEYS : [])
+    : (provider === 'codex'
+        ? CODEX_FORWARD_ENV_KEYS
+        : (provider === 'gemini' ? GEMINI_FORWARD_ENV_KEYS : []))
   if (!keys.length) return undefined
   const out = {}
   for (const k of keys) {
@@ -673,6 +778,9 @@ const HARNESS_TARGET_ALIASES = {
   'claude-code': 'claude-code',
   codex: 'codex',
   'openai-codex': 'codex',
+  gemini: 'gemini',
+  'gemini-cli': 'gemini',
+  'gemini cli': 'gemini',
 }
 
 /** Resolve an external Harness target identifier or alias against enrolled/available Harnesses in the Bubble. */
@@ -724,6 +832,8 @@ export async function dispatchBubbleHarness(deps, {
   fromLabel = 'DSH 参谋长',
   force = false,
   allowAutoEnroll = true,
+  chainNext = null,
+  _chainDepth = 0,
 } = {}) {
   const rid = String(rootId || 'global').trim() || 'global'
   const cleanProvider = clamp(String(provider || '').trim(), 64)
@@ -732,6 +842,12 @@ export async function dispatchBubbleHarness(deps, {
   if (!cleanProvider || !taskText) {
     return { ok: false, statusCode: 400, error: '需要指定目标 Harness provider 与任务内容' }
   }
+  const nextAlias = chainNext && typeof chainNext === 'object' && chainNext.provider
+    ? (HARNESS_TARGET_ALIASES[String(chainNext.provider).trim().toLowerCase()] || clamp(String(chainNext.provider).trim(), 64))
+    : ''
+  const normChainNext = (_chainDepth < 1 && nextAlias && nextAlias.toLowerCase() !== cleanProvider.toLowerCase())
+    ? { provider: nextAlias, instruction: clamp(String(chainNext.instruction || '').trim(), 600) }
+    : null
 
   const runtime = deps && deps.runtime
   const subagents = runtime && typeof runtime.get === 'function' ? runtime.get('subagents') : null
@@ -815,10 +931,103 @@ export async function dispatchBubbleHarness(deps, {
   if (deps && deps.hostState && !(deps.hostState.activeBubbleRuns instanceof Map)) {
     deps.hostState.activeBubbleRuns = new Map()
   }
+  if (deps && deps.hostState && !Array.isArray(deps.hostState.recentBubbleRuns)) {
+    deps.hostState.recentBubbleRuns = []
+  }
   const activeRuns = deps && deps.hostState ? deps.hostState.activeBubbleRuns : null
+  const recentList = deps && deps.hostState && Array.isArray(deps.hostState.recentBubbleRuns)
+    ? deps.hostState.recentBubbleRuns
+    : null
 
   const ac = new AbortController()
   const runKey = nextId('brun')
+  const startedAt = Date.now()
+  const runEntry = {
+    id: runKey,
+    rootId: rid,
+    provider: cleanProvider,
+    label: taskLabel,
+    childId: runKey,
+    transport: '',
+    startedAt,
+    updatedAt: startedAt,
+    bytesOut: 0,
+    tailText: '',
+    chainNextProvider: normChainNext ? normChainNext.provider : '',
+    abortController: ac,
+    recordedHistory: false,
+  }
+  const recordRunHistory = (status = 'done', rawTail = '') => {
+    if (!recentList || runEntry.recordedHistory) return
+    runEntry.recordedHistory = true
+    const finalTail = sanitizeStreamTail(rawTail || runEntry.tailText || '', 3200)
+    recentList.push({
+      runId: runKey,
+      rootId: rid,
+      provider: cleanProvider,
+      label: taskLabel,
+      status,
+      transport: runEntry.transport || 'local-cli',
+      startedAt: runEntry.startedAt,
+      endedAt: Date.now(),
+      bytesOut: runEntry.bytesOut || Buffer.byteLength(finalTail || '', 'utf8'),
+      tail: finalTail,
+      chainNextProvider: normChainNext ? normChainNext.provider : '',
+    })
+    if (recentList.length > 16) recentList.splice(0, recentList.length - 16)
+  }
+  ac.signal.addEventListener('abort', () => {
+    recordRunHistory('aborted', runEntry.tailText || '已被急停中断')
+  }, { once: true })
+
+  const triggerChainNext = (prevOutText) => {
+    if (!normChainNext || ac.signal.aborted) return
+    const summaryTail = sanitizeStreamTail(prevOutText || runEntry.tailText || '', 1600)
+    const nextInst = normChainNext.instruction || '请基于上一棒产出的结论或改动进行复核、补充或完善。'
+    const relayPrompt = [
+      `[🔗 协同系统 2.0 链式接力 · 上一棒 @${cleanProvider} 已完成并交卷]`,
+      `[上一棒产出摘要]`,
+      summaryTail || '（上一棒已执行完成，无文本输出）',
+      '',
+      '[本棒接力要求]',
+      nextInst,
+    ].join('\n')
+    mutateChiefState((st) => {
+      const ws = ensureWorkspace(st, rid)
+      ws.chat.push({
+        id: nextId('chat'),
+        role: 'chief',
+        kind: 'receipt',
+        text: `- 【🔗 链式接力】\`@${cleanProvider}\` 已交卷，正自动转交 \`@${normChainNext.provider}\` 接着处理（${clamp(nextInst, 80)}）`,
+        actions: [`🔗 转交 @${normChainNext.provider}`],
+        at: Date.now(),
+      })
+      if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+    })
+    void dispatchBubbleHarness(deps, {
+      rootId: rid,
+      provider: normChainNext.provider,
+      text: relayPrompt,
+      label: clamp(`接力: ${taskLabel}`, 48),
+      fromLabel: `@${cleanProvider}`,
+      force: true,
+      allowAutoEnroll: true,
+      _chainDepth: _chainDepth + 1,
+    }).catch((err) => {
+      mutateChiefState((st) => {
+        const ws = ensureWorkspace(st, rid)
+        ws.chat.push({
+          id: nextId('chat'),
+          role: 'chief',
+          kind: 'receipt',
+          text: `- 【⚠️ 链式接力未送达 @${normChainNext.provider}】${String((err && err.message) || err || '未知错误').slice(0, 160)}`,
+          actions: ['⚠️ 接力失败'],
+          at: Date.now(),
+        })
+        if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+      })
+    })
+  }
   const recordDispatchState = (childIdVal, transportLabel) => {
     appendChiefAuditLog(rid, {
       kind: 'bubble_harness_dispatch',
@@ -907,18 +1116,9 @@ export async function dispatchBubbleHarness(deps, {
       delivery: 'parent',
     })
     childId = String((activation && activation.childId) || '') || runKey
-    if (activeRuns) {
-      activeRuns.set(runKey, {
-        id: runKey,
-        rootId: rid,
-        provider: cleanProvider,
-        label: taskLabel,
-        childId,
-        transport: 'dsh-subagent',
-        startedAt: Date.now(),
-        abortController: ac,
-      })
-    }
+    runEntry.childId = childId
+    runEntry.transport = 'dsh-subagent'
+    if (activeRuns) activeRuns.set(runKey, runEntry)
     recordDispatchState(childId, 'dsh-subagent')
 
     if (activation && activation.result && typeof activation.result.then === 'function') {
@@ -927,25 +1127,35 @@ export async function dispatchBubbleHarness(deps, {
           if (ac.signal.aborted) return
           const outText = (resVal && (resVal.text || resVal.output || resVal.summary))
             || (typeof resVal === 'string' ? resVal : '外部 Harness 任务已完成')
+          if (activeRuns) activeRuns.delete(runKey)
+          runEntry.tailText = sanitizeStreamTail(outText, 3200)
+          recordRunHistory('done', outText)
           writeSettlementReceipt(childId, outText, true)
+          triggerChainNext(outText)
         })
         .catch((err) => {
           if (ac.signal.aborted) return
-          writeSettlementReceipt(childId, (err && err.message) || err || '执行失败', false)
+          const errMsg = (err && err.message) || err || '执行失败'
+          if (activeRuns) activeRuns.delete(runKey)
+          runEntry.tailText = sanitizeStreamTail(String(errMsg), 3200)
+          recordRunHistory('error', String(errMsg))
+          writeSettlementReceipt(childId, errMsg, false)
         })
         .finally(() => {
           if (activeRuns) activeRuns.delete(runKey)
         })
     }
   } else {
-    // Path B: Direct invocation of local Codex / Claude Code CLI via DSH host ctx.subprocess
+    // Path B: Direct invocation of local Codex / Claude Code / Gemini CLI via DSH host ctx.subprocess
     usedTransport = 'local-cli'
     const tmpOutFile = cleanProvider === 'codex'
       ? path.join(os.tmpdir(), `dsh-bubble-${cleanProvider}-${runKey}.txt`)
       : ''
     const cliArgs = cleanProvider === 'codex'
       ? ['exec', '--skip-git-repo-check', '--color', 'never', '-C', actionCwd, '-s', 'workspace-write', '-o', tmpOutFile, '-']
-      : ['-p', '--output-format', 'text', '--no-session-persistence']
+      : (cleanProvider === 'gemini'
+          ? ['-p', '']
+          : ['-p', '--output-format', 'text', '--no-session-persistence'])
     const argv = resolveLocalCliArgv(localHit.binaryPath, cliArgs)
 
     const envOverrides = buildExternalHarnessEnv(cleanProvider)
@@ -964,9 +1174,14 @@ export async function dispatchBubbleHarness(deps, {
 
     const outChunks = []
     const errChunks = []
+    let rawTailCombined = ''
     const appendChunk = (arr, byteRefSet, chunk) => {
-      if (byteRefSet.n >= 65536) return
       const s = Buffer.isBuffer(chunk) ? chunk.toString('utf8') : String(chunk || '')
+      runEntry.bytesOut += Buffer.byteLength(s, 'utf8')
+      runEntry.updatedAt = Date.now()
+      rawTailCombined = (rawTailCombined + s).slice(-6000)
+      runEntry.tailText = sanitizeStreamTail(rawTailCombined, 3200)
+      if (byteRefSet.n >= 65536) return
       arr.push(s)
       byteRefSet.n += s.length
     }
@@ -975,21 +1190,12 @@ export async function dispatchBubbleHarness(deps, {
     try { handle.stdout?.on?.('data', chunk => appendChunk(outChunks, outLen, chunk)) } catch {}
     try { handle.stderr?.on?.('data', chunk => appendChunk(errChunks, errLen, chunk)) } catch {}
 
-    if (activeRuns) {
-      activeRuns.set(runKey, {
-        id: runKey,
-        rootId: rid,
-        provider: cleanProvider,
-        label: taskLabel,
-        childId,
-        transport: 'local-cli',
-        startedAt: Date.now(),
-        abortController: ac,
-        terminate: () => {
-          try { if (handle && typeof handle.terminate === 'function') handle.terminate() } catch {}
-        },
-      })
+    runEntry.childId = childId
+    runEntry.transport = 'local-cli'
+    runEntry.terminate = () => {
+      try { if (handle && typeof handle.terminate === 'function') handle.terminate() } catch {}
     }
+    if (activeRuns) activeRuns.set(runKey, runEntry)
     recordDispatchState(childId, 'local-cli')
 
     const cleanTmpOut = () => {
@@ -1010,20 +1216,28 @@ export async function dispatchBubbleHarness(deps, {
           const errTail = errChunks.join('').trim().slice(-400)
           const exitCode = outcome && typeof outcome.exitCode === 'number' ? outcome.exitCode : 0
           if (ac.signal.aborted) return
+          if (activeRuns) activeRuns.delete(runKey)
           if (exitCode !== 0) {
             const diagParts = [outText, errTail].filter(Boolean)
             const combinedDiag = diagParts.join(outText && errTail ? '\n' : '').trim()
             const failMsg = combinedDiag
               ? `退出码 ${exitCode}：${clamp(combinedDiag, 1200)}`
               : `外部 CLI 进程以退出码 ${exitCode} 结束`
+            recordRunHistory('error', combinedDiag || failMsg)
             writeSettlementReceipt(childId, failMsg, false)
           } else {
-            writeSettlementReceipt(childId, outText || '本机 CLI 任务已执行完成', true)
+            const doneMsg = outText || '本机 CLI 任务已执行完成'
+            recordRunHistory('done', outText || rawTailCombined || doneMsg)
+            writeSettlementReceipt(childId, doneMsg, true)
+            triggerChainNext(doneMsg)
           }
         })
         .catch((err) => {
           if (ac.signal.aborted) return
-          writeSettlementReceipt(childId, (err && err.message) || err || 'CLI 调用失败', false)
+          const errMsg = (err && err.message) || err || 'CLI 调用失败'
+          if (activeRuns) activeRuns.delete(runKey)
+          recordRunHistory('error', String(errMsg))
+          writeSettlementReceipt(childId, errMsg, false)
         })
         .finally(() => {
           cleanTmpOut()

@@ -14,13 +14,16 @@ import {
   clearCallTrail,
   clearMidTurnSpin,
   detectMidTurnSpin,
+  isExternalWaitTool,
   isPlanWrite,
   markMidTurnSpinActed,
   noteCallResult,
   noteCallTrail,
+  noteExternalWait,
   noteIntervention,
   notePlanWrite,
   noteToolCall,
+  openWork,
   remainingInterventions,
   shouldGuard,
 } from './idle-guard.js'
@@ -50,6 +53,11 @@ import {
   clamp,
 } from './chief-state.js'
 import { createAutoContinueEngine } from './auto-continue.js'
+import {
+  clearPeerDropState,
+  hasUnansweredIncomingPeerMail,
+  syncPeerDropToWaitingSenders,
+} from './chief-network.js'
 import { bootstrapArchivesFromSharedBoard } from './archives.js'
 import { normalizePermissionMode, buildCapabilityScope, evaluatePreExecuteDefense, evaluateSafetyGuardHardRules, listGuardWalls } from './chief-executor.js'
 import {
@@ -234,7 +242,7 @@ export function createRuntimeHooks(deps) {
         }
       },
       isChiefStopped: (rootId, sid) => isRootStopped(rootId, sid),
-      canAutoContinue: ({ sessionId, rootId, trigger, detail }) => {
+      canAutoContinue: ({ sessionId, rootId, trigger, detail, toolSummary, lastIncomingWorkAt }) => {
         try {
           const key = rootId || sessionId || 'global'
           const state = loadChiefState()
@@ -249,6 +257,53 @@ export function createRuntimeHooks(deps) {
           // Check forbidden bounds and active guard walls BEFORE continuing
           const cwdForCheck = (key && key !== 'global' && getSessionCwd(runtime, key)) || process.cwd()
           const board = key && key !== 'global' ? boardForSession(boardFileFor(key)) : null
+
+          const isChildSession = Boolean(rootId && sessionId && rootId !== sessionId)
+          const isSilentTrigger = String(trigger || '').includes(':silent') || trigger === 'turn/end:no-visible-output' || trigger === 'idle-stall'
+          if (isChildSession) {
+            if (isSilentTrigger) {
+              return { allowed: false, skipped: 'child-subagent-silent', logMessage: '子代理静默/完工收尾，跳过自动续跑以免误唤醒' }
+            }
+            const ident = resolveAgentIdentity(runtime, sessionId, null)
+            const selfName = String((ident && ident.self) || '').toLowerCase()
+            const shortSelf = selfName.split('/').pop()
+            const hasOpenDoingTask = Boolean(board && Array.isArray(board.tasks) && board.tasks.some(t => {
+              if (!t || t.status !== 'doing') return false
+              if (t.session && String(t.session) === sessionId) return true
+              const tSub = String(t.subagent || '').toLowerCase()
+              const tOwn = String(t.owner || '').toLowerCase()
+              return Boolean(selfName && (tSub === selfName || tOwn === selfName || tSub.split('/').pop() === shortSelf || tOwn.split('/').pop() === shortSelf))
+            }))
+            if (!hasOpenDoingTask) {
+              return { allowed: false, skipped: 'child-subagent-done', logMessage: '子代理已无进行中任务（已完工），跳过断线续跑以免状态波动' }
+            }
+          }
+
+          if (!isChildSession && (String(trigger || '').includes(':silent') || trigger === 'turn/end:no-visible-output')) {
+            if (toolSummary && toolSummary.hadExternalWaitTool) {
+              return { allowed: false, skipped: 'waiting-external-tool', logMessage: '本轮已执行外部协同/等待工具，跳过静默断线续跑' }
+            }
+            const rosterNow = key && key !== 'global' ? getSubagentRoster(runtime, key, board) : []
+            const hasRunningChild = rosterNow.some(a => a && a.name !== 'lead' && a.verifiedInstance !== false && !a.stale && a.status === 'running')
+            if (hasRunningChild) {
+              return { allowed: false, skipped: 'waiting-running-subagent', logMessage: '存在运行中子代理，主对话静默等待期跳过断线续跑' }
+            }
+            if (board) {
+              const open = openWork(board)
+              const hasAnyItems = (Array.isArray(board.plan) && board.plan.length > 0) || (Array.isArray(board.tasks) && board.tasks.length > 0)
+              const hasUnansweredPeer = hasUnansweredIncomingPeerMail(state, key)
+              const latestBoardDoneAt = Math.max(0, ...((Array.isArray(board.tasks) ? board.tasks : []).map(t => Number(t && t.updatedAt) || 0)))
+              const hasFreshDirective = Boolean(lastIncomingWorkAt && (Date.now() - lastIncomingWorkAt < 120_000) && (!latestBoardDoneAt || lastIncomingWorkAt > latestBoardDoneAt))
+              if (hasAnyItems && open.total === 0 && !hasUnansweredPeer && !hasFreshDirective) {
+                return { allowed: false, skipped: 'board-all-done', logMessage: '看板任务与步骤已全部完成，跳过静默断线续跑' }
+              }
+              const cursorBlocked = Boolean(board.cursor && String(board.cursor.blocked || '').trim())
+              const allTasksBlocked = open.tasks.length > 0 && open.tasks.every(t => t.status === 'blocked')
+              if (cursorBlocked || allTasksBlocked) {
+                return { allowed: false, skipped: 'waiting-external-blocker', logMessage: '当前处于已登记受阻/外部等待状态，跳过静默断线续跑' }
+              }
+            }
+          }
           const detailSample = `${trigger || ''} ${detail || ''}`.trim()
           const safetyGuardEnabled = !(effCfg && effCfg.tacticalModes && effCfg.tacticalModes.safetyGuardEnabled === false)
           const safetyGuard = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: detailSample, board, safetyGuardEnabled })
@@ -381,6 +436,17 @@ export function createRuntimeHooks(deps) {
               dedupeKey: `rescue:${rootId}:${Math.floor(Date.now() / 5_000)}`,
             })
           }
+        } catch {}
+      },
+      onRecoveryBlocked: ({ rootId, trigger, skipped, reason }) => {
+        try {
+          if (!rootId || rootId === 'global') return
+          syncPeerDropToWaitingSenders(makeChiefDeps(runtime), {
+            droppedRootId: rootId,
+            trigger,
+            skipped,
+            reason: reason || skipped || trigger,
+          })
         } catch {}
       },
     })
@@ -691,10 +757,12 @@ export function createRuntimeHooks(deps) {
         }
         if (event.type === 'turn/start') {
           clearMidTurnSpin(id)
+          if (id === rootIdForAct) clearPeerDropState(rootIdForAct)
         } else if (event.type === 'tool/call' && event.data) {
           const turn = event.data.turn
           noteToolCall(id, turn)
           if (isPlanWrite(event.data.name, event.data.arguments)) notePlanWrite(id, turn)
+          if (isExternalWaitTool(event.data.name, event.data.arguments)) noteExternalWait(id, turn)
           noteCallTrail(id, event.data.name, event.data.arguments)
           handleMidTurnSpinCheck(id, rootIdForAct)
         } else if (event.type === 'tool/result' && event.data) {
@@ -840,6 +908,16 @@ export function createRuntimeHooks(deps) {
           const effCfg = resolveWorkspaceConfig(loadChiefState(), rootId)
           const strongIntervention = Boolean(effCfg.tacticalModes && effCfg.tacticalModes.intervention)
           const maxInterventionTurns = Number(effCfg.tacticalModes && effCfg.tacticalModes.maxInterventionTurns) || 0
+          let hasRunningSubagent = false
+          let hasLinkedPeers = false
+          try {
+            const rosterForGuard = getSubagentRoster(runtime, rootId, board)
+            hasRunningSubagent = Array.isArray(rosterForGuard) && rosterForGuard.some(a =>
+              a && a.name !== 'lead' && a.verifiedInstance !== false && !a.stale && a.status === 'running',
+            )
+            const linkedForGuard = linkedPeersForSession(runtime, rootId || 'global')
+            hasLinkedPeers = Boolean(linkedForGuard && Number(linkedForGuard.linkedPeersCount) > 0)
+          } catch {}
           const verdict = shouldGuard({
             board,
             session: agent && agent.session,
@@ -848,6 +926,8 @@ export function createRuntimeHooks(deps) {
             settings,
             strongIntervention,
             maxInterventionTurns,
+            hasRunningSubagent,
+            hasLinkedPeers,
           })
           if (!verdict) {
             saveBoard(board, file)

@@ -110,6 +110,72 @@ export function notePlanWrite(sessionId, turn) {
   if (set.size > 64) planWriteTurns.set(id, new Set([...set].sort((a, b) => b - a).slice(0, 32)))
 }
 
+const EXTERNAL_WAIT_TOOL_NAMES = new Set(['wait_agent', 'wait_subagent', 'agent_wait'])
+const EXTERNAL_WAIT_BOARD_ACTION = /"action"\s*:\s*"(?:mail\.send|chief\.request|permission\.request|bounds\.propose|inquiry\.reply)"/
+
+function stringifyArgs(argumentsValue) {
+  if (typeof argumentsValue === 'string') return argumentsValue
+  if (argumentsValue !== undefined && argumentsValue !== null && typeof argumentsValue === 'object') {
+    try {
+      return JSON.stringify(argumentsValue)
+    } catch {}
+  }
+  return String(argumentsValue === undefined || argumentsValue === null ? '' : argumentsValue)
+}
+
+/** Whether one tool call initiated external communication or legitimately entered an external wait. */
+export function isExternalWaitTool(name, argumentsValue) {
+  const tool = String(name || '')
+  if (EXTERNAL_WAIT_TOOL_NAMES.has(tool)) return true
+  if (tool !== 'chief_board') return false
+  return EXTERNAL_WAIT_BOARD_ACTION.test(stringifyArgs(argumentsValue))
+}
+
+/** Per-Session id → Set of turns that executed an external wait / cross-session handoff tool. */
+const externalWaitTurns = new Map()
+
+function externalWaitSet(sessionId) {
+  let set = externalWaitTurns.get(sessionId)
+  if (!set) {
+    set = new Set()
+    externalWaitTurns.set(sessionId, set)
+    if (externalWaitTurns.size > 64) {
+      const oldest = externalWaitTurns.keys().next().value
+      if (oldest !== undefined && oldest !== sessionId) externalWaitTurns.delete(oldest)
+    }
+  }
+  return set
+}
+
+/** Record that this turn waited on or contacted an external peer/subagent/chief. */
+export function noteExternalWait(sessionId, turn) {
+  const id = String(sessionId || '')
+  const value = Number(turn)
+  if (!id || !Number.isFinite(value)) return
+  const set = externalWaitSet(id)
+  set.add(value)
+  if (set.size > 64) externalWaitTurns.set(id, new Set([...set].sort((a, b) => b - a).slice(0, 32)))
+}
+
+/** Whether this turn called a cross-session relay or external wait tool. */
+export function turnCalledExternalWait(sessionId, turn, session) {
+  const id = String(sessionId || '')
+  const value = Number(turn)
+  if (id && externalWaitSet(id).has(value)) return true
+  if (!session || typeof session.snapshotEvents !== 'function') return false
+  try {
+    const events = session.snapshotEvents()
+    const from = Math.max(0, events.length - 400)
+    for (let index = events.length - 1; index >= from; index -= 1) {
+      const event = events[index]
+      if (!event || !event.data || event.data.turn !== value) continue
+      if (event.type !== 'tool/call') continue
+      if (isExternalWaitTool(event.data.name, event.data.arguments)) return true
+    }
+  } catch {}
+  return false
+}
+
 /**
  * Same-call repetition is the other way a turn stops moving: it re-runs the
  * failing command, re-writes the same file, re-reads the same path. No plan
@@ -117,6 +183,7 @@ export function notePlanWrite(sessionId, turn) {
  * needs its own ledger, and the only lever the host exposes is a steer.
  */
 const LOOP_REPEAT = 4
+const LOOP_REPEAT_WAIT = 10
 
 /** A session's recent calls, capped, so one long turn cannot grow it forever. */
 const callTrail = new Map()
@@ -126,11 +193,19 @@ const spinState = new Map()
 const MID_TURN_SPIN_COOLDOWN_MS = 15_000
 
 /** Tools whose identical repetition is ordinary, not a stuck loop. */
-const READ_ONLY_ACTION = /"action"\s*:\s*"(?:snapshot|memory\.ask)"/u
+const READ_ONLY_ACTION = /"action"\s*:\s*"(?:snapshot|memory\.ask|mail\.inbox|team\.list|wall\.list|archive\.search|archive\.read)"/u
+const WAIT_POLL_BOARD_ACTION = /"action"\s*:\s*"(?:mail\.inbox|team\.list)"/u
+
+function isWaitPollCall(name, argumentsValue) {
+  const tool = String(name || '')
+  if (EXTERNAL_WAIT_TOOL_NAMES.has(tool)) return true
+  if (tool !== 'chief_board') return false
+  return WAIT_POLL_BOARD_ACTION.test(stringifyArgs(argumentsValue))
+}
 
 function isReadOnlyCall(name, argumentsValue) {
   if (String(name || '') !== 'chief_board') return false
-  return READ_ONLY_ACTION.test(String(argumentsValue === undefined || argumentsValue === null ? '' : argumentsValue))
+  return READ_ONLY_ACTION.test(stringifyArgs(argumentsValue))
 }
 
 function hashCall(name, argumentsValue) {
@@ -200,6 +275,7 @@ export function noteCallTrail(sessionId, name, argumentsValue) {
     fuzzyKey: hashCall(name, fuzzyNormalizeArgs(argumentsValue)),
     name: String(name || ''),
     readOnly: isReadOnlyCall(name, argumentsValue),
+    waitPoll: isWaitPollCall(name, argumentsValue),
     planWrite: isPlanWrite(name, argumentsValue),
     preview: String(argumentsValue === undefined || argumentsValue === null ? '' : argumentsValue).slice(0, 120),
   })
@@ -250,9 +326,11 @@ export function detectMidTurnSpin(sessionId, { strongIntervention = false } = {}
       if (trail[index].key !== last.key) break
       exactCount += 1
     }
-    const exactLimit = last.readOnly ? (strongIntervention ? 6 : LOOP_REPEAT_READ) : (strongIntervention ? 3 : LOOP_REPEAT)
+    const exactLimit = last.waitPoll
+      ? (strongIntervention ? 8 : LOOP_REPEAT_WAIT)
+      : (last.readOnly ? (strongIntervention ? 6 : LOOP_REPEAT_READ) : (strongIntervention ? 3 : LOOP_REPEAT))
     if (exactCount >= exactLimit) {
-      return { kind: 'exact-loop', name: last.name, preview: last.preview, count: exactCount }
+      return { kind: 'exact-loop', name: last.name, preview: last.preview, count: exactCount, waitPoll: Boolean(last.waitPoll) }
     }
     if (!last.planWrite) {
       let fuzzyCount = 0
@@ -260,9 +338,11 @@ export function detectMidTurnSpin(sessionId, { strongIntervention = false } = {}
         if (trail[index].fuzzyKey !== last.fuzzyKey || trail[index].planWrite) break
         fuzzyCount += 1
       }
-      const fuzzyLimit = (strongIntervention ? 4 : 6) + (last.readOnly ? 2 : 0)
+      const fuzzyLimit = last.waitPoll
+        ? (strongIntervention ? 8 : LOOP_REPEAT_WAIT)
+        : ((strongIntervention ? 4 : 6) + (last.readOnly ? 2 : 0))
       if (fuzzyCount >= fuzzyLimit) {
-        return { kind: 'fuzzy-loop', name: last.name, preview: last.preview, count: fuzzyCount }
+        return { kind: 'fuzzy-loop', name: last.name, preview: last.preview, count: fuzzyCount, waitPoll: Boolean(last.waitPoll) }
       }
     }
   }
@@ -323,6 +403,9 @@ export function buildMidTurnSpinNotice(spin, board) {
     )
   }
   if (obj) lines.push(`当前锁定核心目标：${obj}`)
+  if (s.waitPoll) {
+    lines.push('切勿无超时死等外部输入：若等待已久，请设置合理超时，优先用 mail.inbox 检查来信、通过 mail.send 主动催促目标 lead，或用 cursor.set(blocked) 标明外部阻塞后退出等待。')
+  }
   lines.push(
     '请立刻停止同类重复尝试，马上二选一：',
     '1) 读取真实错误/服务状态并切换完全不同的修复路径或参数，同时用 chief_board 更新断点进度；',
@@ -345,8 +428,9 @@ export function turnLooping(sessionId) {
     if (trail[index].key !== last.key) break
     count += 1
   }
-  if (count < (last.readOnly ? LOOP_REPEAT_READ : LOOP_REPEAT)) return null
-  return { name: last.name, preview: last.preview, count }
+  const limit = last.waitPoll ? LOOP_REPEAT_WAIT : (last.readOnly ? LOOP_REPEAT_READ : LOOP_REPEAT)
+  if (count < limit) return null
+  return { name: last.name, preview: last.preview, count, waitPoll: Boolean(last.waitPoll) }
 }
 
 /** Forget the trail after it was acted on, so the next turn starts clean. */
@@ -529,6 +613,15 @@ export function detectPrematurePromiseText(text) {
   return ''
 }
 
+const EXTERNAL_WAIT_TEXT_RE = /(?:等待(?:外部|对方|主对话|子代理|参谋|跨会话|跨窗口|人工|用户|测试|回传|回复|响应|投递|输入|核对|确认|完成)|待(?:对方|外部|子代理|人工|用户|跨会话)(?:回复|回传|响应|输入|确认|核对|完成)|已(?:发信|递话|派发|交由|转交|发出挑战|发送请求)[^\n。！？]{0,24}(?:等待|待回|待确认)|停等(?:外部|对方|平台|人工|回复)|waiting\s+for\s+(?:external|reply|response|input|peer|subagent|agent|user|confirmation)|awaiting\s+(?:external|reply|response|input|peer|subagent|confirmation))/i
+
+/** Whether assistant answer explicitly explains it is waiting for external input/reply/peer completion. */
+export function isWaitingExternalInputText(text) {
+  const clean = String(text || '').replace(/\s+/g, ' ').trim()
+  if (!clean) return false
+  return EXTERNAL_WAIT_TEXT_RE.test(clean)
+}
+
 function resolveEffectiveMaxPerSession(limits, { strongIntervention = false, maxInterventionTurns = 0 } = {}) {
   const baseMax = limits.maxPerSession
   if (!strongIntervention || baseMax === 0) return baseMax
@@ -548,7 +641,7 @@ export function openWork(board) {
  * Decide whether this close is premature. Every condition must hold, so the
  * guard stays out of ordinary conversation.
  */
-export function shouldGuard({ board, session, sessionId, turn, settings, strongIntervention = false, maxInterventionTurns = 0 }) {
+export function shouldGuard({ board, session, sessionId, turn, settings, strongIntervention = false, maxInterventionTurns = 0, hasRunningSubagent = false, hasLinkedPeers = false }) {
   const flags = settings || {}
   if (flags.guardIdle === false) return null
   // One nudge per turn: steering re-opens the same turn, so a second close in
@@ -577,6 +670,17 @@ export function shouldGuard({ board, session, sessionId, turn, settings, strongI
     if (loop) return { kind: 'loop', work, answer, loop }
   }
 
+  // Legitimate wait for external input: must be grounded by an external wait/comms tool call,
+  // an active running child subagent, linked cross-session peers, or an explicit blocked marker.
+  const calledExternalWait = turnCalledExternalWait(sessionId, turn, session)
+  const cursorBlocked = Boolean(board && board.cursor && String(board.cursor.blocked || '').trim())
+  const allOpenTasksBlocked = work.tasks.length > 0 && work.tasks.every(t => t.status === 'blocked')
+  const hasExternalWaitGrounding = calledExternalWait || Boolean(hasRunningSubagent) || Boolean(hasLinkedPeers) || cursorBlocked || allOpenTasksBlocked
+  const waitingExternalText = isWaitingExternalInputText(answer.lastText)
+  if (waitingExternalText && hasExternalWaitGrounding) {
+    return null
+  }
+
   // Shape 5, no-goal: a board run in goal mode with no objective has nothing to
   // steer toward, so every step list written on it is decoration. A turn that
   // set the objective is done with this question, whatever else it did.
@@ -598,15 +702,16 @@ export function shouldGuard({ board, session, sessionId, turn, settings, strongI
   // of what it was doing or what comes next.
   const hasPlan = Array.isArray(board && board.plan) && board.plan.length > 0
   const hasTaskGraph = Array.isArray(board && board.tasks) && board.tasks.length > 0
+  const recordedOrHandedOff = wrote || calledExternalWait
   if (!hasPlan && !hasTaskGraph) {
-    if (!called || wrote) return null
+    if (!called || recordedOrHandedOff) return null
     return { kind: 'no-plan', work, answer }
   }
 
   // A board whose steps are all done and whose tasks are all closed is a clean
   // board: there is no next step to demand, so the plan question is moot.
   if (work.total === 0) return null
-  if (wrote) return null
+  if (recordedOrHandedOff) return null
 
   // Shape 1, idle-close: no tool call at all and a short answer. Shape 2,
   // stale-plan: real work was done, the plan was left where it was. A long
@@ -674,6 +779,9 @@ export function buildNotice({ kind, work, answer, loop, promiseCue, board }) {
   if (tasks.length) lines.push('未完成的待办：', ...tasks)
   if (kind === 'loop') {
     lines.push(
+      ...(loop && loop.waitPoll
+        ? ['切勿无超时死等外部输入：如对方久未回应，请先查 mail.inbox、用 mail.send 主动催促目标 lead，或标 cursor.set(blocked) 后退出等待：']
+        : []),
       '不要再用同一个参数试一遍。收工前换一种做法，或者说清楚为什么走不动：',
       '1) 先读一遍上一次的真实输出（报错原文、文件当前内容、接口返回），别凭印象重试，',
       '2) 换维度：缩小范围、换参数、换工具、换路径 —— 只要输入真变了，结果才可能变，',

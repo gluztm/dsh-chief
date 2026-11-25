@@ -23,7 +23,7 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
 
-      - name: Run CI verification gates (v1.3.0 ~ v1.7.0)
+      - name: Run CI verification gates (v1.3.0 ~ v1.8.0)
         run: npm run test:ci
 
       - name: Dry-run npm package tarball

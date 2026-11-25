@@ -56,7 +56,8 @@ flowchart LR
 - **Two plain concepts instead of overlapping switches**: **🛡️ Safety Block** (enforced by code before tools run) and **📝 Rules for AI** (reminded to AI every turn: Must Do / Don't Do / Notes).
 - **Read-only by default**: Even after enabling a session, Chief observes without touching workspace files until you raise the permission tier (`L0`–`L3`).
 - **Keep prompt tokens low**: Only items pinned to the Cognitive Desktop (up to `2,400 tokens / 6 items`) go into each turn; everything else stays on disk until pulled.
-- **Main tab + right sidebar**: Switch to the top `Chief` tab (hiding the duplicate host input bar), connect local `Codex` / `Claude Code` in Peers, and open subagents as tabs in the existing sidebar.
+- **Main tab + right sidebar + Collaboration 2.0**: Switch to the top `Chief` tab (hiding the duplicate host input bar); click the top-left live GitHub Star button (shows public star count, supports one-click starring inside the panel via local `gh` CLI, and gracefully falls back to opening GitHub); dispatch local `Codex` / `Claude Code` / `Gemini CLI` with live output streams, 2-hop handoff chaining, and verified subagent/peer routing guards.
+- **Global Custom Chief Naming (0-byte `@lead` isolation)**: Name your Chief (e.g. "Hakimi", "Jarvis") in Settings with secret hard-blocking and cross-workspace sync, while keeping `@lead` system prompts strictly untouched; the experimental built-in Private Brain was stripped out cleanly to make way for an external memory plugin interface scoped solely to Chief.
 
 ---
 
@@ -94,7 +95,7 @@ The sidebar has 5 tabs plus a top-bar Settings page:
 | Location | What you do here |
 | :--- | :--- |
 | `Chief` tab | Send instructions in plain language, change permissions or run mode, export reports, or hit `⏹ 急停`. |
-| `Tasks` tab | Lock your Core Objective, inspect Flow Canvas or Org Tree, click `Explain` on steps, and export handoffs. |
+| `Tasks` tab | Lock your Core Objective, inspect unified Beam Flow steps with Subagent dispatch/return curves, click `Explain`, and export handoffs. |
 | `Peers` tab | Coordinate `@lead`, subagents, linked windows, and local `Codex` / `Claude Code` CLIs with dormant scan & cross-window mailbox. |
 | `Archives` tab | Manage the pinned Cognitive Desktop and three folded drawers to control prompt tokens. |
 | `Guards` tab | Top: **🛡️ Safety Block** (built-in auto prevention + `🚧 Custom Block Rules`). Bottom: **📝 Rules for AI** (`✅ Must Do` / `🚫 Don't Do` / `💡 Notes`). |
@@ -108,10 +109,10 @@ The sidebar has 5 tabs plus a top-bar Settings page:
 
 ![01 - Chief Cockpit Overview](assets/screenshots/01-chief-cockpit-overview.png)
 
-### 02 · Flow Canvas & Org Tree (`任务 / Tasks` Tab)
-**In one sentence:** Switch to Flow Canvas for SVG steps and return arcs, or click the Lead card in Org Tree to unfold subagent lanes.
+### 02 · Bento Objective Ring & Unified Beam Flow (`任务 / Tasks` Tab)
+**In one sentence:** Track progress in the top **Bento Objective Ring Card** and follow sequential steps plus subagent **dispatch & return** curves directly inside one unified **Task Beam Flow Canvas**.
 
-- Switch between **Flow Canvas** (SVG step flow, nested subagent branches, and dashed cross-step return arcs) and **Org Tree** (collapsed to a one-line summary until you click the Lead card to show subordinate lanes), above the progress board and `分屏` live stream panes.
+- The top left tile presents crisp, click-to-edit objective text alongside `Report / Set Goal / Break Down`, while the right tile renders a live SVG progress ring and active step focus hint; below, legacy Org Tree and view-mode clutter are removed in favor of a single unified canvas connecting sequential steps with anti-jitter Bezier light beams, attaching subagent satellite pills directly beneath parent steps with SVG dispatch/return curves, and opening an inline detail drawer below on click.
 
 <div align="center">
   <img src="assets/screenshots/02-full-spread-pyramid-dag.png" alt="02 - Subagent DAG View" width="80%" />
@@ -224,9 +225,9 @@ Yes. You can type plain instructions in the composer, switch presets with one cl
 ## Going deeper
 
 <details>
-<summary>Architecture Evolution: From a Sidebar Notepad to a Multi-Agent Management Hub (v1.0 -> v1.7)</summary>
+<summary>Architecture Evolution: From a Sidebar Notepad to a Multi-Agent Management Hub (v1.0 -> v1.8)</summary>
 
-What began as a shared-JSON sidebar scratchpad (`dnb-`) grew through practical daily issues into a zero-dependency control hub with **44 backend modules + 39 frontend modules**:
+What began as a shared-JSON sidebar scratchpad (`dnb-`) grew through practical daily issues into a zero-dependency control hub with **45 backend modules + 39 frontend modules**:
 
 <div align="center">
   <img src="assets/evolution-roadmap-en.gif" alt="dsh-chief v1.0 to v1.7 architecture evolution animation" width="840" />
@@ -239,9 +240,20 @@ flowchart LR
   C --> D["v1.4\nPre-Execute Gate\n9 safety modules · Guard Walls"]
   D --> E["v1.5–v1.6\nContext & Spend\nCognitive Desktop · Flow Canvas · Cap"]
   E --> F["v1.7\nMain Tab + Opt-In\nMain view · Local CLIs · Safety toggles"]
+  F --> G["v1.8\nTheme System + Collab 2.0 + Star Sync\n5 UI skins · Beam Flow · Gemini CLI"]
 ```
 
 Read the full story and tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md`)](EVOLUTION.en.md)**.
+
+</details>
+
+<details>
+<summary>What Changed in v1.8.0</summary>
+
+- **Built-In 5-Skin Theme System & Whole-Plugin Visual Overhaul**: Defaults to **Frosted Mist** (`glass`) with 1-click switching across **Warm Paper / Botanical / Starlight / Classic Clean** in both the header palette popover and Settings (dark & light host adaptive); replaces harsh red/green boxes, raw emojis, and the rainbow gauge with fine hairline threads, crisp vector icons, and a skin-morphing thinking effort dial (`EffortFanGauge`).
+- **Global Custom Chief Naming (0-byte `@lead` isolation) & Private Brain Stripped**: Name your Chief in Settings with secret hard-blocking and Chief-only prompt injection (strictly 0-byte isolated from `@lead`); the experimental built-in Private Brain module and views have been cleanly removed ahead of a dedicated Chief-only external memory plugin bridge.
+- **Live GitHub Star Sync & Guard-Wall Preset Packs**: Displays public star counts in the top-left header, supports 1-click direct starring/sync inside the panel via local `gh` CLI (or graceful web fallback when `gh` is absent/unauthenticated) with zero intrusion on plain chats, and adds 4 one-click Guard-Wall preset packs.
+- **Collaboration 2.0 & Anti-Self-Steer Routing Fixes**: Adds local `Gemini CLI` auto-discovery + badge, redacted real-time stream output logs, and 2-hop handoff chaining (`depth <= 1`); also fixes phantom subagent `id` inheritance from `t.session`, Path B self-steer boomerangs into `@lead`, premature `readBy` marking, and same-name `peer-session` collisions.
 
 </details>
 
@@ -342,28 +354,28 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 </details>
 
 <details>
-<summary>Modular Architecture (v1.7.0)</summary>
+<summary>Modular Architecture (v1.8.0)</summary>
 
-**In one sentence:** `44` backend modules and `39` frontend modules run locally under `~/.dsh/chief/`, staying completely inactive in unactivated chats and injecting only the Cognitive Desktop in active ones.
+**In one sentence:** `45` backend modules and `39` frontend modules run locally under `~/.dsh/chief/`, staying completely inactive in unactivated chats, injecting only the Cognitive Desktop into main chat, and keeping custom Chief naming & GitHub Star sync strictly 0-byte isolated from `@lead`.
 
-`v1.7.0` spans **44 backend modules (including 9 isolated modules under `pkg/safety/`) and 39 frontend modules** with no `export let` bindings and no circular imports. See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and contracts.
+`v1.8.0` spans **45 backend modules (including 9 isolated modules under `pkg/safety/` and `github-star.js`) and 39 frontend modules** (including the 5-skin `styles/skins.js` theme engine, zero `export let`, acyclic) for easy audit and maintenance. See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and contracts.
 
 ```mermaid
 flowchart TB
-  subgraph UI["DSH Right Sidebar & Main Tab (client.js <- 39 modules · 5 Tabs + ⚙️ Settings)"]
-    T1["Chief Tab (180° Effort Gauge · Dismissible Overlay · Report Export)"]
-    T2["Tasks Tab (Core Objective · Flow Canvas / Org Tree · Task Board · Handoff)"]
-    T3["Peers Tab (Collab Arena · Local Codex/Claude CLI · Cross-Window Mail · Subagent Tabs)"]
-    T5["Archives Tab (2400T Cognitive Desktop · Hooked Drawers)"]
-    T6["Guards Tab (Guard Walls · Blocker Removal · 📌 Redlines)"]
-    T7["Top-Bar ⚙️ Settings (Presets · Placement & Shortcut Toggles · Opt-In · Safety Guard · Budget · zh/en)"]
+  subgraph UI["DSH Right Sidebar & Main Tab (client.js <- 39 modules · 5 Tabs + 5 UI Skins)"]
+    T1["Chief Tab (Skin-Morphing Effort Dial · Dismissible Overlay · Report Export)"]
+    T2["Tasks Tab (Bento Objective · Unified Beam Flow + Subagent Dispatch/Return · Handoff)"]
+    T3["Peers Tab (Collab 2.0 · Codex/Claude/Gemini CLI · Live Stream · Verified Routing)"]
+    T5["Archives (2400T Cognitive Desktop · 3-Tier Drawers · 0-byte Cold Vault)"]
+    T6["Guards Tab (Guard Walls · 4 Preset Packs · Calm Hairline Rules)"]
+    T7["Header (Live GitHub Star Sync · Theme Palette Switcher · Custom Chief Naming · Settings)"]
   end
 
-  subgraph Core["Local Backend & Safety Kernel (Zero External Deps · 44 modules)"]
+  subgraph Core["Local Backend & Safety Kernel (Zero External Deps · 45 modules)"]
     Hot["Hot Boards: ~/.dsh/chief/board.json & boards/<sid>.json\nCross-process / worker_threads O_EXCL locks"]
     Walls["Guard Walls: ~/.dsh/chief/guard-walls.json\nGlobal / Workspace / Paused"]
     Cold["3-Tier Vaults: 2400T Cognitive Desktop + Hooked Drawers + 0-byte Cold Vault"]
-    Bus["Runtime & Safety: safety/*.js + Off/Patrol/Managed + Audit"]
+    Bus["Runtime & Safety: safety/*.js + github-star.js + Off/Patrol/Managed + Audit"]
   end
 
   subgraph Agents["Host Execution Agents (tools/pre-execute gate)"]

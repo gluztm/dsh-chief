@@ -1,90 +1,19 @@
 /**
- * src/client/styles/tasks-flow.js — 顺序工作流拓扑、组织展开树与任务板亮色适配样式
+ * src/client/styles/tasks-flow.js — 工作流任务抽屉、子代理卡片、交卷角标与任务板亮色适配样式
  *
  * 【核心职责】
- *   承载 v1.6.0 顺序工作流管道拓扑（Steps ①→⑤、分支连线与交卷回流箭头）、浅色主题适配、
- *   可展开 Attention-First 组织树、里程碑进度圆点、已完成折叠组与兼容任务板助手样式。
+ *   承载统一「任务流光图」详情抽屉内的步骤卡（`.dnb-flow-stage`）、子代理分支卡、
+ *   跨步回指角标、已完成子任务折叠组与 DSH 浅色主题适配规则。
  *
  * 【边界约定】
- *   - 紧跟 `styles/tasks-pyramid.js` 与全局样式加载，负责流程拓扑与新版任务板样式。
+ *   - 仅保留合一流光视图及其内联详情抽屉所需的活跃样式规则。
  */
 
 export const CSS_TASKS_FLOW = `
-  /* Sequential Workflow Pipeline Topology (v1.6.0) */
   .dnb-flow-root {
     display: flex;
     flex-direction: column;
     gap: 8px;
-  }
-  .dnb-flow-rail {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 8px;
-    flex-wrap: wrap;
-    padding: 8px 10px;
-    border-radius: 11px;
-    background: var(--dnb-card);
-    border: 1px solid var(--dnb-border);
-  }
-  .dnb-flow-miles {
-    display: flex;
-    align-items: center;
-    gap: 3px;
-    flex-wrap: wrap;
-  }
-  .dnb-flow-mile {
-    width: 21px;
-    height: 21px;
-    border-radius: 999px;
-    border: 1.5px solid rgba(148, 163, 184, 0.45);
-    background: rgba(148, 163, 184, 0.14);
-    color: var(--dnb-text-2);
-    font-size: 10.5px;
-    font-weight: 700;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    cursor: pointer;
-    transition: transform 0.14s ease, border-color 0.16s ease, background 0.16s ease;
-  }
-  .dnb-flow-mile:hover { transform: scale(1.08); }
-  .dnb-flow-mile[data-status="done"] {
-    background: #16a34a;
-    border-color: #16a34a;
-    color: #ffffff;
-  }
-  .dnb-flow-mile[data-status="doing"] {
-    background: rgba(59, 130, 246, 0.22);
-    border-color: #3b82f6;
-    color: #93c5fd;
-    box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.2);
-  }
-  .dnb-flow-mile[data-status="blocked"] {
-    background: rgba(239, 68, 68, 0.22);
-    border-color: #ef4444;
-    color: #fca5a5;
-  }
-  .dnb-flow-rail-link {
-    width: 10px;
-    height: 2px;
-    border-radius: 2px;
-    background: rgba(148, 163, 184, 0.35);
-    display: inline-block;
-  }
-  .dnb-flow-rail-link[data-done="1"] {
-    background: #22c55e;
-  }
-  .dnb-flow-rail-meta {
-    font-size: 11px;
-    color: var(--dnb-text-2);
-    font-weight: 500;
-  }
-  .dnb-flow-pipeline {
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
   }
   .dnb-flow-stage {
     position: relative;
@@ -607,15 +536,11 @@ export const CSS_TASKS_FLOW = `
     border-color: rgba(220, 38, 38, 0.46);
     border-left-color: #dc2626;
   }
-  html[data-ds-theme-source="light"] .dnb-flow-mile[data-status="doing"],
-  html[data-ds-theme="light"] .dnb-flow-mile[data-status="doing"],
   html[data-ds-theme-source="light"] .dnb-flow-step-num[data-status="doing"],
   html[data-ds-theme="light"] .dnb-flow-step-num[data-status="doing"] {
     color: #1d4ed8;
     background: #dbeafe;
   }
-  html[data-ds-theme-source="light"] .dnb-flow-mile[data-status="blocked"],
-  html[data-ds-theme="light"] .dnb-flow-mile[data-status="blocked"],
   html[data-ds-theme-source="light"] .dnb-flow-step-num[data-status="blocked"],
   html[data-ds-theme="light"] .dnb-flow-step-num[data-status="blocked"] {
     color: #b91c1c;
@@ -669,153 +594,6 @@ export const CSS_TASKS_FLOW = `
     background: #fef2f2;
   }
 
-  /* Compact Expandable Organization Tree (collapsed by default, pull-open on click) */
-  .dnb-topo-pyr-wrap .dnb-pyr-apex {
-    border-radius: 10px;
-    padding: 8px 10px;
-    box-shadow: none;
-  }
-  .dnb-pyr-tree-list {
-    position: relative;
-    margin-left: 11px;
-    padding-left: 13px;
-    margin-top: 6px;
-    border-left: 2px solid var(--dnb-border-strong, rgba(155, 155, 168, 0.45));
-    display: flex;
-    flex-direction: column;
-    gap: 5px;
-    min-width: 0;
-  }
-  .dnb-pyr-tree-list[data-tone="doing"],
-  .dnb-pyr-tree-list[data-tone="live"] {
-    border-left-color: rgba(10, 132, 255, 0.65);
-  }
-  .dnb-pyr-tree-list[data-tone="blocked"] {
-    border-left-color: rgba(255, 69, 58, 0.68);
-  }
-  .dnb-pyr-tree-node {
-    padding: 6px 9px;
-    border-radius: 9px;
-  }
-  .dnb-pyr-tree-node .dnb-pyr-node-head {
-    display: flex;
-    align-items: center;
-    gap: 6px;
-    min-width: 0;
-    cursor: pointer;
-    user-select: none;
-  }
-  .dnb-pyr-node-title {
-    flex: 1 1 auto;
-    min-width: 0;
-    font-size: 12px;
-    font-weight: 500;
-    color: var(--dnb-text);
-    line-height: 1.38;
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
-  }
-  .dnb-pyr-node-title[data-done="1"] {
-    color: var(--dnb-text-3);
-    text-decoration: line-through;
-  }
-  .dnb-pyr-tree-node[data-open="1"] .dnb-pyr-node-title {
-    white-space: normal;
-    word-break: break-word;
-  }
-  .dnb-pyr-detail-pill {
-    font-size: 10px;
-    font-weight: 500;
-    color: var(--dnb-text-3);
-    padding: 1px 6px;
-    border-radius: 99px;
-    background: var(--dnb-fill);
-    white-space: nowrap;
-    flex-shrink: 0;
-  }
-  .dnb-pyr-tree-node:hover .dnb-pyr-detail-pill,
-  .dnb-pyr-tree-node[data-open="1"] .dnb-pyr-detail-pill {
-    color: var(--dnb-text-2);
-  }
-  .dnb-pyr-node-detail {
-    margin-top: 7px;
-    padding-top: 7px;
-    border-top: 1px dashed var(--dnb-border);
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-  }
-
-  /* Compact Milestone Progress Dots inside Visual Work Topology Header */
-  .dnb-acc-mini-miles {
-    display: inline-flex;
-    align-items: center;
-    flex-wrap: wrap;
-    gap: 0;
-  }
-  .dnb-acc-mini-mile {
-    width: 18px;
-    height: 18px;
-    border-radius: 999px;
-    border: 1.5px solid var(--dnb-border-strong);
-    background: var(--dnb-fill);
-    color: var(--dnb-text-2);
-    font-size: 10px;
-    font-weight: 700;
-    display: inline-flex;
-    align-items: center;
-    justify-content: center;
-    padding: 0;
-    cursor: pointer;
-    transition: transform 0.12s ease, box-shadow 0.12s ease;
-  }
-  .dnb-acc-mini-mile:hover { transform: scale(1.12); }
-  .dnb-acc-mini-mile[data-status="done"] {
-    background: #16a34a;
-    border-color: #22c55e;
-    color: #ffffff;
-    box-shadow: 0 0 0 2px rgba(34, 197, 94, 0.18);
-  }
-  .dnb-acc-mini-mile[data-status="doing"] {
-    background: rgba(59, 130, 246, 0.28);
-    border-color: #60a5fa;
-    color: #93c5fd;
-    box-shadow: 0 0 0 3px rgba(59, 130, 246, 0.24);
-  }
-  .dnb-acc-mini-mile[data-status="blocked"] {
-    background: rgba(239, 68, 68, 0.24);
-    border-color: #f87171;
-    color: #fca5a5;
-    box-shadow: 0 0 0 3px rgba(239, 68, 68, 0.20);
-  }
-  .dnb-acc-mini-mile[data-status="blocked"] {
-    background: rgba(239, 68, 68, 0.22);
-    border-color: #ef4444;
-    color: #f87171;
-  }
-  .dnb-acc-mini-link {
-    width: 10px;
-    height: 2px;
-    background: rgba(148, 163, 184, 0.35);
-    border-radius: 2px;
-  }
-  .dnb-acc-mini-link[data-done="1"] {
-    background: #22c55e;
-  }
-
-  /* Constrained Topology Viewport inside Drawer */
-  .dnb-topo-canvas-wrap .dnb-canvas {
-    min-height: 200px;
-    max-height: 360px;
-    border-radius: 10px;
-  }
-  .dnb-topo-pyr-wrap {
-    max-height: 400px;
-    overflow: auto;
-    padding-right: 2px;
-  }
-
   /* Done Subtasks Foldable Group inside Active Stages */
   .dnb-flow-done-fold {
     margin-top: 2px;
@@ -848,60 +626,8 @@ export const CSS_TASKS_FLOW = `
     color: var(--dnb-text-3);
   }
 
-  /* Merged Task Board legacy fallback helpers */
-  .dnb-topo-zone {
-    display: flex;
-    flex-direction: column;
-  }
-  .dnb-step-idx-tag {
-    display: inline-block;
-    font-size: 10px;
-    font-weight: 700;
-    padding: 0 5px;
-    margin-right: 6px;
-    border-radius: 5px;
-    background: var(--dnb-fill);
-    color: var(--dnb-text-2);
-    vertical-align: 1px;
-  }
-  .dnb-step-subtasks {
-    margin: 0 8px 6px 24px;
-    padding-left: 8px;
-    border-left: 2px solid rgba(59, 130, 246, 0.32);
-    border-radius: 0 0 8px 0;
-    background: rgba(148, 163, 184, 0.04);
-  }
-  .dnb-step-subtasks .dnb-cell {
-    border-top: 1px solid var(--dnb-border);
-  }
-  .dnb-step-subtasks .dnb-cell:first-child {
-    border-top: none;
-  }
-  .dnb-orphan-tasks {
-    border-top: 1px dashed var(--dnb-border);
-  }
-  .dnb-orphan-tasks-head {
-    font-size: 10.5px;
-    font-weight: 600;
-    color: var(--dnb-text-3);
-    padding: 6px 12px 2px;
-  }
   html[data-ds-theme-source="light"] .dnb-acc-card:not([data-tone]) {
     background: #ffffff;
-  }
-  html[data-ds-theme-source="light"] .dnb-fleet-card,
-  html[data-ds-theme="light"] .dnb-fleet-card,
-  [data-ds-theme-source="light"] .dnb-fleet-card,
-  html[data-ds-theme-source="light"] .dnb-acc-card.dnb-fleet-card,
-  html[data-ds-theme="light"] .dnb-acc-card.dnb-fleet-card,
-  [data-ds-theme-source="light"] .dnb-acc-card.dnb-fleet-card {
-    background: linear-gradient(135deg, #ecfeff 0%, #ffffff 42%);
-    border-left-color: #0891b2;
-  }
-  html[data-ds-theme-source="light"] .dnb-acc-card.dnb-fleet-card > .dnb-acc-head,
-  html[data-ds-theme="light"] .dnb-acc-card.dnb-fleet-card > .dnb-acc-head,
-  [data-ds-theme-source="light"] .dnb-acc-card.dnb-fleet-card > .dnb-acc-head {
-    background: linear-gradient(90deg, rgba(6, 182, 212, 0.14), rgba(6, 182, 212, 0.02) 55%, transparent);
   }
   html[data-ds-theme-source="light"] .dnb-acc-card.dnb-obj-card,
   html[data-ds-theme="light"] .dnb-acc-card.dnb-obj-card,
@@ -913,17 +639,6 @@ export const CSS_TASKS_FLOW = `
   html[data-ds-theme="light"] .dnb-acc-card.dnb-obj-card > .dnb-acc-head,
   [data-ds-theme-source="light"] .dnb-acc-card.dnb-obj-card > .dnb-acc-head {
     background: linear-gradient(90deg, rgba(37, 99, 235, 0.13), rgba(37, 99, 235, 0.02) 58%, transparent);
-  }
-  html[data-ds-theme-source="light"] .dnb-acc-card.dnb-topo-card,
-  html[data-ds-theme="light"] .dnb-acc-card.dnb-topo-card,
-  [data-ds-theme-source="light"] .dnb-acc-card.dnb-topo-card {
-    background: linear-gradient(135deg, #ecfdf5 0%, #ffffff 42%);
-    border-left-color: #059669;
-  }
-  html[data-ds-theme-source="light"] .dnb-acc-card.dnb-topo-card > .dnb-acc-head,
-  html[data-ds-theme="light"] .dnb-acc-card.dnb-topo-card > .dnb-acc-head,
-  [data-ds-theme-source="light"] .dnb-acc-card.dnb-topo-card > .dnb-acc-head {
-    background: linear-gradient(90deg, rgba(16, 185, 129, 0.13), rgba(16, 185, 129, 0.02) 55%, transparent);
   }
   html[data-ds-theme-source="light"] .dnb-acc-card.dnb-board-card,
   html[data-ds-theme="light"] .dnb-acc-card.dnb-board-card,
@@ -947,18 +662,6 @@ export const CSS_TASKS_FLOW = `
   [data-ds-theme-source="light"] .dnb-acc-card.dnb-handoff-card > .dnb-acc-head {
     background: linear-gradient(90deg, rgba(245, 158, 11, 0.14), rgba(245, 158, 11, 0.02) 55%, transparent);
   }
-  html[data-ds-theme-source="light"] .dnb-acc-mini-mile[data-status="doing"],
-  html[data-ds-theme="light"] .dnb-acc-mini-mile[data-status="doing"],
-  [data-ds-theme-source="light"] .dnb-acc-mini-mile[data-status="doing"] {
-    background: #dbeafe;
-    border-color: #2563eb;
-    color: #1d4ed8;
-  }
-  html[data-ds-theme-source="light"] .dnb-pyr-detail-pill,
-  html[data-ds-theme="light"] .dnb-pyr-detail-pill,
-  [data-ds-theme-source="light"] .dnb-pyr-detail-pill {
-    background: rgba(15, 23, 42, 0.06);
-  }
   html[data-ds-theme-source="light"] .dnb-acc-badge[data-tone="amber"],
   html[data-ds-theme="light"] .dnb-acc-badge[data-tone="amber"],
   [data-ds-theme-source="light"] .dnb-acc-badge[data-tone="amber"] {
@@ -968,20 +671,11 @@ export const CSS_TASKS_FLOW = `
   html[data-ds-theme-source="light"] .dnb-acc-badge[data-tone="accent"],
   html[data-ds-theme="light"] .dnb-acc-badge[data-tone="accent"],
   [data-ds-theme-source="light"] .dnb-acc-badge[data-tone="accent"],
-  html[data-ds-theme-source="light"] .dnb-acc-mini-mile[data-status="doing"],
-  html[data-ds-theme="light"] .dnb-acc-mini-mile[data-status="doing"],
-  [data-ds-theme-source="light"] .dnb-acc-mini-mile[data-status="doing"],
   html[data-ds-theme-source="light"] .dnb-flow-step-text-btn[data-active="1"],
   html[data-ds-theme="light"] .dnb-flow-step-text-btn[data-active="1"],
   [data-ds-theme-source="light"] .dnb-flow-step-text-btn[data-active="1"] {
     background: #dbeafe;
     color: #1d4ed8;
-  }
-  html[data-ds-theme-source="light"] .dnb-acc-mini-mile[data-status="blocked"],
-  html[data-ds-theme="light"] .dnb-acc-mini-mile[data-status="blocked"],
-  [data-ds-theme-source="light"] .dnb-acc-mini-mile[data-status="blocked"] {
-    background: #fee2e2;
-    color: #b91c1c;
   }
   html[data-ds-theme-source="light"] .dnb-flow-done-fold-btn,
   html[data-ds-theme="light"] .dnb-flow-done-fold-btn,
@@ -995,11 +689,117 @@ export const CSS_TASKS_FLOW = `
   [data-ds-theme-source="light"] .dnb-flow-done-fold-btn:hover {
     background: #dcfce7;
   }
-  html[data-ds-theme-source="light"] .dnb-step-subtasks,
-  html[data-ds-theme="light"] .dnb-step-subtasks,
-  [data-ds-theme-source="light"] .dnb-step-subtasks {
-    background: rgba(15, 23, 42, 0.025);
-    border-left-color: rgba(37, 99, 235, 0.3);
+
+  /* Compact Milestone Progress Dots inside Work Map Header */
+  .dnb-acc-mini-miles {
+    display: inline-flex;
+    align-items: center;
+    flex-wrap: wrap;
+    gap: 0;
+  }
+  .dnb-acc-mini-mile {
+    width: 18px;
+    height: 18px;
+    border-radius: 999px;
+    border: 1.5px solid var(--dnb-border-strong);
+    background: var(--dnb-fill);
+    color: var(--dnb-text-2);
+    font-size: 10px;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    padding: 0;
+    cursor: pointer;
+    transition: transform 0.12s ease, box-shadow 0.12s ease;
+  }
+  .dnb-acc-mini-mile:hover { transform: scale(1.12); }
+  .dnb-acc-mini-mile[data-status="done"] {
+    background: #16a34a;
+    border-color: #22c55e;
+    color: #ffffff;
+  }
+  .dnb-acc-mini-mile[data-status="doing"] {
+    background: rgba(59, 130, 246, 0.24);
+    border-color: #60a5fa;
+    color: #93c5fd;
+  }
+  .dnb-acc-mini-mile[data-status="blocked"] {
+    background: rgba(239, 68, 68, 0.22);
+    border-color: #f87171;
+    color: #fca5a5;
+  }
+  .dnb-acc-mini-link {
+    width: 10px;
+    height: 2px;
+    background: rgba(148, 163, 184, 0.35);
+    border-radius: 2px;
+  }
+  .dnb-acc-mini-link[data-done="1"] {
+    background: #22c55e;
+  }
+
+  /* Classic Dot-Matrix Interactive SVG Flow Canvas */
+  .dnb-flow-canvas-shell {
+    position: relative;
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+  }
+  .dnb-flow-canvas-bar {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    flex-wrap: wrap;
+  }
+  .dnb-flow-zoom-group {
+    display: inline-flex;
+    align-items: center;
+    gap: 2px;
+    padding: 2px;
+    border-radius: 999px;
+    background: var(--dnb-fill);
+    border: 1px solid var(--dnb-border);
+  }
+  .dnb-flow-zoom-btn {
+    border: none;
+    background: transparent;
+    color: var(--dnb-text-2);
+    font: inherit;
+    font-size: 10.5px;
+    font-weight: 550;
+    height: 21px;
+    padding: 0 8px;
+    border-radius: 999px;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.14s ease, color 0.14s ease;
+  }
+  .dnb-flow-zoom-btn:hover {
+    color: var(--dnb-text);
+    background: var(--dnb-card-hover);
+  }
+  .dnb-flow-zoom-btn[data-active="1"] {
+    background: var(--dnb-elevated, var(--dnb-card));
+    color: var(--dnb-text);
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2);
+  }
+  .dnb-canvas {
+    position: relative;
+    border-radius: 13px;
+    border: 1px solid var(--dnb-border);
+    background-color: var(--dnb-surface-sub, var(--dnb-card));
+    background-image: radial-gradient(var(--dnb-border-strong) 1px, transparent 1px);
+    background-size: 18px 18px;
+    overflow: auto;
+  }
+  .dnb-canvas::-webkit-scrollbar { width: 5px; height: 5px; }
+  .dnb-canvas::-webkit-scrollbar-thumb {
+    background: var(--dsw-alias-scrollbar-bg-l1, rgba(128, 128, 136, 0.24));
+    border-radius: 99px;
   }
 
 `

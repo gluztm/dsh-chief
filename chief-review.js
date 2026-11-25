@@ -74,7 +74,7 @@ const TURN_REVIEW_SYSTEM = [
   '   - `"kind": "bound"`：明显撞墙或发现长期红线/必做规矩时请示注入边界；',
   '   - `"kind": "relay"`：发现明确跨对话信息差时的递话建议；',
   '   - `"kind": "advice"`：当主模型陷入明显可替代方案、环境坑点或需提醒用户拍板的关键决策时提出一句话建议，可带 `"popup": true|false`（仅关键分叉/阻塞决策设 `true`）。',
-  '8. `shouldCompactNow` & `compactReason`：仅当 `SMART_COMPACT_CO_MANAGED`（✦ 智选）启用时评估！仅当上下文已具明显体量（估算 ≥20% 或 ≥35K tokens，或存在大量重复试错工具噪音）且本阶段已稳定收口时，才设 `shouldCompactNow: true` 并填写一句话 `compactReason`；若主对话刚口头预告下一步却空转停手、或上下文仍很轻（<20% 且 <35K tokens），严禁提议压缩，保持 `false`。',
+  '8. `shouldCompactNow` & `compactReason`：仅当 `SMART_COMPACT_CO_MANAGED`（✦ 智选）启用时评估！压缩前系统会自动把关键细节抢救进本会话档案柜，不必担心丢失信息。按上下文压力分档决策：① 轻载（<20% 且 <35K tokens）或主对话刚口头预告下一步却空转停手时，严禁提议压缩，保持 `false`；② 中轻度（20%~34% 或 ≥35K tokens）：完成阶段收口、切换大步、或出现明显重复工具/排障噪音时可主动设 `shouldCompactNow: true`；③ 中高压甜点区（35%~49% 或 ≥150K tokens）：强烈建议积极设 `shouldCompactNow: true`——即使总目标仍在推进中，只要刚完成一个相对独立的子步骤/核验/回复（非空转停手），就应果断归档并压缩，避免上下文继续滚雪球；④ 高水位（≥50% 或 ≥200K tokens）：除空转停手外默认应设 `shouldCompactNow: true`。设为 `true` 时填写一句话 `compactReason`。',
   '9. `AUTO_PILOT_SESSION_ONLY`（全自动托管安全边界）：当激活标志包含 `AUTO_PILOT_SESSION_ONLY` 时，所有自动决策仅限本对话会话内部！严禁将本会话规律生成 `"pinGlobal": true` 的全局定住边界，严禁跨出本对话去篡改全局档案柜或无关独立窗口；发现跨窗口传递信息时可留待人工审批。',
   '10. `desktopArchivePin`（按需取档上认知桌面）：仅当 prompt 列出的「可用但尚未摆上认知桌面的可见档案」中存在当前任务/卡点/排障**正高度直接需要**的一份时，设 `"desktopArchivePin": { "vaultScope": "session|global", "id": "候选id", "title": "候选标题", "reason": "为何需要摆上一线桌面（30字内）" }`；不需要时**必须为 `null`**。严禁编造列表外的 ID 或触碰冷藏库；`AUTO_PILOT_SESSION_ONLY` 时严禁选 `global`。',
   '',
@@ -456,7 +456,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     ? (smartCoManaged && !isGoalMode && !tactical.intervention && !hasAbnormal ? 12_000 : 4_000)
     : (runMode === 'patrol' ? (hasWallCue ? 45_000 : SMART_REVIEW_COOLDOWN_MS) : AUTO_REVIEW_COOLDOWN_MS)
   if (!force && now - lastAt < cooldownMs) {
-    if (interventionChannel || isGoalMode || hasAbnormal) {
+    if (interventionChannel || isGoalMode || hasAbnormal || smartCoManaged) {
       const waitMs = Math.max(500, cooldownMs - (now - lastAt) + 250)
       scheduleChiefTurnReview(deps, { agent, sessionId: sid, turn, abnormalTrigger, delayOverrideMs: waitMs })
       return { ok: false, skipped: 'cooldown', rescheduled: true, waitMs }
@@ -530,8 +530,22 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     hasAbnormal ? `ABNORMAL_PATROL_TRIGGER(${abnormalTrigger})` : '',
   ].filter(Boolean)
 
+  const smartLiveTokens = Number(liveUsage && liveUsage.totalTokens) || 0
+  const smartLiveCtxWin = Math.max(1000, Number(liveUsage && liveUsage.contextWindow) || 128_000)
+  const smartLivePct = smartLiveTokens > 0 ? Math.round((smartLiveTokens / smartLiveCtxWin) * 100) : 0
+  const smartPressureTag = !smartCoManaged
+    ? ''
+    : (smartLiveTokens <= 0
+      ? '暂未取得精确占用（按消息数与噪音综合评估）'
+      : ((smartLivePct < 20 && smartLiveTokens < 35_000)
+        ? '轻载（<20% 且 <35K · 禁压）'
+        : ((smartLivePct >= 50 || smartLiveTokens >= 200_000)
+          ? '🔥 高水位（≥50% 或 ≥200K · 除空转外默认应立即设 shouldCompactNow: true）'
+          : ((smartLivePct >= 35 || smartLiveTokens >= 150_000)
+            ? '⚡ 中高压甜点区（≥35% 或 ≥150K · 强烈建议本轮择机设 shouldCompactNow: true）'
+            : '中轻度（20%~34% · 阶段收口或重工具噪音时可设 shouldCompactNow: true）'))))
   const smartUsageHint = smartCoManaged
-    ? `智选共管状态（硬阈值已停用）：消息数≈${digest.msgCount}${liveUsage && liveUsage.totalTokens ? `，当前估算上下文 ${liveUsage.totalTokens}/${liveUsage.contextWindow} (${Math.round((liveUsage.totalTokens / liveUsage.contextWindow) * 100)}%)` : ''}`
+    ? `智选共管状态（硬阈值已停用）：消息数≈${digest.msgCount}${smartLiveTokens > 0 ? `，当前估算上下文 ${smartLiveTokens}/${smartLiveCtxWin} (${smartLivePct}%)` : ''}；压力分档：${smartPressureTag}`
     : ''
 
   const isAutoPilotBefore = Boolean(runMode === 'managed' && !effCfgBefore.stopped)
@@ -1050,6 +1064,24 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   const lowContextSuppress = !force && liveTokens > 0 && liveRatioPct < 20 && liveTokens < 35_000
   const prematureStallSuppress = !force && Boolean(prematureCue) && !hasRunningChild && openWorkCount > 0
   const compactRequestedNow = permRankNow >= 2 && smartCoManaged && parsed.shouldCompactNow === true && typeof deps.compactSessionNow === 'function'
+  const wsForCompact = ensureWorkspace(loadChiefState(), rootId)
+  const lastCompactedAtForGate = (wsForCompact.runtimeGuard && wsForCompact.runtimeGuard.lastCompactedAt) || 0
+  const sinceLastCompact = lastCompactedAtForGate ? (Date.now() - lastCompactedAtForGate) : Infinity
+  const smartHighPressureFallback = !force
+    && permRankNow >= 2
+    && smartCoManaged
+    && parsed.shouldCompactNow !== true
+    && typeof deps.compactSessionNow === 'function'
+    && !lowContextSuppress
+    && !prematureStallSuppress
+    && !hasRunningChild
+    && !hasAbnormal
+    && !hazardStopped
+    && !(hazardInfo && hazardInfo.triggered)
+    && (liveRatioPct >= 40 || liveTokens >= 180_000)
+    && (digest.msgCount >= 4 || liveRatioPct >= 45 || liveTokens >= 220_000)
+    && (!lastCompactedAtForGate || sinceLastCompact >= 60_000)
+  const shouldExecuteSmartCompact = compactRequestedNow || smartHighPressureFallback
 
   if (prematureStallSuppress && !tactical.intervention && !isGoalAchieved && permRankNow >= 1) {
     const idleAdviceTitle = '主对话刚预告下一步就停住了，点此催它继续'
@@ -1058,7 +1090,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
       kind: 'advice',
       fromAgent: '⏸ 空转提醒',
       title: idleAdviceTitle,
-      reason: `检测到主对话以「${idleCueShort}」收尾但看板仍有 ${openWorkCount} 项未完成${compactRequestedNow ? '，已暂缓压缩' : ''}。`,
+      reason: `检测到主对话以「${idleCueShort}」收尾但看板仍有 ${openWorkCount} 项未完成${shouldExecuteSmartCompact ? '，已暂缓压缩' : ''}。`,
       target: 'lead',
       targetLabel: '主对话 (@lead)',
       mode: 'followup',
@@ -1078,12 +1110,16 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   }
 
   let smartCompacted = false
-  if (compactRequestedNow && !lowContextSuppress && !prematureStallSuppress) {
-    const wsNow = ensureWorkspace(loadChiefState(), rootId)
-    const lastCompactedAt = (wsNow.runtimeGuard && wsNow.runtimeGuard.lastCompactedAt) || 0
-    const sinceLast = Date.now() - lastCompactedAt
+  if (shouldExecuteSmartCompact && !lowContextSuppress && !prematureStallSuppress) {
+    const wsNow = wsForCompact
+    const lastCompactedAt = lastCompactedAtForGate
+    const sinceLast = sinceLastCompact
     if (force || !lastCompactedAt || sinceLast >= 20_000) {
-      const compactReason = clamp(parsed.compactReason || '参谋长评估当前阶段已收口，执行智选归档压缩', 220)
+      const compactReason = (compactRequestedNow && parsed.compactReason)
+        ? clamp(parsed.compactReason, 220)
+        : (smartHighPressureFallback
+          ? clamp(`当前上下文已达 ${Math.round(liveRatioPct)}%（约 ${Math.round(liveTokens / 1000)}K tokens），智选共管按高水位兜底自动抢救归档并压缩`, 220)
+          : clamp('参谋长评估当前阶段已收口，执行智选归档压缩', 220))
       if (permRankNow === 2) {
         queueChiefApproval(rootId, {
           category: 'main_workflow',
@@ -1127,7 +1163,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
             ratioPct,
             totalTokens,
             contextWindow,
-            logLabel: '✦ 智选压缩(参谋长判断)',
+            logLabel: smartHighPressureFallback && !compactRequestedNow ? '✦ 智选压缩(高水位防漏压)' : '✦ 智选压缩(参谋长判断)',
           }).catch((err) => {
             const msg = (err && err.message) || String(err || 'smart-compact-error')
             if (typeof deps.appendBoardLog === 'function' && rootId !== 'global') {

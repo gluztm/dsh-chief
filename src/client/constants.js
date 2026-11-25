@@ -10,7 +10,7 @@ export const SIDE_ID = 'dsh-chief'
 
 export const BRAND_NAME = 'DSH 参谋长'
 
-export const EXPECTED_BACKEND_BUILD = '1.7.1'
+export const EXPECTED_BACKEND_BUILD = '1.8.0'
 
 export const CHIEF_PERMISSION_LABELS = {
   advisor: 'L0 · 顾问模式',
@@ -27,18 +27,18 @@ export const INTERVENTION_TIER_DESC = {
 }
 
 export const RUN_MODE_OPTIONS = [
-  { key: 'off', label: '⏸ 关停', shortLabel: '⏸ 关停', hint: '平时完全不动不花钱，只有你主动问它或点按钮时才干活。' },
-  { key: 'patrol', label: '🛡 巡检', shortLabel: '🛡 巡检', hint: '平时不动不花钱，只有在出错、断线或被安全拦截时才出来帮忙。' },
-  { key: 'managed', label: '🤖 托管', shortLabel: '🤖 托管', hint: '一直在后台盯着把事做完，有空时顺手整理资料；闲置 15 分钟自动停，带费用上限。' },
+  { key: 'off', label: '关停', shortLabel: '关停', hint: '平时完全不动不花钱，只有你主动问它或点按钮时才干活。' },
+  { key: 'patrol', label: '巡检', shortLabel: '巡检', hint: '平时不动不花钱，只有在出错、断线或被安全拦截时才出来帮忙。' },
+  { key: 'managed', label: '托管', shortLabel: '托管', hint: '一直在后台盯着把事做完，有空时顺手整理资料；闲置 15 分钟自动停，带费用上限。' },
 ]
 
 export const THINKING_EFFORT_OPTIONS = [
-  { key: 'auto', label: '🪄 自适应', shortLabel: '🪄 自动', badge: '🪄 自动换挡', hint: '按任务难易自动调思考深度。写摘要或梦境漫游时关闭，排查或设拦截规则时调高。' },
-  { key: 'off', label: '⚡ 关闭思考', shortLabel: '⚡ 关', badge: '⚡ 关闭思考', hint: '直接输出回答，不做深度思考，速度最快。' },
-  { key: 'low', label: '🔅 低强度', shortLabel: '🔅 低', badge: '🔅 低思考', hint: '简单检查和日常问答。' },
-  { key: 'medium', label: '⚖️ 中强度', shortLabel: '⚖️ 中', badge: '⚖️ 中思考', hint: '日常推理、写代码和复盘。' },
-  { key: 'high', label: '🔥 高强度', shortLabel: '🔥 高', badge: '🔥 高思考', hint: '处理复杂问题、设拦截规则、强介入和总结经验。' },
-  { key: 'xhigh', label: '🧠 极高强度', shortLabel: '🧠 极高', badge: '🧠 极高思考', hint: '处理多条规则冲突、严重故障和复杂分析。' },
+  { key: 'auto', label: '自适应', shortLabel: '自动', badge: '自动换挡', hint: '按任务难易自动调思考深度。写摘要或梦境漫游时关闭，排查或设拦截规则时调高。' },
+  { key: 'off', label: '关闭思考', shortLabel: '关', badge: '关闭思考', hint: '直接输出回答，不做深度思考，速度最快。' },
+  { key: 'low', label: '低强度', shortLabel: '低', badge: '低思考', hint: '简单检查和日常问答。' },
+  { key: 'medium', label: '中强度', shortLabel: '中', badge: '中思考', hint: '日常推理、写代码和复盘。' },
+  { key: 'high', label: '高强度', shortLabel: '高', badge: '高思考', hint: '处理复杂问题、设拦截规则、强介入和总结经验。' },
+  { key: 'xhigh', label: '极高强度', shortLabel: '极高', badge: '极高思考', hint: '处理多条规则冲突、严重故障和复杂分析。' },
 ]
 
 export const STATUSES = ['todo', 'doing', 'blocked', 'done']
@@ -76,9 +76,9 @@ export const RELAY_MODES = [
 ]
 
 export const BOUND_LISTS = [
-  { field: 'allowed', label: '必须做', dot: '#30d158' },
-  { field: 'forbidden', label: '不要做', dot: '#ff453a' },
-  { field: 'notes', label: '注意', dot: '#f59e0b' },
+  { field: 'allowed', label: '必须做', dot: 'var(--dnb-sage, #63d1b0)' },
+  { field: 'forbidden', label: '不要做', dot: 'var(--dnb-coral, #f28b88)' },
+  { field: 'notes', label: '注意', dot: 'var(--dnb-amber, #f3be6d)' },
 ]
 
 export const BOUND_CAP = 20
@@ -143,12 +143,67 @@ export const FOLDER_EAR_TAG = {
 }
 
 export const SIX_GOAL_ROWS_META = [
-  { key: '总目标', aliases: ['总目标'], color: '#409cff', bg: 'rgba(10, 132, 255, 0.14)' },
-  { key: '当前推进目标', aliases: ['当前推进目标', '当前推进'], color: '#10b981', bg: 'rgba(16, 185, 129, 0.14)' },
-  { key: '受阻目标', aliases: ['受阻目标', '卡点', '受阻'], color: '#ff453a', bg: 'rgba(255, 69, 58, 0.15)' },
-  { key: '需要什么', aliases: ['需要什么', '尚需条件'], color: '#a855f7', bg: 'rgba(168, 85, 247, 0.14)' },
-  { key: '用户需要提供什么', aliases: ['用户需要提供什么', '用户需要提供', '需用户提供'], color: '#f59e0b', bg: 'rgba(245, 158, 11, 0.15)' },
-  { key: '参谋长建议', aliases: ['参谋长建议', '参谋长的建议'], color: 'var(--dnb-accent)', bg: 'rgba(10, 132, 255, 0.16)' },
+  { key: '总目标', shortKey: '总目标', role: 'goal', aliases: ['总目标'], color: 'var(--dnb-text)', bg: 'transparent' },
+  { key: '当前推进目标', shortKey: '当前推进', role: 'progress', aliases: ['当前推进目标', '当前推进'], color: 'var(--dnb-text-3)', bg: 'transparent' },
+  { key: '受阻目标', shortKey: '当前受阻', role: 'blocked', aliases: ['受阻目标', '卡点', '受阻'], color: 'var(--dnb-coral, #f28b88)', bg: 'var(--dnb-coral-soft, rgba(242, 139, 136, 0.13))' },
+  { key: '需要什么', shortKey: '还需补齐', role: 'need', aliases: ['需要什么', '尚需条件'], color: 'var(--dnb-text-3)', bg: 'transparent' },
+  { key: '用户需要提供什么', shortKey: '需你确认', role: 'userNeed', aliases: ['用户需要提供什么', '用户需要提供', '需用户提供'], color: 'var(--dnb-amber, #f3be6d)', bg: 'var(--dnb-amber-soft, rgba(243, 190, 109, 0.14))' },
+  { key: '参谋长建议', shortKey: '参谋建议', role: 'advice', aliases: ['参谋长建议', '参谋长的建议'], color: 'var(--dnb-accent)', bg: 'var(--dnb-accent-soft, rgba(159, 142, 255, 0.14))' },
 ]
 
 export const DOCK_POLL_MS = 600
+
+export const DEFAULT_UI_SKIN = 'glass'
+
+export const UI_SKIN_OPTIONS = [
+  {
+    key: 'glass',
+    zh: '晨雾琉璃',
+    en: 'Frosted Mist',
+    tagZh: '默认推荐',
+    tagEn: 'Default',
+    descZh: 'Apple × Arc 柔雾玻璃与大圆角通透质感',
+    descEn: 'Apple × Arc frosted glass & soft aura',
+    swatches: ['#9b8afb', '#63d1b0', '#f3be6d'],
+  },
+  {
+    key: 'editorial',
+    zh: '温润纸感',
+    en: 'Warm Paper',
+    tagZh: '书卷耐看',
+    tagEn: 'Editorial',
+    descZh: 'Claude × Craft 暖木炭羊皮纸与细丝线',
+    descEn: 'Warm walnut & cotton paper editorial feel',
+    swatches: ['#de825d', '#7aad8c', '#d7af6b'],
+  },
+  {
+    key: 'botanical',
+    zh: '静谧森系',
+    en: 'Botanical',
+    tagZh: '护眼松弛',
+    tagEn: 'Serene',
+    descZh: 'MUJI × Things 3 松烟青和纸与轻圆点',
+    descEn: 'MUJI pine slate & washi calm tones',
+    swatches: ['#71ad94', '#cea575', '#d97a78'],
+  },
+  {
+    key: 'starlight',
+    zh: '星夜幻想',
+    en: 'Starlight',
+    tagZh: '陪伴星轨',
+    tagEn: 'Companion',
+    descZh: '紫夜星金与樱粉微芒，专属温柔陪伴感',
+    descEn: 'Velvet twilight, starlight gold & sakura rose',
+    swatches: ['#e990ab', '#ebc273', '#9aa8ff'],
+  },
+  {
+    key: 'classic',
+    zh: '原生简约',
+    en: 'Classic Clean',
+    tagZh: '极净兼容',
+    tagEn: 'Minimal',
+    descZh: '贴近宿主原生的清爽中性配色',
+    descEn: 'Clean neutral palette matching host chrome',
+    swatches: ['#3b82f6', '#10b981', '#94a3b8'],
+  },
+]
