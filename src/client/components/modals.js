@@ -35,6 +35,7 @@ import {
   ElevationRequestModal,
   AuditLogModal,
 } from './modals/safety.js'
+import { CustomThemeModal } from './modals/theme-diy.js'
 
 export {
   ModelPickerPopover,
@@ -55,4 +56,5 @@ export {
   OperationApprovalModal,
   ElevationRequestModal,
   AuditLogModal,
+  CustomThemeModal,
 }

@@ -196,7 +196,7 @@ export function ArchiveEditorCard({ folders, editor, defaultScope = '' }) {
     h('textarea', {
       className: 'dnb-textarea',
       rows: 5,
-      style: { marginBottom: 6, fontSize: 12, lineHeight: 1.55 },
+      style: { width: '100%', minWidth: 0, boxSizing: 'border-box', marginBottom: 6, fontSize: 12, lineHeight: 1.55 },
       placeholder: '输入正文内容（支持 ## 小标题分段）…',
       value: editor.body || '',
       onChange: e => updateField({ body: e.target.value }),
@@ -210,7 +210,7 @@ export function ArchiveEditorCard({ folders, editor, defaultScope = '' }) {
     }),
     h(
       'div',
-      { style: { display: 'flex', justifyContent: 'flex-end', gap: 6 } },
+      { style: { display: 'flex', justifyContent: 'flex-end', gap: 6, paddingBottom: 4 } },
       h('button', { className: 'dnb-pill', onClick: () => patch({ archiveEditor: null }) }, '取消'),
       h('button', {
         className: 'dnb-primary-btn',

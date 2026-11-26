@@ -255,54 +255,143 @@ export function ArchiveTab({ board, view }) {
               color: warnLevel === 'crit' ? '#ef4444' : (warnLevel === 'high' ? '#f59e0b' : 'var(--dnb-text-3)'),
             },
           }, `${usedTokens} / ${tokenBudget}t`),
-          deskPinned.length > 0
-            ? h(
-                'div',
-                { className: 'dnb-more-wrap', onClick: e => e.stopPropagation() },
-                h('button', {
-                  type: 'button',
-                  className: 'dnb-mini-btn',
-                  title: bi('桌面操作', 'Desktop actions'),
-                  onClick: () => setOpenMenuKey(deskMenuOpen ? '' : 'desk-more'),
-                }, '⋯'),
-                deskMenuOpen
-                  ? h(
+          h(
+            'div',
+            { className: 'dnb-more-wrap', onClick: e => e.stopPropagation() },
+            h('button', {
+              type: 'button',
+              className: 'dnb-mini-btn',
+              title: bi('桌面扩容与操作', 'Desktop capacity & actions'),
+              onClick: () => setOpenMenuKey(deskMenuOpen ? '' : 'desk-more'),
+            }, '⋯'),
+            deskMenuOpen
+              ? h(
+                  'div',
+                  { className: 'dnb-more-menu', style: { minWidth: 224 } },
+                  h('div', { style: { padding: '4px 9px 3px', fontSize: 10.5, fontWeight: 600, color: 'var(--dnb-text-3)' } },
+                    bi(`📐 桌面容量（当前 ${maxItems} 份 / ${tokenBudget.toLocaleString()}t）`, `📐 Capacity (${maxItems} items / ${tokenBudget.toLocaleString()}t)`)),
+                  [
+                    { maxItems: 6, tokenBudget: 2400, zh: '标准 · 6 份 / 2,400t', en: 'Standard · 6 / 2,400t' },
+                    { maxItems: 10, tokenBudget: 4000, zh: '宽敞 · 10 份 / 4,000t', en: 'Roomy · 10 / 4,000t' },
+                    { maxItems: 16, tokenBudget: 6400, zh: '大桌 · 16 份 / 6,400t', en: 'Wide · 16 / 6,400t' },
+                    { maxItems: 24, tokenBudget: 9600, zh: '巨幕 · 24 份 / 9,600t', en: 'Max · 24 / 9,600t' },
+                  ].map(preset => {
+                    const isCur = maxItems === preset.maxItems && tokenBudget === preset.tokenBudget
+                    return h('button', {
+                      key: preset.maxItems,
+                      type: 'button',
+                      className: 'dnb-more-item',
+                      style: { justifyContent: 'space-between', fontWeight: isCur ? 650 : 400, color: isCur ? 'var(--dnb-accent)' : undefined },
+                      onClick: () => {
+                        setOpenMenuKey('')
+                        void mutateArchiveApi(
+                          { op: 'setDesktopCapacity', vaultScope: 'session', maxItems: preset.maxItems, tokenBudget: preset.tokenBudget },
+                          bi(`📐 认知桌面已扩为 ${preset.maxItems} 份 / ${preset.tokenBudget.toLocaleString()}t`, `📐 Desktop set to ${preset.maxItems} / ${preset.tokenBudget}t`),
+                        )
+                      },
+                    },
+                    h('span', null, bi(preset.zh, preset.en)),
+                    isCur ? h('span', null, '✓') : null)
+                  }),
+                  h(
+                    'div',
+                    {
+                      style: {
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 4,
+                        padding: '5px 8px',
+                        marginTop: 2,
+                        borderTop: '1px solid var(--dnb-border)',
+                        fontSize: 11,
+                        color: 'var(--dnb-text-2)',
+                      },
+                    },
+                    h(
                       'div',
-                      { className: 'dnb-more-menu' },
-                      h('button', {
+                      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
+                      h('span', null, bi('最多份数', 'Max items')),
+                      h(
+                        'div',
+                        { style: { display: 'flex', alignItems: 'center', gap: 4 } },
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-mini-btn',
+                          disabled: maxItems <= 4,
+                          onClick: () => void mutateArchiveApi({ op: 'setDesktopCapacity', vaultScope: 'session', maxItems: Math.max(4, maxItems - 2), tokenBudget }),
+                        }, '−'),
+                        h('span', { style: { minWidth: 32, textAlign: 'center', fontWeight: 600 } }, `${maxItems}${bi('份', '')}`),
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-mini-btn',
+                          disabled: maxItems >= 24,
+                          onClick: () => void mutateArchiveApi({ op: 'setDesktopCapacity', vaultScope: 'session', maxItems: Math.min(24, maxItems + 2), tokenBudget }),
+                        }, '+'),
+                      ),
+                    ),
+                    h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
+                      h('span', null, bi('字数上限', 'Token cap')),
+                      h(
+                        'div',
+                        { style: { display: 'flex', alignItems: 'center', gap: 4 } },
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-mini-btn',
+                          disabled: tokenBudget <= 1200,
+                          onClick: () => void mutateArchiveApi({ op: 'setDesktopCapacity', vaultScope: 'session', maxItems, tokenBudget: Math.max(1200, tokenBudget - 800) }),
+                        }, '−'),
+                        h('span', { style: { minWidth: 44, textAlign: 'center', fontWeight: 600 } }, `${tokenBudget}t`),
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-mini-btn',
+                          disabled: tokenBudget >= 12000,
+                          onClick: () => void mutateArchiveApi({ op: 'setDesktopCapacity', vaultScope: 'session', maxItems, tokenBudget: Math.min(12000, tokenBudget + 800) }),
+                        }, '+'),
+                      ),
+                    ),
+                  ),
+                  deskPinned.length > 0
+                    ? h(
+                        React.Fragment,
+                        null,
+                        h('div', { style: { height: 1, background: 'var(--dnb-border)', margin: '3px 0' } }),
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-more-item',
+                          onClick: () => {
+                            setOpenMenuKey('')
+                            openArchiveRelayModal(deskPinned.map(it => ({
+                              id: it.id,
+                              vaultScope: it.vaultScope || 'session',
+                              title: it.title,
+                            })))
+                          },
+                        }, bi('📨 把桌面资料一起发给对话', '📨 Send Desktop Items to Chat')),
+                      )
+                    : null,
+                  deskPinned.length > 1
+                    ? h('button', {
                         type: 'button',
                         className: 'dnb-more-item',
-                        onClick: () => {
+                        onClick: async () => {
                           setOpenMenuKey('')
-                          openArchiveRelayModal(deskPinned.map(it => ({
-                            id: it.id,
-                            vaultScope: it.vaultScope || 'session',
-                            title: it.title,
-                          })))
+                          for (const it of deskPinned) {
+                            const vs = it.vaultScope || 'session'
+                            if (vs === 'precipitated') {
+                              await mutateArchiveApi({ op: 'sealBack', id: it.id, vaultScope: 'precipitated' })
+                            } else {
+                              await mutateArchiveApi({ op: 'unpinFromDesktop', archiveId: it.id, vaultScope: vs })
+                            }
+                          }
+                          patch({ notice: bi('已全部撤回档案柜', 'Moved all items back') })
                         },
-                      }, bi('📨 把桌面资料一起发给对话', '📨 Send Desktop Items to Chat')),
-                      deskPinned.length > 1
-                        ? h('button', {
-                            type: 'button',
-                            className: 'dnb-more-item',
-                            onClick: async () => {
-                              setOpenMenuKey('')
-                              for (const it of deskPinned) {
-                                const vs = it.vaultScope || 'session'
-                                if (vs === 'precipitated') {
-                                  await mutateArchiveApi({ op: 'sealBack', id: it.id, vaultScope: 'precipitated' })
-                                } else {
-                                  await mutateArchiveApi({ op: 'unpinFromDesktop', archiveId: it.id, vaultScope: vs })
-                                }
-                              }
-                              patch({ notice: bi('已全部撤回档案柜', 'Moved all items back') })
-                            },
-                          }, bi('📥 全部撤下桌面', '📥 Remove All from Desktop'))
-                        : null,
-                    )
-                  : null,
-              )
-            : null,
+                      }, bi('📥 全部撤下桌面', '📥 Remove All from Desktop'))
+                    : null,
+                )
+              : null,
+          ),
         ),
       ),
       h('div', { className: 'dnb-token-track', title: bi(`认知桌面：每轮发给主对话的资料（${usedTokens}/${tokenBudget} Tokens）`, `Cognitive Desktop: sent each turn (${usedTokens}/${tokenBudget} tokens)`) },
@@ -312,7 +401,7 @@ export function ArchiveTab({ board, view }) {
         ? h(
             'div',
             { style: { padding: '22px 10px 16px', textAlign: 'center', display: 'flex', flexDirection: 'column', gap: 10, alignItems: 'center' } },
-            h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } }, bi('认知桌面是空的：这里放的资料每轮都会发给主对话（最多 6 份 / 2,400 Tokens）', 'Desktop is empty. Pinned items are sent each turn (up to 6 / 2,400 tokens).')),
+            h('div', { style: { fontSize: 12, color: 'var(--dnb-text-2)' } }, bi(`认知桌面是空的：这里放的资料每轮都会发给主对话（最多 ${maxItems} 份 / ${tokenBudget.toLocaleString()} Tokens）`, `Desktop is empty. Pinned items are sent each turn (up to ${maxItems} / ${tokenBudget.toLocaleString()} tokens).`)),
             h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, bi('想让主对话一直记住的资料，可以从本局档案放过来。', 'Pin key notes from Session Vault so the main chat keeps seeing them.')),
             h('button', {
               type: 'button',
@@ -415,12 +504,16 @@ export function ArchiveTab({ board, view }) {
               className: 'dnb-mini-btn',
               disabled: view.archiveOrganizing,
               style: { color: '#c4b5fd', borderColor: 'rgba(167, 139, 250, 0.36)' },
-              onClick: () => void requestOrganizeArchives({
-                vaultScope: 'session',
-                ids: watchList.map(w => w.id),
-                dream: true,
-                instruction: '请整理撤下桌面的卷宗归入抽屉并织就线索钩子',
-              }),
+              onClick: () => {
+                const allGlobalWatch = watchList.length > 0
+                  && watchList.every(w => w && (w.vaultScope === 'global' || String(w.id || '').startsWith('glob-')))
+                void requestOrganizeArchives({
+                  vaultScope: allGlobalWatch ? 'global' : 'session',
+                  ids: watchList.map(w => w.id),
+                  dream: true,
+                  instruction: '请整理撤下桌面的卷宗归入抽屉并织就线索钩子',
+                })
+              },
             }, bi('🌙 梦境漫游归位', '🌙 Dream Organize')),
           )
         : null,

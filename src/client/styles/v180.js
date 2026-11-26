@@ -251,26 +251,37 @@ export const CSS_V180 = `
    * 4. Boundaries Guard-Wall Preset Pack & Import/Export Drawer
    * ===================================================================== */
   .dnb-tpl-drawer {
-    padding: 9px 12px 11px;
+    padding: 10px 12px 12px;
     border-bottom: 1px solid var(--dnb-border);
-    background: rgba(56, 189, 248, 0.04);
+    background: var(--dnb-surface-sub, rgba(56, 189, 248, 0.04));
     display: flex;
     flex-direction: column;
     gap: 8px;
   }
   .dnb-tpl-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(195px, 1fr));
-    gap: 7px;
+    grid-template-columns: repeat(auto-fill, minmax(210px, 1fr));
+    gap: 8px;
   }
   .dnb-tpl-card {
-    padding: 8px 9px;
-    border-radius: 9px;
+    padding: 9px 10px;
+    border-radius: 10px;
     border: 1px solid var(--dnb-border);
     background: var(--dnb-fill);
     display: flex;
     flex-direction: column;
-    gap: 4px;
+    gap: 5px;
+    transition: border-color .14s, background .14s;
+  }
+  .dnb-tpl-card[data-active="1"] {
+    border-color: color-mix(in srgb, var(--dnb-accent) 44%, var(--dnb-border));
+    background: color-mix(in srgb, var(--dnb-accent) 7%, var(--dnb-fill));
+  }
+  .dnb-tpl-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
   }
   .dnb-tpl-title {
     font-size: 11.5px;
@@ -282,13 +293,26 @@ export const CSS_V180 = `
     line-height: 1.42;
     color: var(--dnb-text-3);
   }
+  .dnb-tpl-foot {
+    margin-top: auto;
+    padding-top: 5px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 6px;
+    flex-wrap: wrap;
+  }
 
   html[data-ds-theme-source="light"] .dnb-tpl-drawer {
-    background: #f8fafc;
+    background: var(--dnb-surface-sub);
   }
   html[data-ds-theme-source="light"] .dnb-tpl-card {
-    background: #ffffff;
-    border-color: #cbd5e1;
+    background: var(--dnb-card);
+    border-color: var(--dnb-border-strong);
+  }
+  html[data-ds-theme-source="light"] .dnb-tpl-card[data-active="1"] {
+    background: var(--dnb-card);
+    border-color: color-mix(in srgb, var(--dnb-accent) 52%, var(--dnb-border-strong));
   }
 
   @media (prefers-reduced-motion: reduce) {

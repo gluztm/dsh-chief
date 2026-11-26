@@ -801,5 +801,15 @@ export const CSS_TASKS_FLOW = `
     background: var(--dsw-alias-scrollbar-bg-l1, rgba(128, 128, 136, 0.24));
     border-radius: 99px;
   }
+  .dnb-beam-node:focus-visible,
+  .dnb-beam-agent-node:focus-visible {
+    outline: none;
+  }
+  .dnb-beam-node:focus-visible .dnb-beam-node-rect,
+  .dnb-beam-agent-node:focus-visible .dnb-beam-agent-rect {
+    stroke: var(--dnb-accent, #60a5fa);
+    stroke-width: 2.2;
+    filter: drop-shadow(0 0 6px rgba(96, 165, 250, 0.45));
+  }
 
 `

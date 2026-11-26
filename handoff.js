@@ -243,8 +243,20 @@ export function renderHandoff(board, boundaries, budget = 5200, viewer = '', ext
             return lines
           }
           const items = memory.slice(-6).map(item => {
-            const row = ['- [' + sectionLabel(item.section) + '] ' + clip(item.title || item.text, 90)]
-            if (item.text && item.title) row.push('  ' + clip(item.text, 180))
+            const titleStr = String(item.title || '').replace(/\s+/g, ' ').trim()
+            const textStr = String(item.text || '').replace(/\s+/g, ' ').trim()
+            const titleBase = titleStr.replace(/[….]+\s*$/, '').trim()
+            const isDupTitle = Boolean(
+              titleStr && textStr && (
+                textStr === titleStr
+                || (titleBase.length >= 6 && textStr.startsWith(titleBase))
+              ),
+            )
+            const headLine = isDupTitle
+              ? clip(textStr, 220)
+              : clip(titleStr || textStr, 90)
+            const row = ['- [' + sectionLabel(item.section) + '] ' + headLine]
+            if (textStr && titleStr && !isDupTitle) row.push('  ' + clip(textStr, 180))
             if ((item.tools || []).length) row.push('  用过：' + clip(item.tools.join(' / '), 120))
             return row.join('\n')
           })

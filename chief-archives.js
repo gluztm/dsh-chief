@@ -35,6 +35,7 @@ import {
   getChiefActiveWork,
 } from './chief-state.js'
 import { callChiefLlm } from './chief-models.js'
+import { notifyDreamOrIdleAsync } from './external-memory.js'
 import { deliverCrossMessage } from './chief-network.js'
 import { getChiefView } from './chief-view.js'
 
@@ -100,40 +101,92 @@ export async function organizeArchivesWithChief(deps, {
   quiet = false,
 } = {}) {
   const rootId = (deps.resolveRootSessionId && deps.resolveRootSessionId(sessionId)) || String(sessionId || 'global')
-  const effScope = vaultScope === 'global' ? 'global' : 'session'
+  let effScope = vaultScope === 'global' ? 'global' : 'session'
   if (effScope === 'session' && (!rootId || rootId === 'global')) {
     return {
       ok: false,
       error: '当前为空白新对话，尚未建立本会话档案柜；如需整理全局知识请切至「🌐 全局档案柜」',
     }
   }
-  const targetOpt = archiveTargetForRoot(deps, rootId, { cabinetId, vaultScope: effScope })
-  const store = loadArchiveStore(targetOpt)
+  const sessionTargetOpt = (rootId && rootId !== 'global')
+    ? archiveTargetForRoot(deps, rootId, { cabinetId, vaultScope: 'session' })
+    : null
+  let targetOpt = archiveTargetForRoot(deps, rootId, { cabinetId, vaultScope: effScope })
+  let store = loadArchiveStore(targetOpt)
 
-  if (!store.items.length) {
-    return {
-      ok: false,
-      error: '当前「档案」柜中暂无可整理的工程卷宗，可先新建卷宗或将便签沉淀入柜。',
+  const explicitIds = Array.isArray(ids) ? ids.map(x => String(x || '').trim()).filter(Boolean) : []
+  let otherHitIds = []
+  let otherScope = effScope === 'global' ? 'session' : 'global'
+  let candidates = []
+
+  if (explicitIds.length > 0) {
+    const idSet = new Set(explicitIds)
+    const primaryHits = store.items.filter(it => idSet.has(it.id))
+    const primaryHitSet = new Set(primaryHits.map(it => it.id))
+    const missingIds = explicitIds.filter(id => !primaryHitSet.has(id))
+
+    if (missingIds.length > 0 && (otherScope === 'global' || (rootId && rootId !== 'global'))) {
+      const otherOpt = archiveTargetForRoot(deps, rootId, {
+        cabinetId: otherScope === 'global' ? '' : cabinetId,
+        vaultScope: otherScope,
+      })
+      const otherStore = loadArchiveStore(otherOpt)
+      const missingSet = new Set(missingIds)
+      otherHitIds = otherStore.items.filter(it => missingSet.has(it.id)).map(it => it.id)
+
+      if (primaryHits.length === 0 && otherHitIds.length > 0) {
+        effScope = otherScope
+        targetOpt = otherOpt
+        store = otherStore
+        const otherSet = new Set(otherHitIds)
+        candidates = store.items.filter(it => otherSet.has(it.id))
+        otherHitIds = []
+      } else {
+        candidates = primaryHits
+      }
+    } else {
+      candidates = primaryHits
+    }
+
+    // Stale/deleted watch ids during dream_roam: clean up watch queue gracefully instead of failing
+    if (!candidates.length && reasonKind === 'dream_roam') {
+      if (sessionTargetOpt) {
+        try {
+          mutateArchive({ op: 'clearUnpinnedWatch', ids: explicitIds, vaultScope: 'session' }, sessionTargetOpt)
+        } catch {}
+      }
+      const refreshed = listArchiveHeaders(rootId, { includePrecipitated: false }, sessionTargetOpt || targetOpt)
+      return {
+        ok: true,
+        updatedCount: 0,
+        remainingCount: 0,
+        cleanedStaleWatch: explicitIds.length,
+        usedLlm: false,
+        reply: '✦ 撤下的档案已完成归位或清理，桌面提醒已重置。',
+        archives: refreshed,
+        view: quiet ? null : await getChiefView(deps, rootId, { autoSummarize: false }),
+      }
+    }
+  } else {
+    if (!store.items.length) {
+      return {
+        ok: false,
+        error: '当前「档案」柜中暂无可整理的工程卷宗，可先新建卷宗或将便签沉淀入柜。',
+      }
+    }
+    if (folder) {
+      candidates = store.items.filter(it => it.folder === folder)
+    } else if (scope === 'all') {
+      candidates = store.items.slice()
+    } else {
+      // Prefer unhooked / unorganized / inbox / single-point items first; if all were already organized, take newest batch
+      const unorg = store.items.filter(it => !it.hasHook || it.folder === 'inbox' || it.organizedBy !== 'chief' || (it.points || []).length <= 1)
+      candidates = unorg.length > 0 ? unorg : store.items.slice(0, 8)
     }
   }
 
-  const explicitIds = Array.isArray(ids) ? ids.map(x => String(x || '').trim()).filter(Boolean) : []
-  let candidates = []
-  if (explicitIds.length > 0) {
-    const idSet = new Set(explicitIds)
-    candidates = store.items.filter(it => idSet.has(it.id))
-  } else if (folder) {
-    candidates = store.items.filter(it => it.folder === folder)
-  } else if (scope === 'all') {
-    candidates = store.items.slice()
-  } else {
-    // Prefer unhooked / unorganized / inbox / single-point items first; if all were already organized, take newest batch
-    const unorg = store.items.filter(it => !it.hasHook || it.folder === 'inbox' || it.organizedBy !== 'chief' || (it.points || []).length <= 1)
-    candidates = unorg.length > 0 ? unorg : store.items.slice(0, 8)
-  }
-
   if (!candidates.length) {
-    return { ok: false, error: '未找到符合筛选范围的工程档案。' }
+    return { ok: false, error: store.items.length ? '未找到符合筛选范围的工程档案。' : '当前「档案」柜中暂无可整理的工程卷宗，可先新建卷宗或将便签沉淀入柜。' }
   }
 
   const BATCH_SIZE = 5
@@ -226,9 +279,28 @@ export async function organizeArchivesWithChief(deps, {
   }
 
   const applied = applyChiefArchiveCurations(allCurations, allNewFolders, targetOpt)
-  if (effScope === 'session' && selected.length > 0) {
+  let extraUpdatedCount = 0
+  if (otherHitIds.length > 0) {
     try {
-      mutateArchive({ op: 'clearUnpinnedWatch', ids: selected.map(x => x.id), vaultScope: 'session' }, targetOpt)
+      const siblingRes = await organizeArchivesWithChief(deps, {
+        sessionId,
+        vaultScope: otherScope,
+        cabinetId: otherScope === 'global' ? '' : cabinetId,
+        ids: otherHitIds,
+        instruction,
+        reasonKind,
+        quiet: true,
+      })
+      if (siblingRes && siblingRes.ok) {
+        extraUpdatedCount = Number(siblingRes.updatedCount || 0)
+      }
+    } catch {}
+  }
+  const totalUpdatedCount = (applied.updatedCount || 0) + extraUpdatedCount
+  if (sessionTargetOpt && (selected.length > 0 || explicitIds.length > 0)) {
+    const watchClearIds = Array.from(new Set([...selected.map(x => x.id), ...explicitIds]))
+    try {
+      mutateArchive({ op: 'clearUnpinnedWatch', ids: watchClearIds, vaultScope: 'session' }, sessionTargetOpt)
     } catch {}
   }
   const refreshedList = listArchiveHeaders(rootId, { includePrecipitated: false }, targetOpt)
@@ -241,8 +313,8 @@ export async function organizeArchivesWithChief(deps, {
   }
   const statSummary = [...folderStats.entries()].map(([k, n]) => `「${k}」${n} 卷`).join('、')
   const reply = isDream
-    ? `- 【🌙 梦境漫游归整完成】已轻拢 **${applied.updatedCount} 份**零散卷宗入抽屉（${statSummary}）并织就线索钩子。`
-    : (`- 【档案收纳完成】已${usedLlm ? '由参谋长模型深度提炼' : '按结构规则分拣'} **${applied.updatedCount} 份**工程卷宗（归入 ${statSummary}），每份均已拆解「记忆点 → 小点记忆」并织就线索钩子，原文 100% 无损封存。`
+    ? `- 【🌙 梦境漫游归整完成】已轻拢 **${totalUpdatedCount} 份**零散卷宗入抽屉（${statSummary}）并织就线索钩子。`
+    : (`- 【档案收纳完成】已${usedLlm ? '由参谋长模型深度提炼' : '按结构规则分拣'} **${totalUpdatedCount} 份**工程卷宗（归入 ${statSummary}），每份均已拆解「记忆点 → 小点记忆」并织就线索钩子，原文 100% 无损封存。`
       + (remainingCount > 0 ? `\n- 【分批提示】柜内另有 ${remainingCount} 份卷宗待精修，可再点一次「请参谋长整理收纳」继续完成剩余部分。` : ''))
 
   if (!quiet) {
@@ -252,7 +324,7 @@ export async function organizeArchivesWithChief(deps, {
         {
           id: nextId('chat'),
           role: 'user',
-          text: instruction ? `整理工程档案：${instruction}` : `请参谋长整理收纳工程档案（${applied.updatedCount} 卷）`,
+          text: instruction ? `整理工程档案：${instruction}` : `请参谋长整理收纳工程档案（${totalUpdatedCount} 卷）`,
           actions: [],
           at: Date.now(),
         },
@@ -260,7 +332,7 @@ export async function organizeArchivesWithChief(deps, {
           id: nextId('chat'),
           role: 'chief',
           text: reply,
-          actions: [`已收纳 ${applied.updatedCount} 卷档案`],
+          actions: [`已收纳 ${totalUpdatedCount} 卷档案`],
           at: Date.now(),
         },
       )
@@ -272,15 +344,15 @@ export async function organizeArchivesWithChief(deps, {
     deps.appendBoardLog(
       rootId,
       isDream
-        ? `🌙 参谋长梦境漫游已梳理 ${applied.updatedCount} 卷档案（${statSummary}）并织就线索钩子`
-        : `🗄️ 参谋长完成工程档案收纳：共精修 ${applied.updatedCount} 卷（${statSummary}）`,
+        ? `🌙 参谋长梦境漫游已梳理 ${totalUpdatedCount} 卷档案（${statSummary}）并织就线索钩子`
+        : `🗄️ 参谋长完成工程档案收纳：共精修 ${totalUpdatedCount} 卷（${statSummary}）`,
       'chief',
     )
   }
 
   return {
     ok: true,
-    updatedCount: applied.updatedCount,
+    updatedCount: totalUpdatedCount,
     remainingCount,
     usedLlm,
     reply,
@@ -1056,6 +1128,15 @@ export async function runManagedDreamRoam(deps, { sessionId = '', maxPerVault = 
       }).catch(() => null)
       if (res && res.ok) globalProcessed = Number(res.updatedCount) || 0
     }
+    try {
+      const extCfgDream = resolveWorkspaceConfig(loadChiefState(), rootId).externalMemory
+      void notifyDreamOrIdleAsync(extCfgDream, {
+        sessionId: rootId,
+        workspaceCwd: (globOpt && globOpt.cwd) || '',
+        projectKey: resolveProjectKey((globOpt && globOpt.cwd) || ''),
+        reason: 'dream_roam',
+      })
+    } catch {}
     return {
       ok: true,
       roamed: sessionProcessed + globalProcessed,

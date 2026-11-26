@@ -57,7 +57,7 @@ flowchart LR
 - **Read-only by default**: Even after enabling a session, Chief observes without touching workspace files until you raise the permission tier (`L0`–`L3`).
 - **Keep prompt tokens low**: Only items pinned to the Cognitive Desktop (up to `2,400 tokens / 6 items`) go into each turn; everything else stays on disk until pulled.
 - **Main tab + right sidebar + Collaboration 2.0**: Switch to the top `Chief` tab (hiding the duplicate host input bar); click the top-left live GitHub Star button (shows public star count, supports one-click starring inside the panel via local `gh` CLI, and gracefully falls back to opening GitHub); dispatch local `Codex` / `Claude Code` / `Gemini CLI` with live output streams, 2-hop handoff chaining, and verified subagent/peer routing guards.
-- **Global Custom Chief Naming (0-byte `@lead` isolation)**: Name your Chief (e.g. "Hakimi", "Jarvis") in Settings with secret hard-blocking and cross-workspace sync, while keeping `@lead` system prompts strictly untouched; the experimental built-in Private Brain was stripped out cleanly to make way for an external memory plugin interface scoped solely to Chief.
+- **Global Custom Chief Naming & Memory Studio (0-byte `@lead` isolation)**: Name your Chief in Settings and keep a built-in `MEMORY.md` notebook, 2D/3D Constellation Starfield, Ebbinghaus vitality bars, locked 5-section `USER_PROFILE.md`, Prompt Studio, and optional Embedding rerank—or bridge `mcp-http`, dual-slot `chief-http`, read-only Obsidian vaults, and `cordis-provider`; both Memory Studio and the DIY Theme Studio stay strictly 0-byte isolated from `@lead`.
 
 ---
 
@@ -248,6 +248,15 @@ Read the full story and tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md
 </details>
 
 <details>
+<summary>What Changed in v1.9.0</summary>
+
+- **🧠 Chief-Only Memory Studio & External Memory Bridge (`dsh-chief.provider/v1`, 0-byte `@lead` isolation)**: Adds an out-of-the-box `MEMORY.md` notebook, 2D SVG / 3D Canvas Constellation Starfield (with bounding-box overlap prevention and timeline replay), Ebbinghaus decay/reinforcement, locked 5-section `USER_PROFILE.md`, Prompt Studio (`PROMPTS.json`), X-Ray probe, and optional OpenAI-compatible Embedding API semantic rerank; also bridges `mcp-http`, dual-slot `chief-http` (optional muted `moodSlot`), read-only `markdown-vault` (BM25), and `cordis-provider`, with KV-Cache static-first prompts, trivial-query gating, 3-strike circuit breaker, and oral-prefix stripping.
+- **🎨 6th Skin "Custom DIY Theme Studio" & Default Minimalist Left Rail**: Pure-client 4-color WCAG theme derivation, zero-token `<canvas>` 6-swatch image extractor, up to 25MB HD wallpapers persisted in `IndexedDB`, and Chief AI DIY (`op: 'theme.diy'`); promotes the clean Left Rail (`sidebar`) workspace navigation as the default layout with low-glare light theme refinements.
+- **🛡️ Out-of-the-Box Guard Wall Preset Pack v2 & 21 Live-QA Fixes**: Ships 3 streamlined pre-execute physical block presets (with Secrets & Destructive Git ON by default on fresh installs), expands Cognitive Desktop capacity, adds cross-scope Dream-Roam routing & brand Easter eggs, and resolves all 21 issues surfaced across 3 live sandbox dogfood waves (main-tab maximize fix, raw `<|open|>tools...` control-tag sanitization, keyword false-trigger fixes, Managed red Halt button, 2D starfield layout, and keyboard-accessible flow nodes).
+
+</details>
+
+<details>
 <summary>What Changed in v1.8.0</summary>
 
 - **Built-In 5-Skin Theme System & Whole-Plugin Visual Overhaul**: Defaults to **Frosted Mist** (`glass`) with 1-click switching across **Warm Paper / Botanical / Starlight / Classic Clean** in both the header palette popover and Settings (dark & light host adaptive); replaces harsh red/green boxes, raw emojis, and the rainbow gauge with fine hairline threads, crisp vector icons, and a skin-morphing thinking effort dial (`EffortFanGauge`).
@@ -335,14 +344,14 @@ Read the full story and tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md
 Search **`dsh-chief`** inside [dshmarket](https://github.com/dsh-market/dsh-market) / DSH Plugin Market, or install via CLI (replace `desktop` with `web` for the web profile):
 
 ```bash
-# Option 1: Install latest release (v1.7.1) from npm
+# Option 1: Install latest release (v1.9.0) from npm
 dsh plugin --profile desktop add dsh-chief
 
 # Option 2: Install directly from GitHub main branch
 dsh plugin --profile desktop add github:gluztm/dsh-chief
 
-# Option 3: Install prebuilt GitHub Release tarball (v1.7.1)
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.7.1/dsh-chief-1.7.1.tgz
+# Option 3: Install prebuilt GitHub Release tarball (v1.9.0)
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.9.0/dsh-chief-1.9.0.tgz
 ```
 
 | DeepSeek Harness (DSH) Version | Panel / Board / Vaults / Pre-Execute Walls | Named Subagent Tree (`task.dispatch` / `team.*`) | Notes |
@@ -354,21 +363,22 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 </details>
 
 <details>
-<summary>Modular Architecture (v1.8.0)</summary>
+<summary>Modular Architecture (v1.9.0)</summary>
 
-**In one sentence:** `45` backend modules and `39` frontend modules run locally under `~/.dsh/chief/`, staying completely inactive in unactivated chats, injecting only the Cognitive Desktop into main chat, and keeping custom Chief naming & GitHub Star sync strictly 0-byte isolated from `@lead`.
+**In one sentence:** `50` backend modules and `45` frontend modules run locally under `~/.dsh/chief/`, staying completely inactive in unactivated chats, injecting only the Cognitive Desktop into main chat, and keeping custom Chief naming, Memory Studio, DIY themes, and GitHub Star sync strictly 0-byte isolated from `@lead`.
 
-`v1.8.0` spans **45 backend modules (including 9 isolated modules under `pkg/safety/` and `github-star.js`) and 39 frontend modules** (including the 5-skin `styles/skins.js` theme engine, zero `export let`, acyclic) for easy audit and maintenance. See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and contracts.
+`v1.9.0` spans **50 backend modules (including 9 isolated modules under `pkg/safety/`, `external-memory*.js`, `guard-wall-presets.js`, `chief-theme-diy.js`, and `github-star.js`) and 45 frontend modules** (zero `export let`, acyclic) for easy audit and maintenance. See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and contracts.
 
 ```mermaid
 flowchart TB
-  subgraph UI["DSH Right Sidebar & Main Tab (client.js <- 39 modules · 5 Tabs + 5 UI Skins)"]
+  subgraph UI["DSH Right Sidebar & Main Tab (client.js <- 45 modules · 6 Tabs + 5+1 UI Skins)"]
     T1["Chief Tab (Skin-Morphing Effort Dial · Dismissible Overlay · Report Export)"]
     T2["Tasks Tab (Bento Objective · Unified Beam Flow + Subagent Dispatch/Return · Handoff)"]
     T3["Peers Tab (Collab 2.0 · Codex/Claude/Gemini CLI · Live Stream · Verified Routing)"]
-    T5["Archives (2400T Cognitive Desktop · 3-Tier Drawers · 0-byte Cold Vault)"]
-    T6["Guards Tab (Guard Walls · 4 Preset Packs · Calm Hairline Rules)"]
-    T7["Header (Live GitHub Star Sync · Theme Palette Switcher · Custom Chief Naming · Settings)"]
+    T5["Archives (Cognitive Desktop · 3-Tier Drawers · 0-byte Cold Vault)"]
+    T6["Memory Tab (MEMORY.md · 2D/3D Starfield · User Profile · Embedding / MCP Bridge)"]
+    T7["Guards Tab (Guard Walls · 3 Preset Packs v2 · Calm Hairline Rules)"]
+    T8["Header (GitHub Star · 6 Skins + DIY Studio · Chief Naming · Left Rail / Top Tabs)"]
   end
 
   subgraph Core["Local Backend & Safety Kernel (Zero External Deps · 45 modules)"]

@@ -282,6 +282,60 @@ export function createBoardActions(deps) {
       }
     }
 
+    // Guard-wall presets & rules live globally / per-workspace in guard-walls.json,
+    // so unbound global-view surfaces can still list or toggle them without throwing 400.
+    if (action === 'wall.list') {
+      const targetCwd = session ? getSessionCwd(deps.hostState && deps.hostState.activeRuntime, session) : process.cwd()
+      return {
+        ok: true,
+        guardWalls: listGuardWalls({ cwd: targetCwd }),
+        board: (session || shared) ? loadBoard(file) : emptyBoard(),
+      }
+    }
+
+    if (action === 'wall.save' || action === 'wall.setScope' || action === 'wall.remove' || action === 'wall.merge') {
+      const targetCwd = session ? getSessionCwd(deps.hostState && deps.hostState.activeRuntime, session) : process.cwd()
+      const op = action === 'wall.save'
+        ? 'save'
+        : (action === 'wall.setScope'
+            ? 'set_scope'
+            : (action === 'wall.merge' ? 'merge' : 'remove'))
+      const res = mutateGuardWalls({
+        op,
+        wall: (args.wall && typeof args.wall === 'object') ? args.wall : args,
+        wallId: args.wallId !== undefined ? args.wallId : args.id,
+        wallIds: Array.isArray(args.wallIds) ? args.wallIds : [],
+        autoGroup: Boolean(args.autoGroup),
+        title: typeof args.title === 'string' ? args.title : '',
+        scope: args.scope,
+        cwd: targetCwd,
+        callerOrigin: args._callerOrigin || '',
+        humanConfirmToken: args._humanConfirmToken || null,
+      })
+      if (!res.ok) return res
+      let outBoard = emptyBoard()
+      if (session || shared) {
+        const curBoard = loadBoard(file)
+        const actionLabel = op === 'remove'
+          ? `移除自定义拦截规则 ${args.wallId || args.id || ''}`
+          : (op === 'merge'
+              ? `合并同类拦截规则（${res.mergedCount || 0} 条合为 ${res.createdCount || 1} 条）`
+              : (op === 'set_scope'
+                  ? `切换自定义拦截规则「${(res.wall && res.wall.title) || ''}」状态为 ${args.scope}`
+                  : `启用自定义拦截规则「${(res.wall && res.wall.title) || ''}」(${res.wall && res.wall.scope === 'workspace' ? '本工程' : (res.wall && res.wall.scope === 'paused' ? '已暂停' : '全局常驻')})`))
+        pushLog(curBoard, '🚧 ' + actionLabel, by, session)
+        outBoard = saveBoard(curBoard, file)
+      }
+      return {
+        ok: true,
+        mergedCount: res.mergedCount || 0,
+        createdCount: res.createdCount || 0,
+        wall: res.wall,
+        guardWalls: res.walls,
+        board: outBoard,
+      }
+    }
+
     // A caller with no Session is an unbound surface (blank new conversation,
     // hero state): reads must see an empty board — never the shared anchors —
     // and writes have nowhere legitimate to land, so they fail loudly instead
@@ -1063,52 +1117,7 @@ export function createBoardActions(deps) {
       return clipped({ ok: true, cursor: current, board: saveBoard(board, file) }, clips)
     }
 
-    if (action === 'wall.list') {
-      const targetCwd = session ? getSessionCwd(deps.hostState && deps.hostState.activeRuntime, session) : process.cwd()
-      return {
-        ok: true,
-        guardWalls: listGuardWalls({ cwd: targetCwd }),
-        board: loadBoard(file),
-      }
-    }
-
-    if (action === 'wall.save' || action === 'wall.setScope' || action === 'wall.remove' || action === 'wall.merge') {
-      const targetCwd = session ? getSessionCwd(deps.hostState && deps.hostState.activeRuntime, session) : process.cwd()
-      const op = action === 'wall.save'
-        ? 'save'
-        : (action === 'wall.setScope'
-            ? 'set_scope'
-            : (action === 'wall.merge' ? 'merge' : 'remove'))
-      const res = mutateGuardWalls({
-        op,
-        wall: (args.wall && typeof args.wall === 'object') ? args.wall : args,
-        wallId: args.wallId !== undefined ? args.wallId : args.id,
-        wallIds: Array.isArray(args.wallIds) ? args.wallIds : [],
-        autoGroup: Boolean(args.autoGroup),
-        title: typeof args.title === 'string' ? args.title : '',
-        scope: args.scope,
-        cwd: targetCwd,
-        callerOrigin: args._callerOrigin || '',
-        humanConfirmToken: args._humanConfirmToken || null,
-      })
-      if (!res.ok) return res
-      const actionLabel = op === 'remove'
-        ? `移除自定义拦截规则 ${args.wallId || args.id || ''}`
-        : (op === 'merge'
-            ? `合并同类拦截规则（${res.mergedCount || 0} 条合为 ${res.createdCount || 1} 条）`
-            : (op === 'set_scope'
-                ? `切换自定义拦截规则「${(res.wall && res.wall.title) || ''}」状态为 ${args.scope}`
-                : `启用自定义拦截规则「${(res.wall && res.wall.title) || ''}」(${res.wall && res.wall.scope === 'workspace' ? '本工程' : (res.wall && res.wall.scope === 'paused' ? '已暂停' : '全局常驻')})`))
-      pushLog(board, '🚧 ' + actionLabel, by, session)
-      return {
-        ok: true,
-        mergedCount: res.mergedCount || 0,
-        createdCount: res.createdCount || 0,
-        wall: res.wall,
-        guardWalls: res.walls,
-        board: saveBoard(board, file),
-      }
-    }
+    // (wall.* actions handled above so unbound global views can also manage guard walls)
 
     if (action === 'note.unpin') {
       const id = str(args.noteId !== undefined ? args.noteId : args.id, '')

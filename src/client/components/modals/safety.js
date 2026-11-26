@@ -477,9 +477,10 @@ export function ElevationRequestModal({ view }) {
         { style: { display: 'flex', gap: 6, flexWrap: 'wrap' } },
         (req.targetMode === 'chief'
           ? ['strategist', 'chief']
-          : ['assistant', 'strategist']
+          : (req.targetMode === 'assistant' ? ['assistant'] : ['assistant', 'strategist'])
         ).map(modeKey => {
           const selected = chosenMode === modeKey
+          const isLowerStrategist = req.targetMode === 'chief' && modeKey === 'strategist'
           return h('button', {
             key: modeKey,
             type: 'button',
@@ -487,7 +488,7 @@ export function ElevationRequestModal({ view }) {
             'data-tone': selected ? (modeKey === 'chief' ? 'amber' : 'accent') : undefined,
             disabled: busy,
             onClick: () => patch({ elevationChosenMode: modeKey, elevationAgreed: false }),
-          }, modeKey === 'strategist' ? '🛡️ 更稳妥：只开到 L2 · 参谋模式（每步问你）' : (CHIEF_PERMISSION_LABELS[modeKey] || modeKey))
+          }, isLowerStrategist ? '🛡️ 更稳妥：只开到 L2 · 参谋模式（每步问你）' : (CHIEF_PERMISSION_LABELS[modeKey] || modeKey))
         }),
       ),
       needsRiskCheck

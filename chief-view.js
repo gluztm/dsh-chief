@@ -28,7 +28,11 @@ import {
   endChiefActiveWork,
   getChiefActiveWork,
   summarizeLlmLedger,
+  stripModelControlMarkup,
 } from './chief-state.js'
+import { redactExternalMemoryConfigForUi } from './state-schema.js'
+import { resolveProjectKey } from './archives.js'
+import { getExternalMemoryRuntimeStatus } from './external-memory.js'
 import { listChiefModels, callChiefLlm } from './chief-models.js'
 import { collectClusterPeerProgress, listPeerDirectory, computeBubbleState } from './chief-network.js'
 
@@ -528,6 +532,12 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
   const ownWs = (finalState.workspaces && finalState.workspaces[rootId]) || emptyWorkspace()
   const effectiveConfig = resolveWorkspaceConfig(finalState, rootId)
   const wsCwd = resolveSessionWorkspaceCwd(deps, rootId)
+  const extMemRedacted = redactExternalMemoryConfigForUi(effectiveConfig.externalMemory)
+  const extMemStatus = getExternalMemoryRuntimeStatus(effectiveConfig.externalMemory, {
+    sessionId: rootId,
+    workspaceCwd: wsCwd,
+    projectKey: resolveProjectKey(wsCwd),
+  })
   const narrativeAt = hasLatestSaved
     ? (latestView.narrative.at || 0)
     : (ownWs.narrative && ownWs.narrative.at ? ownWs.narrative.at : (board.updatedAt || 0))
@@ -539,8 +549,10 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
     rootId,
     config: {
       ...effectiveConfig,
+      externalMemory: extMemRedacted,
       chiefName: effectiveConfig.chiefName || '',
     },
+    externalMemoryStatus: extMemStatus,
     models: modelsInfo,
     narrative: {
       text: finalNarrativeText,
@@ -557,7 +569,7 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
     suggestions: finalView.suggestions.slice().reverse(),
     chat: finalView.chat.slice(-40).map((c) => {
       if (!c || typeof c !== 'object') return c
-      const cleaned = stripToolCallMarkup(c.text || '')
+      const cleaned = stripModelControlMarkup(stripToolCallMarkup(c.text || ''))
       return cleaned !== c.text
         ? { ...c, text: cleaned || '（该条历史响应仅包含内部工具调用标记，已自动净化）' }
         : c

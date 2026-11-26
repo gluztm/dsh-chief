@@ -147,7 +147,24 @@ export function createClientPlugin() {
           patch({ open: false })
         }
         const onKey = event => {
-          if (String(event.key) === 'Escape' && store.open) patch({ open: false })
+          if (String(event.key) !== 'Escape') return
+          if (
+            store.open
+            || store.secPermMenuOpen
+            || store.secPaceMenuOpen
+            || store.secModelMenuOpen
+            || store.tacticalMenuOpen
+            || store.boundMoreMenuOpen
+          ) {
+            patch({
+              open: false,
+              secPermMenuOpen: false,
+              secPaceMenuOpen: false,
+              secModelMenuOpen: false,
+              tacticalMenuOpen: false,
+              boundMoreMenuOpen: false,
+            })
+          }
         }
         document.addEventListener('pointerdown', onDown, true)
         document.addEventListener('keydown', onKey, true)

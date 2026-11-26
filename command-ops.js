@@ -53,6 +53,7 @@ import {
   extractJsonObject,
   beginChiefActiveWork,
   endChiefActiveWork,
+  stripModelControlMarkup,
 } from './chief-state.js'
 import { callChiefLlm } from './chief-models.js'
 import { listPeerDirectory, deliverCrossMessage } from './chief-network.js'
@@ -955,7 +956,7 @@ export async function suggestCoreObjectiveWithChief(deps, {
     if (llmRes && llmRes.ok && llmRes.text) {
       const parsed = extractJsonObject(llmRes.text)
       if (parsed && typeof parsed.suggestion === 'string' && parsed.suggestion.trim()) {
-        const cleaned = cleanMultiline(stripToolCallMarkup(parsed.suggestion), 160).replace(/\s+/g, ' ').trim()
+        const cleaned = cleanMultiline(stripModelControlMarkup(stripToolCallMarkup(parsed.suggestion)), 160).replace(/\s+/g, ' ').trim()
         const isDuplicateGuess = effectiveMode === 'guess' && prevList.some(p => p.toLowerCase() === cleaned.toLowerCase())
         if (cleaned && !isDuplicateGuess) {
           suggestion = clamp(cleaned, 120)
@@ -1031,6 +1032,15 @@ export async function handleLeadDirectRequestToChief(deps, {
           ...(evalRes.view ? { view: evalRes.view } : {}),
         }
       }
+      if (evalRes && evalRes.ok) {
+        return {
+          ok: true,
+          mode: permissionMode,
+          actionTaken: 'wall_blocker_evaluated',
+          reply: evalRes.reply || '',
+          ...(evalRes.view ? { view: evalRes.view } : {}),
+        }
+      }
     }
   }
 
@@ -1048,7 +1058,11 @@ export async function handleLeadDirectRequestToChief(deps, {
 
   // L0 (advisor) / L1 (assistant): queue readable advice + optional elevation request (never mutate workspace directly)
   if (permRank < 2) {
-    const elv = requestChiefElevation(rootId, {
+    const curWs = ensureWorkspace(loadChiefState(), rootId)
+    const existingPendingElev = curWs.pendingElevation && curWs.pendingElevation.status === 'pending'
+      ? { ...curWs.pendingElevation }
+      : null
+    const elv = existingPendingElev || requestChiefElevation(rootId, {
       fromMode: permissionMode,
       targetMode: 'strategist',
       reason: `主对话（${fromLabel}）请求参谋长协同处置：${clamp(subject || cleanBody, 90)}`,

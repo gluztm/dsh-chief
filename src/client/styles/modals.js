@@ -636,9 +636,45 @@ export const CSS_MODALS = `
     flex-direction: column;
     gap: 6px;
     margin: 0 12px 8px;
+    max-height: 235px;
+    overflow-y: auto;
+    flex-shrink: 0;
   }
   .dnb-sug-group .dnb-sug-card {
     margin: 0;
+  }
+  .dnb-sug-title {
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--dnb-text);
+    line-height: 1.42;
+    margin-bottom: 3px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+  }
+  .dnb-sug-title-full {
+    display: block;
+    -webkit-line-clamp: unset;
+    overflow: visible;
+  }
+  .dnb-sug-reason {
+    font-size: 11.2px;
+    color: var(--dnb-text-2);
+    line-height: 1.42;
+    margin-bottom: 4px;
+    display: -webkit-box;
+    -webkit-line-clamp: 2;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+    word-break: break-word;
+  }
+  .dnb-sug-reason-full {
+    display: block;
+    -webkit-line-clamp: unset;
+    overflow: visible;
   }
   .dnb-sug-top {
     display: flex;

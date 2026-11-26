@@ -4,7 +4,8 @@
  * Idle-wait compaction orchestration, token measurement, rescue harvest, and threshold advisory for DSH Chief.
  */
 
-import { getArchiveDetail } from './archives.js'
+import { getArchiveDetail, resolveProjectKey } from './archives.js'
+import { notifyPreCompressAsync } from './external-memory.js'
 import { normalizePermissionMode } from './chief-executor.js'
 import {
   CHAT_CAP,
@@ -130,6 +131,16 @@ export async function executeHarvestAndCompact(deps, {
   if (!verified || !verified.ok || !verified.item) {
     return { ok: false, error: 'harvest-verify-failed-abort-compact' }
   }
+  try {
+    const extCfgNow = resolveWorkspaceConfig(loadChiefState(), rootId).externalMemory
+    void notifyPreCompressAsync(extCfgNow, {
+      harvestedTitle: verified.item.title || '',
+      harvestedSummary: verified.item.summary || '',
+      sessionId: rootId,
+      workspaceCwd: targetOpt.cwd || '',
+      projectKey: resolveProjectKey(targetOpt.cwd || ''),
+    })
+  } catch {}
 
   const cmdId = `dsh-chief-compact-${Date.now().toString(36)}`
   let compactRes

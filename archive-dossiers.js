@@ -11,6 +11,7 @@ import {
   DEFAULT_ARCHIVE_FOLDERS,
   DESKTOP_TOKEN_BUDGET,
   DESKTOP_MAX_ITEMS,
+  normalizeDesktopCapacity,
   nextId,
   str,
   clamp,
@@ -327,12 +328,16 @@ function buildDesktopSummary(sid, sessionStore, globalStore) {
   }
   pinnedDocuments.sort((a, b) => (b.pinnedAt || 0) - (a.pinnedAt || 0))
   const usedTokens = pinnedDocuments.reduce((acc, it) => acc + (Number(it.estimatedTokens) || 0), 0)
+  const cap = normalizeDesktopCapacity({
+    maxItems: sessionStore && !sessionStore.unboundSession ? sessionStore.desktopMaxItems : DESKTOP_MAX_ITEMS,
+    tokenBudget: sessionStore && !sessionStore.unboundSession ? sessionStore.desktopTokenBudget : DESKTOP_TOKEN_BUDGET,
+  })
   return {
     pinnedDocuments,
     usedTokens,
-    tokenBudget: DESKTOP_TOKEN_BUDGET,
-    maxItems: DESKTOP_MAX_ITEMS,
-    usagePct: Math.min(100, Math.round((usedTokens / DESKTOP_TOKEN_BUDGET) * 100)),
+    tokenBudget: cap.tokenBudget,
+    maxItems: cap.maxItems,
+    usagePct: Math.min(100, Math.round((usedTokens / cap.tokenBudget) * 100)),
     recentlyUnpinnedWatch: (sessionStore && Array.isArray(sessionStore.recentlyUnpinnedWatch))
       ? sessionStore.recentlyUnpinnedWatch
       : [],
@@ -590,6 +595,7 @@ export function getTakenOutArchivesForSession(rootSessionId = '', targetOpt) {
     vaultScope: 'session',
   })
   if (store.unboundSession) return []
+  const cap = normalizeDesktopCapacity({ maxItems: store.desktopMaxItems })
   return store.items
     .filter(it => Array.isArray(it.takenOutSessions) && it.takenOutSessions.includes(sid))
     .sort((a, b) => {
@@ -597,7 +603,7 @@ export function getTakenOutArchivesForSession(rootSessionId = '', targetOpt) {
       const bPin = Number(b?.desktopMeta?.[sid]?.pinnedAt || b.updatedAt || 0)
       return bPin - aPin
     })
-    .slice(0, DESKTOP_MAX_ITEMS)
+    .slice(0, cap.maxItems)
 }
 
 function scoreAndRankArchiveItems(store, query = '', opts = {}) {
@@ -774,20 +780,24 @@ function mutateDesktopPinState(op, payload, effectiveTarget, baseOpts) {
         pushOther(sessStore.items, 'session')
         pushOther(globStore.items, 'global')
 
+        const cap = normalizeDesktopCapacity({
+          maxItems: sessStore.desktopMaxItems,
+          tokenBudget: sessStore.desktopTokenBudget,
+        })
         const itemTokens = estimateArchiveTokens(targetItem)
         let usedTokens = otherPinned.reduce((sum, x) => sum + x.tokens, 0)
         otherPinned.sort((a, b) => a.priority - b.priority || a.pinnedAt - b.pinnedAt)
 
-        while ((otherPinned.length >= DESKTOP_MAX_ITEMS || (otherPinned.length > 0 && usedTokens + itemTokens > DESKTOP_TOKEN_BUDGET))) {
+        while ((otherPinned.length >= cap.maxItems || (otherPinned.length > 0 && usedTokens + itemTokens > cap.tokenBudget))) {
           if (payload.autoEvict === false || payload.strictBudget === true) {
             return {
               ok: false,
               overBudget: true,
               usedTokens,
               itemTokens,
-              tokenBudget: DESKTOP_TOKEN_BUDGET,
-              maxItems: DESKTOP_MAX_ITEMS,
-              error: `认知桌面容量已达上限（当前 ${usedTokens}/${DESKTOP_TOKEN_BUDGET} Tokens，${otherPinned.length}/${DESKTOP_MAX_ITEMS} 份），需先撤下旧文档或允许自动置换`,
+              tokenBudget: cap.tokenBudget,
+              maxItems: cap.maxItems,
+              error: `认知桌面容量已达上限（当前 ${usedTokens}/${cap.tokenBudget} Tokens，${otherPinned.length}/${cap.maxItems} 份），需先撤下旧文档或右上角「⋯」扩容桌面`,
             }
           }
           const victim = otherPinned.shift()
@@ -1202,6 +1212,31 @@ export function mutateArchive(payload = {}, targetOpt) {
         saveArchiveStore(store, lockTarget)
       }
       return { ok: true, recentlyUnpinnedWatch: store.recentlyUnpinnedWatch || [] }
+    }
+
+    if (op === 'setDesktopCapacity') {
+      if (resolved.vaultScope !== 'session') {
+        return { ok: false, error: '认知桌面容量仅在当前会话档案柜设置，请先绑定对话窗口' }
+      }
+      const nextCap = normalizeDesktopCapacity(
+        {
+          maxItems: payload.maxItems,
+          tokenBudget: payload.tokenBudget,
+        },
+        {
+          maxItems: store.desktopMaxItems,
+          tokenBudget: store.desktopTokenBudget,
+        },
+      )
+      store.desktopMaxItems = nextCap.maxItems
+      store.desktopTokenBudget = nextCap.tokenBudget
+      store.updatedAt = Date.now()
+      saveArchiveStore(store, lockTarget)
+      return {
+        ok: true,
+        maxItems: nextCap.maxItems,
+        tokenBudget: nextCap.tokenBudget,
+      }
     }
 
     if (op === 'cycleClip' || op === 'setClip') {

@@ -10,6 +10,7 @@
       "tasks": "任务",
       "peers": "协同",
       "archive": "档案",
+      "extmem": "记忆",
       "boundaries": "边界"
     },
     "runModes": {

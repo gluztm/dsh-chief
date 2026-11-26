@@ -108,6 +108,7 @@ export function tabLabel(key) {
     case 'tasks': return bi('任务', 'Tasks')
     case 'peers': return bi('协同', 'Peers')
     case 'archive': return bi('档案', 'Archives')
+    case 'extmem': return bi('记忆', 'Memory')
     case 'boundaries': return bi('边界', 'Guards')
     default: return String(key || '')
   }

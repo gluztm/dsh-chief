@@ -105,6 +105,10 @@ import {
   CHIEF_THINKING_EFFORTS,
   ALERT_EVENTS_CAP,
   CHIEF_UI_LANGS,
+  DEFAULT_EXTERNAL_MEMORY_CONFIG,
+  normalizeExternalMemoryConfig,
+  redactExternalMemoryConfigForUi,
+  scrubExternalMemoryText,
   normalizeAlertEvent,
   normalizeLockedModelEfforts,
   resolveAlignedModelEffort,
@@ -120,6 +124,7 @@ import {
   endChiefActiveWork,
   getChiefActiveWork,
   OFFICIAL_HARNESS_CATALOG,
+  stripModelControlMarkup,
 } from './state-schema.js'
 import {
   archiveTargetForRoot,
@@ -205,6 +210,7 @@ export {
   getChiefActiveWork,
   OFFICIAL_HARNESS_CATALOG,
   normalizeBubbleHarness,
+  stripModelControlMarkup,
 }
 export {
   resolveSessionWorkspaceCwd,
@@ -1136,7 +1142,7 @@ export function updateChiefConfig(patch) {
       error: '参谋长名称检测到疑似密钥/令牌，已硬拦截拒绝写入',
     }
   }
-  const GLOBAL_ONLY_CFG_KEYS = new Set(['defaultAutoEnableSessions', 'uiLang', 'notifyEnabled', 'notifySound', 'chiefName'])
+  const GLOBAL_ONLY_CFG_KEYS = new Set(['defaultAutoEnableSessions', 'uiLang', 'notifyEnabled', 'notifySound', 'chiefName', 'externalMemory'])
   const META_CFG_KEYS = new Set([
     'sessionId',
     'session',
@@ -1262,10 +1268,14 @@ export function updateChiefConfig(patch) {
       if (typeof safePatch.chiefName === 'string') {
         state.config.chiefName = normalizeChiefName(safePatch.chiefName)
       }
+      if (safePatch.externalMemory && typeof safePatch.externalMemory === 'object') {
+        state.config.externalMemory = normalizeExternalMemoryConfig(safePatch.externalMemory, state.config.externalMemory)
+      }
       const nextCfg = resolveWorkspaceConfig(state, sid)
+      const redactedExt = redactExternalMemoryConfigForUi(nextCfg.externalMemory)
       return {
         ok: true,
-        config: { ...nextCfg, tacticalModes: { ...nextCfg.tacticalModes } },
+        config: { ...nextCfg, externalMemory: redactedExt, tacticalModes: { ...nextCfg.tacticalModes } },
         llmLedger: summarizeLlmLedger(existingWs && existingWs.llmLedger, nextCfg),
       }
     }
@@ -1295,6 +1305,10 @@ export function updateChiefConfig(patch) {
       if (ws) {
         if (!ws.config || typeof ws.config !== 'object') ws.config = { ...effBefore }
         ws.config.tacticalModes = { ...normalizeTacticalModes(ws.config.tacticalModes), intervention: false }
+        ws.config.runMode = 'off'
+        ws.config.autoPilot = false
+        ws.config.paceMode = 'manual'
+        ws.config.stopped = true
         ws.runtimeGuard.interventionTurns = 0
         ws.runtimeGuard.unchangedCount = 0
         ws.runtimeGuard.circuitBroken = false
@@ -1302,6 +1316,9 @@ export function updateChiefConfig(patch) {
         ws.runtimeGuard.hazardAlert = null
       }
       state.config.tacticalModes = { ...normalizeTacticalModes(state.config.tacticalModes), intervention: false }
+      state.config.runMode = 'off'
+      state.config.autoPilot = false
+      state.config.paceMode = 'manual'
       const stoppedCfg = resolveWorkspaceConfig(state, sid)
       return {
         ok: true,
@@ -1673,6 +1690,9 @@ export function updateChiefConfig(patch) {
     if (typeof safePatch.chiefName === 'string') {
       state.config.chiefName = normalizeChiefName(safePatch.chiefName)
     }
+    if (safePatch.externalMemory && typeof safePatch.externalMemory === 'object') {
+      state.config.externalMemory = normalizeExternalMemoryConfig(safePatch.externalMemory, state.config.externalMemory)
+    }
     if (typeof safePatch.sessionEnabled === 'boolean') {
       ws.config.sessionEnabled = safePatch.sessionEnabled
       if (!safePatch.sessionEnabled) {
@@ -1746,7 +1766,11 @@ export function updateChiefConfig(patch) {
       ok: true,
       ...(presetSpec ? { appliedPreset: presetSpec.id } : {}),
       ...(compactLowWarning ? { compactLowWarning } : {}),
-      config: { ...finalCfg, tacticalModes: { ...finalCfg.tacticalModes } },
+      config: {
+        ...finalCfg,
+        externalMemory: redactExternalMemoryConfigForUi(finalCfg.externalMemory),
+        tacticalModes: { ...finalCfg.tacticalModes },
+      },
       llmLedger: summarizeLlmLedger(ws.llmLedger, finalCfg),
     }
   })

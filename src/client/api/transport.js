@@ -32,15 +32,9 @@ export function syncBackendActiveWork(activeWork) {
   const prevWork = store.chiefMeta && store.chiefMeta.activeWork
   if (cleanWork) {
     const seen = store.seenBackendWorkIds || {}
-    if (!store.chiefWorkFx && cleanWork.tab && !seen[cleanWork.id]) {
-      patch({
-        tab: cleanWork.tab,
-        ...(cleanWork.boundSubTab ? { boundSubTab: cleanWork.boundSubTab } : {}),
-        seenBackendWorkIds: { ...seen, [cleanWork.id]: true },
-      })
-      if (cleanWork.tab === 'archive' && !store.archiveLoaded && apiBridge.loadArchives) void apiBridge.loadArchives(false)
-    } else if (cleanWork.id && !seen[cleanWork.id]) {
+    if (!seen[cleanWork.id]) {
       patch({ seenBackendWorkIds: { ...seen, [cleanWork.id]: true } })
+      if (cleanWork.tab === 'archive' && !store.archiveLoaded && apiBridge.loadArchives) void apiBridge.loadArchives(false)
     }
     if (!runtimeRefs.fastWorkPollTimer && typeof setTimeout === 'function') {
       runtimeRefs.fastWorkPollTimer = setTimeout(() => {
@@ -106,6 +100,8 @@ export function applySecView(viewData) {
       defaultAutoEnableSessions: typeof cfg.defaultAutoEnableSessions === 'boolean' ? cfg.defaultAutoEnableSessions : Boolean(prevMeta.defaultAutoEnableSessions),
       globalSafetyGuardEnabled: typeof cfg.globalSafetyGuardEnabled === 'boolean' ? cfg.globalSafetyGuardEnabled : (prevMeta.globalSafetyGuardEnabled !== false),
       sessionSafetyGuardEnabled: typeof cfg.sessionSafetyGuardEnabled === 'boolean' ? cfg.sessionSafetyGuardEnabled : (prevMeta.sessionSafetyGuardEnabled !== false),
+      externalMemory: cfg.externalMemory !== undefined ? cfg.externalMemory : (prevMeta.externalMemory || null),
+      externalMemoryStatus: viewData.externalMemoryStatus !== undefined ? viewData.externalMemoryStatus : (prevMeta.externalMemoryStatus || null),
       runMode: cfg.runMode || (cfg.stopped ? 'off' : (cfg.paceMode === 'auto' ? 'managed' : (cfg.paceMode === 'smart' ? 'patrol' : 'off'))),
       managedIdleTimeoutMs: Number(cfg.managedIdleTimeoutMs) || prevMeta.managedIdleTimeoutMs || (15 * 60 * 1000),
       notifyEnabled: nextNotifyEnabled,

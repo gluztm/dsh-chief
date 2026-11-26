@@ -58,8 +58,10 @@ import {
   hasUnansweredIncomingPeerMail,
   syncPeerDropToWaitingSenders,
 } from './chief-network.js'
-import { bootstrapArchivesFromSharedBoard } from './archives.js'
+import { bootstrapArchivesFromSharedBoard, resolveProjectKey } from './archives.js'
+import { createChiefMemoryHostService, syncChiefTurnAsync } from './external-memory.js'
 import { normalizePermissionMode, buildCapabilityScope, evaluatePreExecuteDefense, evaluateSafetyGuardHardRules, listGuardWalls } from './chief-executor.js'
+import { shouldInspectRelayAsCommand } from './command-helpers.js'
 import {
   newId,
   nowMs,
@@ -91,7 +93,6 @@ export function createRuntimeHooks(deps) {
   const loadBoard = (...args) => deps.loadBoard(...args)
   const makeChiefDeps = (...args) => deps.makeChiefDeps(...args)
   const memoryTool = (...args) => deps.memoryTool(...args)
-  const pendingFile = (...args) => deps.pendingFile(...args)
   const probeSubagentSupport = (...args) => deps.probeSubagentSupport(...args)
   const readPending = (...args) => deps.readPending(...args)
   const readPendingDeploy = (...args) => deps.readPendingDeploy(...args)
@@ -120,6 +121,11 @@ export function createRuntimeHooks(deps) {
       },
     }
     deps.hostState.activeRuntime = runtime
+    try {
+      if (ctx && typeof ctx.provide === 'function') {
+        ctx.provide('chiefMemoryHost', createChiefMemoryHostService())
+      }
+    } catch {}
 
     // 1) Not inflated, not reminded: every prompt assembly carries a small digest,
     //    so a compacted transcript does not take the objective and the open steps
@@ -306,7 +312,14 @@ export function createRuntimeHooks(deps) {
           }
           const detailSample = `${trigger || ''} ${detail || ''}`.trim()
           const safetyGuardEnabled = !(effCfg && effCfg.tacticalModes && effCfg.tacticalModes.safetyGuardEnabled === false)
-          const safetyGuard = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: detailSample, board, safetyGuardEnabled })
+          const safetyGuard = evaluateSafetyGuardHardRules({
+            tool: 'relay',
+            opClass: 'workflow',
+            command: shouldInspectRelayAsCommand(detailSample) ? detailSample : '',
+            content: detailSample,
+            board,
+            safetyGuardEnabled,
+          })
           if (safetyGuard && safetyGuard.blocked) {
             appendChiefAuditLog(key, {
               mode: effCfg.permissionMode || 'advisor',
@@ -906,6 +919,25 @@ export function createRuntimeHooks(deps) {
           const shared = loadBoard(boardFile())
           const settings = { ...(board.settings || {}), ...(shared.settings || {}) }
           const effCfg = resolveWorkspaceConfig(loadChiefState(), rootId)
+          if (
+            capturedEntry
+            && effCfg.externalMemory
+            && effCfg.externalMemory.enabled
+            && effCfg.externalMemory.memorySlot
+            && effCfg.externalMemory.memorySlot.syncLeadSummary === true
+          ) {
+            try {
+              const leadCwd = getSessionCwd(runtime, rootId) || ''
+              void syncChiefTurnAsync(effCfg.externalMemory, {
+                userText: capturedEntry.title || '主对话回合进展',
+                chiefReply: capturedEntry.text || '',
+                sessionId: rootId,
+                workspaceCwd: leadCwd,
+                projectKey: resolveProjectKey(leadCwd),
+                turnKind: 'lead_summary',
+              })
+            } catch {}
+          }
           const strongIntervention = Boolean(effCfg.tacticalModes && effCfg.tacticalModes.intervention)
           const maxInterventionTurns = Number(effCfg.tacticalModes && effCfg.tacticalModes.maxInterventionTurns) || 0
           let hasRunningSubagent = false
@@ -958,18 +990,37 @@ export function createRuntimeHooks(deps) {
           const remAfter = remainingInterventions(id, settings, { strongIntervention, maxInterventionTurns })
           pushLog(board, guardLogText(verdict, turn, remAfter), 'guard', id)
 
-          // Auto-handoff: when the guard has spent its last intervention and the
-          // session still has open work, the turn is not idle — it is stuck in a
-          // context that has grown too long to be productive. Generate the
-          // handover packet right now so the next Session (or a manual reopen)
-          // inherits it instead of a blank board. The steer already fired above
-          // tells the model to wrap up; this packet is what the next one reads.
+          // Auto-handoff backup: when the guard has spent its last intervention and
+          // the session still has open work, refresh and back up the handover packet
+          // strictly inside this session's own board (notes + handoff timestamp) —
+          // NEVER write to global pending-transfer.json where an unrelated new chat
+          // could hijack it on creation.
           if (remAfter === 0) {
             try {
               const packet = resolveEffectiveHandoff(runtime, id, board).text
-              const pendingFile_ = pendingFile()
-              fs.writeFileSync(pendingFile_, JSON.stringify({ text: packet, at: nowMs(), from: id }))
-              pushLog(board, '上下文压力：干预计数耗尽，交接单已自动生成并放入待领取', 'handoff', id)
+              const backupNow = nowMs()
+              if (!board.handoff || !board.handoff.pinned) {
+                board.handoff = {
+                  ...(board.handoff || {}),
+                  at: backupNow,
+                  by: 'guard',
+                  session: id,
+                  updatedAt: backupNow,
+                  source: (board.handoff && board.handoff.customText) ? (board.handoff.source || 'human') : 'auto',
+                }
+              }
+              const backupTitle = '自动交接单（干预计数耗尽备份）'
+              const backupBody = String(packet || '').slice(0, 6000)
+              if (!Array.isArray(board.notes)) board.notes = []
+              const sameBackup = board.notes.find(note => note && note.title === backupTitle)
+              if (sameBackup) {
+                sameBackup.body = backupBody
+                sameBackup.updatedAt = backupNow
+                sameBackup.session = id
+              } else {
+                board.notes.unshift(normalizeNote({ id: newId('n'), title: backupTitle, body: backupBody, tags: ['handoff'], by: 'guard', session: id }))
+              }
+              pushLog(board, '上下文压力：干预计数耗尽，交接单已保存至本会话看板（不再自动派发给新对话）', 'handoff', id)
             } catch (handoffError) {
               pushLog(board, '自动交接单生成失败：' + String(handoffError && handoffError.message ? handoffError.message : handoffError).slice(0, 160), 'handoff', id)
             }

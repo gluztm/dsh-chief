@@ -31,7 +31,9 @@ import { CSS_CHIEF } from './styles/chief.js'
 import { CSS_TASKS_FLOW } from './styles/tasks-flow.js'
 import { CSS_BUBBLE } from './styles/bubble.js'
 import { CSS_V180 } from './styles/v180.js'
+import { CSS_EXTMEM } from './styles/extmem.js'
 import { CSS_SKINS } from './styles/skins.js'
+import { readSavedCustomSkin, applyCustomSkinStyle } from './custom-theme.js'
 
 export { detectHostTheme, isHostLightTheme }
 
@@ -43,6 +45,7 @@ const STYLE_SHEETS = [
   CSS_TASKS_FLOW,
   CSS_BUBBLE,
   CSS_V180,
+  CSS_EXTMEM,
   CSS_SKINS,
 ]
 
@@ -58,6 +61,9 @@ export function Style() {
   React.useEffect(() => {
     if (typeof document === 'undefined' || !document.documentElement) return undefined
     const root = document.documentElement
+    if (typeof document.getElementById === 'function' && !document.getElementById('dnb-custom-skin-style')) {
+      applyCustomSkinStyle(readSavedCustomSkin())
+    }
     const sync = () => {
       const next = detectHostTheme()
       if (root.getAttribute('data-dnb-theme') !== next) {

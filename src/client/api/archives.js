@@ -147,6 +147,16 @@ export function applyArchiveHeaders(payload, invalidateIds = null, requestedScop
   })
 }
 
+function scopeValidArchiveIds(scope) {
+  if (scope === 'global') {
+    return new Set((Array.isArray(store.globalVaultItems) ? store.globalVaultItems : []).map(x => x && x.id).filter(Boolean))
+  }
+  if (scope === 'precipitated') {
+    return new Set((Array.isArray(store.archivePrecipitated) ? store.archivePrecipitated : []).map(x => x && x.id).filter(Boolean))
+  }
+  return new Set((Array.isArray(store.archiveItems) ? store.archiveItems : []).map(x => x && x.id).filter(Boolean))
+}
+
 /** Tier-1 Lazy Load: called ONLY when the user opens or switches scope in the `档案` tab */
 export async function loadArchives(force = false, cabinetIdOverride = '', scopeOverride = '') {
   if (store.archiveLoading) return null
@@ -170,9 +180,10 @@ export async function loadArchives(force = false, cabinetIdOverride = '', scopeO
     const value = await call('archives' + (qs.toString() ? '?' + qs.toString() : ''))
     if (value && value.ok) {
       applyArchiveHeaders(value, [], activeScope)
-      const openIds = Object.keys(store.archiveOpenFiles || {}).filter(id => store.archiveOpenFiles[id] && !store.archiveDetails[id])
+      const validIds = scopeValidArchiveIds(activeScope)
+      const openIds = Object.keys(store.archiveOpenFiles || {}).filter(id => store.archiveOpenFiles[id] && validIds.has(id) && !store.archiveDetails[id])
       for (const id of openIds) {
-        void loadArchiveDetail(id, true, { scope: activeScope })
+        void loadArchiveDetail(id, true, { scope: activeScope, precipitated: activeScope === 'precipitated' })
       }
     }
     return value
@@ -196,11 +207,18 @@ export async function loadArchiveDetail(archiveId, force = false, opts = {}) {
   try {
     const rawScope = (opts && (opts.scope || opts.vaultScope)) || store.archiveTabScope || 'session'
     const activeScope = rawScope === 'desktop' ? 'session' : rawScope
+    const isPrecip = Boolean((opts && opts.precipitated) || activeScope === 'precipitated' || id.startsWith('prec-'))
+    const isGlobal = !isPrecip && (activeScope === 'global' || id.startsWith('glob-'))
     const qs = new URLSearchParams({ id })
     if (store.sessionId) qs.set('session', store.sessionId)
-    if (activeScope === 'global') qs.set('scope', 'global')
-    if (store.archiveCabinetId && activeScope === 'session') qs.set('cabinetId', store.archiveCabinetId)
-    if (opts && opts.precipitated) qs.set('precipitated', '1')
+    if (isPrecip) {
+      qs.set('scope', 'precipitated')
+      qs.set('precipitated', '1')
+    } else if (isGlobal) {
+      qs.set('scope', 'global')
+    } else if (store.archiveCabinetId) {
+      qs.set('cabinetId', store.archiveCabinetId)
+    }
     const value = await call('archives/detail?' + qs.toString())
     if (value && value.ok && value.item) {
       patch({
@@ -353,7 +371,8 @@ export async function requestOrganizeArchives(opts = {}) {
           }),
         })
         if (value && value.ok) {
-          const openIds = Object.keys(store.archiveOpenFiles || {}).filter(k => store.archiveOpenFiles[k])
+          const validIds = scopeValidArchiveIds(vaultScope)
+          const openIds = Object.keys(store.archiveOpenFiles || {}).filter(k => store.archiveOpenFiles[k] && validIds.has(k))
           const nextDetails = { ...(store.archiveDetails || {}) }
           for (const k of openIds) delete nextDetails[k]
           patch({
@@ -362,9 +381,14 @@ export async function requestOrganizeArchives(opts = {}) {
             archiveOrganizePrompt: '',
             notice: value.updatedCount > 0
               ? `✦ 已帮你把 ${value.updatedCount} 份档案分类整理好，原文完整保留`
-              : '✦ 这些档案已经分类好了，不用重整',
+              : (value.cleanedStaleWatch > 0
+                  ? '✦ 撤下的档案已归位或清理完成，桌面提醒已刷新'
+                  : '✦ 这些档案已经分类好了，不用重整'),
           })
           void loadArchives(true, '', vaultScope)
+          if (vaultScope !== 'session' && (isDream || store.archiveTabScope === 'desktop')) {
+            void loadArchives(true, '', 'session')
+          }
           for (const k of openIds) {
             void loadArchiveDetail(k, true, { scope: vaultScope })
           }

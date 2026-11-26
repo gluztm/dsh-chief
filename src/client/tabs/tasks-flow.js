@@ -505,14 +505,15 @@ export function buildTaskFlowModel(board, allTasksRaw, filteredTasksRaw, hier, o
       || /error|fail|crash|blocked/.test(rawSt)
       || childNodes.some(c => c.status === 'blocked')
     if (hasBlocked) return 'blocked'
-    const hasDoing = ownTasks.some(t => t.status === 'doing')
-      || rawSt === 'running' || rawSt === 'active' || rawSt === 'working'
+    const isLiveRunning = rawSt === 'running' || rawSt === 'active' || rawSt === 'working'
+    const isLiveEnded = rawSt !== '' && !isLiveRunning && rawSt !== 'todo' && rawSt !== 'queued'
+    const hasDoing = isLiveRunning
+      || (!isLiveEnded && ownTasks.some(t => t.status === 'doing'))
       || childNodes.some(c => c.status === 'doing')
     if (hasDoing) return 'doing'
     const allOwnDone = ownTasks.length > 0 && ownTasks.every(t => t.status === 'done')
     const hasOpenOwn = ownTasks.some(t => t.status === 'todo' || t.status === 'doing' || t.status === 'blocked')
-    const ended = rawSt !== '' && rawSt !== 'running' && rawSt !== 'active' && rawSt !== 'working' && rawSt !== 'todo' && rawSt !== 'queued'
-    if (allOwnDone || (ended && !hasOpenOwn && (childNodes.length === 0 || childNodes.every(c => c.status === 'done')))) {
+    if (allOwnDone || (isLiveEnded && !hasOpenOwn && (childNodes.length === 0 || childNodes.every(c => c.status === 'done')))) {
       return 'done'
     }
     return 'todo'
@@ -1334,7 +1335,7 @@ export function TaskBeamFlowView({
         {
           ref: canvasRef,
           className: 'dnb-canvas',
-          style: { minHeight: canvasMinH, maxHeight: 500, padding: 10, textAlign: 'center', cursor: 'grab' },
+          style: { minHeight: canvasMinH, maxHeight: 500, padding: 10, textAlign: isLR ? 'left' : 'center', cursor: 'grab' },
           onWheel: e => {
             if (e.ctrlKey || e.metaKey) {
               e.preventDefault()
@@ -1473,11 +1474,23 @@ export function TaskBeamFlowView({
             const twoLine = titleLines.length > 1
             const flatCount = beamFlattenBranches(st.agentBranches).length
             const metaText = `${flowStatusLabel(st.status)}${flatCount ? bi(` · ${flatCount} 代理`, ` · ${flatCount} agents`) : ''}${st.allTasks.length ? bi(` · ${st.allTasks.length} 任务`, ` · ${st.allTasks.length} tasks`) : ''}`
+            const toggleStageNode = () => {
+              if (selectedStage && selectedStage.id === st.id) {
+                setDrawerOpen(v => !v)
+              } else {
+                setSelectedStageId(st.id)
+                setDrawerOpen(true)
+              }
+            }
             return h(
               'g',
               {
                 key: 'node-' + st.id,
                 className: 'dnb-beam-node',
+                role: 'button',
+                tabIndex: 0,
+                'aria-label': `${bi('步骤', 'Step')} ${st.index}: ${cleanFlowTitle(st.title)} (${metaText})`,
+                'aria-expanded': isSelected && drawerOpen ? 'true' : 'false',
                 'data-flow-stage-id': st.id,
                 'data-status': st.status,
                 'data-selected': isSelected ? '1' : '0',
@@ -1489,11 +1502,13 @@ export function TaskBeamFlowView({
                 onMouseLeave: () => setHoveredKey(''),
                 onClick: e => {
                   e.stopPropagation()
-                  if (selectedStage && selectedStage.id === st.id) {
-                    setDrawerOpen(v => !v)
-                  } else {
-                    setSelectedStageId(st.id)
-                    setDrawerOpen(true)
+                  toggleStageNode()
+                },
+                onKeyDown: e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    toggleStageNode()
                   }
                 },
                 onContextMenu: e => {
@@ -1524,6 +1539,19 @@ export function TaskBeamFlowView({
               h(
                 'g',
                 {
+                  ...(canToggle ? {
+                    role: 'button',
+                    tabIndex: 0,
+                    'aria-label': `${bi('切换步骤完成状态', 'Toggle stage completion')}: ${cleanFlowTitle(st.title)}`,
+                    'aria-pressed': st.status === 'done' ? 'true' : 'false',
+                    onKeyDown: e => {
+                      if (e.key === 'Enter' || e.key === ' ') {
+                        e.preventDefault()
+                        e.stopPropagation()
+                        flowStageToggleAction(board, st, stepApi)
+                      }
+                    },
+                  } : {}),
                   style: canToggle ? { cursor: 'pointer' } : undefined,
                   onClick: e => {
                     if (!canToggle) return
@@ -1601,11 +1629,23 @@ export function TaskBeamFlowView({
             const retLabel = ab.isCrossStep
               ? `${flowAgentStatusLabel(stKey)} · ↩ ${bi('交给 ', '→ ')}${targetCircle}`
               : `${flowAgentStatusLabel(stKey)} · ↩ ${bi('回到 ', '↩ ')}${targetCircle}`
+            const activateAgentNode = () => {
+              setSelectedStageId(ab.stageId)
+              setDrawerOpen(true)
+              if (ab.primaryTask) {
+                patch({ selectedTaskId: store.selectedTaskId === ab.primaryTask.id ? '' : ab.primaryTask.id })
+              } else if (ab.agent && ab.agent.id) {
+                openSubagentChat(ab.agent)
+              }
+            }
             return h(
               'g',
               {
                 key: aKey,
                 className: 'dnb-beam-agent-node',
+                role: 'button',
+                tabIndex: 0,
+                'aria-label': `@${ab.name} · ${retLabel}`,
                 'data-status': stKey,
                 'data-focused': ab.isFocused ? '1' : '0',
                 'data-hovered': hovered ? '1' : '0',
@@ -1615,12 +1655,13 @@ export function TaskBeamFlowView({
                 onMouseLeave: () => setHoveredKey(''),
                 onClick: e => {
                   e.stopPropagation()
-                  setSelectedStageId(ab.stageId)
-                  setDrawerOpen(true)
-                  if (ab.primaryTask) {
-                    patch({ selectedTaskId: store.selectedTaskId === ab.primaryTask.id ? '' : ab.primaryTask.id })
-                  } else if (ab.agent && ab.agent.id) {
-                    openSubagentChat(ab.agent)
+                  activateAgentNode()
+                },
+                onKeyDown: e => {
+                  if (e.key === 'Enter' || e.key === ' ') {
+                    e.preventDefault()
+                    e.stopPropagation()
+                    activateAgentNode()
                   }
                 },
               },

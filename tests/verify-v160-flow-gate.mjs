@@ -541,8 +541,8 @@ try {
     })
     assert.equal(def.decision, 'deny', `W6 destructive disk format must be denied: ${cmd}`)
   }
-  assert.equal(constMod.TABS.length, 5, 'W6 TABS must contain 5 merged tabs (plan merged into tasks)')
-  console.log('[W6 PASS] --format zero false-positive, real disk format hard guard & 5-tab layout verified')
+  assert.equal(constMod.TABS.length, 6, 'W6 TABS must contain 6 top-level tabs (including extmem)')
+  console.log('[W6 PASS] --format zero false-positive, real disk format hard guard & 6-tab layout verified')
 
   // =========================================================================
   // W7 ~ W11: Strong Intervention + Idle Guard + Mid-Turn Spin Regression Gates

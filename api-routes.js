@@ -7,6 +7,35 @@
 import fs from 'node:fs'
 import path from 'node:path'
 import { getGithubStarStatus, toggleGithubStar } from './github-star.js'
+import {
+  getExternalMemoryRuntimeStatus,
+  probeExternalMemory,
+  retractExternalMemory,
+  notifyDreamOrIdleAsync,
+  discoverExternalMemorySources,
+  importExternalMemorySource,
+  listExternalMemoryItems,
+  addExternalMemoryItem,
+  updateExternalMemoryItem,
+  removeExternalMemoryItem,
+  probeEmbeddingApi,
+  getMemoryPrompts,
+  saveMemoryPrompt,
+  resetMemoryPrompt,
+  loadUserProfile,
+  saveUserProfile,
+  listDiaryEntries,
+  addDiaryEntry,
+  updateDiaryEntry,
+  removeDiaryEntry,
+  distillMemoryBatch,
+  isSystemMaintenanceNoise,
+} from './external-memory.js'
+import { callChiefLlm } from './chief-models.js'
+import {
+  redactExternalMemoryConfigForUi,
+  normalizeExternalMemoryConfig,
+} from './state-schema.js'
 import { renderDigest } from './digest.js'
 import { memorySections, renderMemoryDigest } from './memory.js'
 import {
@@ -36,6 +65,7 @@ import {
   handleElevationDecision,
   scheduleChiefTurnReview,
 } from './chief.js'
+import { designCustomThemeWithChief } from './chief-theme-diy.js'
 import {
   getChiefActiveWork,
   mutateChiefState,
@@ -68,6 +98,7 @@ import {
   mutatePrecipitated,
   copyPrecipitatedToVault,
 } from './archives.js'
+import { ensureDefaultGuardWallPresets } from './guard-wall-presets.js'
 import {
   DEFAULT_CHIEF_PERMISSION_MODE,
   HUMAN_BOUNDS_CONFIRM_TOKEN,
@@ -277,6 +308,13 @@ export function createApiRoutes(deps) {
             const flippedIds = (rootWs && Array.isArray(rootWs.flippedPrecipitatedIds)) ? rootWs.flippedPrecipitatedIds.slice() : []
             const boundRootSid = resolveBoundRootSid(sessionId)
             const sessionArchOpt = archiveTarget(runtime, boundRootSid, { cabinetId: board.activeCabinetId, vaultScope: 'session' })
+            const extProjectKey = resolveProjectKey(sessionArchOpt.cwd || '')
+            const extMemoryRedacted = redactExternalMemoryConfigForUi(effCfg.externalMemory)
+            const extMemoryStatus = getExternalMemoryRuntimeStatus(effCfg.externalMemory, {
+              sessionId: rootSid,
+              workspaceCwd: sessionArchOpt.cwd || '',
+              projectKey: extProjectKey,
+            })
             const archiveMeta = {
               ...getArchiveMeta(boundRootSid, sessionArchOpt),
               counts: getThreeTierArchiveCounts(boundRootSid, flippedIds, sessionArchOpt),
@@ -298,6 +336,8 @@ export function createApiRoutes(deps) {
                 defaultAutoEnableSessions: Boolean(effCfg.defaultAutoEnableSessions),
                 globalSafetyGuardEnabled: effCfg.globalSafetyGuardEnabled !== false,
                 sessionSafetyGuardEnabled: effCfg.sessionSafetyGuardEnabled !== false,
+                externalMemory: extMemoryRedacted,
+                externalMemoryStatus: extMemoryStatus,
                 paceMode: effCfg.paceMode || 'manual',
                 runMode: effCfg.runMode || 'off',
                 managedIdleTimeoutMs: effCfg.managedIdleTimeoutMs || 15 * 60 * 1000,
@@ -334,7 +374,10 @@ export function createApiRoutes(deps) {
                 contextUsage: sessionId ? getSessionContextBreakdown(runtime, sessionId) : null,
               },
               archiveMeta,
-              guardWalls: listGuardWalls({ cwd: sessionArchOpt.cwd }),
+              guardWalls: (() => {
+                try { ensureDefaultGuardWallPresets({ cwd: sessionArchOpt.cwd }) } catch {}
+                return listGuardWalls({ cwd: sessionArchOpt.cwd })
+              })(),
             })
           } catch (error) {
             sendJson(res, 500, { ok: false, error: String(error && error.message ? error.message : error) })
@@ -1221,6 +1264,273 @@ export function createApiRoutes(deps) {
                     subprocessSvc: subSvc,
                     desired: typeof body.desired === 'boolean' ? body.desired : null,
                   })
+              sendJson(res, out && out.ok === false ? 400 : 200, out)
+              return
+            }
+            if (rawOp.startsWith('ext_mem.')) {
+              const rootSid = resolveRootSessionId(sessionId) || sessionId || 'global'
+              const stNow = loadChiefState()
+              const effCfgNow = resolveWorkspaceConfig(stNow, rootSid)
+              const archOptNow = archiveTarget(runtime, rootSid === 'global' ? '' : rootSid, { vaultScope: 'session' })
+              const wsCwd = (archOptNow && archOptNow.cwd) || ''
+              const projKey = resolveProjectKey(wsCwd)
+              if (rawOp === 'ext_mem.status') {
+                sendJson(res, 200, {
+                  ok: true,
+                  externalMemory: redactExternalMemoryConfigForUi(effCfgNow.externalMemory),
+                  externalMemoryStatus: getExternalMemoryRuntimeStatus(effCfgNow.externalMemory, {
+                    sessionId: rootSid,
+                    workspaceCwd: wsCwd,
+                    projectKey: projKey,
+                  }),
+                })
+                return
+              }
+              if (rawOp === 'ext_mem.probe') {
+                const probeCfg = body.config && typeof body.config === 'object'
+                  ? normalizeExternalMemoryConfig(body.config, effCfgNow.externalMemory)
+                  : effCfgNow.externalMemory
+                const out = await probeExternalMemory(probeCfg, {
+                  slot: body.slot === 'mood' ? 'mood' : 'memory',
+                  testQuery: typeof body.query === 'string' && body.query.trim() ? body.query.trim() : '当前项目偏好与核心约束',
+                  sessionId: rootSid,
+                  workspaceCwd: wsCwd,
+                  projectKey: projKey,
+                })
+                sendJson(res, out && out.ok ? 200 : 400, {
+                  ...out,
+                  externalMemoryStatus: getExternalMemoryRuntimeStatus(probeCfg, {
+                    sessionId: rootSid,
+                    workspaceCwd: wsCwd,
+                    projectKey: projKey,
+                  }),
+                })
+                return
+              }
+              if (rawOp === 'ext_mem.retract') {
+                const ids = Array.isArray(body.ids) ? body.ids : (typeof body.id === 'string' ? [body.id] : [])
+                const out = await retractExternalMemory(effCfgNow.externalMemory, {
+                  ids,
+                  sessionId: rootSid,
+                  workspaceCwd: wsCwd,
+                  projectKey: projKey,
+                })
+                sendJson(res, out && out.ok ? 200 : 400, out)
+                return
+              }
+              if (rawOp === 'ext_mem.sync_now') {
+                const out = await notifyDreamOrIdleAsync(effCfgNow.externalMemory, {
+                  sessionId: rootSid,
+                  workspaceCwd: wsCwd,
+                  projectKey: projKey,
+                  reason: 'manual_sync',
+                })
+                sendJson(res, 200, {
+                  ok: true,
+                  result: out,
+                  externalMemoryStatus: getExternalMemoryRuntimeStatus(effCfgNow.externalMemory, {
+                    sessionId: rootSid,
+                    workspaceCwd: wsCwd,
+                    projectKey: projKey,
+                  }),
+                })
+                return
+              }
+              if (rawOp === 'ext_mem.discover') {
+                const sources = await discoverExternalMemorySources()
+                sendJson(res, 200, { ok: true, sources })
+                return
+              }
+              if (rawOp === 'ext_mem.import_source') {
+                const srcSpec = body.source && typeof body.source === 'object' ? body.source : body
+                const out = await importExternalMemorySource(effCfgNow.externalMemory, {
+                  source: srcSpec,
+                  maxItems: Number(body.maxItems) || 60,
+                })
+                sendJson(res, out && out.ok === false ? 400 : 200, out)
+                return
+              }
+              if (rawOp === 'ext_mem.list') {
+                const listCfg = body.config && typeof body.config === 'object'
+                  ? normalizeExternalMemoryConfig(body.config, effCfgNow.externalMemory)
+                  : effCfgNow.externalMemory
+                const out = await listExternalMemoryItems(listCfg, {
+                  limit: Number(body.limit) || 60,
+                  sessionId: rootSid,
+                  workspaceCwd: wsCwd,
+                  projectKey: projKey,
+                })
+                sendJson(res, out && out.ok === false ? 400 : 200, out)
+                return
+              }
+              if (rawOp === 'ext_mem.add') {
+                const out = await addExternalMemoryItem(effCfgNow.externalMemory, {
+                  text: typeof body.text === 'string' ? body.text : '',
+                  category: typeof body.category === 'string' ? body.category : '',
+                  pinned: Boolean(body.pinned),
+                  sessionId: rootSid,
+                  workspaceCwd: wsCwd,
+                  projectKey: projKey,
+                })
+                sendJson(res, out && out.ok === false ? 400 : 200, out)
+                return
+              }
+              if (rawOp === 'ext_mem.update') {
+                const out = await updateExternalMemoryItem(effCfgNow.externalMemory, {
+                  id: typeof body.id === 'string' ? body.id : '',
+                  ...(typeof body.text === 'string' ? { text: body.text } : {}),
+                  ...(typeof body.category === 'string' ? { category: body.category } : {}),
+                  ...(typeof body.pinned === 'boolean' ? { pinned: body.pinned } : {}),
+                  reinforce: Boolean(body.reinforce),
+                })
+                sendJson(res, out && out.ok === false ? 400 : 200, out)
+                return
+              }
+              if (rawOp === 'ext_mem.remove') {
+                const out = await removeExternalMemoryItem(effCfgNow.externalMemory, {
+                  id: typeof body.id === 'string' ? body.id : '',
+                  sessionId: rootSid,
+                  workspaceCwd: wsCwd,
+                  projectKey: projKey,
+                })
+                sendJson(res, out && out.ok === false ? 400 : 200, out)
+                return
+              }
+              const customVaultDir = (effCfgNow.externalMemory && effCfgNow.externalMemory.memorySlot && effCfgNow.externalMemory.memorySlot.vaultPath) || ''
+              if (rawOp === 'ext_mem.embedding_probe') {
+                const savedEmb = (effCfgNow.externalMemory && effCfgNow.externalMemory.embedding) || {}
+                const rawEmb = body.embedding && typeof body.embedding === 'object' ? body.embedding : {}
+                const mergedEmb = normalizeExternalMemoryConfig({ embedding: { ...rawEmb, enabled: true } }, { embedding: savedEmb }).embedding
+                const out = await probeEmbeddingApi(mergedEmb)
+                sendJson(res, out && out.ok ? 200 : 400, out)
+                return
+              }
+              if (rawOp === 'ext_mem.diary_list') {
+                const out = listDiaryEntries(customVaultDir, Number(body.limit) || 40)
+                sendJson(res, 200, out)
+                return
+              }
+              if (rawOp === 'ext_mem.diary_add') {
+                const out = addDiaryEntry({
+                  title: typeof body.title === 'string' ? body.title : '',
+                  summary: typeof body.summary === 'string' ? body.summary : (typeof body.text === 'string' ? body.text : ''),
+                  highlights: Array.isArray(body.highlights) ? body.highlights : [],
+                  moodTag: typeof body.moodTag === 'string' ? body.moodTag : '日常',
+                  source: 'manual',
+                  sessionId: rootSid,
+                }, customVaultDir)
+                sendJson(res, out && out.ok === false ? 400 : 200, out)
+                return
+              }
+              if (rawOp === 'ext_mem.diary_update') {
+                const out = updateDiaryEntry(typeof body.id === 'string' ? body.id : '', {
+                  ...(typeof body.title === 'string' ? { title: body.title } : {}),
+                  ...(typeof body.summary === 'string' ? { summary: body.summary } : {}),
+                  ...(Array.isArray(body.highlights) ? { highlights: body.highlights } : {}),
+                  ...(typeof body.moodTag === 'string' ? { moodTag: body.moodTag } : {}),
+                }, customVaultDir)
+                sendJson(res, out && out.ok === false ? 400 : 200, out)
+                return
+              }
+              if (rawOp === 'ext_mem.diary_delete') {
+                const out = removeDiaryEntry(typeof body.id === 'string' ? body.id : '', customVaultDir)
+                sendJson(res, out && out.ok === false ? 400 : 200, out)
+                return
+              }
+              if (rawOp === 'ext_mem.profile_get') {
+                sendJson(res, 200, loadUserProfile(customVaultDir))
+                return
+              }
+              if (rawOp === 'ext_mem.profile_save') {
+                const out = saveUserProfile(body.profile && typeof body.profile === 'object' ? body.profile : body, customVaultDir)
+                sendJson(res, out && out.ok === false ? 400 : 200, out)
+                return
+              }
+              if (rawOp === 'ext_mem.prompts_get') {
+                sendJson(res, 200, getMemoryPrompts(customVaultDir))
+                return
+              }
+              if (rawOp === 'ext_mem.prompts_save') {
+                const out = saveMemoryPrompt(
+                  typeof body.key === 'string' ? body.key : '',
+                  typeof body.content === 'string' ? body.content : '',
+                  customVaultDir,
+                )
+                sendJson(res, out && out.ok === false ? 400 : 200, out)
+                return
+              }
+              if (rawOp === 'ext_mem.prompts_reset') {
+                const out = resetMemoryPrompt(typeof body.key === 'string' ? body.key : 'all', customVaultDir)
+                sendJson(res, out && out.ok === false ? 400 : 200, out)
+                return
+              }
+              if (rawOp === 'ext_mem.distill_now') {
+                let turns = Array.isArray(body.turns) ? body.turns : []
+                if (!turns.length && stNow.workspaces && stNow.workspaces[rootSid] && Array.isArray(stNow.workspaces[rootSid].chat)) {
+                  const chatList = stNow.workspaces[rootSid].chat.slice(-16)
+                  const paired = []
+                  let pendingUser = ''
+                  for (const msg of chatList) {
+                    if (!msg) continue
+                    if (msg.kind === 'receipt' || msg.kind === 'system') continue
+                    const txt = String(msg.text || '')
+                    if (!txt.trim() || isSystemMaintenanceNoise(txt)) continue
+                    if (msg.role === 'user') {
+                      if (pendingUser) paired.push({ userText: pendingUser, chiefReply: '' })
+                      pendingUser = txt
+                    } else if (msg.role === 'chief') {
+                      paired.push({ userText: pendingUser, chiefReply: txt })
+                      pendingUser = ''
+                    }
+                  }
+                  if (pendingUser) paired.push({ userText: pendingUser, chiefReply: '' })
+                  turns = paired.slice(-8)
+                }
+                const chiefDeps = makeChiefDeps(runtime)
+                const out = await distillMemoryBatch({
+                  rawCfg: effCfgNow.externalMemory,
+                  turns,
+                  sessionId: rootSid,
+                  customDir: customVaultDir,
+                  callLlm: chiefDeps && (typeof chiefDeps.getLlm === 'function' || typeof chiefDeps.callLlmOverride === 'function')
+                    ? (opts => callChiefLlm(chiefDeps, { sessionId: rootSid, ...opts }))
+                    : null,
+                  forceHeuristic: Boolean(body.forceHeuristic),
+                })
+                if (!out.ok) {
+                  sendJson(res, 400, out)
+                  return
+                }
+                const listed = await listExternalMemoryItems(effCfgNow.externalMemory, {
+                  limit: 60,
+                  sessionId: rootSid,
+                  workspaceCwd: wsCwd,
+                  projectKey: projKey,
+                })
+                const prof = loadUserProfile(customVaultDir)
+                const dr = listDiaryEntries(customVaultDir, 40)
+                sendJson(res, 200, {
+                  ...out,
+                  profile: prof.profile,
+                  profilePath: prof.profilePath,
+                  diary: dr.entries,
+                  diaryPath: dr.diaryPath,
+                  items: listed.items || [],
+                  stats: listed.stats || null,
+                })
+                return
+              }
+              sendJson(res, 400, { ok: false, error: '未知 ext_mem 操作: ' + rawOp })
+              return
+            }
+            if (rawOp === 'theme.diy') {
+              const out = await designCustomThemeWithChief(makeChiefDeps(runtime), {
+                sessionId,
+                prompt: typeof body.prompt === 'string' ? body.prompt : '',
+                currentTheme: body.currentTheme && typeof body.currentTheme === 'object' ? body.currentTheme : null,
+                images: Array.isArray(body.images) ? body.images : [],
+                extractedSwatches: Array.isArray(body.extractedSwatches) ? body.extractedSwatches : [],
+              })
               sendJson(res, out && out.ok === false ? 400 : 200, out)
               return
             }

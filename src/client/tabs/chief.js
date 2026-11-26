@@ -36,6 +36,7 @@ import {
   refresh,
   toggleSyncHandoffOnDigest,
   copyText,
+  retractExternalMemoryApi,
 } from '../api.js'
 import { buildSessionReportMarkdown, downloadSessionReportMarkdown } from '../report.js'
 import {
@@ -69,6 +70,7 @@ export function ChiefTab({ board, view }) {
   const [chatFilter, setChatFilter] = React.useState('all')
   const [emptyStatusExpanded, setEmptyStatusExpanded] = React.useState(false)
   const [expandedReplyIds, setExpandedReplyIds] = React.useState({})
+  const [expandedRecallIds, setExpandedRecallIds] = React.useState({})
 
   React.useEffect(() => {
     void loadChiefView(false)
@@ -202,8 +204,9 @@ export function ChiefTab({ board, view }) {
     'div',
     { className: 'dnb-view' },
     // Editorial Goal Brief or Standard Structured Digest
-    h(
-      AccCard,
+    h('div', { 'data-dnb-section': 'chief-digest' },
+      h(
+        AccCard,
       {
         open: !view.chiefDigestCollapsed,
         onToggle: () => patch({ chiefDigestCollapsed: !view.chiefDigestCollapsed }),
@@ -421,6 +424,7 @@ export function ChiefTab({ board, view }) {
             )
           : h('p', { className: 'dnb-prose-p' },
               '目前还没有生成总结。你可以在下面的输入框存资料、设拦截规则，或让参谋长去干活。'),
+      ),
     ),
 
     // Partitioned Chief Q&A Turn Collections vs System / Execution Receipts
@@ -446,6 +450,70 @@ export function ChiefTab({ board, view }) {
             if (isReceiptChatItem(item)) return true
             const txt = String(item.text || '')
             return txt.includes('\n') || txt.length > 96
+          }
+
+          const renderExtMemoryPill = (item, keyPrefix = '') => {
+            const mr = item && item.memoryRecall
+            const mb = item && item.moodBadge
+            if ((!mr || !mr.count) && (!mb || !mb.text)) return null
+            const recKey = `${keyPrefix}${item.id || item.at || 'latest'}`
+            const recOpen = Boolean(expandedRecallIds[recKey])
+            return h(
+              'div',
+              { style: { marginTop: 6, display: 'flex', flexDirection: 'column', gap: 4 } },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+                mr && mr.count
+                  ? h('button', {
+                      type: 'button',
+                      className: 'dnb-mini-btn',
+                      style: { fontSize: 10.5, padding: '2px 7px' },
+                      onClick: () => setExpandedRecallIds(prev => ({ ...prev, [recKey]: !prev[recKey] })),
+                    }, `${recOpen ? '▾' : '▸'} 🧠 ${bi(`已参考 ${mr.count} 条外部记忆`, `Referenced ${mr.count} external memor${mr.count > 1 ? 'ies' : 'y'}`)}${mr.provider ? ` · ${mr.provider}` : ''}${mr.latencyMs ? ` · ${mr.latencyMs}ms` : ''}`)
+                  : null,
+                mb && mb.text
+                  ? h('span', {
+                      className: 'dnb-tag',
+                      title: mb.detail || mb.text,
+                      style: { fontSize: 10.5, opacity: 0.9 },
+                    }, `${mb.glyph || '💫'} ${mb.text}`)
+                  : null,
+              ),
+              recOpen && mr && Array.isArray(mr.items) && mr.items.length > 0
+                ? h(
+                    'div',
+                    {
+                      style: {
+                        padding: '6px 8px',
+                        borderRadius: 8,
+                        border: '1px solid var(--dnb-border)',
+                        background: 'var(--dnb-surface-2, rgba(127,127,127,0.06))',
+                        fontSize: 11,
+                        display: 'flex',
+                        flexDirection: 'column',
+                        gap: 4,
+                      },
+                    },
+                    mr.items.map((rec, rIdx) =>
+                      h(
+                        'div',
+                        { key: rec.id || rIdx, style: { display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: 6 } },
+                        h('span', { style: { color: 'var(--dnb-text-2)', lineHeight: 1.4 } },
+                          `[${rec.evidence === 'observed' ? '实证' : rec.evidence === 'inferred' ? '推断' : '记录'}${rec.source ? ' · ' + rec.source : ''}] ${rec.preview}`),
+                        mr.canRetract && rec.id
+                          ? h('button', {
+                              type: 'button',
+                              className: 'dnb-mini-btn',
+                              style: { fontSize: 10, flexShrink: 0 },
+                              onClick: () => void retractExternalMemoryApi([rec.id]),
+                            }, bi('撤回', 'Retract'))
+                          : null,
+                      ),
+                    ),
+                  )
+                : null,
+            )
           }
 
           const renderTurnReplyCard = (item) => {
@@ -486,6 +554,7 @@ export function ChiefTab({ board, view }) {
                   ),
                 ),
                 renderStructuredText(item.text),
+                renderExtMemoryPill(item, 'short-'),
               )
             }
 
@@ -523,6 +592,7 @@ export function ChiefTab({ board, view }) {
                     'div',
                     { className: 'dnb-reply-detail' },
                     renderStructuredText(item.text),
+                    renderExtMemoryPill(item, 'exp-'),
                     (effortBadge || actionsArr.length > 1 || item.isOneStopReport || item.resumeTaskId)
                       ? h(
                           'div',
@@ -546,10 +616,13 @@ export function ChiefTab({ board, view }) {
           const allExpandedNow = showHistory && filteredTurns.length > 0 && !anyTurnCollapsed && allRepliesExpanded
 
           return h(
-            AccCard,
-            {
-              open: showHistory,
-              onToggle: () => setShowHistory(v => !v),
+            'div',
+            { 'data-dnb-section': 'chief-chat' },
+            h(
+              AccCard,
+              {
+                open: showHistory,
+                onToggle: () => setShowHistory(v => !v),
               tone: 'slate',
               className: 'dnb-qa-section',
               title: bi('问答与记录', 'Q&A & Log'),
@@ -733,6 +806,7 @@ export function ChiefTab({ board, view }) {
                 )
               : h('div', { className: 'dnb-cell', style: { fontSize: 11.5, color: 'var(--dnb-text-3)' } },
                   chatFilter === 'receipt' ? '还没有操作记录' : '还没有提问记录'),
+          ),
           )
         })()
       : null,
@@ -877,7 +951,13 @@ export function ChiefComposerBar({ view, barRef }) {
   const activeChipsCount = (tm.intervention ? 1 : 0)
     + (tm.autoCompact ? 1 : 0)
     + (!effectiveSafetyOn ? 1 : 0)
-  const showUrgentStrip = Boolean(tm.intervention || !effectiveSafetyOn || guard.circuitBroken)
+  const curRunMode = meta.stopped
+    ? 'off'
+    : (meta.runMode && ['off', 'patrol', 'managed'].includes(meta.runMode)
+        ? meta.runMode
+        : (meta.paceMode === 'auto' ? 'managed' : (meta.paceMode === 'smart' ? 'patrol' : 'off')))
+  const isManagedMode = curRunMode === 'managed' || Boolean(meta.autoPilot)
+  const showUrgentStrip = Boolean(tm.intervention || isManagedMode || !effectiveSafetyOn || guard.circuitBroken)
   const commitTokenThresholdInput = (rawText) => {
     const valStr = String(rawText ?? '').trim() || '64K'
     void updateSecConfig({
@@ -1245,6 +1325,63 @@ export function ChiefComposerBar({ view, barRef }) {
             ),
             h(Switch, { checked: Boolean(tm.conciseBrief), onChange: v => toggleTacticalField('conciseBrief', v) }),
           ),
+          // Row 5.5: Chief-exclusive External Memory quick toggle
+          (() => {
+            const extCfg = meta.externalMemory || {}
+            const extStatus = meta.externalMemoryStatus || {}
+            const sKey = view.sessionId ? `session:${view.sessionId}` : ''
+            const curWsPol = (sKey && extCfg.workspacePolicies && extCfg.workspacePolicies[sKey]) || extStatus.policy || 'read-write'
+            const extOn = Boolean(extCfg.enabled && extCfg.memorySlot && extCfg.memorySlot.kind !== 'none' && curWsPol !== 'disabled')
+            return h(
+              'div',
+              { className: 'dnb-tactical-row' },
+              h(
+                'div',
+                { style: { flex: 1, minWidth: 0 } },
+                h('div', { style: { fontSize: 12, fontWeight: 500, color: 'var(--dnb-text)', display: 'flex', alignItems: 'center', gap: 6 } },
+                  h(Icon, { name: 'brain', size: 12.5, style: { color: extOn ? 'var(--dnb-accent)' : 'var(--dnb-text-3)' } }),
+                  bi('参谋长期记忆（不打扰主对话）', 'Chief Memory (0-byte @lead)')),
+                h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } },
+                  extOn
+                    ? `${(extCfg.memorySlot && (extCfg.memorySlot.label || extCfg.memorySlot.kind)) || '记事本'} · ${curWsPol === 'read-only' ? bi('本局只读', 'Read-only') : bi('已启用', 'Active')}`
+                    : bi('未开启 · 点右侧进入「记忆」页一键打开', 'Off · Open Memory tab for 1-click setup')),
+              ),
+              h('div', { style: { display: 'flex', alignItems: 'center', gap: 6, flexShrink: 0 } },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  onClick: () => patch({ tacticalMenuOpen: false, settingsOpen: false, tab: 'extmem' }),
+                }, bi('记忆页', 'Memory')),
+                h(Switch, {
+                  checked: extOn,
+                  onChange: on => {
+                    if (!extCfg.memorySlot || extCfg.memorySlot.kind === 'none') {
+                      const nextPols = { ...(extCfg.workspacePolicies || {}) }
+                      if (sKey) nextPols[sKey] = 'read-write'
+                      void updateSecConfig({
+                        externalMemory: {
+                          ...extCfg,
+                          enabled: on,
+                          memorySlot: { ...(extCfg.memorySlot || {}), enabled: true, kind: 'builtin-md', label: '参谋自带记事本' },
+                          workspacePolicies: nextPols,
+                        },
+                      })
+                      return
+                    }
+                    const nextPols = { ...(extCfg.workspacePolicies || {}) }
+                    if (sKey) nextPols[sKey] = on ? 'read-write' : 'disabled'
+                    void updateSecConfig({
+                      externalMemory: {
+                        ...extCfg,
+                        enabled: on ? true : extCfg.enabled,
+                        workspacePolicies: nextPols,
+                      },
+                    })
+                  },
+                }),
+              ),
+            )
+          })(),
           // Row 6: Chief Thinking Effort Adaptive Control + Team Effort Mode (Auto / Manual)
           h(
             'div',
@@ -1340,6 +1477,13 @@ export function ChiefComposerBar({ view, barRef }) {
               'div',
               { style: { flex: 1, minWidth: 0 } },
               renderStructuredText(view.secLatestReply.text),
+              view.secLatestReply.memoryRecall && view.secLatestReply.memoryRecall.count
+                ? h('div', { style: { marginTop: 5, fontSize: 10.5, color: 'var(--dnb-text-3)' } },
+                    `🧠 ${bi(`已参考 ${view.secLatestReply.memoryRecall.count} 条外部记忆`, `Referenced ${view.secLatestReply.memoryRecall.count} external memor${view.secLatestReply.memoryRecall.count > 1 ? 'ies' : 'y'}`)}${view.secLatestReply.memoryRecall.provider ? ` (${view.secLatestReply.memoryRecall.provider})` : ''}${view.secLatestReply.moodBadge && view.secLatestReply.moodBadge.text ? ` · ${view.secLatestReply.moodBadge.glyph || '💫'} ${view.secLatestReply.moodBadge.text}` : ''}`)
+                : (view.secLatestReply.moodBadge && view.secLatestReply.moodBadge.text
+                    ? h('div', { style: { marginTop: 5, fontSize: 10.5, color: 'var(--dnb-text-3)' } },
+                        `${view.secLatestReply.moodBadge.glyph || '💫'} ${view.secLatestReply.moodBadge.text}`)
+                    : null),
               Array.isArray(view.secLatestReply.actions) && view.secLatestReply.actions.length
                 ? h(
                     'div',
@@ -1371,6 +1515,15 @@ export function ChiefComposerBar({ view, barRef }) {
                 onClick: () => patch({ tacticalMenuOpen: !view.tacticalMenuOpen }),
               }, h(Icon, { name: 'zap', size: 11 }), `强介入 ${Number(guard.interventionTurns ?? guard.consecutiveInterventionTurns ?? 0)}/${isUnlimitedTurns ? '∞' : maxTurns}`)
             : null,
+          isManagedMode
+            ? h('button', {
+                type: 'button',
+                className: 'dnb-tac-chip',
+                'data-tone': 'accent',
+                title: '当前处于托管模式，点击右侧急停可随时刹停',
+                onClick: () => patch({ settingsOpen: false }),
+              }, h(Icon, { name: 'bolt', size: 11 }), '🤖 托管中')
+            : null,
           !effectiveSafetyOn
             ? h('button', {
                 type: 'button',
@@ -1387,11 +1540,11 @@ export function ChiefComposerBar({ view, barRef }) {
                 title: guard.circuitReason || '连续出错太多次，已自动停下',
               }, h(Icon, { name: 'alert', size: 11 }), '已停机')
             : null,
-          tm.intervention
+          (tm.intervention || isManagedMode)
             ? h('button', {
                 type: 'button',
                 className: 'dnb-stop-btn',
-                title: '马上打断后台推进，当前任务计划会保留',
+                title: '马上打断托管与强介入推进，当前任务计划会保留',
                 onClick: () => void updateSecConfig({ emergencyStopIntervention: true }),
               }, h(Icon, { name: 'stop', size: 10.5 }), '急停')
             : null,

@@ -142,11 +142,14 @@ export function TasksTab({ board }) {
       : (allTasks.length ? bi(`${doneTotal}/${allTasks.length} 任务`, `${doneTotal}/${allTasks.length} tasks`) : '')
 
     return h(
-      AccCard,
-      {
-        cardRef: boardSectionRef,
-        open: !boardCollapsed,
-        onToggle: () => patch({ boardSectionCollapsed: !boardCollapsed }),
+      'div',
+      { 'data-dnb-section': 'tasks-board' },
+      h(
+        AccCard,
+        {
+          cardRef: boardSectionRef,
+          open: !boardCollapsed,
+          onToggle: () => patch({ boardSectionCollapsed: !boardCollapsed }),
         className: 'dnb-board-card',
         title: bi('任务关系图', 'Work Map'),
         headTitle: boardCollapsed ? bi('展开任务关系图', 'Expand Work Map') : bi('收起任务关系图', 'Collapse Work Map'),
@@ -289,6 +292,7 @@ export function TasksTab({ board }) {
         stepApi,
         externalSelectStage: stageFocusReq,
       }),
+      ),
     )
   }
 

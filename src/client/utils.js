@@ -5,7 +5,7 @@
  */
 
 import { h } from './react-runtime.js'
-import { GENERIC_OWNERS, SESSION_PALETTE } from './constants.js'
+import { GENERIC_OWNERS, SESSION_PALETTE, CHIEF_BRAND_EASTER_EGGS } from './constants.js'
 import { store } from './store.js'
 
 export function normalizeMaxTurnsVal(raw) {
@@ -454,6 +454,71 @@ function fmtCompactTokens(num) {
     return (Math.abs(k - Math.round(k)) < 0.05 ? String(Math.round(k)) : k.toFixed(1).replace(/\.0$/, '')) + 'K'
   }
   return String(n)
+}
+
+/* ---------------------------------------------- Brand Easter Egg Matching */
+
+const CHIEF_BRAND_NAME_RULES = [
+  {
+    key: 'claude',
+    asciiRe: /(?:^|[^a-z])(?:claude|clawd|anthropic|opus|sonnet|haiku)(?:$|[^a-z])/i,
+    zhRe: /(?:小克|大克|克劳德|克老师|克总|克爹|牢克|橘猫克|克宝|克妹|克酱|阿克|安思罗|小螃蟹|大小姐)/,
+  },
+  {
+    key: 'gpt',
+    asciiRe: /(?:^|[^a-z])(?:gpt(?:-?[0-9a-z.]+)?|chatgpt|openai|codex|4o|o1|o3|o4)(?:$|[^a-z])/i,
+    zhRe: /(?:白龙娘|小[gG](?![a-zA-Z])|[gG]宝(?![a-zA-Z])|牢[gG](?![a-zA-Z])|阿[gG](?![a-zA-Z])|绿茶[gG](?![a-zA-Z])|GPT老师|GPT酱|恰特|查特|小茶|茶茶|小欧|欧派|鸡屁踢|小皮|小[pP](?![a-zA-Z]))/i,
+  },
+  {
+    key: 'gemini',
+    asciiRe: /(?:^|[^a-z])(?:gemini|gem|google|deepmind|antigravity)(?:$|[^a-z])/i,
+    zhRe: /(?:哈基米|小基米|基米|芥末泥|小Gem(?![a-zA-Z])|杰米尼|双子星|双子座|双子|谷歌娘|鸡米尼|米宝|阿米|星米|哈气猫|北美大豆包)/i,
+  },
+  {
+    key: 'deepseek',
+    asciiRe: /(?:^|[^a-z])(?:deepseek|deep\s+seek|deepsleep|ds|r1|v3|v4)(?:$|[^a-z])/i,
+    zhRe: /(?:鲸鱼娘|小鲸鱼|鲸鱼|蓝色大肥鱼|大肥鱼|哦鲸鲸|鲸鲸|小蓝鲸|蓝鲸|小肥鲸|小鲸|鲸宝|鲸酱|D老师(?![a-zA-Z])|DeepSeek娘|深度求索|深度君|迪普|梁文锋|梁武锋|梁文谷|梁武谷|梁总|小ds(?![a-zA-Z])|ds酱)/i,
+  },
+]
+
+export function detectChiefBrandFromName(rawName) {
+  const clean = String(rawName || '').trim()
+  if (!clean) return null
+  for (const rule of CHIEF_BRAND_NAME_RULES) {
+    if (rule.asciiRe.test(clean) || rule.zhRe.test(clean)) {
+      return CHIEF_BRAND_EASTER_EGGS[rule.key] || null
+    }
+  }
+  return null
+}
+
+export function detectChiefBrandFromModelRef(rawRef, catalog = null) {
+  const ref = String(rawRef || '').trim()
+  if (!ref) return null
+  let hay = ref
+  if (catalog && Array.isArray(catalog.models)) {
+    const matched = catalog.models.find(m => m && (m.ref === ref || m.id === ref))
+    if (matched) {
+      hay += ' ' + [matched.provider, matched.providerName, matched.name, matched.label, matched.id].filter(Boolean).join(' ')
+    }
+  }
+  const lower = hay.toLowerCase()
+  if (/(?:claude|anthropic|opus|sonnet|haiku)/.test(lower)) return CHIEF_BRAND_EASTER_EGGS.claude
+  if (/(?:deepseek|deep-seek|\bds-?(?:r1|v3|v4)\b|\br1\b)/.test(lower)) return CHIEF_BRAND_EASTER_EGGS.deepseek
+  if (/(?:gemini|google|deepmind|antigravity)/.test(lower)) return CHIEF_BRAND_EASTER_EGGS.gemini
+  if (/(?:openai|chatgpt|\bgpt\b|gpt-|\bcodex\b|\bo1\b|\bo3\b|\bo4\b|4o)/.test(lower)) return CHIEF_BRAND_EASTER_EGGS.gpt
+  return null
+}
+
+export function rollChiefBrandNickname(brandKey, excludeName = '') {
+  const egg = brandKey && CHIEF_BRAND_EASTER_EGGS[brandKey] ? CHIEF_BRAND_EASTER_EGGS[brandKey] : null
+  const pool = egg
+    ? egg.nicknames
+    : Object.values(CHIEF_BRAND_EASTER_EGGS).flatMap(item => item.nicknames)
+  const exclude = String(excludeName || '').trim()
+  const candidates = pool.filter(name => name !== exclude)
+  const pickFrom = candidates.length > 0 ? candidates : pool
+  return pickFrom[Math.floor(Math.random() * pickFrom.length)] || '哈基米'
 }
 
 /* ---------------------------------------------------- Spotlight Search */

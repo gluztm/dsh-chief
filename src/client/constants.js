@@ -10,7 +10,7 @@ export const SIDE_ID = 'dsh-chief'
 
 export const BRAND_NAME = 'DSH 参谋长'
 
-export const EXPECTED_BACKEND_BUILD = '1.8.0'
+export const EXPECTED_BACKEND_BUILD = '1.9.0'
 
 export const CHIEF_PERMISSION_LABELS = {
   advisor: 'L0 · 顾问模式',
@@ -66,6 +66,7 @@ export const TABS = [
   { key: 'tasks', label: '任务' },
   { key: 'peers', label: '协同' },
   { key: 'archive', label: '档案' },
+  { key: 'extmem', label: '记忆' },
   { key: 'boundaries', label: '边界' },
 ]
 
@@ -206,4 +207,49 @@ export const UI_SKIN_OPTIONS = [
     descEn: 'Clean neutral palette matching host chrome',
     swatches: ['#3b82f6', '#10b981', '#94a3b8'],
   },
+  {
+    key: 'custom',
+    zh: '自定义 DIY',
+    en: 'Custom DIY',
+    tagZh: '导图取色 · 参谋定制',
+    tagEn: 'Image / AI DIY',
+    descZh: '导入图片自动提色，或让参谋长按你的想法 DIY 专属主题',
+    descEn: 'Extract palette from an image or let Chief DIY your custom theme',
+    swatches: ['#8b7cf6', '#5cc9a7', '#f0b868'],
+  },
 ]
+
+export const CHIEF_BRAND_EASTER_EGGS = {
+  claude: {
+    key: 'claude',
+    label: 'Claude',
+    skin: 'editorial',
+    skinLabelZh: '温润纸感 · 陶土暖橙',
+    skinLabelEn: 'Warm Paper · Terracotta',
+    nicknames: ['小克', '克老师', '克总', '大小姐', '克宝', '克妹', '小螃蟹', 'Clawd', '克劳德', 'Claude'],
+  },
+  gpt: {
+    key: 'gpt',
+    label: 'GPT',
+    skin: 'botanical',
+    skinLabelZh: '静谧森系 · 松烟青绿',
+    skinLabelEn: 'Botanical · Emerald Sage',
+    nicknames: ['小G', '白龙娘', 'G宝', '恰特', '小茶', 'GPT老师', 'GPT酱', 'Codex', 'ChatGPT', '小欧'],
+  },
+  gemini: {
+    key: 'gemini',
+    label: 'Gemini',
+    skin: 'starlight',
+    skinLabelZh: '星夜幻想 · 紫夜星金',
+    skinLabelEn: 'Starlight · Twilight Aura',
+    nicknames: ['哈基米', '芥末泥', '双子星', '小Gem', '谷歌娘', '小基米', '星米', '杰米尼', 'Gemini'],
+  },
+  deepseek: {
+    key: 'deepseek',
+    label: 'DeepSeek',
+    skin: 'classic',
+    skinLabelZh: '原生简约 · 深海鲸蓝',
+    skinLabelEn: 'Classic · Deep Whale Blue',
+    nicknames: ['鲸鱼娘', '小鲸鱼', '小肥鲸', '大肥鱼', '哦鲸鲸', '小蓝鲸', 'D老师', '鲸宝', '深度君', 'DeepSeek'],
+  },
+}

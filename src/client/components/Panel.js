@@ -37,6 +37,9 @@ import {
   toggleChief,
   reserveCornerSpace,
   saveUiSkin,
+  saveNavLayout,
+  scrollWorkspaceSection,
+  openCustomThemeModal,
   runtimeRefs,
 } from '../store.js'
 import {
@@ -79,9 +82,11 @@ import {
   ElevationRequestModal,
   AuditLogModal,
   AwayPresetConfirmModal,
+  CustomThemeModal,
 } from './modals.js'
 import { TasksTab } from '../tabs/tasks.js'
 import { ArchiveTab } from '../tabs/archives.js'
+import { ExternalMemoryTab } from '../tabs/extmem.js'
 import { BoundariesTab } from '../tabs/boundaries.js'
 import { ChiefTab, ChiefComposerBar } from '../tabs/chief.js'
 import { PeersTab } from '../tabs/peers.js'
@@ -342,7 +347,8 @@ function ChiefWorkStageOverlay({ fx }) {
 function PanelInner(props) {
   const view = useStore()
   const [gearDeg, setGearDeg] = React.useState(0)
-  const [skinMenuOpen, setSkinMenuOpen] = React.useState(false)
+  const [skinMenuAnchor, setSkinMenuAnchor] = React.useState('')
+  const [expandedRailTabs, setExpandedRailTabs] = React.useState(() => ({ [(view && view.tab === 'plan' ? 'tasks' : (view && view.tab)) || 'chief']: true }))
   const isPage = !!(props && props.variant === 'main')
   const isDock = !!(props && props.variant === 'dock')
   const inConvView = !!(props && props.inConversationView)
@@ -350,6 +356,11 @@ function PanelInner(props) {
 
   const secBarRef = React.useRef(null)
   const activeSkin = (view && view.uiSkin) || DEFAULT_UI_SKIN
+
+  React.useEffect(() => {
+    const tKey = (view && view.tab === 'plan') ? 'tasks' : ((view && view.tab) || 'chief')
+    setExpandedRailTabs({ [tKey]: true })
+  }, [view && view.tab])
 
   React.useEffect(() => {
     try {
@@ -364,13 +375,13 @@ function PanelInner(props) {
   }, [activeSkin])
 
   React.useEffect(() => {
-    if (!skinMenuOpen) return undefined
+    if (!skinMenuAnchor) return undefined
     const onKey = e => {
-      if (e && e.key === 'Escape') setSkinMenuOpen(false)
+      if (e && e.key === 'Escape') setSkinMenuAnchor('')
     }
     document.addEventListener('keydown', onKey)
     return () => document.removeEventListener('keydown', onKey)
-  }, [skinMenuOpen])
+  }, [skinMenuAnchor])
 
   React.useEffect(() => {
     const host = isDock || isPage || view.open ? selfRef.current : null
@@ -412,6 +423,14 @@ function PanelInner(props) {
   const secBadge = (meta.pendingSuggestions || 0)
   const archMeta = view.archiveMeta || {}
   const archiveBadge = archMeta.takenOutCount || 0
+  const extMemBadge = Boolean(
+    meta.externalMemory
+    && meta.externalMemory.enabled
+    && meta.externalMemory.memorySlot
+    && meta.externalMemory.memorySlot.kind !== 'none'
+    && (!meta.externalMemoryStatus || meta.externalMemoryStatus.policy !== 'disabled'),
+  )
+  const extMemDegraded = Boolean(meta.externalMemoryStatus && meta.externalMemoryStatus.memory && meta.externalMemoryStatus.memory.degraded)
   const panelWorking = Boolean(
     meta.sessionEnabled !== false
     && (
@@ -456,14 +475,141 @@ function PanelInner(props) {
         ? h(PeersTab, { view })
         : view.tab === 'archive'
           ? h(ArchiveTab, { board, view })
-          : view.tab === 'boundaries'
-            ? h(BoundariesTab, { store: view })
-            : h(TasksTab, { board, view })
+          : view.tab === 'extmem'
+            ? h(ExternalMemoryTab, { view })
+            : view.tab === 'boundaries'
+              ? h(BoundariesTab, { store: view })
+              : h(TasksTab, { board, view })
 
   const cursorBlocked = normalizeCursorBlocked(board && board.cursor && board.cursor.blocked)
   const cursorText = board && board.cursor && (board.cursor.next || board.cursor.step || cursorBlocked)
     ? (cursorBlocked ? '卡住了：' + cursorBlocked : (board.cursor.next || board.cursor.step))
     : ''
+
+  const renderSkinPopover = (extraClass = '') => h(
+    React.Fragment,
+    null,
+    h('div', {
+      style: { position: 'fixed', inset: 0, zIndex: 140 },
+      onClick: e => {
+        e.stopPropagation()
+        setSkinMenuAnchor('')
+      },
+    }),
+    h(
+      'div',
+      {
+        className: extraClass ? `dnb-skin-pop ${extraClass}` : 'dnb-skin-pop',
+        role: 'menu',
+        'aria-label': bi('选择视觉主题', 'Choose UI Theme'),
+        onClick: e => e.stopPropagation(),
+      },
+      h('div', { className: 'dnb-skin-pop-title' }, bi('视觉主题 · 一键换肤', 'Appearance · Select Theme')),
+      UI_SKIN_OPTIONS.map(opt => {
+        const isCur = activeSkin === opt.key
+        if (opt.key === 'custom') {
+          const cSkin = view.customSkin || {}
+          const hasSavedCustom = Number(cSkin.updatedAt) > 0
+          const displayTitle = hasSavedCustom ? cSkin.name : bi(opt.zh, opt.en)
+          const displaySub = hasSavedCustom ? bi('自定义 DIY', 'Custom DIY') : bi(opt.tagZh, opt.tagEn)
+          const displaySwatches = Array.isArray(cSkin.swatches) && cSkin.swatches.length === 3 ? cSkin.swatches : opt.swatches
+          return h(
+            React.Fragment,
+            { key: opt.key },
+            h('div', { className: 'dnb-skin-pop-sep' }),
+            h(
+              'div',
+              { className: 'dnb-skin-pop-custom-row' },
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dnb-skin-pop-item',
+                  'data-active': isCur ? '1' : '0',
+                  title: bi(opt.descZh, opt.descEn),
+                  onClick: e => {
+                    e.stopPropagation()
+                    if (!hasSavedCustom || isCur) {
+                      setSkinMenuAnchor('')
+                      openCustomThemeModal()
+                      return
+                    }
+                    saveUiSkin('custom')
+                    setSkinMenuAnchor('')
+                    patch({ notice: bi('已切换主题：', 'Theme set to: ') + displayTitle })
+                  },
+                },
+                h(
+                  'div',
+                  { style: { display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 } },
+                  h('span', { style: { fontSize: 12, fontWeight: isCur ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, displayTitle),
+                  h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, displaySub),
+                ),
+                h(
+                  'div',
+                  { className: 'dnb-skin-swatches' },
+                  displaySwatches.map((hex, idx) =>
+                    h('span', { key: `${hex}-${idx}`, className: 'dnb-skin-swatch-dot', style: { background: hex } })),
+                ),
+              ),
+              h(
+                'button',
+                {
+                  type: 'button',
+                  className: 'dnb-skin-pop-edit-btn',
+                  title: bi('导入图片取色或让参谋长 DIY', 'Extract image palette or ask Chief to DIY'),
+                  onClick: e => {
+                    e.stopPropagation()
+                    setSkinMenuAnchor('')
+                    openCustomThemeModal()
+                  },
+                },
+                bi('调色', 'DIY'),
+              ),
+            ),
+          )
+        }
+        return h(
+          'button',
+          {
+            key: opt.key,
+            type: 'button',
+            className: 'dnb-skin-pop-item',
+            'data-active': isCur ? '1' : '0',
+            title: bi(opt.descZh, opt.descEn),
+            onClick: e => {
+              e.stopPropagation()
+              saveUiSkin(opt.key)
+              setSkinMenuAnchor('')
+              patch({ notice: bi('已切换主题：', 'Theme set to: ') + bi(opt.zh, opt.en) })
+            },
+          },
+          h(
+            'div',
+            { style: { display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 } },
+            h('span', { style: { fontSize: 12, fontWeight: isCur ? 600 : 500 } }, bi(opt.zh, opt.en)),
+            h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, bi(opt.tagZh, opt.tagEn)),
+          ),
+          h(
+            'div',
+            { className: 'dnb-skin-swatches' },
+            opt.swatches.map(hex =>
+              h('span', { key: hex, className: 'dnb-skin-swatch-dot', style: { background: hex } })),
+          ),
+        )
+      }),
+    ),
+  )
+
+  const activeRailSub = (() => {
+    if (view.settingsOpen) return ''
+    const curTab = view.tab === 'plan' ? 'tasks' : (view.tab || 'chief')
+    if (curTab === 'chief') return `chief:${view.chiefSubTab || 'all'}`
+    if (curTab === 'tasks') return `tasks:${view.tasksSubTab || 'plan'}`
+    if (curTab === 'peers') return `peers:${view.peersSubTab || 'all'}`
+    if (curTab === 'boundaries') return `boundaries:${view.boundSubTab || 'walls'}`
+    return ''
+  })()
 
   return h(
     React.Fragment,
@@ -474,6 +620,7 @@ function PanelInner(props) {
       {
         className: isDock ? 'dnb-panel dnb-main dnb-dock' : isPage ? 'dnb-panel dnb-main' : 'dnb-panel',
         'data-dnb-skin': activeSkin,
+        'data-dnb-nav-layout': view.navLayout || 'sidebar',
         role: isPage || isDock ? 'region' : 'dialog',
         'aria-label': BRAND_NAME,
         ref: node => {
@@ -498,99 +645,75 @@ function PanelInner(props) {
         h(GithubStarButton, { ghState: view.githubStarState }),
         h(
           'div',
-          {
-            style: { position: 'relative', display: 'inline-flex', alignItems: 'center' },
-          },
+          { className: 'dnb-head-rail-moved' },
+          h(
+            'div',
+            {
+              style: { position: 'relative', display: 'inline-flex', alignItems: 'center' },
+            },
+            h('button', {
+              type: 'button',
+              className: 'dnb-gear-btn dnb-skin-head-btn',
+              'data-active': skinMenuAnchor === 'head' ? '1' : '0',
+              'aria-label': bi('切换外观主题', 'Switch Appearance Theme'),
+              'aria-pressed': skinMenuAnchor === 'head' ? 'true' : 'false',
+              title: bi('切换插件外观主题（晨雾琉璃 / 温润纸感 / 静谧森系 / 星夜幻想）', 'Switch UI theme (Frosted Mist / Warm Paper / Botanical / Starlight)'),
+              onClick: e => {
+                e.stopPropagation()
+                setSkinMenuAnchor(v => (v === 'head' ? '' : 'head'))
+                patch({
+                  secModelMenuOpen: false,
+                  secPaceMenuOpen: false,
+                  secPermMenuOpen: false,
+                })
+              },
+            }, h(Icon, { name: 'palette', size: 13.5 })),
+            skinMenuAnchor === 'head' ? renderSkinPopover() : null,
+          ),
           h('button', {
             type: 'button',
-            className: 'dnb-gear-btn dnb-skin-head-btn',
-            'data-active': skinMenuOpen ? '1' : '0',
-            'aria-label': bi('切换外观主题', 'Switch Appearance Theme'),
-            'aria-pressed': skinMenuOpen ? 'true' : 'false',
-            title: bi('切换插件外观主题（晨雾琉璃 / 温润纸感 / 静谧森系 / 星夜幻想）', 'Switch UI theme (Frosted Mist / Warm Paper / Botanical / Starlight)'),
+            className: 'dnb-gear-btn dnb-layout-toggle-btn',
+            'aria-label': bi('切换导航排列样式', 'Toggle Navigation Layout'),
+            title: (view.navLayout || 'sidebar') === 'sidebar'
+              ? bi('当前：左侧极简工作台（宽屏生效）· 点一下切回顶部标签', 'Current: Left Rail Studio · Click to switch to Top Tabs')
+              : bi('当前：顶部经典标签 · 点一下切换左侧极简工作台（宽屏生效）', 'Current: Top Tabs · Click to switch to Left Rail Studio'),
             onClick: e => {
               e.stopPropagation()
-              setSkinMenuOpen(v => !v)
+              if (e.currentTarget && typeof e.currentTarget.blur === 'function') e.currentTarget.blur()
+              const next = (view.navLayout || 'sidebar') === 'sidebar' ? 'top' : 'sidebar'
+              saveNavLayout(next)
+              setSkinMenuAnchor('')
               patch({
+                notice: next === 'sidebar'
+                  ? bi('已切换为左侧极简工作台（宽屏生效）', 'Switched to Left Rail Studio (wide view)')
+                  : bi('已切回顶部经典标签排列', 'Switched to Top Classic Tabs'),
+              })
+            },
+          }, h(
+            'svg',
+            { width: 13.5, height: 13.5, viewBox: '0 0 24 24', fill: 'none', stroke: 'currentColor', strokeWidth: 1.85, strokeLinecap: 'round', strokeLinejoin: 'round', 'aria-hidden': true },
+            h('rect', { x: 3, y: 4, width: 18, height: 16, rx: 2.5 }),
+            h('path', { d: (view.navLayout || 'sidebar') === 'sidebar' ? 'M9 4v16' : 'M3 9h18' }),
+          )),
+          h('button', {
+            type: 'button',
+            className: 'dnb-gear-btn',
+            'data-active': view.settingsOpen ? '1' : '0',
+            'aria-label': bi('设置', 'Settings'),
+            'aria-pressed': view.settingsOpen ? 'true' : 'false',
+            title: bi('设置：外观主题、给参谋长取名、模式预设、桌面通知和用量上限', 'Settings: theme, Chief name, presets, alerts, and caps'),
+            onClick: () => {
+              setGearDeg(d => d + 180)
+              setSkinMenuAnchor('')
+              patch({
+                settingsOpen: !view.settingsOpen,
                 secModelMenuOpen: false,
                 secPaceMenuOpen: false,
                 secPermMenuOpen: false,
               })
             },
-          }, h(Icon, { name: 'palette', size: 13.5 })),
-          skinMenuOpen
-            ? h(
-                React.Fragment,
-                null,
-                h('div', {
-                  style: { position: 'fixed', inset: 0, zIndex: 140 },
-                  onClick: e => {
-                    e.stopPropagation()
-                    setSkinMenuOpen(false)
-                  },
-                }),
-                h(
-                  'div',
-                  {
-                    className: 'dnb-skin-pop',
-                    role: 'menu',
-                    'aria-label': bi('选择视觉主题', 'Choose UI Theme'),
-                    onClick: e => e.stopPropagation(),
-                  },
-                  h('div', { className: 'dnb-skin-pop-title' }, bi('视觉主题 · 一键换肤', 'Appearance · Select Theme')),
-                  UI_SKIN_OPTIONS.map(opt => {
-                    const isCur = activeSkin === opt.key
-                    return h(
-                      'button',
-                      {
-                        key: opt.key,
-                        type: 'button',
-                        className: 'dnb-skin-pop-item',
-                        'data-active': isCur ? '1' : '0',
-                        title: bi(opt.descZh, opt.descEn),
-                        onClick: e => {
-                          e.stopPropagation()
-                          saveUiSkin(opt.key)
-                          setSkinMenuOpen(false)
-                          patch({ notice: bi('已切换主题：', 'Theme set to: ') + bi(opt.zh, opt.en) })
-                        },
-                      },
-                      h(
-                        'div',
-                        { style: { display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 } },
-                        h('span', { style: { fontSize: 12, fontWeight: isCur ? 600 : 500 } }, bi(opt.zh, opt.en)),
-                        h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, bi(opt.tagZh, opt.tagEn)),
-                      ),
-                      h(
-                        'div',
-                        { className: 'dnb-skin-swatches' },
-                        opt.swatches.map(hex =>
-                          h('span', { key: hex, className: 'dnb-skin-swatch-dot', style: { background: hex } })),
-                      ),
-                    )
-                  }),
-                ),
-              )
-            : null,
+          }, h(Icon, { name: 'settings', size: 13.5, style: { transform: `rotate(${gearDeg}deg)` } })),
         ),
-        h('button', {
-          type: 'button',
-          className: 'dnb-gear-btn',
-          'data-active': view.settingsOpen ? '1' : '0',
-          'aria-label': bi('设置', 'Settings'),
-          'aria-pressed': view.settingsOpen ? 'true' : 'false',
-          title: bi('设置：外观主题、给参谋长取名、模式预设、桌面通知和用量上限', 'Settings: theme, Chief name, presets, alerts, and caps'),
-          onClick: () => {
-            setGearDeg(d => d + 180)
-            setSkinMenuOpen(false)
-            patch({
-              settingsOpen: !view.settingsOpen,
-              secModelMenuOpen: false,
-              secPaceMenuOpen: false,
-              secPermMenuOpen: false,
-            })
-          },
-        }, h(Icon, { name: 'settings', size: 13.5, style: { transform: `rotate(${gearDeg}deg)` } })),
         view.staleBackendDetected
           ? h('span', {
               className: 'dnb-ver-chip',
@@ -610,7 +733,8 @@ function PanelInner(props) {
           'div',
           { className: 'dnb-head-actions' },
           h('button', {
-            className: 'dnb-head-pill',
+            type: 'button',
+            className: 'dnb-head-pill dnb-model-pill',
             title: (() => {
               const cat = view.secModelsCatalog || (view.secView && view.secView.models) || null
               const eff = meta.modelRef || meta.resolvedModelRef || meta.followModelRef || ''
@@ -622,7 +746,7 @@ function PanelInner(props) {
             })(),
             onClick: () => {
               const nextOpen = !view.secModelMenuOpen
-              setSkinMenuOpen(false)
+              setSkinMenuAnchor('')
               patch({ secModelMenuOpen: nextOpen, secPaceMenuOpen: false, secPermMenuOpen: false })
               if (nextOpen) void loadChiefModels(true)
             },
@@ -632,7 +756,8 @@ function PanelInner(props) {
             const effortKey = meta.thinkingEffort || 'auto'
             const effortOpt = effortMeta(effortKey) || THINKING_EFFORT_OPTIONS.find(x => x.key === effortKey)
             const effBadge = effortOpt ? effortOpt.shortLabel : bi('自动', 'Auto')
-            const tag = eff ? clampTitle(shortModelName(eff, cat, true), 14) : bi('自动', 'Auto')
+            const rawShort = eff ? shortModelName(eff, cat, false).replace(/^deepseek[\s\-_]*/i, '').trim() : ''
+            const tag = rawShort ? clampTitle(rawShort, 16) : (eff ? clampTitle(shortModelName(eff, cat, false), 16) : bi('自动', 'Auto'))
             return `${tag} · ${effBadge}`
           })()),
           (() => {
@@ -654,7 +779,7 @@ function PanelInner(props) {
                   'data-rm': opt.key,
                   title: rm.hint || opt.hint,
                   onClick: () => {
-                    setSkinMenuOpen(false)
+                    setSkinMenuAnchor('')
                     if (opt.key === 'managed' && curRunMode !== 'managed') {
                       patch({ autoPilotConfirmOpen: true, secPaceMenuOpen: false })
                       return
@@ -774,124 +899,422 @@ function PanelInner(props) {
           )
         : null,
 
-      // iOS Segmented Tab Strip (5 Clean Two-Char Tabs)
+      // Responsive Workspace Host (Top Classic Tabs vs Left Minimalist Rail Studio)
       h(
         'div',
-        { className: 'dnb-seg-wrap' },
+        {
+          className: 'dnb-workspace-host',
+          'data-layout': view.navLayout || 'sidebar',
+          ...(activeRailSub ? { 'data-rail-sub': activeRailSub } : {}),
+        },
+
+        // Top Segmented Tab Strip (Always visible in 'top' layout or narrow screens)
         h(
           'div',
-          { className: 'dnb-seg' },
-          TABS.map(tab => {
-            const count = tab.key === 'tasks'
-              ? openCount
-              : tab.key === 'peers'
-                ? peersBadge
-                : tab.key === 'chief'
-                  ? secBadge
-                  : tab.key === 'archive'
-                    ? archiveBadge
-                    : 0
+          { className: 'dnb-seg-wrap' },
+          h(
+            'div',
+            { className: 'dnb-seg' },
+            TABS.map(tab => {
+              const count = tab.key === 'tasks'
+                ? openCount
+                : tab.key === 'peers'
+                  ? peersBadge
+                  : tab.key === 'chief'
+                    ? secBadge
+                    : tab.key === 'archive'
+                      ? archiveBadge
+                      : 0
+              const isSegActive = !view.settingsOpen && (view.tab === tab.key || (tab.key === 'tasks' && view.tab === 'plan'))
               return h(
-              'button',
-              {
-                key: tab.key,
-                className: 'dnb-seg-btn',
-                'data-tab': tab.key,
-                'data-active': !view.settingsOpen && (view.tab === tab.key || (tab.key === 'tasks' && view.tab === 'plan')) ? '1' : '0',
-                onClick: () => patch({ tab: tab.key, settingsOpen: false }),
-              },
-              tabLabel(tab.key) || tab.label,
-              count
-                ? h('span', {
-                    className: 'dnb-seg-dot',
-                    style: tab.key === 'chief'
-                      ? { color: 'var(--dnb-accent)', opacity: 1, fontWeight: 600 }
-                      : tab.key === 'archive'
-                        ? { color: 'var(--dnb-amber, #f3be6d)', opacity: 1, fontWeight: 600 }
-                        : undefined,
-                  }, String(count))
-                : null,
-            )
-          }),
+                'button',
+                {
+                  key: tab.key,
+                  type: 'button',
+                  className: 'dnb-seg-btn',
+                  'data-tab': tab.key,
+                  'data-active': isSegActive ? '1' : '0',
+                  'aria-pressed': isSegActive ? 'true' : 'false',
+                  onClick: () => patch({
+                    tab: tab.key,
+                    settingsOpen: false,
+                    secModelMenuOpen: false,
+                    secPaceMenuOpen: false,
+                    secPermMenuOpen: false,
+                    tacticalMenuOpen: false,
+                    boundMoreMenuOpen: false,
+                  }),
+                },
+                tabLabel(tab.key) || tab.label,
+                tab.key === 'extmem' && extMemBadge
+                  ? h('span', {
+                      className: 'dnb-seg-dot',
+                      style: {
+                        color: extMemDegraded ? 'var(--dnb-coral, #ff453a)' : 'var(--dnb-sage, #30d158)',
+                        opacity: 1,
+                        fontWeight: 700,
+                      },
+                    }, extMemDegraded ? '!' : '•')
+                  : (count
+                      ? h('span', {
+                          className: 'dnb-seg-dot',
+                          style: tab.key === 'chief'
+                            ? { color: 'var(--dnb-accent)', opacity: 1, fontWeight: 600 }
+                            : tab.key === 'archive'
+                              ? { color: 'var(--dnb-amber, #f3be6d)', opacity: 1, fontWeight: 600 }
+                              : undefined,
+                        }, String(count))
+                      : null),
+              )
+            }),
+          ),
         ),
-      ),
 
-      // Stale Backend Module Notice (if desktop host still holds pre-1.2.0-r5 backend in RAM)
-      view.staleBackendDetected && !view.staleBackendDismissed
-        ? h(
-            'div',
-            {
-              style: {
-                margin: '0 12px 8px',
-                padding: '6px 10px',
-                borderRadius: 10,
-                border: '1px solid rgba(245, 158, 11, 0.42)',
-                background: 'rgba(245, 158, 11, 0.12)',
-                color: '#f59e0b',
-                fontSize: 11.5,
-                lineHeight: 1.45,
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: 8,
+        // Notice & Error Banners (shared above workspace shell)
+        view.staleBackendDetected && !view.staleBackendDismissed
+          ? h(
+              'div',
+              {
+                style: {
+                  margin: '0 12px 8px',
+                  padding: '6px 10px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(245, 158, 11, 0.42)',
+                  background: 'rgba(245, 158, 11, 0.12)',
+                  color: '#f59e0b',
+                  fontSize: 11.5,
+                  lineHeight: 1.45,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 8,
+                },
               },
-            },
-            h('span', null, '⚠ 后台还在跑旧版本（面板 v' + EXPECTED_BACKEND_BUILD + (meta.backendBuild ? '，后台 v' + meta.backendBuild : '') + '），请重启 DeepSeek Harness 或重新加载插件后生效。'),
-            h('span', { style: { cursor: 'pointer', paddingLeft: 6, flexShrink: 0 }, onClick: () => patch({ staleBackendDismissed: true }) }, '×'),
-          )
-        : null,
+              h('span', null, '⚠ 后台还在跑旧版本（面板 v' + EXPECTED_BACKEND_BUILD + (meta.backendBuild ? '，后台 v' + meta.backendBuild : '') + '），请重启 DeepSeek Harness 或重新加载插件后生效。'),
+              h('span', { style: { cursor: 'pointer', paddingLeft: 6, flexShrink: 0 }, onClick: () => patch({ staleBackendDismissed: true }) }, '×'),
+            )
+          : null,
 
-      view.hostCompat && view.hostCompat.present && view.hostCompat.namedSubagentsSupported === false && !view.hostCompatDismissed
-        ? h(
-            'div',
-            {
-              style: {
-                margin: '0 12px 8px',
-                padding: '6px 10px',
-                borderRadius: 10,
-                border: '1px solid rgba(245, 158, 11, 0.42)',
-                background: 'rgba(245, 158, 11, 0.12)',
-                color: '#f59e0b',
-                fontSize: 11.5,
-                lineHeight: 1.45,
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
-                gap: 8,
+        view.hostCompat && view.hostCompat.present && view.hostCompat.namedSubagentsSupported === false && !view.hostCompatDismissed
+          ? h(
+              'div',
+              {
+                style: {
+                  margin: '0 12px 8px',
+                  padding: '6px 10px',
+                  borderRadius: 10,
+                  border: '1px solid rgba(245, 158, 11, 0.42)',
+                  background: 'rgba(245, 158, 11, 0.12)',
+                  color: '#f59e0b',
+                  fontSize: 11.5,
+                  lineHeight: 1.45,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                  gap: 8,
+                },
               },
-            },
-            h('span', null, '⚠ ' + (view.hostCompat.warning || '当前 DSH 版本太旧，不支持子代理协作功能，请升级到 0.2.2-rc.2 或以上。')),
-            h('span', { style: { cursor: 'pointer', paddingLeft: 6, flexShrink: 0 }, onClick: () => patch({ hostCompatDismissed: true }) }, '×'),
-          )
-        : null,
+              h('span', null, '⚠ ' + (view.hostCompat.warning || '当前 DSH 版本太旧，不支持子代理协作功能，请升级到 0.2.2-rc.2 或以上。')),
+              h('span', { style: { cursor: 'pointer', paddingLeft: 6, flexShrink: 0 }, onClick: () => patch({ hostCompatDismissed: true }) }, '×'),
+            )
+          : null,
 
-      // Error Banner (only on API failure)
-      view.error
-        ? h(
-            'div',
-            {
-              style: {
-                margin: '0 12px 8px',
-                padding: '6px 10px',
-                borderRadius: 10,
-                background: STATUS_BG.blocked,
-                color: '#ff453a',
-                fontSize: 11.5,
-                display: 'flex',
-                justifyContent: 'space-between',
-                alignItems: 'center',
+        view.error
+          ? h(
+              'div',
+              {
+                style: {
+                  margin: '0 12px 8px',
+                  padding: '6px 10px',
+                  borderRadius: 10,
+                  background: STATUS_BG.blocked,
+                  color: '#ff453a',
+                  fontSize: 11.5,
+                  display: 'flex',
+                  justifyContent: 'space-between',
+                  alignItems: 'center',
+                },
               },
-            },
-            h('span', null, view.error),
-            h('span', { style: { cursor: 'pointer', paddingLeft: 8 }, onClick: () => patch({ error: '' }) }, '×'),
-          )
-        : null,
+              h('span', null, view.error),
+              h('span', { style: { cursor: 'pointer', paddingLeft: 8 }, onClick: () => patch({ error: '' }) }, '×'),
+            )
+          : null,
 
-      // Tab Body Protected by Error Boundary
-      h(
-        'div',
-        { className: 'dnb-body' },
-        h(ChiefErrorBoundary, { key: view.tab + ':' + (view.sessionId || 'none') }, body),
+        // Two-Column Workspace Shell when 'sidebar' layout on Wide Views
+        h(
+          'div',
+          { className: 'dnb-workspace-shell' },
+          (view.navLayout || 'sidebar') === 'sidebar'
+            ? h(
+                'aside',
+                { className: 'dnb-workspace-rail', 'aria-label': bi('主导航', 'Main Navigation') },
+                h(
+                  'div',
+                  { className: 'dnb-workspace-rail-head' },
+                  h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 6, fontSize: 12, fontWeight: 650, color: 'var(--dnb-text)' } },
+                    h(Icon, { name: 'sparkles', size: 13, style: { color: 'var(--dnb-accent)' } }),
+                    bi('参谋工作台', 'Workspace')),
+                ),
+                h(
+                  'div',
+                  { className: 'dnb-workspace-rail-list' },
+                  TABS.map(tab => {
+                    const isTabCur = !view.settingsOpen && (view.tab === tab.key || (tab.key === 'tasks' && view.tab === 'plan'))
+                    const isExpanded = Boolean(expandedRailTabs[tab.key])
+                    const tabIcon = tab.key === 'chief'
+                      ? 'sparkles'
+                      : tab.key === 'tasks'
+                        ? 'list'
+                        : tab.key === 'peers'
+                          ? 'network'
+                          : tab.key === 'archive'
+                            ? 'archive'
+                            : tab.key === 'extmem'
+                              ? 'brain'
+                              : 'sliders'
+                    const count = tab.key === 'tasks'
+                      ? openCount
+                      : tab.key === 'peers'
+                        ? peersBadge
+                        : tab.key === 'chief'
+                          ? secBadge
+                          : tab.key === 'archive'
+                            ? archiveBadge
+                            : 0
+                    const railSubsMap = {
+                      chief: [
+                        { k: 'all', zh: '全部总览', en: 'Overview' },
+                        { k: 'digest', zh: '局势简报', en: 'Digest' },
+                        { k: 'chat', zh: '参谋对话', en: 'Chief Q&A' },
+                      ],
+                      tasks: [
+                        { k: 'plan', zh: '主线计划', en: 'Main Plan' },
+                        { k: 'board', zh: '任务看板', en: 'Work Map' },
+                        { k: 'handoff', zh: '交接流转', en: 'Handoff' },
+                      ],
+                      peers: [
+                        { k: 'all', zh: '全部协同', en: 'All Squad' },
+                        { k: 'net', zh: '协同编队', en: 'Collab Canvas' },
+                        { k: 'mail', zh: '消息记录', en: 'Team Messages' },
+                      ],
+                      archive: [
+                        { k: 'desktop', zh: '认知桌面', en: 'Desktop' },
+                        { k: 'session', zh: '本局档案', en: 'Session' },
+                        { k: 'global', zh: '全局档案', en: 'Global' },
+                        { k: 'precipitated', zh: '冷藏档案', en: 'Cold Vault' },
+                      ],
+                      extmem: [
+                        { k: 'book', zh: '记忆清单', en: 'Memories' },
+                        ...((meta.externalMemory?.moodSlot?.enabled && meta.externalMemory?.moodSlot?.emotionSplitView)
+                          ? [{ k: 'emotion', zh: '情感记忆', en: 'Emotion' }]
+                          : []),
+                        { k: 'profile', zh: '用户画像', en: 'Profile' },
+                        { k: 'bridge', zh: '接入与设置', en: 'Setup' },
+                      ],
+                      boundaries: [
+                        { k: 'walls', zh: '拦截墙', en: 'Block Rules' },
+                        { k: 'rules', zh: '行为规矩', en: 'AI Rules' },
+                        { k: 'env', zh: '运行环境', en: 'Runtime' },
+                      ],
+                    }
+                    const subList = isExpanded ? (railSubsMap[tab.key] || []) : []
+                    const isSubActive = (subKey) => {
+                      if (!isTabCur) return false
+                      if (tab.key === 'chief') return (view.chiefSubTab || 'all') === subKey
+                      if (tab.key === 'tasks') return (view.tasksSubTab || 'plan') === subKey
+                      if (tab.key === 'peers') return (view.peersSubTab || 'all') === subKey
+                      if (tab.key === 'archive') return (view.archiveTabScope || 'desktop') === subKey
+                      if (tab.key === 'extmem') {
+                        const rawSub = view.extMemSubTab || 'book'
+                        const splitOn = Boolean(meta.externalMemory?.moodSlot?.enabled && meta.externalMemory?.moodSlot?.emotionSplitView)
+                        let effSub = rawSub
+                        if (rawSub === 'sky' || rawSub === 'diary' || (rawSub === 'emotion' && !splitOn)) effSub = 'book'
+                        else if (rawSub === 'prompts' || rawSub === 'probe' || rawSub === 'curve') effSub = 'bridge'
+                        return effSub === subKey
+                      }
+                      if (tab.key === 'boundaries') return (view.boundSubTab || 'walls') === subKey
+                      return false
+                    }
+                    const handleSubClick = (subKey) => {
+                      if (tab.key === 'chief') {
+                        const patchObj = { tab: 'chief', settingsOpen: false, chiefSubTab: subKey }
+                        if (subKey === 'all') {
+                          patchObj.chiefDigestCollapsed = false
+                        } else if (subKey === 'digest') {
+                          patchObj.chiefDigestCollapsed = false
+                        }
+                        patch(patchObj)
+                        scrollWorkspaceSection(subKey === 'chat' ? 'chief-chat' : 'chief-digest')
+                        return
+                      }
+                      if (tab.key === 'tasks') {
+                        const patchObj = { tab: 'tasks', settingsOpen: false, tasksSubTab: subKey }
+                        if (subKey === 'plan') patchObj.planObjCollapsed = false
+                        if (subKey === 'board') patchObj.boardSectionCollapsed = false
+                        if (subKey === 'handoff') patchObj.handoffSectionCollapsed = false
+                        patch(patchObj)
+                        scrollWorkspaceSection(`tasks-${subKey}`)
+                        return
+                      }
+                      if (tab.key === 'peers') {
+                        const patchObj = { tab: 'peers', settingsOpen: false, peersSubTab: subKey }
+                        if (subKey === 'all') {
+                          patchObj.peersNetCollapsed = false
+                          patchObj.peersMailCollapsed = false
+                        } else if (subKey === 'net') {
+                          patchObj.peersNetCollapsed = false
+                        } else if (subKey === 'mail') {
+                          patchObj.peersMailCollapsed = false
+                        }
+                        patch(patchObj)
+                        scrollWorkspaceSection(subKey === 'mail' ? 'peers-mail' : 'peers-net')
+                        return
+                      }
+                      if (tab.key === 'archive') {
+                        patch({ tab: 'archive', settingsOpen: false, archiveTabScope: subKey })
+                        void loadArchives(false)
+                        return
+                      }
+                      if (tab.key === 'extmem') {
+                        patch({ tab: 'extmem', settingsOpen: false, extMemSubTab: subKey })
+                        return
+                      }
+                      if (tab.key === 'boundaries') {
+                        const patchObj = { tab: 'boundaries', settingsOpen: false, boundSubTab: subKey }
+                        if (subKey === 'walls') patchObj.wallCollapsed = false
+                        if (subKey === 'rules') patchObj.boundCollapsedCols = {}
+                        patch(patchObj)
+                        scrollWorkspaceSection(`bound-${subKey}`)
+                      }
+                    }
+                    return h(
+                      React.Fragment,
+                      { key: tab.key },
+                      h(
+                        'button',
+                        {
+                          type: 'button',
+                          className: 'dnb-workspace-nav-btn',
+                          'data-active': isTabCur ? '1' : '0',
+                          onClick: () => {
+                            if (isTabCur) {
+                              setExpandedRailTabs(prev => ({ [tab.key]: !prev[tab.key] }))
+                              return
+                            }
+                            patch({
+                              tab: tab.key,
+                              settingsOpen: false,
+                              secModelMenuOpen: false,
+                              secPaceMenuOpen: false,
+                              secPermMenuOpen: false,
+                              tacticalMenuOpen: false,
+                              boundMoreMenuOpen: false,
+                            })
+                            setExpandedRailTabs({ [tab.key]: true })
+                          },
+                        },
+                        h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 7, minWidth: 0 } },
+                          h(Icon, { name: tabIcon, size: 13.5 }),
+                          h('span', null, tabLabel(tab.key) || tab.label)),
+                        h(
+                          'span',
+                          { style: { display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
+                          tab.key === 'extmem' && extMemBadge
+                            ? h('span', {
+                                style: {
+                                  width: 6.5,
+                                  height: 6.5,
+                                  borderRadius: '50%',
+                                  background: extMemDegraded ? 'var(--dnb-coral, #ff453a)' : 'var(--dnb-sage, #30d158)',
+                                },
+                              })
+                            : (count ? h('span', { className: 'dnb-workspace-rail-badge' }, String(count)) : null),
+                          h('span', { className: 'dnb-workspace-chevron', 'data-open': isExpanded ? '1' : '0' },
+                            h(Icon, { name: 'chevron', size: 10.5 })),
+                        ),
+                      ),
+                      subList.length > 0
+                        ? h(
+                            'div',
+                            { className: 'dnb-workspace-subnav' },
+                            subList.map(sub =>
+                              h('button', {
+                                key: sub.k,
+                                type: 'button',
+                                className: 'dnb-workspace-sub-btn',
+                                'data-active': isSubActive(sub.k) ? '1' : '0',
+                                onClick: () => handleSubClick(sub.k),
+                              }, bi(sub.zh, sub.en))),
+                          )
+                        : null,
+                    )
+                  }),
+                ),
+                h(
+                  'div',
+                  { className: 'dnb-workspace-rail-foot' },
+                  h(
+                    'div',
+                    { style: { position: 'relative' } },
+                    h(
+                      'button',
+                      {
+                        type: 'button',
+                        className: 'dnb-workspace-nav-btn',
+                        'data-active': skinMenuAnchor === 'rail' ? '1' : '0',
+                        onClick: e => {
+                          e.stopPropagation()
+                          setSkinMenuAnchor(v => (v === 'rail' ? '' : 'rail'))
+                          patch({ secModelMenuOpen: false, secPaceMenuOpen: false, secPermMenuOpen: false })
+                        },
+                      },
+                      h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 7 } },
+                        h(Icon, { name: 'palette', size: 13 }),
+                        bi('外观主题', 'Appearance')),
+                    ),
+                    skinMenuAnchor === 'rail' ? renderSkinPopover('dnb-skin-pop-rail') : null,
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dnb-workspace-nav-btn',
+                      'data-active': view.settingsOpen ? '1' : '0',
+                      onClick: () => {
+                        setSkinMenuAnchor('')
+                        patch({ settingsOpen: !view.settingsOpen })
+                      },
+                    },
+                    h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 7 } },
+                      h(Icon, { name: 'settings', size: 13 }),
+                      bi('偏好设置', 'Settings')),
+                  ),
+                  h(
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dnb-workspace-nav-btn',
+                      onClick: () => {
+                        setSkinMenuAnchor('')
+                        saveNavLayout('top')
+                        patch({ notice: bi('已切回顶部经典标签排列', 'Switched to Top Classic Tabs') })
+                      },
+                    },
+                    h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 7, color: 'var(--dnb-text-3)' } },
+                      h(Icon, { name: 'sliders', size: 12.5 }),
+                      bi('切回顶部栏', 'Use Top Tabs')),
+                  ),
+                ),
+              )
+            : null,
+
+          // Tab Body Protected by Error Boundary
+          h(
+            'div',
+            { className: 'dnb-body' },
+            h(ChiefErrorBoundary, { key: view.tab + ':' + (view.sessionId || 'none') }, body),
+          ),
+        ),
       ),
 
       // Persistent Bottom Chief Input & Relay Bar
@@ -917,6 +1340,7 @@ function PanelInner(props) {
       h(PrecipitateConfirmModal, { view }),
       h(PeerLinkConfirmModal, { view }),
       h(HandoffWarnModal, { view }),
+      h(CustomThemeModal, { view }),
 
       // Floating iOS Toast
       view.notice ? h('div', { className: 'dnb-toast' }, view.notice) : null,

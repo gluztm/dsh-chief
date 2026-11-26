@@ -12,8 +12,16 @@
  */
 
 import { CHIEF_PERMISSION_LABELS, SEC_IMAGE_MIMES, SEC_MAX_IMAGES } from '../constants.js'
-import { store, patch, runtimeRefs } from '../store.js'
-import { clampTitle, shortSession, fullModelWithChannel, encodeImageForChief } from '../utils.js'
+import { store, patch, runtimeRefs, saveUiSkin } from '../store.js'
+import {
+  clampTitle,
+  shortSession,
+  fullModelWithChannel,
+  encodeImageForChief,
+  detectChiefBrandFromName,
+  detectChiefBrandFromModelRef,
+  rollChiefBrandNickname,
+} from '../utils.js'
 import { bi } from '../i18n.js'
 import { apiBridge, call, applySecView, classifyChiefWorkFx, resolveChiefSuggestionWorkFx, withChiefWorkFx } from './transport.js'
 import { refresh, loadHandoff } from './board.js'
@@ -110,11 +118,33 @@ export async function updateSecConfig(nextCfg) {
         for (const k of keys) lockPatchPayload[k] = l
       }
     }
+    const catBefore = (store && (store.secModelsCatalog || (store.secView && store.secView.models))) || null
+    const metaBefore = (store && store.chiefMeta) || {}
+    let effectiveCfg = (nextCfg && typeof nextCfg === 'object') ? { ...nextCfg } : {}
+    let autoBrandEgg = null
+    let autoRolledName = ''
+
+    if (typeof effectiveCfg.modelRef === 'string' && !('chiefName' in effectiveCfg)) {
+      const targetModelRef = effectiveCfg.modelRef
+        || (catBefore && (catBefore.followRef || catBefore.defaultRef))
+        || metaBefore.followModelRef
+        || ''
+      autoBrandEgg = detectChiefBrandFromModelRef(targetModelRef, catBefore)
+      if (autoBrandEgg) {
+        const curName = String(metaBefore.chiefName || '').trim()
+        const curNameBrand = detectChiefBrandFromName(curName)
+        if (!curName || !curNameBrand || curNameBrand.key !== autoBrandEgg.key) {
+          autoRolledName = rollChiefBrandNickname(autoBrandEgg.key, curName)
+          effectiveCfg.chiefName = autoRolledName
+        }
+      }
+    }
+
     const value = await call('chief/config', {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
       body: JSON.stringify({
-        ...nextCfg,
+        ...effectiveCfg,
         ...(lockPatchPayload ? { lockedModelEfforts: lockPatchPayload } : {}),
         session: store.sessionId,
       }),
@@ -178,6 +208,9 @@ export async function updateSecConfig(nextCfg) {
     const resolvedChiefName = (typeof value.chiefName === 'string')
       ? value.chiefName
       : (cfgObj && typeof cfgObj.chiefName === 'string' ? cfgObj.chiefName : null)
+    const resolvedExternalMemory = cfgObj && cfgObj.externalMemory && typeof cfgObj.externalMemory === 'object'
+      ? cfgObj.externalMemory
+      : null
     const updatedSubagents = resolvedLocks && Array.isArray(store.subagents)
       ? store.subagents.map(ag => {
           if (!ag || typeof ag !== 'object') return ag
@@ -194,11 +227,12 @@ export async function updateSecConfig(nextCfg) {
     patch({
       compactInputDraft: null,
       compactLowWarning: value.compactLowWarning || '',
-      ...((resolvedLocks || resolvedTeamEffortMode || resolvedSessionEnabled !== null || resolvedDefaultAutoEnable !== null || resolvedRunMode !== null || resolvedPaceMode !== null || resolvedGlobalSafety !== null || resolvedSessionSafety !== null || resolvedTacticalModes || resolvedChiefName !== null)
+      ...((resolvedLocks || resolvedTeamEffortMode || resolvedSessionEnabled !== null || resolvedDefaultAutoEnable !== null || resolvedRunMode !== null || resolvedPaceMode !== null || resolvedGlobalSafety !== null || resolvedSessionSafety !== null || resolvedTacticalModes || resolvedChiefName !== null || resolvedExternalMemory !== null)
         ? {
             chiefMeta: {
               ...store.chiefMeta,
               ...(resolvedChiefName !== null ? { chiefName: resolvedChiefName } : {}),
+              ...(resolvedExternalMemory !== null ? { externalMemory: resolvedExternalMemory } : {}),
               ...(resolvedLocks ? { lockedModelEfforts: resolvedLocks } : {}),
               ...(resolvedTeamEffortMode ? { teamEffortMode: resolvedTeamEffortMode === 'manual' ? 'manual' : 'auto' } : {}),
               ...(resolvedSessionEnabled !== null ? { sessionEnabled: resolvedSessionEnabled } : {}),
@@ -287,11 +321,43 @@ export async function updateSecConfig(nextCfg) {
       patch({ notice: rmMap[nextCfg.runMode] || '已更新运行方式' })
     } else if (typeof nextCfg.thinkingEffort === 'string') {
       patch({ notice: `🧠 思考深度已切到「${nextCfg.thinkingEffort === 'auto' ? '自动' : nextCfg.thinkingEffort}」` })
+    } else if (typeof nextCfg.modelRef === 'string') {
+      const cat = (value && value.view && value.view.models) || store.secModelsCatalog
+      const followHint = (cat && (cat.followLabel || fullModelWithChannel(cat.followRef || cat.defaultRef, cat))) || ''
+      const modelEgg = autoBrandEgg || detectChiefBrandFromModelRef(
+        nextCfg.modelRef || (cat && (cat.followRef || cat.defaultRef)) || (store.chiefMeta && store.chiefMeta.followModelRef) || '',
+        cat,
+      )
+      if (modelEgg) saveUiSkin(modelEgg.skin)
+      const modelLabel = nextCfg.modelRef ? fullModelWithChannel(nextCfg.modelRef, cat) : followHint
+      if (autoRolledName && modelEgg) {
+        patch({
+          notice: nextCfg.modelRef
+            ? `✨ 已切到 ${modelLabel} · 随机化身「${autoRolledName}」并切到 ${modelEgg.label} 代表色（${modelEgg.skinLabelZh}，随时可改名）`
+            : `✨ 已切回跟随主对话（${modelLabel || '主模型'}）· 化身「${autoRolledName}」并切到 ${modelEgg.label} 代表色`,
+        })
+      } else if (modelEgg) {
+        patch({
+          notice: nextCfg.modelRef
+            ? `🎨 已切到 ${modelLabel}（自动同步 ${modelEgg.label} 代表色 · ${modelEgg.skinLabelZh}）`
+            : `🎨 已切回跟随主对话模型${followHint ? '（' + followHint + '）' : ''}（${modelEgg.label} 代表色）`,
+        })
+      } else {
+        patch({
+          notice: nextCfg.modelRef
+            ? '参谋长当前模型：' + modelLabel
+            : '已切回跟随主对话模型' + (followHint ? '（' + followHint + '）' : ''),
+        })
+      }
     } else if (typeof nextCfg.chiefName === 'string') {
+      const nameEgg = resolvedChiefName ? detectChiefBrandFromName(resolvedChiefName) : null
+      if (nameEgg) saveUiSkin(nameEgg.skin)
       patch({
-        notice: resolvedChiefName
-          ? `🏷️ 参谋长专属名字已设为「${resolvedChiefName}」`
-          : '🏷️ 已恢复参谋长默认名称',
+        notice: nameEgg
+          ? `✨ 彩蛋触发！「${resolvedChiefName}」已自动切到 ${nameEgg.label} 代表色 · ${nameEgg.skinLabelZh}`
+          : resolvedChiefName
+            ? `🏷️ 参谋长专属名字已设为「${resolvedChiefName}」`
+            : '🏷️ 已恢复参谋长默认名称',
       })
     } else if (typeof nextCfg.teamEffortMode === 'string') {
       patch({
@@ -340,13 +406,6 @@ export async function updateSecConfig(nextCfg) {
       void refresh()
     } else if (nextCfg.managedBudgetMaxCalls !== undefined || nextCfg.managedBudgetMaxTokens !== undefined) {
       patch({ notice: bi('💰 已更新托管费用上限', '💰 Spending limits updated') })
-    } else if (typeof nextCfg.chiefName === 'string') {
-      const cleanName = nextCfg.chiefName.trim()
-      patch({
-        notice: cleanName
-          ? bi(`🏷️ 参谋长已改名为「${cleanName}」`, `🏷️ Chief renamed to "${cleanName}"`)
-          : bi('🏷️ 参谋长名称已恢复默认', '🏷️ Chief name reset to default'),
-      })
     } else if (typeof nextCfg.paceMode === 'string') {
       const paceNotice = nextCfg.paceMode === 'stopped'
         ? '⏹ 已停止参谋长：自动推进和后台检查都已暂停'
@@ -358,14 +417,6 @@ export async function updateSecConfig(nextCfg) {
       patch({ notice: paceNotice })
     } else if (typeof nextCfg.autoPilot === 'boolean') {
       patch({ notice: nextCfg.autoPilot ? '⚡ 已开启当前对话托管' : '已切到手动模式' })
-    } else if (typeof nextCfg.modelRef === 'string') {
-      const cat = (value && value.view && value.view.models) || store.secModelsCatalog
-      const followHint = (cat && (cat.followLabel || fullModelWithChannel(cat.followRef || cat.defaultRef, cat))) || ''
-      patch({
-        notice: nextCfg.modelRef
-          ? '参谋长当前模型：' + fullModelWithChannel(nextCfg.modelRef, cat)
-          : '已切回跟随主对话模型' + (followHint ? '（' + followHint + '）' : ''),
-      })
     }
     return value
   } catch (error) {
@@ -926,14 +977,19 @@ export async function submitChiefBar(overrideText = '', quickTag = '') {
         const hasWallRemovalOnly = (Array.isArray(value.wallRemovalProposals) && value.wallRemovalProposals.length > 0)
           && !(Array.isArray(value.wallProposals) && value.wallProposals.length > 0)
           && !(Array.isArray(value.boundProposals) && value.boundProposals.length > 0)
-        const autoDestTab = createdSugCount > 0
-          ? (hasWallRemovalOnly ? (store.tab || 'chief') : 'boundaries')
-          : ((Array.isArray(value.archiveOps) && value.archiveOps.length > 0 && fxSpec.tab === 'chief') ? 'archive' : '')
+        const isViewingChief = !store.settingsOpen && (store.tab || 'chief') === 'chief'
+        const autoDestTab = isViewingChief
+          ? (createdSugCount > 0
+              ? (hasWallRemovalOnly ? 'chief' : 'boundaries')
+              : ((Array.isArray(value.archiveOps) && value.archiveOps.length > 0 && fxSpec.tab === 'chief') ? 'archive' : ''))
+          : ''
         patch({
           ...(autoDestTab && autoDestTab !== store.tab ? { tab: autoDestTab, ...(autoDestTab === 'boundaries' ? { boundSubTab: 'rules' } : {}) } : {}),
           secLatestReply: {
             text: value.reply || '- 【已处理】已按吩咐执行完毕。',
             actions,
+            ...(value.memoryRecall ? { memoryRecall: value.memoryRecall } : {}),
+            ...(value.moodBadge ? { moodBadge: value.moodBadge } : {}),
             at: Date.now(),
           },
           ...(createdSugCount > 0
@@ -1033,6 +1089,259 @@ export async function toggleGithubStarApi({ desired = null } = {}) {
     patch({ githubStarState: { ...prevState, busy: false } })
     return null
   }
+}
+
+export async function probeExternalMemoryApi({ slot = 'memory', query = '', config = null } = {}) {
+  try {
+    const value = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'ext_mem.probe',
+        slot,
+        query,
+        ...(config && typeof config === 'object' ? { config } : {}),
+      }),
+    })
+    if (value && value.externalMemoryStatus) {
+      patch({
+        chiefMeta: {
+          ...(store.chiefMeta || {}),
+          externalMemoryStatus: value.externalMemoryStatus,
+        },
+      })
+    }
+    return value
+  } catch (error) {
+    return {
+      ok: false,
+      error: String((error && error.message) || error || '连通测试失败'),
+    }
+  }
+}
+
+export async function retractExternalMemoryApi(ids = []) {
+  try {
+    const value = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'ext_mem.retract',
+        ids: Array.isArray(ids) ? ids : [ids],
+      }),
+    })
+    if (value && value.ok) {
+      patch({ notice: bi('↩️ 已从外部记忆库撤回指定条目', '↩️ Retracted item from external memory') })
+    }
+    return value
+  } catch (error) {
+    const msg = String((error && error.message) || error || '撤回失败')
+    patch({ error: msg })
+    return { ok: false, error: msg }
+  }
+}
+
+export async function discoverExternalMemoryApi() {
+  try {
+    return await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'ext_mem.discover',
+      }),
+    })
+  } catch (error) {
+    return { ok: false, sources: [], error: String((error && error.message) || error) }
+  }
+}
+
+export async function listExternalMemoryApi(config = null) {
+  try {
+    return await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'ext_mem.list',
+        ...(config && typeof config === 'object' ? { config } : {}),
+      }),
+    })
+  } catch (error) {
+    return { ok: false, items: [], error: String((error && error.message) || error) }
+  }
+}
+
+export async function addExternalMemoryApi(text, opts = {}) {
+  try {
+    const value = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'ext_mem.add',
+        text: String(text || ''),
+        ...(typeof opts.category === 'string' && opts.category ? { category: opts.category } : {}),
+        ...(typeof opts.pinned === 'boolean' ? { pinned: opts.pinned } : {}),
+      }),
+    })
+    if (value && value.ok) {
+      patch({ notice: bi('✨ 新记忆星辰已点亮并写入记事本', '✨ New star lit & saved to Chief memory') })
+    }
+    return value
+  } catch (error) {
+    const msg = String((error && error.message) || error || '写入失败')
+    patch({ error: msg })
+    return { ok: false, error: msg }
+  }
+}
+
+export async function updateExternalMemoryApi({ id = '', text, category, pinned, reinforce = false } = {}) {
+  try {
+    const value = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'ext_mem.update',
+        id: String(id || ''),
+        ...(typeof text === 'string' ? { text } : {}),
+        ...(typeof category === 'string' && category ? { category } : {}),
+        ...(typeof pinned === 'boolean' ? { pinned } : {}),
+        ...(reinforce ? { reinforce: true } : {}),
+      }),
+    })
+    if (value && value.ok) {
+      patch({
+        notice: reinforce
+          ? bi('⚡ 记忆已强化，活力恢复 100%', '⚡ Memory reinforced to 100% vitality')
+          : typeof pinned === 'boolean'
+            ? (pinned ? bi('📌 已钉选为常驻星辰（永不衰减）', '📌 Pinned as permanent memory') : bi('已取消常驻钉选', 'Unpinned memory'))
+            : bi('✅ 记忆内容与分类已更新', '✅ Memory updated'),
+      })
+    }
+    return value
+  } catch (error) {
+    const msg = String((error && error.message) || error || '更新失败')
+    patch({ error: msg })
+    return { ok: false, error: msg }
+  }
+}
+
+export async function removeExternalMemoryApi(id) {
+  try {
+    const value = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'ext_mem.remove',
+        id: String(id || ''),
+      }),
+    })
+    if (value && value.ok) {
+      patch({ notice: bi('🧹 已忘掉这条记忆', '🧹 Removed from Chief memory') })
+    }
+    return value
+  } catch (error) {
+    const msg = String((error && error.message) || error || '删除失败')
+    patch({ error: msg })
+    return { ok: false, error: msg }
+  }
+}
+
+export async function designCustomThemeApi({ prompt = '', currentTheme = null, images = [], extractedSwatches = [] } = {}) {
+  try {
+    return await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'theme.diy',
+        prompt: String(prompt || ''),
+        ...(currentTheme && typeof currentTheme === 'object' ? { currentTheme } : {}),
+        ...(Array.isArray(images) && images.length > 0 ? { images: images.slice(0, 1) } : {}),
+        ...(Array.isArray(extractedSwatches) && extractedSwatches.length > 0 ? { extractedSwatches: extractedSwatches.slice(0, 8) } : {}),
+      }),
+    })
+  } catch (error) {
+    return { ok: false, error: String((error && error.message) || error || '自定义配色生成失败') }
+  }
+}
+
+async function callExtMemStudioOp(op, payload = {}) {
+  try {
+    return await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op,
+        ...payload,
+      }),
+    })
+  } catch (error) {
+    return { ok: false, error: String((error && error.message) || error || '请求失败') }
+  }
+}
+
+export function probeEmbeddingApi(embedding = null) {
+  return callExtMemStudioOp('ext_mem.embedding_probe', embedding ? { embedding } : {})
+}
+
+export function listMemoryDiaryApi(limit = 40) {
+  return callExtMemStudioOp('ext_mem.diary_list', { limit })
+}
+
+export function addMemoryDiaryApi({ title = '', summary = '', highlights = [], moodTag = '日常' } = {}) {
+  return callExtMemStudioOp('ext_mem.diary_add', { title, summary, highlights, moodTag })
+}
+
+export function updateMemoryDiaryApi({ id = '', title, summary, highlights, moodTag } = {}) {
+  return callExtMemStudioOp('ext_mem.diary_update', {
+    id,
+    ...(typeof title === 'string' ? { title } : {}),
+    ...(typeof summary === 'string' ? { summary } : {}),
+    ...(Array.isArray(highlights) ? { highlights } : {}),
+    ...(typeof moodTag === 'string' ? { moodTag } : {}),
+  })
+}
+
+export function deleteMemoryDiaryApi(id) {
+  return callExtMemStudioOp('ext_mem.diary_delete', { id })
+}
+
+export function getMemoryProfileApi() {
+  return callExtMemStudioOp('ext_mem.profile_get', {})
+}
+
+export function saveMemoryProfileApi(profile) {
+  return callExtMemStudioOp('ext_mem.profile_save', { profile })
+}
+
+export function getMemoryPromptsApi() {
+  return callExtMemStudioOp('ext_mem.prompts_get', {})
+}
+
+export function saveMemoryPromptApi(key, content) {
+  return callExtMemStudioOp('ext_mem.prompts_save', { key, content })
+}
+
+export function resetMemoryPromptApi(key = 'all') {
+  return callExtMemStudioOp('ext_mem.prompts_reset', { key })
+}
+
+export function distillMemoryNowApi(turns = null) {
+  return callExtMemStudioOp('ext_mem.distill_now', Array.isArray(turns) ? { turns } : {})
+}
+
+export function importExternalMemorySourceApi(source, maxItems = 60) {
+  return callExtMemStudioOp('ext_mem.import_source', {
+    source: source && typeof source === 'object' ? source : {},
+    maxItems,
+  })
 }
 
 apiBridge.loadChiefView = loadChiefView

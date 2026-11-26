@@ -706,55 +706,55 @@ export const CSS_BUBBLE = `
   html[data-ds-theme-source="light"] .dnb-liquid-canvas,
   html[data-ds-theme="light"] .dnb-liquid-canvas,
   [data-ds-theme-source="light"] .dnb-liquid-canvas {
-    background: linear-gradient(175deg, #f0f9ff 0%, #eaf5fd 100%);
-    border-color: rgba(2, 132, 199, 0.30);
+    background: linear-gradient(175deg, #dfe9f5 0%, #d5e3f2 100%);
+    border-color: rgba(2, 132, 199, 0.34);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.92),
-      0 6px 18px rgba(15, 23, 42, 0.06);
+      inset 0 1px 0 rgba(255, 255, 255, 0.52),
+      0 6px 18px rgba(15, 23, 42, 0.08);
   }
   html[data-ds-theme-source="light"] .dnb-liquid-canvas[data-locked="1"],
   html[data-ds-theme="light"] .dnb-liquid-canvas[data-locked="1"],
   [data-ds-theme-source="light"] .dnb-liquid-canvas[data-locked="1"] {
-    background: linear-gradient(175deg, #fffbeb 0%, #fef7dc 100%);
-    border-color: rgba(217, 119, 6, 0.52);
+    background: linear-gradient(175deg, #f3ebcf 0%, #eee2ba 100%);
+    border-color: rgba(180, 83, 9, 0.52);
   }
   html[data-ds-theme-source="light"] .dnb-liquid-membrane,
   html[data-ds-theme="light"] .dnb-liquid-membrane,
   [data-ds-theme-source="light"] .dnb-liquid-membrane {
     background:
-      radial-gradient(240px 140px at 22% 45%, rgba(14, 165, 233, 0.10), transparent 72%),
-      radial-gradient(240px 140px at 78% 45%, rgba(20, 184, 166, 0.08), transparent 72%),
-      rgba(255, 255, 255, 0.72);
-    border-color: rgba(2, 132, 199, 0.22);
+      radial-gradient(240px 140px at 22% 45%, rgba(14, 165, 233, 0.12), transparent 72%),
+      radial-gradient(240px 140px at 78% 45%, rgba(20, 184, 166, 0.10), transparent 72%),
+      rgba(243, 247, 252, 0.86);
+    border-color: rgba(2, 132, 199, 0.28);
     box-shadow:
-      inset 0 1px 0 rgba(255, 255, 255, 0.96),
-      0 6px 18px rgba(15, 23, 42, 0.05);
+      inset 0 1px 0 rgba(255, 255, 255, 0.65),
+      0 6px 18px rgba(15, 23, 42, 0.07);
   }
   html[data-ds-theme-source="light"] .dnb-liquid-membrane[data-locked="1"],
   html[data-ds-theme="light"] .dnb-liquid-membrane[data-locked="1"],
   [data-ds-theme-source="light"] .dnb-liquid-membrane[data-locked="1"] {
     background:
-      radial-gradient(240px 140px at 22% 45%, rgba(245, 158, 11, 0.12), transparent 72%),
-      rgba(255, 251, 235, 0.80);
-    border-color: rgba(217, 119, 6, 0.44);
+      radial-gradient(240px 140px at 22% 45%, rgba(245, 158, 11, 0.14), transparent 72%),
+      rgba(247, 241, 220, 0.88);
+    border-color: rgba(180, 83, 9, 0.46);
   }
   html[data-ds-theme-source="light"] .dnb-squad-link-pill-bg,
   html[data-ds-theme="light"] .dnb-squad-link-pill-bg,
   [data-ds-theme-source="light"] .dnb-squad-link-pill-bg {
-    fill: rgba(248, 252, 255, 0.96);
+    fill: rgba(240, 245, 252, 0.96);
     fill-opacity: 0.96;
   }
   html[data-ds-theme-source="light"] .dnb-liquid-hub,
   html[data-ds-theme="light"] .dnb-liquid-hub,
   [data-ds-theme-source="light"] .dnb-liquid-hub {
-    background: rgba(255, 255, 255, 0.88);
-    border-color: rgba(2, 132, 199, 0.42);
-    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.06);
+    background: rgba(243, 247, 252, 0.94);
+    border-color: rgba(2, 132, 199, 0.44);
+    box-shadow: 0 3px 10px rgba(15, 23, 42, 0.08);
   }
   html[data-ds-theme-source="light"] .dnb-liquid-hub-star,
   html[data-ds-theme="light"] .dnb-liquid-hub-star,
   [data-ds-theme-source="light"] .dnb-liquid-hub-star {
-    color: #0284c7;
+    color: #0369a1;
   }
   html[data-ds-theme-source="light"] .dnb-liquid-run-badge,
   html[data-ds-theme="light"] .dnb-liquid-run-badge,
@@ -765,15 +765,15 @@ export const CSS_BUBBLE = `
   html[data-ds-theme-source="light"] .dnb-liquid-lead-orb,
   html[data-ds-theme="light"] .dnb-liquid-lead-orb,
   [data-ds-theme-source="light"] .dnb-liquid-lead-orb {
-    background: linear-gradient(180deg, rgba(224, 242, 254, 0.86), rgba(255, 255, 255, 0.96));
+    background: linear-gradient(180deg, rgba(214, 234, 250, 0.92), rgba(240, 246, 252, 0.98));
     border-color: rgba(2, 132, 199, 0.56);
-    box-shadow: 0 4px 14px rgba(2, 132, 199, 0.12);
+    box-shadow: 0 4px 14px rgba(2, 132, 199, 0.14);
   }
   html[data-ds-theme-source="light"] .dnb-liquid-sat-pill,
   html[data-ds-theme="light"] .dnb-liquid-sat-pill,
   [data-ds-theme-source="light"] .dnb-liquid-sat-pill {
-    background: rgba(255, 255, 255, 0.90);
-    border-color: rgba(15, 23, 42, 0.14);
+    background: rgba(242, 246, 252, 0.95);
+    border-color: rgba(15, 23, 42, 0.18);
   }
   html[data-ds-theme-source="light"] .dnb-sat-btn,
   html[data-ds-theme="light"] .dnb-sat-btn,
@@ -784,43 +784,43 @@ export const CSS_BUBBLE = `
   html[data-ds-theme-source="light"] .dnb-sat-btn:hover,
   html[data-ds-theme="light"] .dnb-sat-btn:hover,
   [data-ds-theme-source="light"] .dnb-sat-btn:hover {
-    background: rgba(2, 132, 199, 0.10);
-    border-color: rgba(2, 132, 199, 0.28);
+    background: rgba(2, 132, 199, 0.11);
+    border-color: rgba(2, 132, 199, 0.30);
   }
   html[data-ds-theme-source="light"] .dnb-liquid-canvas .dnb-mini-btn,
   html[data-ds-theme="light"] .dnb-liquid-canvas .dnb-mini-btn {
-    background: rgba(255, 255, 255, 0.88);
-    border-color: rgba(15, 23, 42, 0.18);
-    color: #334155;
+    background: rgba(242, 246, 252, 0.94);
+    border-color: rgba(15, 23, 42, 0.22);
+    color: #1e293b;
   }
   html[data-ds-theme-source="light"] .dnb-liquid-canvas .dnb-mini-btn:hover,
   html[data-ds-theme="light"] .dnb-liquid-canvas .dnb-mini-btn:hover {
-    background: #e0f2fe;
-    border-color: rgba(2, 132, 199, 0.42);
+    background: #d8ecf9;
+    border-color: rgba(2, 132, 199, 0.44);
     color: #0369a1;
   }
   html[data-ds-theme-source="light"] .dnb-dock-pill,
   html[data-ds-theme="light"] .dnb-dock-pill {
-    background: #ffffff;
-    border-color: #cbd5e1;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.05);
+    background: #f2f6fb;
+    border-color: #b8c7da;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, 0.06);
   }
   html[data-ds-theme-source="light"] .dnb-dock-pill:hover,
   html[data-ds-theme="light"] .dnb-dock-pill:hover {
-    border-color: rgba(2, 132, 199, 0.45);
-    background: #f8fafc;
+    border-color: rgba(2, 132, 199, 0.48);
+    background: #e7eff9;
   }
   html[data-ds-theme-source="light"] .dnb-liquid-ally-pill,
   html[data-ds-theme="light"] .dnb-liquid-ally-pill,
   [data-ds-theme-source="light"] .dnb-liquid-ally-pill {
-    background: rgba(255, 255, 255, 0.90);
-    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.07);
+    background: rgba(242, 246, 252, 0.94);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.08);
   }
   html[data-ds-theme-source="light"] .dnb-brand-badge[data-provider="codex"],
   html[data-ds-theme="light"] .dnb-brand-badge[data-provider="codex"],
   [data-ds-theme-source="light"] .dnb-brand-badge[data-provider="codex"] {
-    background: rgba(15, 23, 42, 0.06);
-    border-color: rgba(15, 23, 42, 0.18);
+    background: rgba(15, 23, 42, 0.08);
+    border-color: rgba(15, 23, 42, 0.20);
     color: #0f172a;
   }
   html[data-ds-theme-source="light"] .dnb-dispatch-target-tag,
@@ -831,7 +831,7 @@ export const CSS_BUBBLE = `
   html[data-ds-theme-source="light"] .dnb-liquid-dock,
   html[data-ds-theme="light"] .dnb-liquid-dock,
   [data-ds-theme-source="light"] .dnb-liquid-dock {
-    background: rgba(15, 23, 42, 0.02);
+    background: rgba(15, 23, 42, 0.048);
   }
   html[data-ds-theme-source="light"] .dnb-dock-bolt-btn,
   html[data-ds-theme="light"] .dnb-dock-bolt-btn,

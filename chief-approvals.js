@@ -43,6 +43,7 @@ import { getChiefView } from './chief-view.js'
 import { buildChiefArchiveUpsertFn } from './chief-archives.js'
 import { buildChiefCompactFn, recordSmartCompactionChatReceipt } from './chief-compaction.js'
 import { askOrCommandChief, executeChiefArchiveInjectionOp } from './chief-commands.js'
+import { shouldInspectRelayAsCommand } from './command-helpers.js'
 
 export async function handleSuggestionDecision(deps, { sessionId, suggestionId, decision, editedText, boundField, pinGlobal, _suppressChatReceipt = false, _byUserClick = true }) {
   const rootId = deps.resolveRootSessionId(sessionId) || String(sessionId || 'global')
@@ -714,7 +715,14 @@ export async function handleApprovalDecision(deps, {
         resultMsg = scopeCheck.error
         appendChiefAuditLog(rootId, { mode: currentMode, stage: 'scope_guard', rule: scopeCheck.rule, decision: 'rejected', operation: found.operationLabel, target: found.targetLabel, reason: scopeCheck.error, outcome: 'rejected', by: 'operator' })
       } else {
-        const guardRes = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: payload.text || '', board, safetyGuardEnabled: effSafetyGuardEnabled })
+        const guardRes = evaluateSafetyGuardHardRules({
+          tool: 'relay',
+          opClass: 'workflow',
+          command: shouldInspectRelayAsCommand(payload.text) ? (payload.text || '') : '',
+          content: payload.text || '',
+          board,
+          safetyGuardEnabled: effSafetyGuardEnabled,
+        })
         if (guardRes.blocked) {
           execOk = false
           execRes = { ok: false, blockedBySafetyGuard: true, error: guardRes.reason }

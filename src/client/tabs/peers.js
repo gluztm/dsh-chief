@@ -799,10 +799,13 @@ export function PeersTab({ view }) {
     { className: 'dnb-view' },
     // Section 1: Collaboration System Topology & Standby Dock
     h(
-      AccCard,
-      {
-        open: !view.peersNetCollapsed,
-        onToggle: () => patch({ peersNetCollapsed: !view.peersNetCollapsed }),
+      'div',
+      { 'data-dnb-section': 'peers-net' },
+      h(
+        AccCard,
+        {
+          open: !view.peersNetCollapsed,
+          onToggle: () => patch({ peersNetCollapsed: !view.peersNetCollapsed }),
         tone: 'cyan',
         icon: h(Icon, { name: 'network', size: 12.5, style: { color: 'var(--dnb-text-2)' } }),
         title: bi('协同系统', 'Collaboration System'),
@@ -1598,6 +1601,7 @@ export function PeersTab({ view }) {
         ),
       ),
     ),
+    ),
 
     // Section 2: Clean Grouped Card-Stream Collaboration Mailbox
     (() => {
@@ -1607,9 +1611,12 @@ export function PeersTab({ view }) {
         .filter(Boolean)
       const allMailExpanded = visibleMailIds.length > 0 && visibleMailIds.every(id => Boolean(expandedMailIds[id]))
       return h(
-        AccCard,
-        {
-          open: !view.peersMailCollapsed,
+        'div',
+        { 'data-dnb-section': 'peers-mail' },
+        h(
+          AccCard,
+          {
+            open: !view.peersMailCollapsed,
           onToggle: () => patch({ peersMailCollapsed: !view.peersMailCollapsed }),
           tone: 'indigo',
           icon: h(Icon, { name: 'mail', size: 12.5, style: { color: 'var(--dnb-text-2)' } }),
@@ -1813,6 +1820,7 @@ export function PeersTab({ view }) {
               }),
             )
           : h('div', { className: 'dnb-empty', style: { padding: '16px 12px' } }, bi('这个分类下还没有消息', 'No messages in this filter')),
+        ),
       )
     })(),
   )

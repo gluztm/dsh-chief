@@ -401,7 +401,7 @@ export function toggleBoundSelect(field, item) {
   patch({ boundSelected: { ...curMap, [field]: next } })
 }
 
-export async function saveGuardWallApi({ title, ruleType = 'forbid_cmd', pattern = '', patterns = null, scope = 'global', reason = '', writeOnly = false }) {
+export async function saveGuardWallApi({ id = '', title, ruleType = 'forbid_cmd', pattern = '', patterns = null, scope = 'global', reason = '', writeOnly = false, source = 'manual', silent = false }) {
   const cleanTitle = String(title || '').trim()
   const cleanPattern = String(pattern || '').trim()
   const patList = Array.isArray(patterns) && patterns.length > 0
@@ -411,35 +411,37 @@ export async function saveGuardWallApi({ title, ruleType = 'forbid_cmd', pattern
     patch({ error: '请给拦截规则起个名字，并至少写 1 条拦截条件' })
     return null
   }
+  const wallPayload = {
+    ...(id ? { id: String(id).trim() } : {}),
+    title: cleanTitle,
+    ruleType,
+    patterns: patList,
+    scope,
+    reason: String(reason || '').trim(),
+    writeOnly: Boolean(writeOnly),
+    source: String(source || 'manual').trim() || 'manual',
+  }
   const res = await act({
     action: 'wall.save',
-    wall: {
-      title: cleanTitle,
-      ruleType,
-      patterns: patList,
-      scope,
-      reason: String(reason || '').trim(),
-      writeOnly: Boolean(writeOnly),
-      source: 'manual',
-    },
+    wall: wallPayload,
   })
-  if (res && res.ok) {
+  if (res && res.ok && !silent) {
     patch({
       wallFormOpen: false,
       wallDraftTitle: '',
       wallDraftPattern: '',
-      notice: `🚧 已启用自定义拦截规则「${cleanTitle}」（${scope === 'workspace' ? '只管当前项目' : '🌐 所有项目通用'}）`,
+      notice: `🚧 已启用拦截规则「${cleanTitle}」（${scope === 'workspace' ? '只管当前项目' : scope === 'paused' ? '⏸ 已暂停' : '🌐 所有项目通用'}）`,
     })
   }
   return res
 }
 
-export async function setGuardWallScopeApi(wallId, scope) {
+export async function setGuardWallScopeApi(wallId, scope, { silent = false } = {}) {
   if (!wallId || !scope) return null
   const res = await act({ action: 'wall.setScope', wallId, scope })
-  if (res && res.ok) {
+  if (res && res.ok && !silent) {
     const labelMap = { global: '🌐 所有项目通用', workspace: '📁 只管当前项目', paused: '⏸ 已暂停' }
-    patch({ notice: `🚧 自定义拦截规则状态已改为：${labelMap[scope] || scope}` })
+    patch({ notice: `🚧 拦截规则状态已改为：${labelMap[scope] || scope}` })
   }
   return res
 }

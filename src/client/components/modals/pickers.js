@@ -257,8 +257,13 @@ export function SuggestionBanner({ view }) {
   const suggestions = [...rawSuggestions].sort((a, b) => rankSug(a) - rankSug(b))
   const [expandedId, setExpandedId] = React.useState('')
   const [unselectedIds, setUnselectedIds] = React.useState({})
+  const [showAllSugs, setShowAllSugs] = React.useState(false)
 
   if (!suggestions.length) return null
+  const maxDefaultSugs = 2
+  const cappedSuggestions = suggestions.slice(0, 6)
+  const visibleSuggestions = showAllSugs ? cappedSuggestions : cappedSuggestions.slice(0, maxDefaultSugs)
+  const hiddenSugCount = Math.max(0, cappedSuggestions.length - maxDefaultSugs)
 
   const selectedList = suggestions.filter(s => !unselectedIds[s.id])
   const selectedGoalCount = selectedList.filter(s => s.kind === 'goal_approval').length
@@ -317,7 +322,7 @@ export function SuggestionBanner({ view }) {
     ),
 
     // Read-only informative suggestion items (NO per-item execute buttons)
-    suggestions.slice(0, 6).map(sug => {
+    visibleSuggestions.map(sug => {
       const meta = describeSuggestionMeta(sug)
       const isChecked = !unselectedIds[sug.id]
       const openDraft = expandedId === sug.id
@@ -373,10 +378,15 @@ export function SuggestionBanner({ view }) {
             }, h(Icon, { name: 'x', size: 12 })),
           ),
         ),
-        h('div', { style: { fontSize: 12.2, fontWeight: 600, color: 'var(--dnb-text)', lineHeight: 1.45, marginBottom: 3 } }, sug.title),
+        h('div', {
+          className: openDraft ? 'dnb-sug-title dnb-sug-title-full' : 'dnb-sug-title',
+          title: sug.title,
+        }, sug.title),
         sug.reason
-          ? h('div', { style: { fontSize: 11.2, color: 'var(--dnb-text-2)', lineHeight: 1.45, marginBottom: 4 } },
-              '原因：' + sug.reason)
+          ? h('div', {
+              className: openDraft ? 'dnb-sug-reason dnb-sug-reason-full' : 'dnb-sug-reason',
+              title: sug.reason,
+            }, '原因：' + sug.reason)
           : null,
         h(
           'div',
@@ -404,6 +414,14 @@ export function SuggestionBanner({ view }) {
           : null,
       )
     }),
+    hiddenSugCount > 0
+      ? h('button', {
+          type: 'button',
+          className: 'dnb-mini-btn',
+          style: { alignSelf: 'center', fontSize: 11 },
+          onClick: () => setShowAllSugs(v => !v),
+        }, showAllSugs ? '收起多余建议 ▴' : `展开其余 ${hiddenSugCount} 条建议 ▾`)
+      : null,
   )
 }
 

@@ -222,6 +222,15 @@ export function Icon({ name, size = 14, style, filled = false }) {
         h('path', { d: 'M14 2.5H6.5a2 2 0 0 0-2 2v15a2 2 0 0 0 2 2h11a2 2 0 0 0 2-2V8z' }),
         h('path', { d: 'M14 2.5V8h5.5M8.5 12.5h7M8.5 16h5' }),
       )
+    case 'user':
+      return h('svg', props,
+        h('circle', { cx: 12, cy: 8, r: 4 }),
+        h('path', { d: 'M4.5 20a7.5 7.5 0 0 1 15 0' }),
+      )
+    case 'heart':
+      return h('svg', props,
+        h('path', { d: 'M19.5 12.5C21 10.8 21 8 19.2 6.4a4.2 4.2 0 0 0-5.8.2L12 8l-1.4-1.4a4.2 4.2 0 0 0-5.8-.2C3 8 3 10.8 4.5 12.5L12 20l7.5-7.5z' }),
+      )
     case 'alertTriangle':
       return h('svg', props,
         h('path', { d: 'M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z' }),

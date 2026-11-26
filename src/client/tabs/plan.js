@@ -7,8 +7,14 @@
 import { React, h } from '../react-runtime.js'
 import { DEFAULT_UI_SKIN, UI_SKIN_OPTIONS, EXPECTED_BACKEND_BUILD } from '../constants.js'
 import { bi, getUiLangPref, presetList, chiefDisplayName } from '../i18n.js'
-import { store, patch, savePlacementPref, saveUiSkin } from '../store.js'
-import { clampTitle, shortSession, timeLabel } from '../utils.js'
+import { store, patch, savePlacementPref, saveUiSkin, openCustomThemeModal, saveNavLayout } from '../store.js'
+import {
+  clampTitle,
+  shortSession,
+  timeLabel,
+  detectChiefBrandFromModelRef,
+  rollChiefBrandNickname,
+} from '../utils.js'
 import {
   call,
   updateSecConfig,
@@ -364,6 +370,7 @@ export function PlanTab({
       return h(
         'div',
         {
+          'data-dnb-section': 'tasks-plan',
           className: 'dnb-obj-card dnb-bento-hero',
           'data-locked': (isInterventionLocked || isGoalMode) ? '1' : '0',
           'data-collapsed': objCollapsed ? '1' : '0',
@@ -822,11 +829,14 @@ export function PlanTab({
       })
 
       return h(
-        AccCard,
-        {
-          open: !handoffCollapsed,
-          onToggle: () => patch({ handoffSectionCollapsed: !handoffCollapsed }),
-          className: 'dnb-handoff-card',
+        'div',
+        { 'data-dnb-section': 'tasks-handoff' },
+        h(
+          AccCard,
+          {
+            open: !handoffCollapsed,
+            onToggle: () => patch({ handoffSectionCollapsed: !handoffCollapsed }),
+            className: 'dnb-handoff-card',
           title: h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
             h(Icon, { name: 'workflow', size: 12.5, style: { color: 'var(--dnb-amber)' } }),
             bi('换新窗口接着做', 'Continue in New Window')),
@@ -1021,6 +1031,7 @@ export function PlanTab({
         showHandoffPreview && !view.handoffEditing
           ? h('pre', { className: 'dnb-pre', style: { maxHeight: 170, marginTop: 2 } }, view.handoffText || '加载中…')
           : null,
+        ),
       )
     })(),
 
@@ -1242,6 +1253,20 @@ export function HandoffTab({ view }) {
           }),
           h('button', {
             type: 'button',
+            className: 'dnb-pill',
+            style: { height: 28, padding: '0 9px', fontSize: 11 },
+            title: bi('按当前模型随机抽一个昵称并切对应代表色', 'Roll a nickname matching current model & theme color'),
+            onClick: () => {
+              const catNow = view.secModelsCatalog || (view.secView && view.secView.models) || null
+              const curRef = meta.modelRef || meta.resolvedModelRef || meta.followModelRef || ''
+              const curBrand = detectChiefBrandFromModelRef(curRef, catNow)
+              const rolled = rollChiefBrandNickname(curBrand ? curBrand.key : '', chiefNameDraft)
+              setChiefNameDraft(rolled)
+              void updateSecConfig({ chiefName: rolled })
+            },
+          }, bi('🎲 随一个', '🎲 Roll')),
+          h('button', {
+            type: 'button',
             className: 'dnb-primary-btn',
             style: { height: 28, padding: '0 10px', fontSize: 11 },
             onClick: () => void updateSecConfig({ chiefName: chiefNameDraft.trim() }),
@@ -1258,8 +1283,64 @@ export function HandoffTab({ view }) {
               }, bi('恢复默认', 'Reset'))
             : null,
         ),
+        h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 4, lineHeight: 1.45 } },
+          bi('✨ 彩蛋：叫 Claude/小克(温润纸感)、GPT/小G(静谧森系)、Gemini/哈基米(星夜幻想)、DeepSeek/鲸鱼娘(原生简约) 会自动切换对应代表色；换模型也会自动随一个昵称。',
+            '✨ Easter egg: Naming Claude, GPT, Gemini, or DeepSeek (or nicknames) auto-switches to its signature color theme; switching models rolls a matching name.')),
       ),
-      // 5 UI Skins
+      // Navigation Layout Style (Top Classic Tabs vs Left Minimalist Rail)
+      h(
+        'div',
+        { style: { paddingTop: 8, borderTop: '1px solid var(--dnb-border)' } },
+        h('div', { style: { fontSize: 11.5, fontWeight: 500, color: 'var(--dnb-text-2)', marginBottom: 6 } },
+          bi('导航排列样式（宽屏即时生效，窄侧栏自动回退顶部）', 'Navigation Layout (Wide View Toggle)')),
+        h(
+          'div',
+          { className: 'dnb-skin-grid' },
+          [
+            {
+              key: 'top',
+              zh: '顶部标签（经典）',
+              en: 'Top Tabs (Classic)',
+              tagZh: '紧凑横向',
+              tagEn: 'Compact Horizontal',
+              descZh: '所有页签居中平铺在顶栏下方，适合所有窗口宽度',
+              descEn: 'Clean horizontal segmented strip under the header',
+            },
+            {
+              key: 'sidebar',
+              zh: '左侧工作台（极简）',
+              en: 'Left Rail (Studio)',
+              tagZh: '左栏右画布',
+              tagEn: 'Rail + Wide Stage',
+              descZh: '左侧极简竖排导航轨 + 右侧沉浸大画布（所有页签统一生效）',
+              descEn: 'Minimalist left navigation rail with full-width stage for all tabs',
+            },
+          ].map(item => {
+            const active = (view.navLayout || 'sidebar') === item.key
+            return h(
+              'button',
+              {
+                key: item.key,
+                type: 'button',
+                className: 'dnb-skin-card',
+                'data-active': active ? '1' : '0',
+                onClick: () => {
+                  saveNavLayout(item.key)
+                  patch({ notice: bi('已切换导航排列：', 'Navigation layout: ') + bi(item.zh, item.en) })
+                },
+              },
+              h(
+                'div',
+                { className: 'dnb-skin-card-head' },
+                h('span', { className: 'dnb-skin-card-name' }, bi(item.zh, item.en)),
+                h('span', { className: 'dnb-acc-badge', 'data-tone': active ? 'accent' : undefined, style: { fontSize: 10 } }, bi(item.tagZh, item.tagEn)),
+              ),
+              h('div', { className: 'dnb-skin-card-desc' }, bi(item.descZh, item.descEn)),
+            )
+          }),
+        ),
+      ),
+      // 5 UI Skins + Custom DIY
       h(
         'div',
         { style: { paddingTop: 8, borderTop: '1px solid var(--dnb-border)' } },
@@ -1270,6 +1351,13 @@ export function HandoffTab({ view }) {
           { className: 'dnb-skin-grid' },
           UI_SKIN_OPTIONS.map(opt => {
             const isCur = curSkin === opt.key
+            const isCustomOpt = opt.key === 'custom'
+            const cSkin = isCustomOpt ? (view.customSkin || {}) : null
+            const hasSavedCustom = Boolean(cSkin && Number(cSkin.updatedAt) > 0)
+            const cardName = isCustomOpt && hasSavedCustom ? cSkin.name : bi(opt.zh, opt.en)
+            const cardSwatches = isCustomOpt && cSkin && Array.isArray(cSkin.swatches) && cSkin.swatches.length === 3
+              ? cSkin.swatches
+              : opt.swatches
             return h(
               'button',
               {
@@ -1278,23 +1366,43 @@ export function HandoffTab({ view }) {
                 className: 'dnb-skin-card',
                 'data-active': isCur ? '1' : '0',
                 onClick: () => {
+                  if (isCustomOpt && (!hasSavedCustom || isCur)) {
+                    openCustomThemeModal()
+                    return
+                  }
                   saveUiSkin(opt.key)
-                  patch({ notice: bi('已切换视觉主题：', 'Theme switched to: ') + bi(opt.zh, opt.en) })
+                  patch({ notice: bi('已切换视觉主题：', 'Theme switched to: ') + cardName })
                 },
               },
               h(
                 'div',
                 { className: 'dnb-skin-card-head' },
-                h('span', { className: 'dnb-skin-card-name' }, bi(opt.zh, opt.en)),
+                h('span', { className: 'dnb-skin-card-name' }, cardName),
                 h(
                   'div',
                   { className: 'dnb-skin-swatches' },
-                  opt.swatches.map(hex =>
-                    h('span', { key: hex, className: 'dnb-skin-swatch-dot', style: { background: hex } })),
+                  cardSwatches.map((hex, idx) =>
+                    h('span', { key: `${hex}-${idx}`, className: 'dnb-skin-swatch-dot', style: { background: hex } })),
                 ),
               ),
               h('div', { className: 'dnb-skin-card-tag' }, bi(opt.tagZh, opt.tagEn)),
-              h('div', { className: 'dnb-skin-card-desc' }, bi(opt.descZh, opt.descEn)),
+              h('div', { className: 'dnb-skin-card-desc' },
+                isCustomOpt
+                  ? h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
+                      h('span', null, bi('导图提色 / 参谋长定制', 'Image / AI DIY')),
+                      h('span', {
+                        role: 'button',
+                        tabIndex: 0,
+                        style: { color: 'var(--dnb-accent)', fontWeight: 600, fontSize: 10.5 },
+                        onClick: e => {
+                          e.stopPropagation()
+                          openCustomThemeModal()
+                        },
+                      }, bi('🎨 调色工坊', '🎨 Studio')),
+                    )
+                  : bi(opt.descZh, opt.descEn)),
             )
           }),
         ),

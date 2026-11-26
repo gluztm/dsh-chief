@@ -8,7 +8,7 @@ import { normalizeMemory } from './memory.js'
 
 export const API = '/api/dsh-chief'
 
-export const BACKEND_BUILD = '1.8.0'
+export const BACKEND_BUILD = '1.9.0'
 
 export const BOARD_VERSION = 1
 
@@ -848,7 +848,7 @@ export function derivePlanFlowProgress(board, subagents = []) {
 
     let agentStatus = 'todo'
     if (hasBlockedTask || isAgentFailed) agentStatus = 'blocked'
-    else if (isAgentRunning || hasDoingTask) agentStatus = 'doing'
+    else if (isAgentRunning || (!isAgentEnded && hasDoingTask)) agentStatus = 'doing'
     else if (allTasksDone || (isAgentEnded && !hasOpenTask)) agentStatus = 'done'
 
     if (agentStatus === 'doing') runningAgents += 1

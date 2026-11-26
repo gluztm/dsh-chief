@@ -25,7 +25,7 @@ import {
   mergeGuardWallsApi,
   updateSecConfig,
 } from '../api.js'
-import { Icon, AccCard } from '../components/common.js'
+import { Icon, AccCard, Switch } from '../components/common.js'
 
 const WALL_TYPE_META = {
   forbid_cmd: { label: '禁跑命令', placeholder: '输入禁跑的命令关键词（如 npm publish、git push --force）…' },
@@ -37,38 +37,38 @@ const WALL_TYPE_META = {
 
 const GUARD_WALL_PRESET_PACKS = [
   {
-    id: 'git_safety',
-    title: 'Git 危险操作急停',
-    desc: '直接拦住强推 (force push)、清工作区和硬回退',
+    id: 'preset-secret-files',
+    title: '涉密文件防泄露',
+    desc: '不让 AI 偷看或乱改密码、密钥和账号配置文件（.env、私钥、凭据等）',
+    ruleType: 'forbid_path',
+    defaultEnabled: true,
+    patterns: ['.env', '.env.*', '.npmrc', '.netrc', '*.pem', '*.key', 'id_rsa', 'id_ed25519', 'credentials', 'secrets.*', '.aws/credentials'],
+    reason: '预设包：默认保护密码、密钥与凭据文件，防止 AI 误读泄露或误改',
+  },
+  {
+    id: 'preset-git-safety',
+    title: '高危操作防误删',
+    desc: '直接拦住强推覆盖、强行清空本地改动和强删分支等不可逆操作',
     ruleType: 'forbid_cmd',
-    patterns: ['git\\s+push.*--force', 'git\\s+push\\s+-f\\b', 'git\\s+reset\\s+--hard', 'git\\s+clean\\s+-f'],
+    defaultEnabled: true,
+    patterns: ['git\\s+push.*--force', 'git\\s+push\\s+-f\\b', 'git\\s+reset\\s+--hard', 'git\\s+clean\\s+-f', 'git\\s+branch\\s+-D'],
+    reason: '预设包：防止误运行不可逆 Git 破坏性命令导致本地改动或远端历史丢失',
   },
   {
-    id: 'secret_files',
-    title: '敏感凭据与配置禁碰',
-    desc: '防止 AI 误读或改动 .env、.npmrc、私钥与凭据目录',
-    ruleType: 'forbid_path',
-    patterns: ['.env', '.npmrc', '*.pem', 'credentials', '.netrc'],
-  },
-  {
-    id: 'publish_gate',
-    title: '对外发版发布先问你',
-    desc: '运行 npm publish 或建删 GitHub Release 前必须弹窗同意',
-    ruleType: 'require_approval_cmd',
-    patterns: ['npm\\s+publish', 'gh\\s+release\\s+create', 'gh\\s+release\\s+delete'],
-  },
-  {
-    id: 'ci_workflow',
-    title: 'CI 工作流文件保护',
-    desc: '防止 AI 擅自篡改 .github/workflows 自动化流水线',
-    ruleType: 'forbid_path',
-    patterns: ['.github/workflows'],
+    id: 'preset-readonly-audit',
+    title: '只读看代码模式',
+    desc: '只想让 AI 看代码、查问题或出方案时打开，彻底禁止改文件和删文件',
+    ruleType: 'deny_tool',
+    defaultEnabled: false,
+    patterns: ['write_file', 'edit_file', 'write', 'edit', 'apply_patch', 'delete_file', 'remove_file'],
+    reason: '预设包：临时锁死所有写文件工具，确保只读审查期间源码零改动',
   },
 ]
 
 function GuardWallsCard({ view }) {
   const [wallMenuOpen, setWallMenuOpen] = React.useState(false)
-  const [tplOpen, setTplOpen] = React.useState(false)
+  const [tplOpen, setTplOpen] = React.useState(true)
+  const [presetBusy, setPresetBusy] = React.useState(false)
   const wallImportRef = React.useRef(null)
   React.useEffect(() => {
     if (!wallMenuOpen) return
@@ -78,7 +78,15 @@ function GuardWallsCard({ view }) {
   }, [wallMenuOpen])
 
   const walls = Array.isArray(view.guardWalls) ? view.guardWalls : []
+  const presetIdSet = new Set(GUARD_WALL_PRESET_PACKS.map(p => p.id))
+  const presetTitleSet = new Set(GUARD_WALL_PRESET_PACKS.map(p => p.title))
+  const findPresetWall = tpl => walls.find(w => w && (w.id === tpl.id || w.title === tpl.title))
+  const customWalls = walls.filter(w => w && !presetIdSet.has(w.id) && !presetTitleSet.has(w.title))
   const activeCount = walls.filter(w => w && w.activeNow).length
+  const activePresetCount = GUARD_WALL_PRESET_PACKS.filter(tpl => {
+    const w = findPresetWall(tpl)
+    return w && w.activeNow
+  }).length
   const collapsed = Boolean(view.wallCollapsed)
   const formOpen = Boolean(view.wallFormOpen)
   const draftField = WALL_TYPE_META[view.wallDraftField] ? view.wallDraftField : 'forbid_cmd'
@@ -86,11 +94,11 @@ function GuardWallsCard({ view }) {
   const draftTitle = view.wallDraftTitle || ''
   const draftPattern = view.wallDraftPattern || ''
   const selectedIds = (Array.isArray(view.wallSelectedIds) ? view.wallSelectedIds : [])
-    .filter(id => walls.some(w => w && w.id === id))
+    .filter(id => customWalls.some(w => w && w.id === id))
   const selectedSet = new Set(selectedIds)
 
   const bucketCounts = {}
-  for (const w of walls) {
+  for (const w of customWalls) {
     if (!w || !w.ruleType) continue
     const k = (w.scope === 'paused' ? 'paused|' : 'active|') + w.ruleType
     bucketCounts[k] = (bucketCounts[k] || 0) + 1
@@ -106,18 +114,104 @@ function GuardWallsCard({ view }) {
     })
   }
 
-  const applyWallTemplatePack = async (tpl) => {
-    if (!tpl) return
-    if (walls.some(w => w && w.title === tpl.title)) {
-      patch({ notice: bi(`「${tpl.title}」已经加过了`, `"${tpl.title}" is already added`) })
-      return
+  const togglePresetPack = async (tpl, nextOn) => {
+    if (!tpl || presetBusy) return
+    setPresetBusy(true)
+    try {
+      const existing = findPresetWall(tpl)
+      if (existing) {
+        const targetScope = nextOn
+          ? (existing.scope === 'workspace' ? 'workspace' : 'global')
+          : 'paused'
+        await setGuardWallScopeApi(existing.id, targetScope)
+      } else if (nextOn) {
+        await saveGuardWallApi({
+          id: tpl.id,
+          title: tpl.title,
+          ruleType: tpl.ruleType,
+          patterns: tpl.patterns,
+          scope: 'global',
+          reason: tpl.reason,
+          source: 'manual',
+        })
+      }
+    } finally {
+      setPresetBusy(false)
     }
-    await saveGuardWallApi({
-      title: tpl.title,
-      ruleType: tpl.ruleType,
-      pattern: tpl.patterns.join(', '),
-      scope: 'global',
-    })
+  }
+
+  const changePresetScope = async (tpl, targetScope) => {
+    if (!tpl || !targetScope || presetBusy) return
+    setPresetBusy(true)
+    try {
+      const existing = findPresetWall(tpl)
+      if (existing) {
+        if (existing.scope !== targetScope) {
+          await setGuardWallScopeApi(existing.id, targetScope)
+        }
+      } else {
+        await saveGuardWallApi({
+          id: tpl.id,
+          title: tpl.title,
+          ruleType: tpl.ruleType,
+          patterns: tpl.patterns,
+          scope: targetScope,
+          reason: tpl.reason,
+          source: 'manual',
+        })
+      }
+    } finally {
+      setPresetBusy(false)
+    }
+  }
+
+  const restoreDefaultPresets = async () => {
+    if (presetBusy) return
+    setPresetBusy(true)
+    try {
+      for (const tpl of GUARD_WALL_PRESET_PACKS) {
+        const existing = findPresetWall(tpl)
+        if (tpl.defaultEnabled) {
+          if (existing) {
+            if (existing.scope === 'paused') {
+              await setGuardWallScopeApi(existing.id, 'global', { silent: true })
+            }
+          } else {
+            await saveGuardWallApi({
+              id: tpl.id,
+              title: tpl.title,
+              ruleType: tpl.ruleType,
+              patterns: tpl.patterns,
+              scope: 'global',
+              reason: tpl.reason,
+              source: 'manual',
+              silent: true,
+            })
+          }
+        } else if (existing && existing.scope !== 'paused') {
+          await setGuardWallScopeApi(existing.id, 'paused', { silent: true })
+        }
+      }
+      patch({ notice: bi('🛡️ 已恢复默认开启 2 套常用防泄密与防误删预设', '🛡️ Restored 2 default safety presets') })
+    } finally {
+      setPresetBusy(false)
+    }
+  }
+
+  const pauseAllPresets = async () => {
+    if (presetBusy) return
+    setPresetBusy(true)
+    try {
+      for (const tpl of GUARD_WALL_PRESET_PACKS) {
+        const existing = findPresetWall(tpl)
+        if (existing && existing.scope !== 'paused') {
+          await setGuardWallScopeApi(existing.id, 'paused', { silent: true })
+        }
+      }
+      patch({ notice: bi('⏸ 已暂停全部预设拦截包，随时可一键重新开启', '⏸ Paused all preset guard packs') })
+    } finally {
+      setPresetBusy(false)
+    }
   }
 
   const exportWallsJson = () => {
@@ -212,13 +306,13 @@ function GuardWallsCard({ view }) {
           className: 'dnb-pill',
           'data-active': tplOpen ? '1' : '0',
           style: { height: 22, padding: '0 8px', fontSize: 10.5 },
-          title: bi('查看常用安全拦截模板包与导出导入备份', 'Browse built-in block rule packs & import/export'),
+          title: bi('查看并一键开关预设安全拦截包与导出导入备份', 'Toggle built-in safety guard packs & import/export'),
           onClick: () => {
             const nextTpl = !tplOpen
             setTplOpen(nextTpl)
             if (nextTpl && collapsed) patch({ wallCollapsed: false })
           },
-        }, h(Icon, { name: 'layers', size: 10.5 }), tplOpen ? bi('收起模板', 'Hide Packs') : bi('模板包', 'Packs')),
+        }, h(Icon, { name: 'layers', size: 10.5 }), tplOpen ? bi('收起预设包', 'Hide Presets') : bi('预设包', 'Presets')),
         h('button', {
           type: 'button',
           className: 'dnb-pill',
@@ -314,12 +408,31 @@ function GuardWallsCard({ view }) {
           h(
             'div',
             { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
-            h('span', { style: { fontSize: 11.5, fontWeight: 500, color: 'var(--dnb-text)', display: 'inline-flex', alignItems: 'center', gap: 5 } },
+            h('span', { style: { fontSize: 11.5, fontWeight: 600, color: 'var(--dnb-text)', display: 'inline-flex', alignItems: 'center', gap: 5 } },
               h(Icon, { name: 'layers', size: 12, style: { color: 'var(--dnb-accent)' } }),
-              bi('常用安全拦截模板包（点一下就能加上）', 'One-Click Safety Rule Packs')),
+              bi(
+                `快捷安全预设（默认开 2 项，随时切 · ${activePresetCount}/${GUARD_WALL_PRESET_PACKS.length} 生效）`,
+                `Quick Safety Presets (${activePresetCount}/${GUARD_WALL_PRESET_PACKS.length} active)`,
+              )),
             h(
               'div',
-              { style: { display: 'inline-flex', gap: 5 } },
+              { style: { display: 'inline-flex', gap: 5, flexWrap: 'wrap' } },
+              h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+                disabled: presetBusy,
+                title: bi('一键恢复默认开启 2 套防泄密与防误删预设', 'Restore 2 default safety presets'),
+                onClick: () => void restoreDefaultPresets(),
+              }, h(Icon, { name: 'refresh', size: 10.5 }), bi('恢复默认', 'Restore Defaults')),
+              h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 22, padding: '0 8px', fontSize: 10.5 },
+                disabled: presetBusy || activePresetCount === 0,
+                title: bi('临时暂停全部预设拦截包', 'Pause all preset guard packs'),
+                onClick: () => void pauseAllPresets(),
+              }, h(Icon, { name: 'pause', size: 10.5 }), bi('全部暂停', 'Pause Presets')),
               h('button', {
                 type: 'button',
                 className: 'dnb-pill',
@@ -345,23 +458,72 @@ function GuardWallsCard({ view }) {
             'div',
             { className: 'dnb-tpl-grid' },
             GUARD_WALL_PRESET_PACKS.map(tpl => {
-              const alreadyOn = walls.some(w => w && w.title === tpl.title)
+              const existing = findPresetWall(tpl)
+              const isOn = Boolean(existing && existing.scope !== 'paused')
+              const currentScope = existing ? existing.scope : 'paused'
+              const typeMeta = WALL_TYPE_META[tpl.ruleType] || { label: tpl.ruleType }
               return h(
                 'div',
-                { key: tpl.id, className: 'dnb-tpl-card' },
-                h('div', { className: 'dnb-tpl-title' }, tpl.title),
+                { key: tpl.id, className: 'dnb-tpl-card', 'data-active': isOn ? '1' : '0' },
+                h(
+                  'div',
+                  { className: 'dnb-tpl-head' },
+                  h(
+                    'div',
+                    { style: { display: 'flex', alignItems: 'center', gap: 5, minWidth: 0, flexWrap: 'wrap' } },
+                    h('span', { className: 'dnb-tpl-title' }, tpl.title),
+                    h('span', { className: 'dnb-tag', style: { fontSize: 9.5 } }, typeMeta.label),
+                  ),
+                  h(Switch, {
+                    checked: isOn,
+                    small: true,
+                    disabled: presetBusy,
+                    title: isOn ? bi(`点击暂停「${tpl.title}」`, `Pause "${tpl.title}"`) : bi(`点击开启「${tpl.title}」`, `Enable "${tpl.title}"`),
+                    onChange: next => void togglePresetPack(tpl, next),
+                  }),
+                ),
                 h('div', { className: 'dnb-tpl-desc' }, tpl.desc),
-                h('div', { style: { marginTop: 'auto', paddingTop: 4 } },
-                  h('button', {
-                    type: 'button',
-                    className: alreadyOn ? 'dnb-pill' : 'dnb-pill dnb-pill-accent',
-                    style: { height: 22, padding: '0 8px', fontSize: 10.5 },
-                    disabled: alreadyOn,
-                    onClick: () => void applyWallTemplatePack(tpl),
-                  }, alreadyOn ? bi('已启用', 'Added') : bi('+ 一键启用', '+ Enable')),
+                h(
+                  'div',
+                  { className: 'dnb-tpl-foot' },
+                  h(
+                    'div',
+                    { style: { display: 'inline-flex', alignItems: 'center', gap: 4 } },
+                    [
+                      { key: 'global', label: bi('🌐 全局', '🌐 Global') },
+                      { key: 'workspace', label: bi('📁 仅本工程', '📁 Project') },
+                    ].map(opt =>
+                      h('button', {
+                        key: opt.key,
+                        type: 'button',
+                        className: 'dnb-wall-scope-btn',
+                        disabled: presetBusy,
+                        'data-active': isOn && currentScope === opt.key ? '1' : '0',
+                        onClick: () => void changePresetScope(tpl, opt.key),
+                      }, opt.label)),
+                  ),
+                  h(
+                    'span',
+                    {
+                      className: 'dnb-tag',
+                      style: {
+                        fontSize: 9.5,
+                        color: isOn ? 'var(--dnb-sage, #4ade80)' : 'var(--dnb-text-3)',
+                      },
+                    },
+                    isOn ? (tpl.defaultEnabled ? bi('默认开启', 'Default ON') : bi('已开启', 'Active')) : bi('已暂停', 'Paused'),
+                  ),
                 ),
               )
             }),
+          ),
+          h(
+            'div',
+            { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', paddingTop: 2 } },
+            bi(
+              '需要发版审批、CI 或更细的目录/命令限制？老手可直接点右上角「+ 加规则」手搓，或让参谋长帮你写。',
+              'Need finer publish, CI, or path rules? Click "+ Add Rule" above to craft your own.',
+            ),
           ),
         )
       : null,
@@ -428,8 +590,8 @@ function GuardWallsCard({ view }) {
           ),
         )
       : null,
-    walls.length > 0
-      ? walls.map(w => {
+    customWalls.length > 0
+      ? customWalls.map(w => {
           const typeMeta = WALL_TYPE_META[w.ruleType] || { label: w.ruleType }
           const patText = Array.isArray(w.patterns) ? w.patterns.join(' , ') : ''
           const isChecked = selectedSet.has(w.id)
@@ -451,7 +613,7 @@ function GuardWallsCard({ view }) {
               h(
                 'div',
                 { style: { display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
-                walls.length >= 2
+                customWalls.length >= 2
                   ? h('button', {
                       type: 'button',
                       className: 'dnb-bound-check',
@@ -501,7 +663,10 @@ function GuardWallsCard({ view }) {
       : h(
           'div',
           { style: { padding: '10px 12px', fontSize: 11, color: 'var(--dnb-text-3)' } },
-          '还没有自定义拦截规则。点右上角「+ 加规则」自己加一条，或让参谋长帮你写一条。',
+          bi(
+            '暂无其他手写自定义规则。上方预设包已提供常见事前拦截；如需针对本项目的专属拦截，可点右上角「+ 加规则」。',
+            'No extra custom rules yet. Built-in presets above already cover common pre-execute guards.',
+          ),
         ),
   )
 }
@@ -733,7 +898,10 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
 }
 
 export function BoundariesTab({ store: view }) {
-  const [showEnv, setShowEnv] = React.useState(false)
+  const [showEnv, setShowEnv] = React.useState(() => (view && view.boundSubTab) === 'env')
+  React.useEffect(() => {
+    if (view && view.boundSubTab === 'env') setShowEnv(true)
+  }, [view && view.boundSubTab])
   React.useEffect(() => {
     if (!view.boundMoreMenuOpen) return
     const close = () => patch({ boundMoreMenuOpen: false })
@@ -780,77 +948,84 @@ export function BoundariesTab({ store: view }) {
     // Section 1: Safety Block (hard pre-tool blocking)
     h(
       'div',
-      { className: 'dnb-bound-sec-head' },
+      { 'data-dnb-section': 'bound-walls' },
       h(
         'div',
-        { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flexWrap: 'wrap' } },
-        h('span', { style: { fontSize: 12.5, fontWeight: 550, color: 'var(--dnb-text)', display: 'inline-flex', alignItems: 'center', gap: 5 } },
-          h(Icon, { name: 'shieldCheck', size: 13.5, style: { color: 'var(--dnb-sage, #63d1b0)' } }),
-          bi('安全拦截', 'Safety Block')),
-        h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, bi('程序直接拦住，AI 绕不过', 'Enforced before tools run')),
-      ),
-    ),
-    h(
-      'div',
-      {
-        className: 'dnb-safety-banner',
-        'data-off': safetyDisabled ? '1' : '0',
-      },
-      h(
-        'div',
-        { style: { flex: '1 1 200px', minWidth: 0 } },
+        { className: 'dnb-bound-sec-head' },
         h(
           'div',
-          { className: 'dnb-safety-banner-title' },
-          h(Icon, { name: safetyDisabled ? 'shieldOff' : 'shieldCheck', size: 13 }),
-          safetyDisabled
-            ? (!globalSafetyOn
-                ? bi('自动防误操作 · 已关闭（全部对话）', 'Auto Protection · Off (All Chats)')
-                : bi('自动防误操作 · 已关闭（当前对话）', 'Auto Protection · Off (This Chat)'))
-            : bi('自动防误操作 · 已开启', 'Auto Protection · On'),
+          { style: { display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flexWrap: 'wrap' } },
+          h('span', { style: { fontSize: 12.5, fontWeight: 550, color: 'var(--dnb-text)', display: 'inline-flex', alignItems: 'center', gap: 5 } },
+            h(Icon, { name: 'shieldCheck', size: 13.5, style: { color: 'var(--dnb-sage, #63d1b0)' } }),
+            bi('安全拦截', 'Safety Block')),
+          h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, bi('程序直接拦住，AI 绕不过', 'Enforced before tools run')),
         ),
+      ),
+      h(
+        'div',
+        {
+          className: 'dnb-safety-banner',
+          'data-off': safetyDisabled ? '1' : '0',
+        },
         h(
           'div',
-          { className: 'dnb-safety-banner-sub' },
-          safetyDisabled
-            ? bi(
-                `已放行内置拦截${activeWallCount ? `（下方仍有 ${activeWallCount} 条自定义规则生效）` : ''}`,
-                `Built-in blocks bypassed${activeWallCount ? ` (${activeWallCount} custom rule(s) still active below)` : ''}`,
-              )
-            : bi(
-                '自动拦住删文件、改项目外文件、读 .env/密钥等危险操作',
-                'Blocks risky file deletes, edits outside workspace, and secret reads',
+          { style: { flex: '1 1 200px', minWidth: 0 } },
+          h(
+            'div',
+            { className: 'dnb-safety-banner-title' },
+            h(Icon, { name: safetyDisabled ? 'shieldOff' : 'shieldCheck', size: 13 }),
+            safetyDisabled
+              ? (!globalSafetyOn
+                  ? bi('自动防误操作 · 已关闭（全部对话）', 'Auto Protection · Off (All Chats)')
+                  : bi('自动防误操作 · 已关闭（当前对话）', 'Auto Protection · Off (This Chat)'))
+              : bi('自动防误操作 · 已开启', 'Auto Protection · On'),
+          ),
+          h(
+            'div',
+            { className: 'dnb-safety-banner-sub' },
+            safetyDisabled
+              ? bi(
+                  `已放行内置拦截${activeWallCount ? `（下方仍有 ${activeWallCount} 条自定义规则生效）` : ''}`,
+                  `Built-in blocks bypassed${activeWallCount ? ` (${activeWallCount} custom rule(s) still active below)` : ''}`,
+                )
+              : bi(
+                  '自动拦住删文件、改项目外文件、读 .env/密钥等危险操作',
+                  'Blocks risky file deletes, edits outside workspace, and secret reads',
+                ),
+          ),
+        ),
+        safetyDisabled
+          ? h('button', {
+              type: 'button',
+              className: 'dnb-primary-btn',
+              style: { height: 26, padding: '0 10px', fontSize: 11, flexShrink: 0 },
+              onClick: () => void updateSecConfig(
+                !globalSafetyOn
+                  ? { globalSafetyGuardEnabled: true, ...(!sessionSafetyOn ? { tacticalModes: { safetyGuardEnabled: true } } : {}) }
+                  : { tacticalModes: { safetyGuardEnabled: true } },
               ),
-        ),
+            }, bi('一键开启', 'Enable'))
+          : h('button', {
+              type: 'button',
+              className: 'dnb-pill',
+              style: { height: 26, padding: '0 10px', fontSize: 11, flexShrink: 0 },
+              onClick: () => patch({
+                safetyGuardModalOpen: true,
+                safetyGuardModalScope: 'session',
+                safetyGuardAgreed: false,
+                safetyGuardPauseWalls: activeWallCount > 0,
+              }),
+            }, bi('关闭', 'Turn Off')),
       ),
-      safetyDisabled
-        ? h('button', {
-            type: 'button',
-            className: 'dnb-primary-btn',
-            style: { height: 26, padding: '0 10px', fontSize: 11, flexShrink: 0 },
-            onClick: () => void updateSecConfig(
-              !globalSafetyOn
-                ? { globalSafetyGuardEnabled: true, ...(!sessionSafetyOn ? { tacticalModes: { safetyGuardEnabled: true } } : {}) }
-                : { tacticalModes: { safetyGuardEnabled: true } },
-            ),
-          }, bi('一键开启', 'Enable'))
-        : h('button', {
-            type: 'button',
-            className: 'dnb-pill',
-            style: { height: 26, padding: '0 10px', fontSize: 11, flexShrink: 0 },
-            onClick: () => patch({
-              safetyGuardModalOpen: true,
-              safetyGuardModalScope: 'session',
-              safetyGuardAgreed: false,
-              safetyGuardPauseWalls: activeWallCount > 0,
-            }),
-          }, bi('关闭', 'Turn Off')),
+      h(GuardWallsCard, { view }),
     ),
-    h(GuardWallsCard, { view }),
     // Section 2: Guidelines for AI (prompt-injected rules)
     h(
       'div',
-      { className: 'dnb-bound-sec-head', style: { marginTop: 16 } },
+      { 'data-dnb-section': 'bound-rules' },
+      h(
+        'div',
+        { className: 'dnb-bound-sec-head', style: { marginTop: 16 } },
       h(
         'div',
         {
@@ -936,39 +1111,44 @@ export function BoundariesTab({ store: view }) {
         view,
       }),
     ),
+    ),
     h(
-      AccCard,
-      {
-        open: showEnv,
-        onToggle: () => setShowEnv(v => !v),
-        tone: 'slate',
-        title: bi('运行环境', 'Runtime Info'),
-        count: rows.length ? String(rows.length) : '',
-        preview: info.workspaceRoot || info.sessionWorkingDirectory || info.workingDirectory || '',
-        bodyStyle: { padding: 0 },
-      },
-      rows.map(([k, v]) =>
-        h(
-          'div',
-          {
-            key: k,
-            className: 'dnb-cell dnb-cell-hover',
-            style: { justifyContent: 'space-between', cursor: 'pointer' },
-            title: '点击复制',
-            onClick: () => copyText(v, '已复制 ' + k),
-          },
-          h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)', flexShrink: 0 } }, k),
-          h('span', {
-            style: {
-              fontSize: 11,
-              color: 'var(--dnb-text-2)',
-              fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap',
-              maxWidth: '68%',
+      'div',
+      { 'data-dnb-section': 'bound-env' },
+      h(
+        AccCard,
+        {
+          open: showEnv,
+          onToggle: () => setShowEnv(v => !v),
+          tone: 'slate',
+          title: bi('运行环境', 'Runtime Info'),
+          count: rows.length ? String(rows.length) : '',
+          preview: info.sessionWorkingDirectory || info.workingDirectory || info.workspaceRoot || '',
+          bodyStyle: { padding: 0 },
+        },
+        rows.map(([k, v]) =>
+          h(
+            'div',
+            {
+              key: k,
+              className: 'dnb-cell dnb-cell-hover',
+              style: { justifyContent: 'space-between', cursor: 'pointer' },
+              title: '点击复制',
+              onClick: () => copyText(v, '已复制 ' + k),
             },
-          }, String(v)),
+            h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)', flexShrink: 0 } }, k),
+            h('span', {
+              style: {
+                fontSize: 11,
+                color: 'var(--dnb-text-2)',
+                fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                maxWidth: '68%',
+              },
+            }, String(v)),
+          ),
         ),
       ),
     ),

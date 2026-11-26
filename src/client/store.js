@@ -7,9 +7,36 @@
 import { React } from './react-runtime.js'
 import { SIDE_ID, BRAND_NAME, DEFAULT_UI_SKIN, UI_SKIN_OPTIONS } from './constants.js'
 import { readSavedUiLang } from './i18n.js'
+import {
+  readSavedCustomSkin,
+  writeSavedCustomSkin,
+  applyCustomSkinStyle,
+  normalizeCustomSkinConfig,
+  saveCustomWallpaperBlob,
+  loadCustomWallpaperBlob,
+  deleteCustomWallpaperBlob,
+  createManagedWallpaperUrl,
+  buildInlineWallpaperFallback,
+} from './custom-theme.js'
 
 const PLACEMENT_STORAGE_KEY = 'dsh-chief:placement-pref'
 const SKIN_STORAGE_KEY = 'dsh-chief:ui-skin'
+const NAV_LAYOUT_STORAGE_KEY = 'dsh-chief:nav-layout'
+
+export function normalizeNavLayout(raw) {
+  const clean = String(raw || '').trim().toLowerCase()
+  return clean === 'top' ? 'top' : 'sidebar'
+}
+
+export function readSavedNavLayout() {
+  try {
+    if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+      const raw = localStorage.getItem(NAV_LAYOUT_STORAGE_KEY)
+      if (raw) return normalizeNavLayout(raw)
+    }
+  } catch {}
+  return 'sidebar'
+}
 
 export function normalizeUiSkin(raw) {
   const clean = String(raw || '').trim().toLowerCase()
@@ -253,6 +280,14 @@ export const store = {
   awayPresetAgreed: false,
   uiLangPref: readSavedUiLang(),
   uiSkin: readSavedUiSkin(),
+  navLayout: readSavedNavLayout(),
+  chiefSubTab: 'all',
+  tasksSubTab: 'plan',
+  peersSubTab: 'all',
+  boundSubTab: 'walls',
+  extMemSubTab: 'book',
+  customSkin: readSavedCustomSkin(),
+  customThemeModalOpen: false,
   skinMenuOpen: false,
   placementPref: readSavedPlacementPref(),
   seenAlertEventIds: {},
@@ -450,6 +485,21 @@ export function focusSecInput() {
   }, 30)
 }
 
+export function scrollWorkspaceSection(sectionKey) {
+  const clean = String(sectionKey || '').trim()
+  if (!clean) return
+  setTimeout(() => {
+    try {
+      const host = runtimeRefs.panelEl || (typeof document !== 'undefined' ? document : null)
+      if (!host || typeof host.querySelector !== 'function') return
+      const el = host.querySelector(`[data-dnb-section="${clean}"]`)
+      if (el && typeof el.scrollIntoView === 'function') {
+        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+      }
+    } catch {}
+  }, 45)
+}
+
 export function service(name) {
   if (!runtimeRefs.hostCtx || typeof runtimeRefs.hostCtx.get !== 'function') return null
   try {
@@ -601,12 +651,17 @@ function collapseRightbarIfOpen() {
 
 function findConversationTabEl(targetViewId) {
   if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return null
-  const tabs = Array.from(document.querySelectorAll('[role="tablist"] [role="tab"]'))
+  const primaryTabs = Array.from(document.querySelectorAll('[data-conversation-tabs] [role="tab"]'))
+  const allTabs = primaryTabs.length
+    ? primaryTabs
+    : Array.from(document.querySelectorAll('[role="tablist"] [role="tab"]'))
+  // Never match tabs inside Chief's own panel or right sidebar dock
+  const tabs = allTabs.filter(el => !el.closest('.dnb-panel') && !el.closest('.dnb-dock-page'))
   if (!tabs.length) return null
   const isChiefTab = (el) => {
     const txt = String(el.textContent || '').trim()
     const key = el.getAttribute && (el.getAttribute('data-view') || el.getAttribute('data-id') || el.getAttribute('id') || '')
-    return key === SIDE_ID || txt === BRAND_NAME || txt === 'DSH Chief' || txt.includes('参谋')
+    return key === SIDE_ID || txt === BRAND_NAME || txt === 'DSH Chief' || txt.includes('参谋长') || txt === 'Chief'
   }
   if (targetViewId === SIDE_ID) {
     return tabs.find(isChiefTab) || null
@@ -633,29 +688,26 @@ export function switchConversationView(targetViewId) {
       return true
     } catch {}
   }
-  const uiConv = service('uiConversation')
-  const sid = store.sessionId
-  if (uiConv && sid && typeof uiConv.binding === 'function') {
-    try {
-      const binding = uiConv.binding(sid)
-      if (binding && typeof binding.activate === 'function') {
-        binding.activate(target)
-        return true
-      }
-    } catch {}
-  }
   const tabEl = findConversationTabEl(target)
-  if (tabEl && typeof tabEl.click === 'function') {
-    try {
-      tabEl.click()
+  if (tabEl) {
+    if (tabEl.getAttribute && tabEl.getAttribute('aria-selected') === 'true') {
       return true
-    } catch {}
+    }
+    if (typeof tabEl.click === 'function') {
+      try {
+        tabEl.click()
+        return true
+      } catch {}
+    }
   }
   return false
 }
 
 export function saveUiSkin(nextSkin) {
   const clean = normalizeUiSkin(nextSkin)
+  if (clean === 'custom') {
+    applyCustomSkinStyle(store.customSkin)
+  }
   try {
     if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
       localStorage.setItem(SKIN_STORAGE_KEY, clean)
@@ -669,6 +721,87 @@ export function saveUiSkin(nextSkin) {
   } catch {}
   patch({ uiSkin: clean })
   return clean
+}
+
+let wallpaperHydrating = false
+
+export async function hydrateCustomSkinWallpaper() {
+  if (wallpaperHydrating) return store.customSkin
+  const cur = store.customSkin || {}
+  if (cur.bgImageStorage !== 'idb' || cur.bgImageUrl) return cur
+  wallpaperHydrating = true
+  try {
+    const blob = await loadCustomWallpaperBlob()
+    if (!blob) return store.customSkin
+    const latest = store.customSkin || {}
+    if (latest.bgImageStorage !== 'idb' || latest.bgImageUrl) return latest
+    const objUrl = createManagedWallpaperUrl(blob)
+    if (!objUrl) return latest
+    const hydrated = normalizeCustomSkinConfig({ ...latest, bgImageUrl: objUrl, bgImageStorage: 'idb' })
+    applyCustomSkinStyle(hydrated)
+    patch({ customSkin: hydrated })
+    return hydrated
+  } catch {
+    return store.customSkin
+  } finally {
+    wallpaperHydrating = false
+  }
+}
+
+export function saveCustomSkin(nextPartial, { activate = true, wallpaperBlob = undefined } = {}) {
+  const prev = store.customSkin || {}
+  const baseMerged = { ...prev, ...(nextPartial || {}), updatedAt: Date.now() }
+  if (wallpaperBlob && typeof Blob !== 'undefined' && wallpaperBlob instanceof Blob) {
+    const objUrl = createManagedWallpaperUrl(wallpaperBlob)
+    if (objUrl) {
+      baseMerged.bgImageUrl = objUrl
+      baseMerged.bgImageStorage = 'idb'
+    }
+  }
+  const clean = writeSavedCustomSkin(baseMerged)
+  applyCustomSkinStyle(clean)
+  patch({ customSkin: clean })
+  if (activate) saveUiSkin('custom')
+
+  if (wallpaperBlob && typeof Blob !== 'undefined' && wallpaperBlob instanceof Blob) {
+    void saveCustomWallpaperBlob(wallpaperBlob).then(async idbRes => {
+      if (idbRes && idbRes.ok) return
+      const inlineUrl = await buildInlineWallpaperFallback(wallpaperBlob)
+      if (!inlineUrl) return
+      const fallbackCfg = writeSavedCustomSkin({
+        ...(store.customSkin || {}),
+        bgImageUrl: inlineUrl,
+        bgImageStorage: 'inline',
+      })
+      applyCustomSkinStyle(fallbackCfg)
+      patch({ customSkin: fallbackCfg })
+    })
+  } else if (nextPartial && nextPartial.bgImageUrl === '' && !nextPartial.bgImageStorage) {
+    void deleteCustomWallpaperBlob()
+  }
+  return clean
+}
+
+export function openCustomThemeModal() {
+  applyCustomSkinStyle(store.customSkin)
+  void hydrateCustomSkinWallpaper()
+  patch({ customThemeModalOpen: true, skinMenuOpen: false })
+}
+
+export function saveNavLayout(nextLayout) {
+  const clean = normalizeNavLayout(nextLayout)
+  try {
+    if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
+      localStorage.setItem(NAV_LAYOUT_STORAGE_KEY, clean)
+    }
+  } catch {}
+  patch({ navLayout: clean })
+  return clean
+}
+
+if (typeof document !== 'undefined') {
+  applyCustomSkinStyle(store.customSkin)
+  void hydrateCustomSkinWallpaper()
 }
 
 export function savePlacementPref(nextPartial) {
@@ -695,29 +828,44 @@ export function openChiefInMainPage() {
   if (cur === 'sidebar') {
     savePlacementPref({ placement: 'both' })
   }
-  const tryActivate = () => {
-    if (switchConversationView(SIDE_ID)) {
-      collapseRightbarIfOpen()
-      patch({ open: false })
-      return true
-    }
-    if (selectPanel(SIDE_ID)) {
+  const tryActivateConvTab = () => {
+    const tabEl = findConversationTabEl(SIDE_ID)
+    if (tabEl && switchConversationView(SIDE_ID)) {
       collapseRightbarIfOpen()
       patch({ open: false })
       return true
     }
     return false
   }
-  if (tryActivate()) return true
+  const tryActivate = () => {
+    if (tryActivateConvTab()) return true
+    if (runtimeRefs.layout && typeof runtimeRefs.layout.selectPanel === 'function' && selectPanel(SIDE_ID)) {
+      collapseRightbarIfOpen()
+      patch({ open: false })
+      return true
+    }
+    return false
+  }
+  if (tryActivateConvTab()) return true
+  if (store.sessionId && rightbarExpanded()) {
+    collapseRightbarIfOpen()
+  }
+  const finishRetry = () => {
+    if (!tryActivate()) {
+      setTimeout(() => {
+        if (!tryActivate()) patch({ open: true })
+      }, 90)
+    }
+  }
   if (typeof requestAnimationFrame === 'function') {
     requestAnimationFrame(() => {
       requestAnimationFrame(() => {
-        if (!tryActivate()) selectPanel(SIDE_ID)
+        if (!tryActivateConvTab()) finishRetry()
       })
     })
     return true
   }
-  return selectPanel(SIDE_ID)
+  return tryActivate()
 }
 
 export function openChiefInRightbar() {

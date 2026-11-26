@@ -5,6 +5,48 @@ All notable changes to **`dsh-chief`** (**DSH 参谋长**) will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [1.9.0] - 2026-11-26
+
+> 里程碑大版本：推出全新**参谋专属「记忆工作台」与外部记忆桥接（`dsh-chief.provider/v1` · 对 `@lead` 严格 0 字节隔离）**（开箱 `MEMORY.md` 纯文本记事本 + 2D/3D 星云星图与艾宾浩斯遗忘曲线 + 5 维可锁定 `USER_PROFILE.md` 用户画像 + 提示词工坊 + X-Ray 召回测试 + Embedding API 语义重排，并开放接入 `mcp-http` / `chief-http` 双槽含独立心境槽位 / `markdown-vault` 只读 Obsidian / `cordis-provider`）；同步带来零依赖**第 6 套「自定义 DIY 主题工坊」（本地图片提色 + 25MB 高清壁纸 + 参谋长 AI DIY）**、全新默认**「极简左侧边栏」工作台布局 & 护眼浅色主题**、开箱即用**「安全拦截预设包 v2」（事前物理硬拦截）**、认知桌面扩容、梦境漫游跨作用域路由与品牌彩蛋联动；并在发版前完成**隔离沙盒全链路真机实测与三波边测边修，将实机暴露的 21 项大小问题全部清零**（`M1–M17` 回归门禁全绿，10 个 MD5 锁定安全内核零改动）。
+
+### Added
+- **🧠 参谋专属「记忆工作台」与外部记忆桥接（`external-memory.js` / `external-memory-connectors.js` / `external-memory-studio.js` / `src/client/tabs/extmem.js` / `extmem-starfield.js` / `extmem-studio.js` / `styles/extmem.js` · `M1–M10`, `M15`, `M16`）**：
+  - **严格 0 字节 `@lead` 硬隔离**：全部记忆检索、用户画像、提示词工坊与可选心境/关系槽位仅在参谋模型侧运行，绝不向主对话 `@lead` 系统提示词、摘要或子代理注入任何字节，也绝不激活普通未启用会话。
+  - **开箱即用纯文本记事本（`MEMORY.md`）+ 4 类开放连接协议**：默认内置零配置 `builtin-md` 记事本（透明 Markdown 纯文本，支持随时用记事本或 Obsidian 编辑）；开放接入 `mcp-http`（MCP Streamable HTTP，`initialize` + `tools/list` 自动发现）、`chief-http`（主记忆槽位 + 可选独立 `moodSlot` 心境/关系槽位，工作模式自动静默且对模型隐藏裸数值）、`markdown-vault`（本地 Obsidian / 笔记目录严格只读中英双语 BM25 召回，跳过 `README` / `CHANGELOG` 并脱敏）及 `cordis-provider`（宿主 `chiefMemoryHost` 服务，支持工作区 `读写 / 只读 / 关闭` 三级策略）。
+  - **精简 3 栏记忆工作台、2D/3D 星云星图与艾宾浩斯遗忘曲线**：主入口默认展示极简「记忆清单」（5 类色点标签、活力进度条、单点强化、常驻固定、编辑与忘记）并支持一键切换「2D SVG / 3D Canvas 星云星图」（主星团 + 4 卫星星团、年轮时间轴回放、检索高亮与关联弧线）；「用户画像（`USER_PROFILE.md`）」5 维结构化画像支持锁定单条防后台覆盖；「接入与设置」整合可选 OpenAI 兼容 **Embedding API 语义重排**（失败静默降级、API Key 对 UI 脱敏）、可选「情感记忆独立分栏（`emotionSplitView`）」、提示词工坊（`PROMPTS.json`）、X-Ray 召回测试与里程碑日记（`DIARY.md`）。
+  - **KV Cache 友好与工程防噪**：提示词采用静态前置 + 动态召回后置结构保障前缀缓存命中；内置无信号短句门卫（拦截“好的 / 继续 / ok”等低信息触发）、硬超时 + 3 次熔断静默降级、后台自动提炼自动剔除例行压缩流水账噪声（绝不生成水字数流水日记）、全局本机扫描不抓取 `node_modules` 与敏感凭据，出口全链路自动脱敏。
+- **🎨 第 6 套皮肤「自定义 DIY 主题工坊」（`src/client/custom-theme.js` / `src/client/components/modals/theme-diy.js` / `chief-theme-diy.js` · `M14`）**：
+  - **纯前端 HSL/WCAG 色彩引擎**：仅凭主强调色 / 辅助点缀色 / 暖色高光 / 底调色 4 枚基准色，自动推导出同时适配 DSH 深色与浅色宿主的完整 `--dnb-*` 样式令牌与清晰文本对比度，支持实时整面板预览与取消安全回滚。
+  - **本地图片一键提色 & 高清壁纸持久化**：纯前端 `<canvas>` 像素量化提取 6 枚主色色卡（0 Token），支持导入最高 25MB 高清壁纸存入 `IndexedDB`（不污染 `localStorage`），支持透明度与磨砂模糊调节（`blur=0` 时保持 1:1 锐利像素显示，卡片自动切换半透毛玻璃质感）。
+  - **✨ 参谋长 AI DIY（`op: 'theme.diy'`）**：用大白话描述想要的风格（内置「赛博雨夜樱花 / 京都雨抹茶 / 敦煌石青金 / 北欧冰川极光」等灵感胶囊）或附带参考图，即可生成和谐双模配色方案，并带离线国风/潮流兜底与严格 Hex 白名单防 CSS 注入。
+- **🧭 默认「极简左侧边栏」工作台布局 & 护眼浅色主题精修（`src/client/components/Panel.js` / `store.js` / `styles/skins.js` / `components/common.js` · `M15`, `M16`）**：
+  - 宽屏默认采用「左侧边栏（`sidebar`）」主导航 + 二级子菜单（窄右侧栏自动切换顶部 6 页签 `参谋 / 任务 / 协同 / 档案 / 记忆 / 边界`），设置中仍支持随时切回「顶部页签（`top`）」。
+  - 全面调优 5+1 套皮肤的浅色防过曝低眩光底色配比，并补全 `user` / `heart` 线性矢量图标。
+- **🛡️ 开箱即用「安全拦截预设包 v2」（`guard-wall-presets.js` · `M17`）**：
+  - 精简收拢为 3 套开箱事前物理硬拦截预设，全新安装自动默认开启「涉密文件防泄露（`.env` / 密钥 / 凭据）」与「高危操作防误删（`git push --force` / `reset --hard` 等）」，并按需一键切换「只读看代码模式」；幂等初始化不覆盖用户手动暂停，自动清理 v1 废弃旧预设并完整保留用户自定义拦截规则。
+- **✨ 认知桌面扩容、梦境漫游跨作用域路由与品牌彩蛋（`archive-core.js` / `chief-archives.js` / `src/client/constants.js` · `M11–M13`）**：
+  - 认知桌面支持扩大容量上限（支持 `7+` 份档案上桌并带安全边界夹紧），梦境漫游支持跨本局/全局作用域自动路由整理与清理陈旧观察项；新增品牌彩蛋联动（特定参谋称呼与模型匹配触发专属皮肤/彩蛋昵称滚动），并新增 17 项 `v1.9.0` 自动化回归门禁（`tests/verify-v190-external-memory-gate.mjs` · `M1–M17`）全面接入 `test:ci` / `test`。
+
+### Fixed（发版前沙盒真机实测 · 核心缺陷清零）
+- **修复右侧栏「在主页面全屏打开」无效（`src/client/store.js`）**：移除仅激活组装器而未切换 UI 视图的 `uiConversation.binding(sid).activate()` 错误短路逻辑，精准锁定 `[data-conversation-tabs] [role="tab"]` 并触发真实视图切换（含右侧栏挤压折叠时的异步重尝试与面板回退），点击后主区「参谋长」视图立即打开且右侧栏同步收起。
+- **修复参谋本地关键词路由误劫持正常业务提问（`command-helpers.js` / `chief-commands.js`）**：收窄 `asksBounds` 判定，将代码领域常见的「边界情况 / 边界条件 / 边界用例 / 边界测试 / 边界值」排除出本地规矩查询，并澄清空规矩提示文案与离线模型兜底横幅，防止日常代码分析被误拐进静态模板。
+- **修复参谋给主对话「工作流递话」提及 `.env` 被误判为终端命令拦截（`command-helpers.js` / `chief-commands.js` / `chief-approvals.js` / `runtime-hooks.js`）**：新增 `shouldInspectRelayAsCommand(text)`，仅当递话包含真实 Shell/CLI 命令意图时触发 `command` 护栏，纯自然语言沟通保留 `content` 禁止红线与敏感信息检查而不再误触发 `sensitive_credential_cmd`。
+- **修复巡检模式撞墙连环弹出重复提权弹窗（`command-ops.js`）**：阻止 `isWallBlockerEscalation` 只读拆墙评估落入重复 `L0 -> L2` 提权弹窗，并在 `permRank < 2` 下复用已有 `pendingElevation`，消除 16ms 连弹两张提权弹窗锁死界面的情况。
+- **修复任务流画布子代理「幻影运行中」状态残留（`board-schema.js` / `src/client/tabs/tasks-flow.js`）**：当宿主子代理实际已进入等待/结束状态时，不再沿用陈旧任务的 `doing` 状态冒充运行中，画布实时回归「等待中」。
+- **修复托管模式下缺失显眼紧急刹车控件（`chief-state.js` / `src/client/tabs/chief.js`）**：在 `🤖 托管` 模式下于参谋面板展示 `🤖 托管中` 徽标与红色 `⏹ 急停` 按钮，点击后一键硬刹回 `⏸ 关停` 并同步清空 `autoPilot` 与托管节奏状态。
+- **修复任务交接单内容重复拼接（`handoff.js`）**：自动去重 `item.title` 与 `item.text` 重叠前缀，消除「这一程记住的」预览单条文本重复两遍的问题。
+- **修复左侧「全局参谋长」未绑定会话视图点击边界开关报 HTTP 400（`board-actions.js`）**：将 `wall.list / wall.save / wall.setScope / wall.remove / wall.merge` 动作提前至 `!session && !shared` 校验之前处理。
+- **修复「左侧边栏」布局下「任务 → 主线计划」下方空白（`src/client/styles/skins.js`）**：解除窄侧边栏误隐藏 `tasks-board` 的样式规则，并补齐窄容器响应式列排。
+- **修复窄右侧栏页签偶发跳回与「记忆」高亮/闪烁问题（`src/client/api/transport.js` / `src/client/api/chief.js` / `src/client/components/Panel.js` / `src/client/styles/base.js`）**：禁止后台 4s 轮询 `activeWork` 擅自覆盖用户当前手动切换的页签、`askChief` 仅在用户仍停留参谋页时按需自动跳转、切页签同步收起悬空浮层、并为第 6 个 `extmem`（「记忆」）页签补齐深浅双模高亮配色。
+
+### Security & Reliability（安全与模型协议加固）
+- **净化模型原生工具控制标签泄漏（`state-schema.js` / `chief-state.js` / `chief-commands.js` / `chief-view.js` / `command-ops.js` / `command-helpers.js`）**：针对部分模型（如 `swe-2`）偶发吐出的 `<|open|>tools<|sep|>...<|close|>message<|sep|>` 控制协议片段，新增不触碰安全内核的纯清洗函数 `stripModelControlMarkup`，同步接入实时回答、目标建议、历史消息读取与纯控制标签自动纠偏重试通道，确保界面零协议碎片残留。
+
+### Improved（界面排版与交互打磨）
+- **窄栏排版防重叠与建议卡自适应折叠（`src/client/components/modals/pickers.js` / `src/client/styles/modals.js` / `src/client/styles/base.js` / `src/client/styles/skins.js` / `src/client/tabs/archives-cards.js`）**：顶部「参谋长建议」默认折叠为首 2 条并带展开收起与限高滚动；超长建议标题与原因默认两行省略（点「详情」完整展示）；补全窄栏 `Bento` 单列退让、`flex-wrap`、档案大屏 `.dnb-textarea` 全宽，以及窄栏顶栏 `.dnb-model-pill` 型号精简与自适应换行（避免被截断成 `DeepS`）。
+- **记忆去前缀提炼与 2D 星图零重叠（`external-memory-studio.js` / `src/client/tabs/extmem-starfield.js` / `src/client/tabs/extmem.js`）**：新增 `distillOralMemoryText` 自动剥离「记住一条我的个人习惯：」等口语触发前缀再写入 `MEMORY.md` 与 `USER_PROFILE.md`；2D 记忆星图小规模星团扩大分布半径并升级为标签包围盒感知 28 轮排斥；存储源卡片实时同步记忆总条数。
+- **可访问性与细节文案校正（`src/client/entry.js` / `src/client/components/modals/safety.js` / `src/client/tabs/boundaries.js` / `src/client/tabs/tasks-flow.js` / `src/client/styles/tasks-flow.js`）**：支持 `Escape` 一键关闭权限/节奏/模型/战术/边界浮层；修正 `L0 -> L1` 提权弹窗降档按钮文案逻辑倒挂；运行环境信息优先展示当前会话真实工作目录；为 SVG 流光画布阶段节点与子代理节点补齐 `role="button"`、`tabIndex={0}`、`aria-label` 与键盘焦点高亮框。
+
 ## [1.8.0] - 2026-11-25
 
 > 新增**任务页 Route C Apple Bento 目标圆环全景卡 + 还原经典暗夜点阵 SVG 流程画布 / 流光节点图及全前端 5 套主题视觉统一重构**（默认「晨雾琉璃」，支持「温润纸感 / 静谧森系 / 星夜幻想 / 原生简约」一键秒切、随皮肤自适应变形的可拖拽扇形思考深度仪表盘 `EffortFanGauge`、5 页签/顶栏/输入条/协同 2.0/弹窗深浅双模全量统一与矢量图标降噪）；同时保留轻量全局自定义参谋长取名（对主对话 0 字节隔离）、彻底剥离试验性私有脑、修复协同名录幻影归属、协同摩擦与跨会话断流恢复（`B13–B15`），升级 **✦ 智选压缩** 4 档压力决策与 `40%+` 高水位兜底（`B16`）、新增参谋长**近 6 轮轻量短期记忆滑窗**治好连续追问失忆（`B17`）、加固安全内核混用引号拼接拦截并锁新指纹，以及「协同系统 2.0」（`Gemini CLI` / 实时流 / 2 棒接力）与左上角**真状态同步 GitHub Star 按钮**。

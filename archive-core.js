@@ -22,6 +22,32 @@ export const DESKTOP_TOKEN_BUDGET = 2400
 
 export const DESKTOP_MAX_ITEMS = 6
 
+export const DESKTOP_MIN_ITEMS = 4
+
+export const DESKTOP_MAX_ITEMS_CAP = 24
+
+export const DESKTOP_MIN_TOKEN_BUDGET = 1200
+
+export const DESKTOP_MAX_TOKEN_BUDGET = 12000
+
+export function normalizeDesktopCapacity(raw = {}, fallback = {}) {
+  const src = raw && typeof raw === 'object' ? raw : {}
+  const fb = fallback && typeof fallback === 'object' ? fallback : {}
+  const fbItems = Number.isFinite(Number(fb.maxItems)) ? Number(fb.maxItems) : DESKTOP_MAX_ITEMS
+  const fbTokens = Number.isFinite(Number(fb.tokenBudget)) ? Number(fb.tokenBudget) : DESKTOP_TOKEN_BUDGET
+  const rawItems = Number(src.maxItems)
+  const rawTokens = Number(src.tokenBudget)
+  const maxItems = Math.max(
+    DESKTOP_MIN_ITEMS,
+    Math.min(DESKTOP_MAX_ITEMS_CAP, Math.round(Number.isFinite(rawItems) ? rawItems : fbItems)),
+  )
+  const tokenBudget = Math.max(
+    DESKTOP_MIN_TOKEN_BUDGET,
+    Math.min(DESKTOP_MAX_TOKEN_BUDGET, Math.round(Number.isFinite(rawTokens) ? rawTokens : fbTokens)),
+  )
+  return { maxItems, tokenBudget }
+}
+
 export const SECRET_PATTERN = /(?:sk-[a-zA-Z0-9_-]{16,}|ghp_[a-zA-Z0-9]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|Bearer\s+[A-Za-z0-9._~+/=-]{20,}|-----BEGIN [A-Z ]*PRIVATE KEY-----)/
 
 export const DEFAULT_ARCHIVE_FOLDERS = [
@@ -848,6 +874,11 @@ export function normalizeArchiveStore(raw) {
 
   const folders = [...folderMap.values()].sort((a, b) => (a.order || 99) - (b.order || 99))
 
+  const cap = normalizeDesktopCapacity({
+    maxItems: src.desktopMaxItems,
+    tokenBudget: src.desktopTokenBudget,
+  })
+
   return {
     version: ARCHIVE_VERSION,
     isSystemGlobalVault: Boolean(src.isSystemGlobalVault),
@@ -858,6 +889,8 @@ export function normalizeArchiveStore(raw) {
     projectKey: src.isSystemGlobalVault ? 'global' : resolveProjectKey(src.projectKey || 'proj-default'),
     migratedSharedAt: Number(src.migratedSharedAt) || 0,
     updatedAt: Number(src.updatedAt) || Date.now(),
+    desktopMaxItems: src.isSystemGlobalVault ? DESKTOP_MAX_ITEMS : cap.maxItems,
+    desktopTokenBudget: src.isSystemGlobalVault ? DESKTOP_TOKEN_BUDGET : cap.tokenBudget,
     folders,
     items,
     recentlyUnpinnedWatch: src.isSystemGlobalVault ? [] : normalizeRecentlyUnpinnedWatch(src.recentlyUnpinnedWatch),

@@ -69,6 +69,7 @@ import {
   extractJsonObject,
   resolveSessionWorkspaceCwd,
   buildChiefIdentityPromptLine,
+  stripModelControlMarkup,
 } from './chief-state.js'
 import { callChiefLlm } from './chief-models.js'
 import {
@@ -93,7 +94,9 @@ import {
   buildSmartFallbackReply,
   describeThreePartyBoundariesForPrompt,
   buildRecentChiefChatWindow,
+  shouldInspectRelayAsCommand,
 } from './command-helpers.js'
+import { prefetchForChief, syncChiefTurnAsync, maybeAutoDistillTurnAsync } from './external-memory.js'
 import {
   applyFactChanges,
   applyBoardOps,
@@ -191,6 +194,8 @@ export async function askOrCommandChief(deps, {
     forceReceipt = false,
     thinkingEffort = '',
     thinkingEffortMode = '',
+    memoryRecall = null,
+    moodBadge = null,
   }) => {
     const cleanActions = Array.isArray(actions) ? actions.filter(Boolean) : []
     const isReceipt = Boolean(isResumeTurn || _fromLeadRequest || forceReceipt || elevationObj || pendingApprovalList.length > 0 || cleanActions.length > 0)
@@ -268,6 +273,8 @@ export async function askOrCommandChief(deps, {
       ...(attachedTaskId ? { resumeTaskId: attachedTaskId } : {}),
       ...(thinkingEffort ? { thinkingEffort } : {}),
       ...(thinkingEffortMode ? { thinkingEffortMode } : {}),
+      ...(memoryRecall && typeof memoryRecall === 'object' ? { memoryRecall } : {}),
+      ...(moodBadge && typeof moodBadge === 'object' ? { moodBadge } : {}),
       text: chiefText,
       actions: finalActions,
       at: Date.now(),
@@ -658,9 +665,45 @@ export async function askOrCommandChief(deps, {
     && permissionMode === 'chief',
   )
 
+  const askReasonKind = statusOnlyInquiry
+    ? 'quick_status'
+    : (/筑墙|物理墙|拦截规则|guard.?wall/i.test(input)
+        ? 'craft_wall'
+        : (isBlankContext
+            ? 'blank_explore'
+            : ((effCfg.tacticalModes && effCfg.tacticalModes.intervention) ? 'strong_intervention' : 'ask_chat')))
+
+  const extProjectKey = resolveProjectKey(cwdForPromptWalls || '')
+  const isWorkModeForExtMem = ['wall_blocked', 'craft_wall', 'strong_intervention', 'quick_status'].includes(askReasonKind) || Boolean(_wallBlockerEscalation)
+  const extMem = (!isResumeTurn && !_fromLeadRequest)
+    ? await prefetchForChief(effCfg.externalMemory, {
+        query: input,
+        sessionId: rootId,
+        workspaceCwd: cwdForPromptWalls,
+        projectKey: extProjectKey,
+        reasonKind: askReasonKind,
+        isWorkMode: isWorkModeForExtMem,
+      }).catch(() => ({ staticBlock: '', memorySectionLines: [], moodSectionLines: [], recallMeta: null, moodBadge: null }))
+    : { staticBlock: '', memorySectionLines: [], moodSectionLines: [], recallMeta: null, moodBadge: null }
+
+  if (extMem && ((extMem.memorySectionLines && extMem.memorySectionLines.length > 0) || (extMem.moodSectionLines && extMem.moodSectionLines.length > 0))) {
+    const extInsertLines = [
+      ...(extMem.memorySectionLines || []),
+      ...(extMem.moodSectionLines || []),
+      '',
+    ]
+    const anchorIdx = promptLines.indexOf('## 用户刚刚对你说的话：')
+    if (anchorIdx >= 0) {
+      promptLines.splice(anchorIdx, 0, ...extInsertLines)
+    } else {
+      promptLines.push(...extInsertLines)
+    }
+  }
+
   const effectiveSystem = [
     ASK_CHIEF_SYSTEM,
     ...(chiefIdentityLine ? [chiefIdentityLine] : []),
+    ...(extMem && extMem.staticBlock ? [extMem.staticBlock] : []),
     ...(isConciseBrief ? [CONCISE_BRIEF_ASK_EXTRA] : []),
     ...(quickAction === 'consult_chief' ? [CONSULT_CHIEF_EXTRA] : []),
     ...(_wallBlockerEscalation
@@ -698,14 +741,6 @@ export async function askOrCommandChief(deps, {
   const upsertArchiveFn = buildChiefArchiveUpsertFn(deps, rootId)
   const compactNowFn = buildChiefCompactFn(deps, rootId)
 
-  const askReasonKind = statusOnlyInquiry
-    ? 'quick_status'
-    : (/筑墙|物理墙|拦截规则|guard.?wall/i.test(input)
-        ? 'craft_wall'
-        : (isBlankContext
-            ? 'blank_explore'
-            : ((effCfg.tacticalModes && effCfg.tacticalModes.intervention) ? 'strong_intervention' : 'ask_chat')))
-
   const safetyGuardEnabled = !(effCfg && effCfg.tacticalModes && effCfg.tacticalModes.safetyGuardEnabled === false)
   const loopRes = await runChiefAgenticLoop(deps, {
     rootId,
@@ -732,7 +767,7 @@ export async function askOrCommandChief(deps, {
     recordAuditFn: (entry) => appendChiefAuditLog(rootId, entry),
   })
 
-  const llmRes = (loopRes && loopRes.llmRes) || { ok: false, error: 'agentic loop no response' }
+  let llmRes = (loopRes && loopRes.llmRes) || { ok: false, error: 'agentic loop no response' }
   if (imageBlocks.length > 0 && !llmRes.ok && !savedImagePaths.length) {
     return {
       ok: false,
@@ -741,6 +776,21 @@ export async function askOrCommandChief(deps, {
   }
 
   let parsed = (loopRes && loopRes.parsed) || (llmRes.ok ? extractJsonObject(llmRes.text) : null)
+  if (!parsed && llmRes.ok && llmRes.text && !stripModelControlMarkup(stripToolCallMarkup(llmRes.text)).trim()) {
+    try {
+      const retryRes = await callChiefLlm(deps, {
+        sessionId: rootId,
+        reasonKind: askReasonKind,
+        system: `${effectiveSystem}\n\n【格式纠偏（最高优先级）】严禁输出 \`<|open|>tools\`、\`<|sep|>\`、\`<|close|>\`、\`<|open|>call\` 等原生工具协议标记！请直接用自然中文回答用户问题，并仅输出单个合法 JSON 对象：\`{"reply":"- 【结论】..."}\`。`,
+        prompt: promptLines.join('\n'),
+        maxTokens: SUMMARY_MAX_TOKENS,
+      })
+      if (retryRes && retryRes.ok && retryRes.text) {
+        llmRes = retryRes
+        parsed = extractJsonObject(retryRes.text)
+      }
+    } catch {}
+  }
   const loopBadges = Array.isArray(loopRes && loopRes.toolBadges) ? [...loopRes.toolBadges] : []
   const loopToolRecords = Array.isArray(loopRes && loopRes.toolRecords) ? loopRes.toolRecords : []
   const queuedApprovals = Array.isArray(loopRes && loopRes.pendingApprovals) ? [...loopRes.pendingApprovals] : []
@@ -1031,14 +1081,14 @@ export async function askOrCommandChief(deps, {
         by: 'chief',
       })
     }
-    const strippedPlain = llmRes.ok && llmRes.text ? stripToolCallMarkup(llmRes.text).trim() : ''
+    const strippedPlain = llmRes.ok && llmRes.text ? stripModelControlMarkup(stripToolCallMarkup(llmRes.text)).trim() : ''
     const usablePlainLlm = strippedPlain && !strippedPlain.startsWith('{') && strippedPlain.length >= 6
       ? cleanMultiline(strippedPlain, 2200)
       : ''
     const archiveFallback = onDemandArchiveLines.length > 1
       ? ['- 【已从沉淀档案柜按需检索到以下卷宗】', ...onDemandArchiveLines.slice(2)].join('\n')
       : ''
-    const rawFallbackReply = usablePlainLlm || archiveFallback || buildSmartFallbackReply({
+    const fallbackCoreReply = usablePlainLlm || archiveFallback || buildSmartFallbackReply({
       input,
       board,
       liveDigest,
@@ -1047,6 +1097,10 @@ export async function askOrCommandChief(deps, {
       mailbox: view.mailbox,
       conciseBrief: isConciseBrief,
     })
+    const usedLocalFallback = !usablePlainLlm && !archiveFallback && !llmRes.ok
+    const rawFallbackReply = usedLocalFallback && !isConciseBrief
+      ? `- 【⚠️ 参谋模型暂未响应（${clamp(llmRes.error || '连接超时或限流', 96)}），已切换本地状态兜底】\n${fallbackCoreReply}`
+      : fallbackCoreReply
     const replyText = isConciseBrief ? sanitizeConciseBriefText(rawFallbackReply) : rawFallbackReply
     const fallbackBounds = (permRank >= 1 && quickAction !== 'consult_chief') ? extractFallbackBoundProposalsFromText(rawFallbackReply, input) : []
     const createdFallbackBounds = []
@@ -1088,8 +1142,29 @@ export async function askOrCommandChief(deps, {
         forceReceipt: createdFallbackBounds.length > 0,
         thinkingEffort: llmRes.thinkingEffort || '',
         thinkingEffortMode: llmRes.thinkingEffortMode || effCfg.thinkingEffort || 'auto',
+        memoryRecall: extMem && extMem.recallMeta ? extMem.recallMeta : null,
+        moodBadge: extMem && extMem.moodBadge ? extMem.moodBadge : null,
       })
     })
+    if (!isResumeTurn && !_fromLeadRequest && createdFallbackBounds.length === 0 && replyText) {
+      void syncChiefTurnAsync(effCfg.externalMemory, {
+        userText: input,
+        chiefReply: replyText,
+        sessionId: rootId,
+        workspaceCwd: cwdForPromptWalls,
+        projectKey: extProjectKey,
+        turnKind: 'chief_chat',
+      })
+      void maybeAutoDistillTurnAsync({
+        rawCfg: effCfg.externalMemory,
+        userText: input,
+        chiefReply: replyText,
+        sessionId: rootId,
+        workspaceCwd: cwdForPromptWalls,
+        projectKey: extProjectKey,
+        callLlm: deps && deps.callLlmOverride ? null : (opts => callChiefLlm(deps, { sessionId: rootId, ...opts })),
+      })
+    }
     return {
       ok: true,
       reply: replyText,
@@ -1100,6 +1175,8 @@ export async function askOrCommandChief(deps, {
       actionBadges: loopBadges,
       toolRecords: loopToolRecords,
       pendingApprovals: queuedApprovals,
+      ...(extMem && extMem.recallMeta ? { memoryRecall: extMem.recallMeta } : {}),
+      ...(extMem && extMem.moodBadge ? { moodBadge: extMem.moodBadge } : {}),
       ...(fallbackElev ? { elevationRequested: fallbackElev } : {}),
       view: await getChiefView(deps, rootId, { autoSummarize: false, chatTriggered: !_fromLeadRequest }),
     }
@@ -1126,7 +1203,14 @@ export async function askOrCommandChief(deps, {
       : null
     const relayMode = ['steer', 'followup', 'silent'].includes(r.mode) ? r.mode : 'steer'
 
-    const relayGuard = evaluateSafetyGuardHardRules({ tool: 'relay', opClass: 'workflow', command: r.text, board, safetyGuardEnabled })
+    const relayGuard = evaluateSafetyGuardHardRules({
+      tool: 'relay',
+      opClass: 'workflow',
+      command: shouldInspectRelayAsCommand(r.text) ? r.text : '',
+      content: r.text,
+      board,
+      safetyGuardEnabled,
+    })
     if (relayGuard.blocked) {
       actionBadges.push(relayGuard.badge || '🛡️ 卫兵拦递话')
       relayResults.push({ ok: false, target: targetName, blockedBySafetyGuard: true, error: relayGuard.reason })
@@ -1539,7 +1623,7 @@ export async function askOrCommandChief(deps, {
     }
   }
 
-  const cleanedParsedReply = stripToolCallMarkup(parsed.reply || '').trim()
+  const cleanedParsedReply = stripModelControlMarkup(stripToolCallMarkup(parsed.reply || '')).trim()
   const compactOutcomeNote = forcedCompactOut
     ? (forcedCompactOut.ok
         ? (forcedCompactOut.noop
@@ -1813,6 +1897,21 @@ export async function askOrCommandChief(deps, {
       }
     }
 
+    const mainTurnIsReceipt = Boolean(
+      relayResults.length > 0
+      || createdInquiries.length > 0
+      || proposedWalls.length > 0
+      || proposedWallRemovals.length > 0
+      || appliedFacts.length > 0
+      || executedBoardOps.length > 0
+      || executedArchiveOps.length > 0
+      || executedEffortOps.length > 0
+      || executedNetworkOps.length > 0
+      || loopToolRecords.some(r => {
+        const tName = r && ((r.call && (r.call.tool || r.call.name)) || (r.result && r.result.tool) || r.tool || '')
+        return Boolean(tName && getToolOpClass(tName) !== 'read')
+      })
+    )
     persistTurnChatAndResume(ws, {
       chiefText: replyText,
       actions: actionBadges,
@@ -1820,23 +1919,30 @@ export async function askOrCommandChief(deps, {
       pendingApprovalList: queuedApprovals,
       thinkingEffort: llmRes.thinkingEffort || '',
       thinkingEffortMode: llmRes.thinkingEffortMode || effCfg.thinkingEffort || 'auto',
-      forceReceipt: Boolean(
-        relayResults.length > 0
-        || createdInquiries.length > 0
-        || proposedWalls.length > 0
-        || proposedWallRemovals.length > 0
-        || appliedFacts.length > 0
-        || executedBoardOps.length > 0
-        || executedArchiveOps.length > 0
-        || executedEffortOps.length > 0
-        || executedNetworkOps.length > 0
-        || loopToolRecords.some(r => {
-          const tName = r && ((r.call && (r.call.tool || r.call.name)) || (r.result && r.result.tool) || r.tool || '')
-          return Boolean(tName && getToolOpClass(tName) !== 'read')
-        })
-      ),
+      memoryRecall: extMem && extMem.recallMeta ? extMem.recallMeta : null,
+      moodBadge: extMem && extMem.moodBadge ? extMem.moodBadge : null,
+      forceReceipt: mainTurnIsReceipt,
     })
   })
+  if (!isResumeTurn && !_fromLeadRequest && replyText && !relayResults.length && !appliedFacts.length && !executedBoardOps.length) {
+    void syncChiefTurnAsync(effCfg.externalMemory, {
+      userText: input,
+      chiefReply: replyText,
+      sessionId: rootId,
+      workspaceCwd: cwdForPromptWalls,
+      projectKey: extProjectKey,
+      turnKind: 'chief_chat',
+    })
+    void maybeAutoDistillTurnAsync({
+      rawCfg: effCfg.externalMemory,
+      userText: input,
+      chiefReply: replyText,
+      sessionId: rootId,
+      workspaceCwd: cwdForPromptWalls,
+      projectKey: extProjectKey,
+      callLlm: deps && deps.callLlmOverride ? null : (opts => callChiefLlm(deps, { sessionId: rootId, ...opts })),
+    })
+  }
 
   // Gently wake idle lead/peer for queued inquiries (if currently running, agent/pre-step picks them up without interruption)
   if (createdInquiries.length > 0 && deps && deps.runtime && typeof deps.runtime.get === 'function') {
@@ -1912,6 +2018,8 @@ export async function askOrCommandChief(deps, {
     pendingApprovals: queuedApprovals,
     thinkingEffort: llmRes.thinkingEffort || '',
     thinkingEffortMode: llmRes.thinkingEffortMode || effCfg.thinkingEffort || 'auto',
+    ...(extMem && extMem.recallMeta ? { memoryRecall: extMem.recallMeta } : {}),
+    ...(extMem && extMem.moodBadge ? { moodBadge: extMem.moodBadge } : {}),
     ...(finalElevation ? { elevationRequested: finalElevation } : {}),
     permissionMode,
     ...(freshBoard ? { board: freshBoard } : {}),

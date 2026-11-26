@@ -100,6 +100,272 @@ export const DEFAULT_MANAGED_BUDGET_MAX_TOKENS = 300_000
 
 export const CHIEF_UI_LANGS = ['auto', 'zh', 'en']
 
+export const DEFAULT_EXTERNAL_MEMORY_CONFIG = {
+  enabled: false,
+  memorySlot: {
+    enabled: true,
+    kind: 'none',
+    label: '',
+    endpoint: '',
+    vaultPath: '',
+    cordisProviderId: '',
+    authEnvVar: '',
+    authToken: '',
+    searchTool: '',
+    writeTool: '',
+    retractTool: '',
+    autoSyncChat: true,
+    syncPreCompress: true,
+    syncLeadSummary: false,
+    decayHalfLifeDays: 21,
+    timeoutMs: 1800,
+    charBudget: 1600,
+    topK: 5,
+  },
+  moodSlot: {
+    enabled: false,
+    kind: 'none',
+    label: '',
+    endpoint: '',
+    cordisProviderId: '',
+    authEnvVar: '',
+    authToken: '',
+    workModeAutoMute: true,
+    emotionSplitView: false,
+    timeoutMs: 1500,
+    charBudget: 400,
+  },
+  embedding: {
+    enabled: false,
+    baseUrl: '',
+    model: '',
+    apiKeyEnv: '',
+    apiKey: '',
+    timeoutMs: 2500,
+    weight: 0.45,
+  },
+  autoDistill: {
+    enabled: true,
+    minTurns: 2,
+    cooldownSec: 90,
+  },
+  workspacePolicies: {},
+}
+
+const EXT_MEM_KINDS = ['none', 'builtin-md', 'mcp-http', 'chief-http', 'markdown-vault', 'cordis']
+const EXT_MOOD_KINDS = ['none', 'chief-http', 'cordis']
+const EXT_WS_POLICIES = ['read-write', 'read-only', 'disabled']
+
+function normalizeHttpEndpointUrl(raw) {
+  const s = String(raw == null ? '' : raw).trim().slice(0, 320)
+  if (!s) return ''
+  try {
+    const u = new URL(s)
+    if (u.protocol !== 'http:' && u.protocol !== 'https:') return ''
+    return u.toString().replace(/\/+$/, '')
+  } catch {
+    return ''
+  }
+}
+
+function normalizeEnvVarName(raw) {
+  const s = String(raw == null ? '' : raw).trim().slice(0, 80)
+  return /^[A-Za-z_][A-Za-z0-9_]*$/.test(s) ? s : ''
+}
+
+function normalizeBoundedInt(raw, defVal, minVal, maxVal) {
+  const n = Number(raw)
+  if (!Number.isFinite(n)) return defVal
+  return Math.min(maxVal, Math.max(minVal, Math.round(n)))
+}
+
+export function normalizeExternalMemoryConfig(raw, prevConfig = null) {
+  const src = raw && typeof raw === 'object' ? raw : {}
+  const prev = prevConfig && typeof prevConfig === 'object' ? prevConfig : null
+  const prevMem = prev && prev.memorySlot && typeof prev.memorySlot === 'object' ? prev.memorySlot : {}
+  const prevMood = prev && prev.moodSlot && typeof prev.moodSlot === 'object' ? prev.moodSlot : {}
+  const prevEmb = prev && prev.embedding && typeof prev.embedding === 'object' ? prev.embedding : {}
+  const prevDistill = prev && prev.autoDistill && typeof prev.autoDistill === 'object' ? prev.autoDistill : {}
+  const rawMem = src.memorySlot && typeof src.memorySlot === 'object' ? src.memorySlot : {}
+  const rawMood = src.moodSlot && typeof src.moodSlot === 'object' ? src.moodSlot : {}
+  const rawEmb = src.embedding && typeof src.embedding === 'object' ? src.embedding : {}
+  const rawDistill = src.autoDistill && typeof src.autoDistill === 'object' ? src.autoDistill : {}
+
+  const memKind = EXT_MEM_KINDS.includes(rawMem.kind) ? rawMem.kind : (EXT_MEM_KINDS.includes(prevMem.kind) && !('kind' in rawMem) ? prevMem.kind : 'none')
+  const moodKind = EXT_MOOD_KINDS.includes(rawMood.kind) ? rawMood.kind : (EXT_MOOD_KINDS.includes(prevMood.kind) && !('kind' in rawMood) ? prevMood.kind : 'none')
+
+  const resolveToken = (incoming, prevObj) => {
+    if (incoming && incoming.clearAuthToken === true) return ''
+    if (typeof incoming.authToken === 'string' && incoming.authToken.trim()) {
+      return incoming.authToken.trim().slice(0, 512)
+    }
+    return typeof prevObj.authToken === 'string' ? prevObj.authToken.trim().slice(0, 512) : ''
+  }
+
+  const rawPolicies = src.workspacePolicies && typeof src.workspacePolicies === 'object'
+    ? src.workspacePolicies
+    : (prev && prev.workspacePolicies && typeof prev.workspacePolicies === 'object' ? prev.workspacePolicies : {})
+  const workspacePolicies = {}
+  for (const [k, v] of Object.entries(rawPolicies)) {
+    const cleanKey = String(k || '').trim().slice(0, 140)
+    if (!cleanKey) continue
+    if (EXT_WS_POLICIES.includes(v)) workspacePolicies[cleanKey] = v
+    if (Object.keys(workspacePolicies).length >= 100) break
+  }
+
+  const pickBool = (obj, prevObj, key, defVal) => {
+    if (obj && typeof obj[key] === 'boolean') return obj[key]
+    if (prevObj && typeof prevObj[key] === 'boolean') return prevObj[key]
+    return defVal
+  }
+  const pickStr = (obj, prevObj, key, maxLen = 120) => {
+    if (obj && typeof obj[key] === 'string') return obj[key].trim().slice(0, maxLen)
+    if (prevObj && typeof prevObj[key] === 'string') return prevObj[key].trim().slice(0, maxLen)
+    return ''
+  }
+
+  return {
+    enabled: typeof src.enabled === 'boolean' ? src.enabled : Boolean(prev && prev.enabled),
+    memorySlot: {
+      enabled: pickBool(rawMem, prevMem, 'enabled', DEFAULT_EXTERNAL_MEMORY_CONFIG.memorySlot.enabled),
+      kind: memKind,
+      label: pickStr(rawMem, prevMem, 'label', 60),
+      endpoint: 'endpoint' in rawMem
+        ? normalizeHttpEndpointUrl(rawMem.endpoint)
+        : normalizeHttpEndpointUrl(prevMem.endpoint),
+      vaultPath: pickStr(rawMem, prevMem, 'vaultPath', 360),
+      cordisProviderId: pickStr(rawMem, prevMem, 'cordisProviderId', 80),
+      authEnvVar: 'authEnvVar' in rawMem
+        ? normalizeEnvVarName(rawMem.authEnvVar)
+        : normalizeEnvVarName(prevMem.authEnvVar),
+      authToken: resolveToken(rawMem, prevMem),
+      searchTool: pickStr(rawMem, prevMem, 'searchTool', 80),
+      writeTool: pickStr(rawMem, prevMem, 'writeTool', 80),
+      retractTool: pickStr(rawMem, prevMem, 'retractTool', 80),
+      autoSyncChat: pickBool(rawMem, prevMem, 'autoSyncChat', DEFAULT_EXTERNAL_MEMORY_CONFIG.memorySlot.autoSyncChat),
+      syncPreCompress: pickBool(rawMem, prevMem, 'syncPreCompress', DEFAULT_EXTERNAL_MEMORY_CONFIG.memorySlot.syncPreCompress),
+      syncLeadSummary: pickBool(rawMem, prevMem, 'syncLeadSummary', DEFAULT_EXTERNAL_MEMORY_CONFIG.memorySlot.syncLeadSummary),
+      decayHalfLifeDays: normalizeBoundedInt(
+        'decayHalfLifeDays' in rawMem ? rawMem.decayHalfLifeDays : prevMem.decayHalfLifeDays,
+        DEFAULT_EXTERNAL_MEMORY_CONFIG.memorySlot.decayHalfLifeDays,
+        3,
+        365,
+      ),
+      timeoutMs: normalizeBoundedInt(
+        'timeoutMs' in rawMem ? rawMem.timeoutMs : prevMem.timeoutMs,
+        DEFAULT_EXTERNAL_MEMORY_CONFIG.memorySlot.timeoutMs,
+        500,
+        5000,
+      ),
+      charBudget: normalizeBoundedInt(
+        'charBudget' in rawMem ? rawMem.charBudget : prevMem.charBudget,
+        DEFAULT_EXTERNAL_MEMORY_CONFIG.memorySlot.charBudget,
+        400,
+        3000,
+      ),
+      topK: normalizeBoundedInt(
+        'topK' in rawMem ? rawMem.topK : prevMem.topK,
+        DEFAULT_EXTERNAL_MEMORY_CONFIG.memorySlot.topK,
+        1,
+        10,
+      ),
+    },
+    moodSlot: {
+      enabled: pickBool(rawMood, prevMood, 'enabled', DEFAULT_EXTERNAL_MEMORY_CONFIG.moodSlot.enabled),
+      kind: moodKind,
+      label: pickStr(rawMood, prevMood, 'label', 60),
+      endpoint: 'endpoint' in rawMood
+        ? normalizeHttpEndpointUrl(rawMood.endpoint)
+        : normalizeHttpEndpointUrl(prevMood.endpoint),
+      cordisProviderId: pickStr(rawMood, prevMood, 'cordisProviderId', 80),
+      authEnvVar: 'authEnvVar' in rawMood
+        ? normalizeEnvVarName(rawMood.authEnvVar)
+        : normalizeEnvVarName(prevMood.authEnvVar),
+      authToken: resolveToken(rawMood, prevMood),
+      workModeAutoMute: pickBool(rawMood, prevMood, 'workModeAutoMute', DEFAULT_EXTERNAL_MEMORY_CONFIG.moodSlot.workModeAutoMute),
+      emotionSplitView: pickBool(rawMood, prevMood, 'emotionSplitView', DEFAULT_EXTERNAL_MEMORY_CONFIG.moodSlot.emotionSplitView),
+      timeoutMs: normalizeBoundedInt(
+        'timeoutMs' in rawMood ? rawMood.timeoutMs : prevMood.timeoutMs,
+        DEFAULT_EXTERNAL_MEMORY_CONFIG.moodSlot.timeoutMs,
+        500,
+        5000,
+      ),
+      charBudget: normalizeBoundedInt(
+        'charBudget' in rawMood ? rawMood.charBudget : prevMood.charBudget,
+        DEFAULT_EXTERNAL_MEMORY_CONFIG.moodSlot.charBudget,
+        100,
+        800,
+      ),
+    },
+    embedding: {
+      enabled: pickBool(rawEmb, prevEmb, 'enabled', DEFAULT_EXTERNAL_MEMORY_CONFIG.embedding.enabled),
+      baseUrl: 'baseUrl' in rawEmb
+        ? normalizeHttpEndpointUrl(rawEmb.baseUrl)
+        : normalizeHttpEndpointUrl(prevEmb.baseUrl),
+      model: pickStr(rawEmb, prevEmb, 'model', 120),
+      apiKeyEnv: 'apiKeyEnv' in rawEmb
+        ? normalizeEnvVarName(rawEmb.apiKeyEnv)
+        : normalizeEnvVarName(prevEmb.apiKeyEnv),
+      apiKey: (() => {
+        if (rawEmb && rawEmb.clearApiKey === true) return ''
+        if (typeof rawEmb.apiKey === 'string' && rawEmb.apiKey.trim()) {
+          return rawEmb.apiKey.trim().slice(0, 512)
+        }
+        return typeof prevEmb.apiKey === 'string' ? prevEmb.apiKey.trim().slice(0, 512) : ''
+      })(),
+      timeoutMs: normalizeBoundedInt(
+        'timeoutMs' in rawEmb ? rawEmb.timeoutMs : prevEmb.timeoutMs,
+        DEFAULT_EXTERNAL_MEMORY_CONFIG.embedding.timeoutMs,
+        500,
+        8000,
+      ),
+      weight: (() => {
+        const rawW = 'weight' in rawEmb ? Number(rawEmb.weight) : Number(prevEmb.weight)
+        if (!Number.isFinite(rawW)) return DEFAULT_EXTERNAL_MEMORY_CONFIG.embedding.weight
+        return Number(Math.min(0.9, Math.max(0.1, rawW)).toFixed(2))
+      })(),
+    },
+    autoDistill: {
+      enabled: pickBool(rawDistill, prevDistill, 'enabled', DEFAULT_EXTERNAL_MEMORY_CONFIG.autoDistill.enabled),
+      minTurns: normalizeBoundedInt(
+        'minTurns' in rawDistill ? rawDistill.minTurns : prevDistill.minTurns,
+        DEFAULT_EXTERNAL_MEMORY_CONFIG.autoDistill.minTurns,
+        1,
+        10,
+      ),
+      cooldownSec: normalizeBoundedInt(
+        'cooldownSec' in rawDistill ? rawDistill.cooldownSec : prevDistill.cooldownSec,
+        DEFAULT_EXTERNAL_MEMORY_CONFIG.autoDistill.cooldownSec,
+        15,
+        3600,
+      ),
+    },
+    workspacePolicies,
+  }
+}
+
+export function redactExternalMemoryConfigForUi(raw) {
+  const norm = normalizeExternalMemoryConfig(raw)
+  return {
+    ...norm,
+    memorySlot: {
+      ...norm.memorySlot,
+      authToken: '',
+      hasAuthToken: Boolean(norm.memorySlot.authToken),
+    },
+    moodSlot: {
+      ...norm.moodSlot,
+      authToken: '',
+      hasAuthToken: Boolean(norm.moodSlot.authToken),
+    },
+    embedding: {
+      ...norm.embedding,
+      apiKey: '',
+      hasApiKey: Boolean(norm.embedding.apiKey),
+    },
+  }
+}
+
 export const CHIEF_SCENARIO_PRESETS = {
   observer: {
     id: 'observer',
@@ -430,6 +696,25 @@ export function containsChiefNameSecret(raw) {
   const s = String(raw == null ? '' : raw).trim()
   if (!s) return false
   return SECRET_PATTERN.test(s) || CHIEF_NAME_SECRET_RES.some(re => re.test(s))
+}
+
+const EXT_MEM_GLOBAL_SECRET_RES = [
+  /(?:sk-[a-zA-Z0-9_-]{16,}|ghp_[a-zA-Z0-9]{20,}|gho_[a-zA-Z0-9]{16,}|github_pat_[a-zA-Z0-9_]{20,}|AKIA[0-9A-Z]{16}|AIza[0-9A-Za-z_-]{30,}|xox[baprs]-[a-zA-Z0-9-]{16,})/g,
+  /\bBearer\s+[A-Za-z0-9._~+/=-]{16,}/gi,
+  /-----BEGIN [A-Z ]*PRIVATE KEY-----[\s\S]*?-----END [A-Z ]*PRIVATE KEY-----|-----BEGIN [A-Z ]*PRIVATE KEY-----/g,
+  /\b(api[_-]?key|secret|token|password|passwd)\s*([:=])\s*['"]?[A-Za-z0-9._~+/=-]{10,}['"]?/gi,
+  /(https?:\/\/)([^:@/\s]+):([^@/\s]+)@/gi,
+]
+
+export function scrubExternalMemoryText(text) {
+  let s = String(text == null ? '' : text)
+  if (!s) return ''
+  s = s.replace(EXT_MEM_GLOBAL_SECRET_RES[0], '[REDACTED]')
+  s = s.replace(EXT_MEM_GLOBAL_SECRET_RES[1], 'Bearer [REDACTED]')
+  s = s.replace(EXT_MEM_GLOBAL_SECRET_RES[2], '[REDACTED_PRIVATE_KEY]')
+  s = s.replace(EXT_MEM_GLOBAL_SECRET_RES[3], '$1$2[REDACTED]')
+  s = s.replace(EXT_MEM_GLOBAL_SECRET_RES[4], '$1[REDACTED]@')
+  return s
 }
 
 export function normalizeChiefName(raw) {
@@ -1251,6 +1536,7 @@ export function resolveWorkspaceConfig(state, sessionId = '') {
     autoReview: !stopped && runMode === 'managed',
     globalSafetyGuardEnabled,
     sessionSafetyGuardEnabled,
+    externalMemory: normalizeExternalMemoryConfig(base.externalMemory),
     tacticalModes: mergedTactical,
   }
 }
@@ -1347,7 +1633,16 @@ export function normalizeState(raw) {
       autoPilot: !stopped && paceMode === 'auto',
       autoReview: !stopped && paceMode !== 'manual',
       ...(globalPlugRes.ok && globalPlugRes.plugins.length > 0 ? { policyPlugins: globalPlugRes.plugins } : {}),
+      externalMemory: normalizeExternalMemoryConfig(cfg.externalMemory),
       tacticalModes: normalizeTacticalModes(cfg.tacticalModes),
+      ...(Array.isArray(cfg.guardWallPresetsSeededPaths)
+        ? {
+            guardWallPresetsSeededPaths: cfg.guardWallPresetsSeededPaths
+              .map(s => String(s || '').trim())
+              .filter(Boolean)
+              .slice(-24),
+          }
+        : {}),
     },
     links,
     workspaces,
@@ -1551,5 +1846,24 @@ export function normalizeBubbleHarness(raw) {
     accent: (meta && meta.accent) || '#38bdf8',
     joinedAt: Math.max(0, Number(raw.joinedAt) || Date.now()),
   }
+}
+
+/**
+ * Strip Harmony / model-native `<|open|>tools<|sep|>...<|close|>` and `<|...|>`
+ * control markup so raw protocol tokens never leak into Chief replies or logs.
+ */
+export function stripModelControlMarkup(rawText) {
+  let s = String(rawText || '')
+  if (!s) return ''
+  // 1) Closed tool/call/internal-thinking envelopes (supports ASCII | and fullwidth ｜)
+  s = s.replace(/<[|｜]open[|｜]>\s*tools\b[\s\S]*?<[|｜]close[|｜]>\s*tools(?:\s*<[|｜]sep[|｜]>)?/gi, '\n')
+  s = s.replace(/<[|｜]open[|｜]>\s*call\b[\s\S]*?<[|｜]close[|｜]>\s*call(?:\s*<[|｜]sep[|｜]>)?/gi, '\n')
+  s = s.replace(/<[|｜]open[|｜]>\s*(?:thought|thinking|analysis|reasoning)\b[\s\S]*?<[|｜]close[|｜]>\s*(?:thought|thinking|analysis|reasoning)(?:\s*<[|｜]sep[|｜]>)?/gi, '\n')
+  // 2) Truncated/unclosed tool or thinking tails
+  s = s.replace(/<[|｜]open[|｜]>\s*(?:tools|call|thought|thinking|analysis|reasoning)\b[\s\S]*$/gi, '')
+  // 3) Outer control wrapper tags while keeping visible message body intact
+  s = s.replace(/<[|｜](?:open|close)[|｜]>\s*(?:message|final|assistant|commentary|tools|call|thought|thinking|analysis|reasoning)(?:\s+[^<|｜\n]{0,160})?(?:\s*<[|｜]sep[|｜]>)?/gi, '')
+  s = s.replace(/<[|｜](?:open|close|sep|start|end|channel|message|constrain|eot_id|im_start|im_end|return|end_of_turn)[^|｜>\n]{0,60}[|｜]>/gi, '')
+  return s.replace(/\n{3,}/g, '\n\n').trim()
 }
 

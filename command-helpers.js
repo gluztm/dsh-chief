@@ -116,7 +116,7 @@ export const ASK_CHIEF_SYSTEM = [
   '- 【生成自定义拦截规则与极低概率请示关闭】：\n  1) 当用户让你“筑一堵物理墙/加条拦截规则/锁死某个目录/禁跑某个高危命令”时，直接将大白话诉求编译成 `"wallProposals"`（跨会话常驻设 `"scope": "global"`），呈交用户一键确认落锁；\n  2) **关闭规则红线（极低触发）**：任何权限下（哪怕是 L3 最高权限）你都绝无权私改或绕过自定义拦截规则！仅当主代理或子代理真实撞墙并确认无法绕过、向你上报阻断情况，且你独立复核确认确因该条规则导致任务彻底无法推进、无合法替代路径时，才允许填入 `"wallRemovalProposals"` 向人类提交暂停/删除审批申请（内置安全防护硬规则永远不可申请拆除）；平时一切情形严禁主动填 `"wallRemovalProposals"`。',
   '- 【许愿框全权自治与三层档案隔离】：无论整理/分类/织钩/提炼档案入全局、`pin_to_desktop` 摆上认知桌面（2400 Tokens / 6 份上限）、`deliver_to_lead` 一次性向主对话递送关键档案、还是设定边界/重编任务、`effortOps` 调配主对话/子代理思考深度，只要符合当前权限，直接输出对应 JSON ops 执行到位。严禁触碰或读取冷藏档案柜（`precipitated` 100% 人类专属）；严禁越级让本局档案直接跳级沉淀，必须遵循 `本局 -> 全局 -> 冷藏` 梯度。',
   '- 【严守当前权限与禁止红线】：绝不越过当前权限等级上限，也绝不执行触发 `禁止红线 (forbidden)` 的写操作或高危命令。',
-  '- 【问进展 / 问步骤 / 问卡点 / 求建议】：当用户询问“现在在做什么 / 处于什么步骤 / 目前进度如何 / 卡在哪里”等态势问题时，你面前的上下文已经完整包含「实时对话流快照」+「小任务板 (Plan)」+「任务图」+「断点游标」！直接用简明人话分点作答并放进 JSON 的 `reply` 字段，**严禁退化成纯工具 XML/DSML 标签输出，更严禁盲目运行 `run_command` / `list_dir` 扫盘**！只有用户明确要求去核查具体源码文件/跑命令实测时，才在 JSON `toolCalls` 里调工具。',
+  '- 【问进展 / 问步骤 / 问卡点 / 求建议】：当用户询问“现在在做什么 / 处于什么步骤 / 目前进度如何 / 卡在哪里”等态势问题时，你面前的上下文已经完整包含「实时对话流快照」+「小任务板 (Plan)」+「任务图」+「断点游标」！直接用简明人话分点作答并放进 JSON 的 `reply` 字段，**严禁退化成纯工具 XML/DSML 标签或 `<|open|>tools<|sep|>` / `<|open|>call` 等原生模型控制协议标签输出，更严禁盲目运行 `run_command` / `list_dir` 扫盘**！只有用户明确要求去核查具体源码文件/跑命令实测时，才在 JSON `toolCalls` 里调工具。',
   '- 【代维护看板】：当用户让你「把某任务标为完成/受阻」「记一下下一步干啥」「改总目标」时，直接通过 `boardOps`（`task.update` / `cursor.set` / `objective.set` / `task.add`）落实（若强介入已锁定核心目标，则提示先解锁或关闭强介入）。',
   '- 【边界奏请与零散浓缩】：',
   '  1) 总结踩坑红线或必做要求时，生成 `boundProposals` 呈交用户拍板（若用户提到「全局定住/以后所有任务都生效」则设 `"pinGlobal": true`）；只有用户明确下令「直接写进禁止/必做边界」时才用 `boardOps`。',
@@ -334,6 +334,18 @@ export function isExplicitCompactCommand(rawText) {
 }
 
 /**
+ * Only inspect a Chief-to-Lead relay message as a shell `command` when it actually
+ * carries an executable destructive or credential-reading shell pattern. Plain-language
+ * explanations mentioning `.env` or `.pem` stay protected by workspace bounds without
+ * triggering `sensitive_credential_cmd` false positives.
+ */
+export function shouldInspectRelayAsCommand(text) {
+  const s = String(text || '').trim()
+  if (!s) return false
+  return /(?:rm\s+-rf|git\s+reset\s+--hard|git\s+push\s+(?:-f|--force)|del\s+\/[fq]|remove-item\b[^\n]*-force|-enc(?:odedcommand)?\b|(?:cat|type|more|head|tail|get-content|gc|sed|awk|grep|rg|findstr|python|node|powershell|pwsh|bash|sh|cmd)\b[^\n]{0,80}(?:\.env\b|\.credentials|id_rsa|id_ed25519|\.pem\b|\.key\b))/i.test(s)
+}
+
+/**
  * Holistic offline/fallback intelligence synthesizer so DSH Chief NEVER
  * utters "记忆里没有这条" even if every configured LLM provider is unreachable.
  */
@@ -362,7 +374,8 @@ export function buildSmartFallbackReply({ input, board, liveDigest, directory, f
     return buildConciseSixLineReport({ board, blocked, doing, todo, done, workers })
   }
 
-  const asksBounds = /边界|红线|禁止|允许|必做|规矩|约束/.test(q)
+  const asksCodeEdgeCase = /边界(?:情况|条件|用例|测试|值|输入|场景|检查)/.test(q)
+  const asksBounds = !asksCodeEdgeCase && /边界|红线|禁止|允许|必做|规矩|约束/.test(q)
   const asksTeam = /子代理|团队|谁在|分工|成员|subagent|worker/i.test(qLower)
   const asksBlocked = /卡在哪|受阻|阻塞|报错|问题|风险|撞墙|block/i.test(qLower)
   const asksProgress = /进展|进度|怎么样|到哪|在做什么|在干嘛|干什么|处于什么步骤|什么步骤|第几步|情况|状态|汇报|总结|下一步|status|progress/i.test(qLower)
@@ -379,7 +392,7 @@ export function buildSmartFallbackReply({ input, board, liveDigest, directory, f
     if (aList.length) bullets.push(`- 【必做事项】${aList.slice(0, 4).map(x => (pinnedBounds.allowed?.includes(x) ? '📌' : '') + clamp(x, 60)).join('；')}`)
     if (nList.length) bullets.push(`- 【注意事项】${nList.slice(0, 3).map(x => (pinnedBounds.notes?.includes(x) ? '📌' : '') + clamp(x, 60)).join('；')}`)
     if (!fList.length && !aList.length && !nList.length) {
-      bullets.push('- 【提示】当前尚未配置边界规则，可在「边界」页添加并点击 📌 定住为跨任务共享，或点「✦ 提炼新边界」。')
+      bullets.push('- 【提示】当前尚未配置文字行为边界（事前文件/命令拦截请查看「边界 → 拦截墙」预设），可在「边界」页添加并点击 📌 定住为跨任务共享，或点「✦ 提炼新边界」。')
     }
     return bullets.join('\n')
   }
