@@ -10,30 +10,28 @@
 
 ---
 
-## 一、宿主装配与后端业务层（44 个后端模块）
+## 一、宿主装配与后端业务层（53 个后端模块，含 9 个安全模块）
 
-### 1. 宿主装配入口与看板 / 工具 / 路由（`index.js` + 拆分模块）
+### 1. 宿主装配入口与看板 / 工具 / 路由 / 外设外延（`index.js` + 拆分模块）
 
 - **`index.js`（DI Hub，保留 6 项公开导出）**
   - 持有进程唯一 `hostState` 与 `deps` 总线，按序装配工厂模块并对外转调：`apply`、`resolveWorkspaceIdForSession`、`getSessionCwd`、`executeHostSessionCompaction`、`deployStateToTargetChief`、`transferChief`。
   - 避免多实例各自持锁导致状态冲突。
-- **`board-schema.js`**
-  - 维护常量、字段长度上限（`BODY_LIMIT` 等）、任务 DAG 归一化、工作流进度推演（`planStepId` / `targetPlanStepId` / `resolveActivePlanStepId` / `derivePlanFlowProgress`）、`cursor.blocked` 语义归一化（`normalizeCursorBlocked`）、`emptyBoard` 与版本标识 `BACKEND_BUILD = '1.7.0'`。
-  - 仅依赖 `./memory.js`，无磁盘副作用。
-- **`board-store.js`**
-  - 负责看板 JSON 文件缓存、跨进程 `O_EXCL` 文件锁（`.lock`）与带 `threadId` 的原子重命名写盘。
-  - `withBoardLock` 通过 `try...finally` 成对释放内存与磁盘锁；`boardForSession` 自动合并全局红线 `pinnedBounds`。
-- **`subagent-runtime.js`**
-  - 解析子代理树谱系（`resolveRootSessionId`）、工作区 `cwd` / `workspaceId`、会话 Token 用量、以及宿主 `/compact` 上下文压缩桥接；派发简报强制附带 `⛔` 红线。
+- **`board-schema.js` & `board-store.js` & `subagent-runtime.js`**
+  - `board-schema.js`：维护常量、字段长度上限（`BODY_LIMIT` 等）、任务 DAG 归一化、工作流进度推演、`normalizeCursorBlocked`、`emptyBoard` 与版本标识 `BACKEND_BUILD = '2.0.0'`。
+  - `board-store.js`：负责看板 JSON 文件缓存、跨进程 `O_EXCL` 文件锁与带 `threadId` 的原子重命名写盘，自动合并全局红线 `pinnedBounds`。
+  - `subagent-runtime.js`：解析子代理树谱系、工作区 `cwd` / `workspaceId`、会话 Token 用量以及 `/compact` 上下文压缩桥接。
 - **`board-actions.js` & `board-handoff.js`**
-  - `board-actions.js` 处理 `runAction` / `runActionUnlocked`（任务、计划、边界、档案、记忆写操作）与跨窗口 `transferChief`。
-  - `board-handoff.js` 负责长程交接单生成、跨会话部署与指定范围档案摘取。
+  - `board-actions.js` 处理任务、计划、边界、档案、记忆写操作及单条边界「暂挂」；`board-handoff.js` 生成长程交接单并支持跨会话部署。
 - **`api-routes.js`**
-  - 注册全部 27 条 `/api/dsh-chief/*` 同源 HTTP 路由。
-  - 每条路由入口第一行检查 `if (!guard(req, res)) return`（异常时默认 fail-closed 返回 `403`）；`/chief/config` 暴露与持久化安全卫兵开关；`/chief/suggestion` 统一承接单条与批量建议。
+  - 注册全部 27 条 `/api/dsh-chief/*` 同源 HTTP 路由；入口首行执行 `if (!guard(req, res)) return`（异常时 fail-closed 返回 `403`），涵盖 TTS/ASR 语音、远程传呼配置、多端主题同步、记忆工坊与文档档案 CRUD。
 - **`model-tools.js` & `runtime-hooks.js`**
-  - `model-tools.js` 定义并注册 4 个模型工具：`chief_board`、`chief_memory`、`chief_boundaries`、`chief_handoff`（已收紧 `cursor.set.blocked` 说明）。
-  - `runtime-hooks.js` 注册 Cordis `apply(ctx)` 生命周期：8 处后端钩子先校验会话 `sessionEnabled`（未启用普通会话直接放行），在 `tools/pre-execute` 执行全局与会话生效后的 `safetyGuardEnabled` 及物理驻墙判断，在 `agent/pre-step` 注入 `[INQUIRY #...]`，并在 `auto-continue` 与 `agent/turn-stopping` 做自动收尾。
+  - 注册 `chief_board`、`chief_memory`、`chief_boundaries`、`chief_handoff` 4 个模型工具；`runtime-hooks.js` 注册 Cordis `apply(ctx)` 8 处生命周期钩子，在 `tools/pre-execute` 校验 `sessionEnabled` 与 `safetyGuardEnabled` / 物理驻墙，并在异常/拦停/完工节点联动语音播报与远程传呼。
+- **扩展能力模块（`v1.8` – `v2.0` 新增）**
+  - `chief-tts.js` & `voice-inbox.js`：多引擎语音合成与语音转写路由、口语脱敏、叫名唤醒及 `~/.dsh/chief/voice-inbox/` 语音手记收件箱（经梦境漫游沉淀入库）。
+  - `remote-pager.js`：6 通道手机远程传呼（飞书 / 钉钉 / 企业微信 / Telegram / Discord / 自定义 Webhook），带密钥脱敏、HMAC 签名与防刷屏冷却。
+  - `chief-theme-diy.js` & `guard-wall-presets.js` & `github-star.js`：AI 主题配色生成与服务端 `~/.dsh/chief/` 多端同步、开箱边界预设包 v2、实时 GitHub Star 计数与 `gh` CLI 直连点星。
+  - `external-memory.js` / `external-memory-connectors.js` / `external-memory-studio.js`：参谋专属 `MEMORY.md` + 5 维画像 + 艾宾浩斯曲线、OpenAI/Ollama/Gemini 三协议向量客户端，以及 `mcp-http` / `chief-http` / 只读 Obsidian / `cordis-provider` 桥接（严格对 `@lead` 0 字节隔离）。
 
 ---
 
@@ -70,18 +68,18 @@
 ## 四、三层工程档案系统（`archives.js` + 4 模块）
 
 - **单向依赖 `archive-dossiers.js` → `archive-precipitated.js` → `archive-cabinets.js` → `archive-core.js`（外部只走 `archives.js` 42 项导出）**：
-  - `archive-core.js`：统一管理锁集合、缓存、`DESKTOP_TOKEN_BUDGET = 2400` / `DESKTOP_MAX_ITEMS = 6` 与密钥正则替换 `[REDACTED]`。
+  - `archive-core.js`：统一管理锁集合、缓存、`DESKTOP_TOKEN_BUDGET` / `DESKTOP_MAX_ITEMS`、密钥脱敏 `[REDACTED]`、CJK+Latin 双语 BM25 检索引擎与 `history[]` 版本快照数据结构。
   - `archive-cabinets.js`：多柜注册与旧版数据迁移。
   - `archive-precipitated.js`：冷藏冷库管理，未人工翻出恒保持 0 字节隔离。
-  - `archive-dossiers.js`：三层卷宗 CRUD、谁在看计算（`computeArchiveViewerStatus`）、认知桌面预算淘汰与跨会话拷贝。
+  - `archive-dossiers.js`：三层卷宗 CRUD、谁在看计算（`computeArchiveViewerStatus`）、`[[双链]]` 解析与暗铜失效下游预警、`rollbackHistory` 无损回滚及认知桌面预算淘汰。
 
 ---
 
-## 五、客户端 ES Module 结构（`pkg/src/client/` 39 模块 → `client.js`）
+## 五、客户端 ES Module 结构（`pkg/src/client/` 48 模块 → `client.js`）
 
-由 [build-client.mjs](scripts/build-client.mjs) 按拓扑顺序打包为单文件 [client.js](client.js)，`package.json`、`board-schema.js`（`BACKEND_BUILD`）与 `src/client/constants.js`（`EXPECTED_BACKEND_BUILD`）版本统一对齐 `1.7.0`：
+由 [build-client.mjs](scripts/build-client.mjs) 按拓扑顺序打包为单文件 [client.js](client.js)，`package.json`、`board-schema.js`（`BACKEND_BUILD`）与 `src/client/constants.js`（`EXPECTED_BACKEND_BUILD`）版本统一对齐 `2.0.0`：
 
-- **基础与状态**：`react-runtime.js`、`constants.js`、`i18n.js`（`zh/en` 切换）、`store.js`（唯一客户端可变状态）、`utils.js`（含前端 `normalizeCursorBlocked`）、`notify.js`、`report.js`（脱敏复盘导出）。
-- **通信与样式**：`api.js` + `api/{archives,board,chief,transport}.js`；`styles.js` + `styles/{archives,base,bubble,chief,modals,tasks-flow,theme,v180,skins}.js`（含 DSH 浅色主题适配与主页面视口高度规则）。
-- **组件与弹窗**：`components/{common,modals,Panel}.js` + `components/modals/{intervention,pickers,safety,workflow}.js`（含 `SafetyGuardConfirmModal`）。
-- **页签视图**：`tabs/{chief,tasks,tasks-flow,tasks-widgets,peers,archives,archives-cards,boundaries,plan}.js`（顶栏 5 页签 `参谋 / 任务 / 协同 / 档案 / 边界` + 顶栏齿轮 `⚙️` 设置页；支持 `conversation.view` 主页面与右侧栏双模式、本会话启用横幅、安全卫兵双开关与边界页恢复横幅）。
+- **基础与语音引擎**：`react-runtime.js`、`constants.js`、`i18n.js`（`zh/en` 切换）、`store.js`（唯一客户端可变状态）、`utils.js`、`notify.js`、`report.js`、`custom-theme.js`（WCAG 双模派生 + 社区「潮汐蓝」+ JSON 导入导出 + 服务端同步）、`tts.js`（TTS/ASR 播报与语音舞台驱动）与 `voice-recorder.js`（免提 VAD 与录音队列）。
+- **通信与样式**：`api.js` + `api/{archives,board,chief,transport}.js`；`styles.js` + `styles/{archives,base,bubble,chief,extmem,modals,skins,tasks-flow,theme,tts,v180}.js`。
+- **组件与弹窗**：`components/{common,modals,Panel}.js` + `components/modals/{intervention,pickers,safety,theme-diy,workflow}.js`（含独立「外观与主题工坊」页面与极简 `+` 控制面板）。
+- **页签视图**：`tabs/{chief,tasks,tasks-flow,tasks-widgets,peers,archives,archives-cards,extmem,extmem-starfield,extmem-studio,boundaries,plan}.js`（顶栏 6 页签 `参谋 / 任务 / 协同 / 档案 / 记忆 / 边界` + `⚙️` 设置、语音舞台、2D/3D 记忆星图、档案 `🎙️ 手记` 子页签与边界单条暂挂）。

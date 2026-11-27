@@ -1,4 +1,4 @@
-# How `dsh-chief` Evolved: From a Right-Sidebar Notepad to a Multi-Agent Management Hub
+# How `dsh-chief` Evolved: From a Right-Sidebar Notepad to a Multi-Agent Voice Hub
 
 [简体中文 (`EVOLUTION.md`)](EVOLUTION.md) · [Back to README (`README.en.md`)](README.en.md) · [Changelog (`CHANGELOG.md`)](CHANGELOG.md) · [Architecture (`ARCHITECTURE.md`)](ARCHITECTURE.md)
 
@@ -8,16 +8,16 @@ If you check `dsh-chief`'s CSS classes, almost all of them start with `dnb-`. On
 
 `dnb` stands for **DSH Notebook**.
 
-What now runs as **45 backend modules (9 in `pkg/safety/`) + 39 frontend modules**—handling task graphs, tiered archives, global custom Chief naming (0-byte isolated from `@lead`), a 5-skin built-in theme system, pre-execute checks, and multi-agent coordination—started from a much simpler goal: hang a notepad in the right sidebar of DeepSeek Harness (DSH), backed by one shared JSON file, so the AI stops forgetting context mid-task.
+What now runs as **53 backend modules (9 in `pkg/safety/`) + 48 frontend modules**—handling speaker-out Voice Chief alerts & wake commands, a 6-channel mobile pager, multi-origin theme syncing, bilingual BM25 / WikiLink / rollback archives, pre-execute checks, and multi-agent coordination—started from a much simpler goal: hang a notepad in the right sidebar of DeepSeek Harness (DSH), backed by one shared JSON file, so the AI stops forgetting context mid-task.
 
-Between `v1.0.0` on November 14, 2026 and `v1.7.0` on November 22, 2026, nine releases shipped in nine days. `CHANGELOG.md` lists changes commit by commit. This page steps back to explain what broke at each stage and why the code looks the way it does today.
+From `v1.0.0` on November 14, 2026 through `v2.0.0` on November 27, 2026 (14 days of iteration), `CHANGELOG.md` tracks changes commit by commit. This page steps back to explain what broke at each stage and why the code looks the way it does today.
 
 ---
 
-## Nine Days at a Glance
+## Architecture Evolution (`v1.0` → `v2.0`)
 
 <div align="center">
-  <img src="assets/evolution-roadmap-en.gif" alt="dsh-chief v1.0 to v1.7 architecture evolution animation" width="900" />
+  <img src="assets/evolution-roadmap-en.gif" alt="dsh-chief architecture evolution animation" width="900" />
 </div>
 
 ```mermaid
@@ -28,9 +28,12 @@ flowchart TD
   S3["Stage 3 · v1.3.0\nSplit Oversized Files, Add O_EXCL Locks & CI Guardrails\n29 backend + 16 frontend modules · Zero external deps"]
   S4["Stage 4 · v1.4.0\n9-Module Safety Kernel at tools/pre-execute\nMain chat edits code; Chief plans, reviews, and guards"]
   S5["Stage 5 · v1.5.0 ~ v1.6.0\nToken & Spend Limits: 2,400-Token Desktop + 5 Tabs\nSVG Flow Canvas · Hard Budget Breaker · Away Alerts"]
-  S6["Stage 6 · v1.7.0\nMain Conversation Tab + Local Codex/Claude + Opt-In Sessions\nSafety Guard Toggles & False-Positive Fixes · 44 + 39 modules"]
+  S6["Stage 6 · v1.7.0 ~ v1.7.1\nMain Tab + Local Codex/Claude + Opt-In Sessions\nSafety Guard Toggles & False-Positive Fixes · Unified 2-Concept Guards"]
+  S7["Stage 7 · v1.8.0\nBuilt-in 5-Skin Themes + Bento Beam Flow + Collab 2.0 (Gemini CLI)\nGlobal Chief Naming · Live GitHub Star Sync"]
+  S8["Stage 8 · v1.9.0\nChief-Only Memory Studio (2D/3D Starfield + External Bridge) + DIY Themes\nDefault Left Rail · Guard Wall Presets v2 · 21 Live-QA Fixes"]
+  S9["Stage 9 · v2.0.0\nVoice Chief Alerts & Wake + 6-Channel Mobile Pager + Multi-Origin Theme Sync\nBilingual BM25 / Rollback / WikiLinks · 3-Protocol Embedding · 53 + 48 modules"]
 
-  S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6
+  S0 --> S1 --> S2 --> S3 --> S4 --> S5 --> S6 --> S7 --> S8 --> S9
 ```
 
 ### Size and Focus by Stage
@@ -42,7 +45,10 @@ flowchart TD
 | Stage 3 | `v1.3.0`<br>Nov 18 | 29 backend + 16 frontend modules<br>(0 external npm deps) | Modular & concurrency base | 16K-line files were fragile; concurrent writes hit Windows locks; obfuscated commands slipped checks |
 | Stage 4 | `v1.4.0`<br>Nov 19 | 38 backend (9 safety) + 16 frontend | Pre-execute gate across agents | Old checks only watched Chief itself, missing `@lead` & subagents; high-tier Chief hijacked edits |
 | Stage 5 | `v1.5.0` – `v1.6.0`<br>Nov 20 – 21 | 38 backend + 20 frontend<br>(5 tabs + top gear) | Token & away-run control | Scattered switches hid token spend; archive growth risked bloating prompts; overnight runs needed hard caps |
-| Stage 6 | `v1.7.0`<br>Nov 22 | **44 backend (9 safety) + 39 frontend** | Opt-in multi-agent hub | Narrow sidebar cramped team graphs; local `Codex` / `Claude Code` worked in silos; plain chats hit global hooks |
+| Stage 6 | `v1.7.0` – `v1.7.1`<br>Nov 22 – 23 | 44 backend (9 safety) + 39 frontend | Opt-in multi-agent hub | Narrow sidebar cramped team graphs; local `Codex` / `Claude Code` worked in silos; plain chats hit global hooks |
+| Stage 7 | `v1.8.0`<br>Nov 24 – 25 | 45 backend (9 safety) + 39 frontend | Collab 2.0 & Theme System | View clutter around Org Tree; external CLIs lacked live streams & chaining; UI needed adaptive skins |
+| Stage 8 | `v1.9.0`<br>Nov 26 | 50 backend (9 safety) + 45 frontend | Chief Memory Studio & DIY | Chief lacked persistent isolated memory/profile; external memory connectors needed one clean bridge |
+| Stage 9 | `v2.0.0`<br>Nov 27 | **53 backend (9 safety) + 48 frontend** | **Voice Alerts & Remote Pager Hub** | Unattended failures went unnoticed away from screen; plain archives lacked BM25/links/rollback; skins needed server sync |
 
 ---
 
@@ -150,6 +156,36 @@ Once single-window tracking and budget caps worked reliably, daily workflows (`I
 
 ---
 
+## 7. Theme System, Unified Beam Flow & Collaboration 2.0 (`v1.7.1` → `v1.8.0`)
+
+`v1.7.1` brought DSH `0.2.3-alpha.2` compatibility and consolidated overlapping controls into two clear concepts (`🛡️ Safety Block` and `📝 Rules for AI`). Then `v1.8.0` overhauled the ergonomics and multi-agent pipeline:
+
+- **Built-in 5-Skin Themes & Adaptive Dials**: Introduced **Frosted Mist** alongside **Warm Paper / Botanical / Starlight / Classic Clean**, replaced boxy borders with hairline dividers, and added the theme-adaptive `EffortFanGauge`.
+- **Bento Objective Ring + Unified Beam Flow**: Replaced separate Org Tree views with a single serpentine Bezier beam canvas showing subagent dispatch and return curves directly beneath steps.
+- **Collaboration 2.0 & Live GitHub Star Sync**: Added `Gemini CLI` discovery, redacted live output streams, 2-hop handoff chaining (`Codex → Claude Code / Gemini CLI`), anti-self-steer routing guards, live GitHub Star sync via `gh` CLI, and 0-byte isolated custom Chief naming.
+
+---
+
+## 8. Chief-Only Memory Studio, External Bridges & DIY Workshop (`v1.9.0`)
+
+With squad orchestration stable, `v1.9.0` added long-term memory and visual customization strictly scoped away from `@lead`:
+
+- **Chief-Only Memory Studio (0-byte `@lead` isolation)**: Ships an out-of-the-box `MEMORY.md` notebook, Ebbinghaus decay/reinforcement bars, a 2D SVG / 3D Canvas Constellation Starfield, locked 5-section `USER_PROFILE.md`, and X-Ray recall testing—while opening `mcp-http`, dual-slot `chief-http`, read-only `markdown-vault` (Obsidian BM25), and `cordis-provider`.
+- **DIY Theme Studio & Default Left Rail**: Derives full dark/light tokens from 4 base swatches, extracts 6-color palettes from images on `<canvas>`, stores up to 25MB wallpapers in `IndexedDB`, and ships Chief AI DIY alongside Guard Wall Presets v2 and 21 live-QA fixes.
+
+---
+
+## 9. Voice Chief Alerts, 6-Channel Mobile Pager & 3-Protocol Vector Archives (`v2.0.0`)
+
+`v2.0.0` closes the loop when you step away from your desk or prefer hands-free voice supervision without giving up hard safety gates:
+
+- **Voice Chief & Inline Voice Stage (`chief-tts.js` / `src/client/tts.js` / `voice-recorder.js`)**: Combines DeepSeek `/v1/tools/tts`, OpenAI `/v1/audio/speech`, and offline speech (scrubbing secrets and code paths) with SenseVoice + DeepSeek ASR recognition. Replaces full-screen blur with an inline Voice Stage (`Alt+V`, hands-free VAD, name-call wake) where push commands still strictly traverse L0–L3 permission approvals before touching `@lead`.
+- **6-Channel Mobile Pager (`remote-pager.js`)**: Dispatches scrubbed milestone alerts to **Feishu, DingTalk, WeCom, Telegram, Discord, and HMAC-signed Webhooks** with cooldown deduplication.
+- **Voice Inbox & `Archives → 🎙️ Notes` (`voice-inbox.js`)**: Queues voice notes under `~/.dsh/chief/voice-inbox/` for Dream Roam digestion into memory, profile, diary, and voice manuscripts.
+- **Bilingual BM25 + Rollback + `[[WikiLinks]]` + 3-Protocol Embedding**: Upgrades Project Archives with CJK+Latin BM25 full-body ranking, 5-version `history[]` one-click rollback, bidirectional `[[Target]]` links with copper deprecation warnings, and `OpenAI / Ollama / Gemini` embedding support—plus `@iridiumgit`'s community **Tide Blue** theme, JSON palette export/import, and server-side multi-origin sync across `~/.dsh/chief/` (Issue `#7`).
+
+---
+
 ## Before vs. After
 
 ```mermaid
@@ -162,33 +198,31 @@ flowchart TB
     E1 --> E2 --> E3 --> E4
   end
 
-  subgraph Current["Current Hub (v1.7)"]
-    C1["Surface: Main tab + Sidebar + Opt-in per session"]
-    C2["Coordination: Main chat + Subagents + Peer windows + Local Codex / Claude Code"]
-    C3["Memory: 2,400-Token Cognitive Desktop + Hooked vaults + Dream Roam"]
-    C4["Safety: Isolated tools/pre-execute kernel + Guard Walls + Safety toggles + Budget cap"]
+  subgraph Current["Current Hub (v2.0)"]
+    C1["Interaction: Main tab + Sidebar + Speaker Voice Alerts + 6-Channel Pager"]
+    C2["Coordination: Main chat + Subagents + Peer windows + Codex / Claude / Gemini CLI"]
+    C3["Memory: 2,400T Desktop + BM25/Links/Rollback + 0-Byte Starfield & Voice Notes"]
+    C4["Safety: Isolated 9-module tools/pre-execute kernel + Guard Walls + Budget cap"]
     C1 --> C2 --> C3 --> C4
   end
 
-  Early -.->|"9 days · 9 releases"| Current
+  Early -.->|"14 days · continuous evolution to v2.0.0"| Current
 ```
 
 ---
 
 ## Four Lessons From These Releases
 
-Looking back across those nine days, most decisions come down to four simple points:
+Looking back across the evolution from `v1.0` to `v2.0`, four engineering principles still hold everything together:
 
 1. **Memory is there to save prompt tokens, not stuff every turn.**  
-   Zero-byte cold drawers early on and the `2,400`-token Cognitive Desktop later do the same thing: keep only active papers on the desk, file the rest behind keyword hooks, and pull details on demand.
+   Whether via the `2,400`-token Cognitive Desktop + BM25/`[[WikiLink]]` on-demand pulls or the 0-byte `@lead` isolation of Memory Studio and Voice Notes, keep main chat context clean.
 
 2. **Put brakes and confirmations in place before giving tools.**  
-   Warnings inside a system prompt fade as context grows. Starting read-only at `L0`, popping single-action approvals, and locking Guard Walls at `tools/pre-execute` stop accidents—while a human-only Safety Guard toggle keeps normal workflows from getting stuck on edge cases.
+   Starting read-only at `L0`, gating voice dispatch behind real L0–L3 approvals, and enforcing the 9-module `tools/pre-execute` kernel stop accidents without trapping normal workflows.
 
-3. **Multi-agent teams fail when progress and spend stay hidden.**  
-   Clear separation (`@lead` edits, Chief tracks plans and boundaries), a readable flow graph, and hard budget circuit breakers let you step away safely.
+3. **Keep teams audible and reachable even when you step away.**  
+   Visual beam flow, hard spend breakers, speaker-out alerts, and 6-channel mobile pagers keep long runs observable at and away from your desk.
 
 4. **Stay quiet when not asked.**  
-   Idle modes spend zero background tokens, idle screens stay still, and plain chats run untouched until you enable Chief. Good tools step forward when needed and stay out of the way otherwise.
-
-With `v1.7.0`, the core plumbing—task graphs, tiered archives, pre-execute safety & switches, budget caps, local CLI dispatch, and opt-in isolation—was tested and in place. `v1.7.1` added DSH `0.2.3-alpha.2` compatibility and simplified safety/rules into two plain concepts (`Safety Block` and `Rules for AI`), and **`v1.8.0`** refines the zero-dependency codebase to **45 backend modules (9 in `pkg/safety/`) + 39 frontend modules** with a built-in **5-skin Theme System** (defaulting to **Frosted Mist** with adaptive vector controls & restored interactive `EffortFanGauge` across all tabs), a redesigned **Tasks Tab** pairing a top **Bento Objective Ring Card** with a unified **Flow Canvas + Serpentine Bezier Beam** view (with subagent dispatch & return curves and no Org Tree clutter) plus header/settings decluttering, global custom Chief naming (0-byte `@lead` isolation, stripped built-in Private Brain ahead of a Chief-only memory plugin bridge), **Collaboration 2.0** (`Gemini CLI` discovery, redacted live streams, 2-hop handoff chaining & hardened anti-self-steer routing), one-click Guard-Wall preset packs, and a top-left live GitHub Star sync button supporting direct local `gh` CLI starring with web fallback.
+   Zero idle background LLM calls, untouched unactivated chats, and clear alerts only when action is genuinely needed.

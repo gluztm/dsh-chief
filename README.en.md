@@ -1,7 +1,7 @@
 <div align="center">
 
 # DSH Chief (`dsh-chief`)
-**DeepSeek Harness (DSH) sidebar & main-tab supervisor plugin: stays off by default in plain chats, tracks tasks, layers notes into cold archives, connects local external CLIs, and checks writes/commands before they run.**
+**DeepSeek Harness (DSH) supervisor & voice chief plugin: speaks alerts through desktop speakers, answers wake-word commands, dispatches mobile pager alerts, syncs themes across origins, and enforces pre-execute guardrails—while staying untouched in plain chats.**
 
 [![DSH Compatibility](https://img.shields.io/badge/DSH-%3E%3D%200.2.2--rc.2-38bdf8?style=flat-square)](https://dsh.deepseek.com)
 [![GitHub Release](https://img.shields.io/github/v/release/gluztm/dsh-chief?color=2563eb&style=flat-square)](https://github.com/gluztm/dsh-chief/releases)
@@ -14,7 +14,7 @@
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-<img src="assets/chief-10s-compare.gif" alt="Comparison of plain long sessions vs dsh-chief v1.7.0: stays off in plain chats by default, with Collaboration System for local Codex/Claude Code, Main Tab mode, Cognitive Desktop, and pre-execute safety guardrails" width="840" />
+<img src="assets/chief-10s-compare.gif" alt="Comparison of plain long sessions vs dsh-chief v2.0.0: stays off in plain chats by default, adding Voice Chief alerts, 6-channel mobile pager, Theme Studio server sync, local CLI orchestration, and pre-execute guardrails" width="840" />
 
 <sub>Read-only by default · Asks before editing workspace · One-command install</sub>
 
@@ -57,7 +57,8 @@ flowchart LR
 - **Read-only by default**: Even after enabling a session, Chief observes without touching workspace files until you raise the permission tier (`L0`–`L3`).
 - **Keep prompt tokens low**: Only items pinned to the Cognitive Desktop (up to `2,400 tokens / 6 items`) go into each turn; everything else stays on disk until pulled.
 - **Main tab + right sidebar + Collaboration 2.0**: Switch to the top `Chief` tab (hiding the duplicate host input bar); click the top-left live GitHub Star button (shows public star count, supports one-click starring inside the panel via local `gh` CLI, and gracefully falls back to opening GitHub); dispatch local `Codex` / `Claude Code` / `Gemini CLI` with live output streams, 2-hop handoff chaining, and verified subagent/peer routing guards.
-- **Global Custom Chief Naming & Memory Studio (0-byte `@lead` isolation)**: Name your Chief in Settings and keep a built-in `MEMORY.md` notebook, 2D/3D Constellation Starfield, Ebbinghaus vitality bars, locked 5-section `USER_PROFILE.md`, Prompt Studio, and optional Embedding rerank—or bridge `mcp-http`, dual-slot `chief-http`, read-only Obsidian vaults, and `cordis-provider`; both Memory Studio and the DIY Theme Studio stay strictly 0-byte isolated from `@lead`.
+- **Chief-Only Memory Studio, Bilingual BM25 & 3-Protocol Embedding (`v2.0.0`)**: Name your Chief in Settings with a built-in `MEMORY.md` notebook, 2D/3D Constellation Starfield, Ebbinghaus vitality bars, and locked 5-section `USER_PROFILE.md`; Project Archives gain CJK+Latin BM25 full-body search, 5-version `history[]` rollback, and `[[WikiLinks]]` with deprecation warnings; Memory Studio supports `OpenAI / Local Ollama / Google Gemini` embedding plus `mcp-http`, `chief-http`, read-only Obsidian vaults, and `cordis-provider` (all strictly 0-byte isolated from `@lead`).
+- **Voice Chief Alerts, 6-Channel Mobile Pager & Multi-Origin Theme Sync (`v2.0.0`)**: Broadcasts redacted safety-block, approval, budget, and finish alerts through speakers alongside an inline hands-free Voice Stage (`Alt+V`, name-call wake, real L0–L3 `@lead` dispatch, and `Archives → 🎙️ Notes` inbox); forwards mobile alerts via **Feishu / DingTalk / WeCom / Telegram / Discord / Webhook**; and persists curated presets plus DIY Theme Studio (including `@iridiumgit`'s community **Tide Blue** theme and JSON import/export) to `~/.dsh/chief/` across origins.
 
 ---
 
@@ -94,12 +95,13 @@ The sidebar has 5 tabs plus a top-bar Settings page:
 
 | Location | What you do here |
 | :--- | :--- |
-| `Chief` tab | Send instructions in plain language, change permissions or run mode, export reports, or hit `⏹ 急停`. |
+| `Chief` tab | Send plain instructions or open the inline Voice Stage (`Alt+V`), switch permissions/run modes, export reports, or hit `⏹ Halt`. |
 | `Tasks` tab | Lock your Core Objective, inspect unified Beam Flow steps with Subagent dispatch/return curves, click `Explain`, and export handoffs. |
-| `Peers` tab | Coordinate `@lead`, subagents, linked windows, and local `Codex` / `Claude Code` CLIs with dormant scan & cross-window mailbox. |
-| `Archives` tab | Manage the pinned Cognitive Desktop and three folded drawers to control prompt tokens. |
-| `Guards` tab | Top: **🛡️ Safety Block** (built-in auto prevention + `🚧 Custom Block Rules`). Bottom: **📝 Rules for AI** (`✅ Must Do` / `🚫 Don't Do` / `💡 Notes`). |
-| Top-bar `⚙️` | Switch presets, placement (`Main Tab / Sidebar`), corner/subagent-tab toggles, session opt-in, alerts, budget caps, and `zh / en`. |
+| `Peers` tab | Coordinate `@lead`, subagents, linked windows, and local `Codex` / `Claude Code` / `Gemini CLI` with dormant scan & cross-window mailbox. |
+| `Archives` tab | Manage the Cognitive Desktop and drawers with BM25 search, 5-version history rollback, `[[WikiLinks]]`, and the dedicated `🎙️ Notes` voice subtab. |
+| `Memory` tab | Manage `MEMORY.md`, 2D/3D Starfield, 5-section User Profile, 3-protocol embedding, and external memory bridges (0-byte `@lead` isolated). |
+| `Guards` tab | Top: **🛡️ Safety Block** (built-in protection + `🚧 Custom Block Rules` with 1-click `⏸` pause). Bottom: **📝 Rules for AI** (`✅ Must Do` / `🚫 Don't Do` / `💡 Notes`). |
+| Top-bar `⚙️` | Switch presets/placement, configure alerts & budget caps, and open the dedicated **Theme Studio**, **Voice TTS**, and **6-Channel Mobile Pager**. |
 
 ### 01 · Chief Cockpit (`参谋` Tab)
 **In one sentence:** Give Chief plain-language instructions, switch permission and run tiers, or hit the red halt button from this tab.
@@ -167,6 +169,13 @@ The sidebar has 5 tabs plus a top-bar Settings page:
   <img src="assets/screenshots/07-session-handoff-and-guard.png" alt="07 - Top-bar Settings: presets, placement, per-session opt-in, Safety Guard toggles, alerts, and budget caps" width="88%" />
 </div>
 
+### 08 · Voice Chief Stage, 6-Channel Mobile Pager & Theme Studio (`v2.0.0`)
+**In one sentence:** Desktop speakers announce safety intercepts out loud, an inline Voice Stage takes hands-free wake commands, mobile pagers keep you posted away from your desk, and Theme Studio skins stay synced across origins.
+
+- **Voice Alerts & Inline Voice Stage (`Alt+V`)**: Pairs DeepSeek native `/v1/tools/tts`, OpenAI `/v1/audio/speech`, and offline browser speech (scrubbing secrets and code paths automatically) with SenseVoice + DeepSeek ASR recognition; wake hands-free VAD by calling your Chief's name and issue real L0–L3 routed commands to `@lead`, while casual voice thoughts queue into `Archives → 🎙️ Notes`.
+- **6-Channel Mobile Pager (`remote-pager.js`)**: Sends scrubbed milestone alerts (pending approvals, elevations, safety blocks, budget stops, and Managed completion) to Feishu, DingTalk, WeCom, Telegram, Discord, or custom HMAC-signed Webhooks.
+- **Standalone Appearance & Theme Studio**: Open directly from Settings to pick any of the 5 curated skins or customize with the DIY Workshop—now featuring `@iridiumgit`'s community **Tide Blue (`tide`)** theme, canvas palette extraction, AI DIY, JSON import/export, and server-side sync under `~/.dsh/chief/`.
+
 ---
 
 ## Glossary
@@ -189,7 +198,10 @@ The sidebar has 5 tabs plus a top-bar Settings page:
 | `⚡ Strong Intervention` | Keeps pushing a locked objective forward if the model stalls, stopping after 3 identical errors. |
 | `⏹ Halt (急停)` | The red button on the input bar that stops all background triggers immediately. |
 | `Handoff Packet` | A pinned summary card used to start a clean new DSH window without re-explaining background. |
-| `Dream Roam` | Background archive organizing and hook tagging during Managed mode, tracked in the `dream` ledger. |
+| `Dream Roam` | Background archive organizing, hook tagging, and voice-inbox digestion during Managed mode (`dream` ledger). |
+| `Voice Chief & Stage` | Redacted speaker alerts plus the inline hands-free Voice Stage (`Alt+V`, name wake, and real `@lead` dispatch). |
+| `Mobile Pager` | Dispatches scrubbed milestone and safety alerts to Feishu, DingTalk, WeCom, Telegram, Discord, or Webhook. |
+| `[[WikiLinks]] & Rollback` | Cross-link project dossiers with `[[Target]]` syntax and restore any of the last 5 automatic `history[]` snapshots. |
 | `Token` | The text unit used for context limits and model billing, roughly one word or 1–2 CJK characters. |
 
 ---
@@ -225,22 +237,23 @@ Yes. You can type plain instructions in the composer, switch presets with one cl
 ## Going deeper
 
 <details>
-<summary>Architecture Evolution: From a Sidebar Notepad to a Multi-Agent Management Hub (v1.0 -> v1.8)</summary>
+<summary>Architecture Evolution: From a Sidebar Notepad to a Multi-Agent Voice Hub (v1.0 -> v2.0)</summary>
 
-What began as a shared-JSON sidebar scratchpad (`dnb-`) grew through practical daily issues into a zero-dependency control hub with **45 backend modules + 39 frontend modules**:
+What began as a shared-JSON sidebar scratchpad (`dnb-`) grew through practical daily issues into a zero-dependency control hub with **53 backend modules + 48 frontend modules**:
 
 <div align="center">
-  <img src="assets/evolution-roadmap-en.gif" alt="dsh-chief v1.0 to v1.7 architecture evolution animation" width="840" />
+  <img src="assets/evolution-roadmap-en.gif" alt="dsh-chief architecture evolution animation" width="840" />
 </div>
 
 ```mermaid
 flowchart LR
   A["v1.0–v1.1\nSidebar Co-Pilot\nCold vaults · Pre-compact save"] --> B["v1.2–v1.2.1\nExecutor + Tiers\nShell/file tools · 4 permission tiers"]
-  B --> C["v1.3\nSplit & Locks\n45 modules · O_EXCL locks"]
+  B --> C["v1.3\nSplit & Locks\nModule split · O_EXCL locks"]
   C --> D["v1.4\nPre-Execute Gate\n9 safety modules · Guard Walls"]
   D --> E["v1.5–v1.6\nContext & Spend\nCognitive Desktop · Flow Canvas · Cap"]
   E --> F["v1.7\nMain Tab + Opt-In\nMain view · Local CLIs · Safety toggles"]
-  F --> G["v1.8\nTheme System + Collab 2.0 + Star Sync\n5 UI skins · Beam Flow · Gemini CLI"]
+  F --> G["v1.8–v1.9\nThemes + Collab 2.0 + Memory\nDIY Studio · Starfield · External Bridge"]
+  G --> H["v2.0\nVoice Chief + Mobile Pager\nSpeaker Alerts · 6-Channel Pager · 3-Protocol Vector"]
 ```
 
 Read the full story and tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md`)](EVOLUTION.en.md)**.
@@ -452,6 +465,7 @@ flowchart TB
 | [Gemini](https://github.com/gemini-code-assist) | Feature development, `pkg/safety/` kernel, Cognitive Desktop, runtime controls, fan gauge & CI gates |
 | [Codex](https://github.com/codex) | Modular architecture split, concurrency stress tests, and red-team boundary audits |
 | [deepseek-ai](https://github.com/deepseek-ai) | DeepSeek Harness host runtime and SuperAgent workflow alignment |
+| [@iridiumgit](https://github.com/iridiumgit) | Community contributor: Issues `#5/#6/#7` dogfooding, multi-origin theme sync & palette JSON export/import UX, and the adaptive Tide Blue theme |
 
 ---
 
