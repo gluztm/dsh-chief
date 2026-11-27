@@ -17,7 +17,7 @@
 ## 演进概览（`v1.0` → `v2.0`）
 
 <div align="center">
-  <img src="assets/evolution-roadmap.gif?v=2.0.0" alt="dsh-chief 架构演进动态图：从右侧记事本到多代理与语音管理中心" width="900" />
+  <img src="assets/evolution-roadmap.gif?v=2.0.1" alt="dsh-chief 架构演进动态图：从右侧记事本到多代理与语音管理中心" width="900" />
 </div>
 
 ```mermaid

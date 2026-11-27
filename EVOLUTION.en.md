@@ -17,7 +17,7 @@ From `v1.0.0` on November 14, 2026 through `v2.0.0` on November 27, 2026 (14 day
 ## Architecture Evolution (`v1.0` → `v2.0`)
 
 <div align="center">
-  <img src="assets/evolution-roadmap-en.gif?v=2.0.0" alt="dsh-chief architecture evolution animation" width="900" />
+  <img src="assets/evolution-roadmap-en.gif?v=2.0.1" alt="dsh-chief architecture evolution animation" width="900" />
 </div>
 
 ```mermaid

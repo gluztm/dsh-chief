@@ -729,7 +729,7 @@ function svgScene8(u) {
     <rect x="438" y="112" width="344" height="36" rx="8" fill="#122822" stroke="#34d399"/>
     <text x="452" y="135" fill="#a7f3d0" font-size="12">\${IS_EN ? 'CJK+Latin BM25 · 5-Rev Rollback · [[WikiLinks]]' : '双语 BM25 搜正文 · 5 版回滚 · [[双链]] 作废预警'}</text>
     <rect x="438" y="156" width="344" height="34" rx="8" fill="#1b1c3a" stroke="#a78bfa"/>
-    <text x="452" y="177" fill="#ddd6fe" font-size="11.5">\${IS_EN ? 'OpenAI/Ollama/Gemini Vector · Tide Blue + Server Sync' : '三协议向量 · 社区「潮汐蓝」+ JSON + 服务端多端同步'}</text>
+    <text x="452" y="177" fill="#ddd6fe" font-size="11.5">\${IS_EN ? 'OpenAI/Ollama/Gemini Vector · Theme Studio + Server Sync' : '三协议向量 · 主题工坊 / 社区皮肤 + 服务端多端同步'}</text>
 
     <rect x="18" y="218" width="784" height="62" rx="12" fill="#0b2821" stroke="#34d399" stroke-width="2.2"/>
     <circle cx="48" cy="249" r="7" fill="#34d399" opacity="\${pulse}"/>

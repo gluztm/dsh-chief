@@ -113,7 +113,7 @@ body { position:relative; display:flex; flex-direction:column;
     </div>
     <div class="card" id="rc4">
       <div class="k"><span>4 · 零介入 + 主题 sync + 喊名唤醒</span><span class="chip-inline chip-ok">0 字节 @lead 隔离</span></div>
-      <div class="v ok">普通闲聊不打扰 · 潮汐蓝多端同步 · Alt+V 免提语音发令</div>
+      <div class="v ok">普通闲聊不打扰 · 主题多端同步 · Alt+V 免提语音发令</div>
     </div>
   </div>
 </div>

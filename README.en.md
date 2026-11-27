@@ -14,7 +14,7 @@
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-<img src="assets/chief-10s-compare.gif?v=2.0.0" alt="Comparison of plain long sessions vs dsh-chief v2.0.0: stays off in plain chats by default, adding Voice Chief alerts, 6-channel mobile pager, Theme Studio server sync, local CLI orchestration, and pre-execute guardrails" width="840" />
+<img src="assets/chief-10s-compare.gif?v=2.0.1" alt="Comparison of plain long sessions vs dsh-chief v2.0.0: stays off in plain chats by default, adding Voice Chief alerts, 6-channel mobile pager, Theme Studio server sync, local CLI orchestration, and pre-execute guardrails" width="840" />
 
 <sub>Read-only by default · Asks before editing workspace · One-command install</sub>
 
@@ -58,7 +58,7 @@ flowchart LR
 - **Keep prompt tokens low**: Only items pinned to the Cognitive Desktop (up to `2,400 tokens / 6 items`) go into each turn; everything else stays on disk until pulled.
 - **Main tab + right sidebar + Collaboration 2.0**: Switch to the top `Chief` tab (hiding the duplicate host input bar); click the top-left live GitHub Star button (shows public star count, supports one-click starring inside the panel via local `gh` CLI, and gracefully falls back to opening GitHub); dispatch local `Codex` / `Claude Code` / `Gemini CLI` with live output streams, 2-hop handoff chaining, and verified subagent/peer routing guards.
 - **Chief-Only Memory Studio, Bilingual BM25 & 3-Protocol Embedding (`v2.0.0`)**: Name your Chief in Settings with a built-in `MEMORY.md` notebook, 2D/3D Constellation Starfield, Ebbinghaus vitality bars, and locked 5-section `USER_PROFILE.md`; Project Archives gain CJK+Latin BM25 full-body search, 5-version `history[]` rollback, and `[[WikiLinks]]` with deprecation warnings; Memory Studio supports `OpenAI / Local Ollama / Google Gemini` embedding plus `mcp-http`, `chief-http`, read-only Obsidian vaults, and `cordis-provider` (all strictly 0-byte isolated from `@lead`).
-- **Voice Chief Alerts, 6-Channel Mobile Pager & Multi-Origin Theme Sync (`v2.0.0`)**: Broadcasts redacted safety-block, approval, budget, and finish alerts through speakers alongside an inline hands-free Voice Stage (`Alt+V`, name-call wake, real L0–L3 `@lead` dispatch, and `Archives → 🎙️ Notes` inbox); forwards mobile alerts via **Feishu / DingTalk / WeCom / Telegram / Discord / Webhook**; and persists curated presets plus DIY Theme Studio (including `@iridiumgit`'s community **Tide Blue** theme and JSON import/export) to `~/.dsh/chief/` across origins.
+- **Voice Chief Alerts, 6-Channel Mobile Pager & Multi-Origin Theme Sync (`v2.0.0`)**: Broadcasts redacted safety-block, approval, budget, and finish alerts through speakers alongside an inline hands-free Voice Stage (`Alt+V`, name-call wake, real L0–L3 `@lead` dispatch, and `Archives → 🎙️ Notes` inbox); forwards mobile alerts via **Feishu / DingTalk / WeCom / Telegram / Discord / Webhook**; and persists curated presets plus DIY Theme Studio (including community skins and JSON import/export) to `~/.dsh/chief/` across origins.
 
 ---
 
@@ -89,7 +89,7 @@ Open the `⚙️` gear in the top bar to switch between these three built-in pre
 
 ## What the panel looks like
 
-<img src="assets/hero-banner.png?v=2.0.0" alt="dsh-chief main cockpit view" width="100%" />
+<img src="assets/hero-banner.png?v=2.0.1" alt="dsh-chief main cockpit view" width="100%" />
 
 Uses a clean Left Rail workspace layout by default (`6 core tabs + standalone Theme Studio + Settings`), keeping each concern separate:
 
@@ -101,7 +101,7 @@ Uses a clean Left Rail workspace layout by default (`6 core tabs + standalone Th
 | `Archives` tab | Manage the Cognitive Desktop and drawers with BM25 search, 5-version history rollback, `[[WikiLinks]]`, and the dedicated `🎙️ Notes` voice subtab. |
 | `Memory` tab | Manage `MEMORY.md`, 2D/3D Starfield, 5-section User Profile, 3-protocol embedding, and external memory bridges (0-byte `@lead` isolated). |
 | `Guards` tab | Top: **🛡️ Safety Block** (3 out-of-the-box Preset Packs v2 + `🚧 Custom Block Rules` with 1-click `⏸` pause). Bottom: **📝 Rules for AI** (`✅ Must Do` / `🚫 Don't Do` / `💡 Notes`). |
-| `🎨 Studio` & `⚙️ Settings` | Standalone Appearance & Theme Studio (5 skins + Tide Blue + DIY sync), Voice TTS/ASR, 6-channel Mobile Pager, and budget cap controls. |
+| `🎨 Studio` & `⚙️ Settings` | Standalone Appearance & Theme Studio (5 skins + community skins + DIY sync), Voice TTS/ASR, 6-channel Mobile Pager, and budget cap controls. |
 
 ### 01 · Chief Cockpit & Inline Voice Stage (`Chief` Tab)
 **In one sentence:** Keep `@lead` untouched on the left while Chief handles speaker alerts, hands-free voice dispatch, and session reports on the right.
@@ -138,7 +138,7 @@ Uses a clean Left Rail workspace layout by default (`6 core tabs + standalone Th
 - Includes out-of-the-box `MEMORY.md` writing with Ebbinghaus vitality tracking, lockable `USER_PROFILE.md`, native **OpenAI / Ollama / Google Gemini** embedding support, and external bridges (`mcp-http`, dual-slot `chief-http`, read-only Obsidian, and `cordis-provider`).
 
 <div align="center">
-  <img src="assets/screenshots/04-dual-tier-goal-and-step-qa.png?v=2.0.0" alt="04 - Chief-Only Memory Studio and 3-Protocol Vector" width="92%" />
+  <img src="assets/screenshots/04-dual-tier-goal-and-step-qa.png?v=2.0.1" alt="04 - Chief-Only Memory Studio and 3-Protocol Vector" width="92%" />
 </div>
 
 ### 05 · Collaboration 2.0 & Direct Local CLIs (`Peers` Tab)
@@ -172,13 +172,13 @@ Uses a clean Left Rail workspace layout by default (`6 core tabs + standalone Th
 </div>
 
 ### 08 · Standalone Appearance & Theme Studio (`🎨 Studio` · `v2.0.0`)
-**In one sentence:** Switch between 5 curated themes or `@iridiumgit`'s community **Tide Blue**, extract palettes from images, and sync skins automatically across origins.
+**In one sentence:** Switch between 5 curated themes or community skins, extract palettes from images, and sync skins automatically across origins.
 
-- **Curated Presets + Tide Blue**: Combines **Frosted Mist / Warm Paper / Botanical / Starlight / Classic Clean** with `@iridiumgit`'s dark/light adaptive **Tide Blue (`tide`)** theme card.
+- **Curated Presets + Community Skins**: Combines **Frosted Mist / Warm Paper / Botanical / Starlight / Classic Clean** with dark/light adaptive community skins.
 - **DIY Workshop & Server Sync**: Supports 4-swatch WCAG derivation, zero-token `<canvas>` palette extraction, 25MB `IndexedDB` wallpapers, AI DIY, **JSON import/export**, and server persistence under `~/.dsh/chief/`.
 
 <div align="center">
-  <img src="assets/screenshots/08-theme-studio-and-voice.png?v=2.0.0" alt="08 - Standalone Theme Studio, Tide Blue and Multi-Origin Sync" width="92%" />
+  <img src="assets/screenshots/08-theme-studio-and-voice.png?v=2.0.1" alt="08 - Standalone Theme Studio, Community Skins and Multi-Origin Sync" width="92%" />
 </div>
 
 ---
@@ -247,7 +247,7 @@ Yes. You can type plain instructions in the composer, switch presets with one cl
 What began as a shared-JSON sidebar scratchpad (`dnb-`) grew through practical daily issues into a zero-dependency control hub with **53 backend modules + 48 frontend modules**:
 
 <div align="center">
-  <img src="assets/evolution-roadmap-en.gif?v=2.0.0" alt="dsh-chief architecture evolution animation" width="840" />
+  <img src="assets/evolution-roadmap-en.gif?v=2.0.1" alt="dsh-chief architecture evolution animation" width="840" />
 </div>
 
 ```mermaid
@@ -376,7 +376,7 @@ Read the full story and tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md
 **In one sentence:** Theme presets & DIY skins persist in `~/.dsh/chief/` across origins, while Memory Studio and Voice Notes stay 0-byte isolated from `@lead`.
 
 - **What goes wrong**: Switching between localhost, LAN, or Tailnet resets browser skins, or mixing assistant notes into system prompts pollutes coding focus.
-- **How `dsh-chief` handles it**: Selected skins (including `@iridiumgit`'s Tide Blue) and DIY palettes sync server-side under `~/.dsh/chief/` with JSON export/import, while `MEMORY.md`, 2D/3D Starfield, locked `USER_PROFILE.md`, and `🎙️ Notes` never inject a single byte into `@lead`.
+- **How `dsh-chief` handles it**: Selected skins (including community skins) and DIY palettes sync server-side under `~/.dsh/chief/` with JSON export/import, while `MEMORY.md`, 2D/3D Starfield, locked `USER_PROFILE.md`, and `🎙️ Notes` never inject a single byte into `@lead`.
 
 </details>
 
