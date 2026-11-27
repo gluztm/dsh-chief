@@ -37,8 +37,18 @@ import {
   toggleSyncHandoffOnDigest,
   copyText,
   retractExternalMemoryApi,
+  recordBrowserVoiceTranscriptApi,
 } from '../api.js'
 import { buildSessionReportMarkdown, downloadSessionReportMarkdown } from '../report.js'
+import { speakChiefText, stopChiefSpeech } from '../tts.js'
+import {
+  voiceRecCanRecord,
+  voiceRecHasBrowserStt,
+  startChiefVoiceRecording,
+  startBrowserSpeechDictation,
+  transcribeRecordedWaveApi,
+  matchChiefWakeCall,
+} from '../voice-recorder.js'
 import {
   Icon,
   Switch,
@@ -222,6 +232,26 @@ export function ChiefTab({ board, view }) {
             style: { display: 'inline-flex', alignItems: 'center', gap: 2 },
             onClick: e => e.stopPropagation(),
           },
+          (() => {
+            const digestText = String((narrative && narrative.text) || '').trim()
+            if (!digestText) return null
+            const digestTtsId = 'digest:' + (view.sessionId || 'global')
+            const ttsP = view.ttsPlayer || {}
+            const isDigestSpeaking = ttsP.itemId === digestTtsId && (ttsP.status === 'playing' || ttsP.status === 'loading')
+            return h('button', {
+              type: 'button',
+              className: 'dnb-tts-btn',
+              'data-active': isDigestSpeaking ? '1' : '0',
+              title: isDigestSpeaking ? bi('停止朗读摘要', 'Stop reading summary') : bi('语音播报当前进展摘要', 'Read current summary aloud'),
+              onClick: () => {
+                if (isDigestSpeaking) stopChiefSpeech()
+                else void speakChiefText(digestText, { itemId: digestTtsId, label: bi('当前进展摘要', 'Current Summary'), style: 'brief' })
+              },
+            },
+              h(Icon, { name: isDigestSpeaking ? 'stop' : 'volume', size: 11.5 }),
+              isDigestSpeaking ? bi('停止', 'Stop') : bi('朗读', 'Speak'),
+            )
+          })(),
           h('button', {
             type: 'button',
             className: 'dnb-ghost-btn',
@@ -442,7 +472,7 @@ export function ChiefTab({ board, view }) {
             if (!eff) return ''
             const opt = THINKING_EFFORT_OPTIONS.find(o => o.key === eff)
             const label = opt ? opt.shortLabel : eff
-            return (it && it.thinkingEffortMode === 'auto') ? `自动→${label}` : `${label}`
+            return (it && it.thinkingEffortMode === 'auto') ? `自动思考·${label}` : `思考${label}`
           }
 
           const isExpandableReply = (item) => {
@@ -530,6 +560,24 @@ export function ChiefTab({ board, view }) {
               ...prev,
               [item.id]: !prev[item.id],
             }))
+            const ttsState = view.ttsPlayer || {}
+            const ttsItemId = 'chat:' + item.id
+            const canSpeakReply = item.role === 'chief' && Boolean(String(item.text || '').trim())
+            const isThisSpeaking = ttsState.itemId === ttsItemId && (ttsState.status === 'playing' || ttsState.status === 'loading')
+            const ttsBtn = canSpeakReply
+              ? h('button', {
+                  type: 'button',
+                  className: 'dnb-tts-btn',
+                  'data-active': isThisSpeaking ? '1' : '0',
+                  'aria-label': isThisSpeaking ? bi('停止朗读', 'Stop reading') : bi('朗读这条回复', 'Read reply aloud'),
+                  title: isThisSpeaking ? bi('点击停止朗读', 'Click to stop') : bi('朗读这条回复', 'Read this reply aloud'),
+                  onClick: e => {
+                    e.stopPropagation()
+                    if (isThisSpeaking) stopChiefSpeech()
+                    else void speakChiefText(item.text, { itemId: ttsItemId, label: summaryLine || bi('参谋回复', 'Chief Reply'), style: 'full' })
+                  },
+                }, h(Icon, { name: isThisSpeaking ? 'stop' : 'volume', size: 11 }))
+              : null
 
             if (!expandable) {
               return h(
@@ -548,9 +596,14 @@ export function ChiefTab({ board, view }) {
                       ? bi('一站式战报', 'Report')
                       : (item.resumeTaskId ? bi('授权后继续', 'Resumed') : primaryActionLabel)),
                   h(
-                    'span',
-                    { className: 'dnb-reply-time' },
-                    effortBadge ? `${effortBadge} · ${timeLabel(item.at)}` : timeLabel(item.at),
+                    'div',
+                    { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
+                    ttsBtn,
+                    h(
+                      'span',
+                      { className: 'dnb-reply-time' },
+                      effortBadge ? `${effortBadge} · ${timeLabel(item.at)}` : timeLabel(item.at),
+                    ),
                   ),
                 ),
                 renderStructuredText(item.text),
@@ -567,25 +620,30 @@ export function ChiefTab({ board, view }) {
                 'data-open': isReplyOpen ? '1' : '0',
               },
               h(
-                'button',
-                {
-                  type: 'button',
-                  className: 'dnb-reply-summary-btn',
-                  title: isReplyOpen ? bi('点击收起详情', 'Click to collapse') : bi('点击展开详情', 'Click to expand'),
-                  onClick: toggleReply,
-                },
+                'div',
+                { className: 'dnb-reply-summary-row' },
                 h(
-                  'span',
-                  { className: 'dnb-reply-summary-left' },
-                  h('span', { className: 'dnb-reply-chevron' }, isReplyOpen ? '▾' : '▸'),
-                  h('span', { className: 'dnb-reply-summary-text' }, summaryLine),
+                  'button',
+                  {
+                    type: 'button',
+                    className: 'dnb-reply-summary-btn',
+                    title: isReplyOpen ? bi('点击收起详情', 'Click to collapse') : bi('点击展开详情', 'Click to expand'),
+                    onClick: toggleReply,
+                  },
+                  h(
+                    'span',
+                    { className: 'dnb-reply-summary-left' },
+                    h('span', { className: 'dnb-reply-chevron' }, isReplyOpen ? '▾' : '▸'),
+                    h('span', { className: 'dnb-reply-summary-text' }, summaryLine),
+                  ),
+                  h(
+                    'span',
+                    { className: 'dnb-reply-summary-right' },
+                    h('span', { className: 'dnb-reply-action-txt', 'data-tone': actionTone }, primaryActionLabel),
+                    h('span', { className: 'dnb-reply-time' }, timeLabel(item.at)),
+                  ),
                 ),
-                h(
-                  'span',
-                  { className: 'dnb-reply-summary-right' },
-                  h('span', { className: 'dnb-reply-action-txt', 'data-tone': actionTone }, primaryActionLabel),
-                  h('span', { className: 'dnb-reply-time' }, timeLabel(item.at)),
-                ),
+                ttsBtn,
               ),
               isReplyOpen
                 ? h(
@@ -634,7 +692,7 @@ export function ChiefTab({ board, view }) {
                 [
                   { key: 'all', label: `${bi('全部', 'All')} ${turns.length}` },
                   { key: 'qa', label: `${bi('问答', 'Q&A')} ${qaCount}` },
-                  { key: 'receipt', label: `${bi('记录', 'Log')} ${receiptCount}` },
+                  { key: 'receipt', label: `${bi('含回执', 'With Log')} ${receiptCount}` },
                 ].map(opt =>
                   h('button', {
                     key: opt.key,
@@ -817,8 +875,37 @@ export function ChiefTab({ board, view }) {
 
 export function ChiefComposerBar({ view, barRef }) {
   const fileInputRef = React.useRef(null)
+  const voiceRecCtrlRef = React.useRef(null)
+  const browserRecCtrlRef = React.useRef(null)
+  const wakeRecCtrlRef = React.useRef(null)
+  const wakeLoopActiveRef = React.useRef(false)
+  const wakeFailCountRef = React.useRef(0)
+  const wakeCooldownRef = React.useRef(0)
+  const voiceLevelTickRef = React.useRef(0)
+  const [voiceElapsedMs, setVoiceElapsedMs] = React.useState(0)
+  const [voiceInterim, setVoiceInterim] = React.useState('')
+  const [voiceUseBrowserStt, setVoiceUseBrowserStt] = React.useState(false)
   const secImages = Array.isArray(view.secImages) ? view.secImages : []
-  const canSend = (Boolean((view.secInput || '').trim()) || secImages.length > 0) && !view.secBusy
+  const canSend = (Boolean((view.secInput || '').trim()) || secImages.length > 0) && !view.secBusy && view.voiceRecState !== 'transcribing'
+
+  React.useEffect(() => () => {
+    wakeLoopActiveRef.current = false
+    try { if (voiceRecCtrlRef.current) voiceRecCtrlRef.current.cancel() } catch {}
+    try { if (browserRecCtrlRef.current) browserRecCtrlRef.current.abort() } catch {}
+    try {
+      if (wakeRecCtrlRef.current) {
+        if (typeof wakeRecCtrlRef.current.cancel === 'function') wakeRecCtrlRef.current.cancel()
+        else if (typeof wakeRecCtrlRef.current.abort === 'function') wakeRecCtrlRef.current.abort()
+      }
+    } catch {}
+    voiceRecCtrlRef.current = null
+    browserRecCtrlRef.current = null
+    wakeRecCtrlRef.current = null
+    runtimeRefs.triggerVoiceAction = null
+    runtimeRefs.exitVoiceMode = null
+    runtimeRefs.toggleVoiceMode = null
+    runtimeRefs.toggleWakeWord = null
+  }, [])
   const peers = (view.secView && Array.isArray(view.secView.peers)) ? view.secView.peers : []
   const fallbackChildren = Array.isArray(view.subagents)
     ? view.subagents.filter(a => a && a.name && a.name !== 'lead').map(a => ({
@@ -858,14 +945,11 @@ export function ChiefComposerBar({ view, barRef }) {
       icon: '👁',
       shortLabel: 'L0 顾问',
       title: 'L0 · 顾问模式',
-      code: 'READ ONLY',
       badgeText: '默认模式',
       badgeTone: 'green',
       bullets: [
-        '只看任务看板和项目情况',
-        '帮你分析问题、提建议',
-        '不会改你的任何文件',
-        '不会插手主对话和子代理的活',
+        '只看任务和项目进展，随时给你分析和建议',
+        '不会修改你的文件、看板，也不打断主对话',
       ],
       footer: '只看不改，只在你问时给建议。',
     },
@@ -875,14 +959,11 @@ export function ChiefComposerBar({ view, barRef }) {
       icon: '🧰',
       shortLabel: 'L1 助手',
       title: 'L1 · 助手模式',
-      code: 'ASSISTANT',
       badgeText: '',
       badgeTone: '',
       bullets: [
-        '包含 L0 顾问的全部能力',
-        '可自己整理记忆、档案和任务看板',
-        '不会直接改你的项目文件',
-        '不会直接插话打断主对话',
+        '可帮你整理任务看板、档案和记忆笔记',
+        '绝不修改你的项目代码，也不打断主对话',
       ],
       footer: '只整理笔记和看板，不碰你的项目代码。',
     },
@@ -892,15 +973,11 @@ export function ChiefComposerBar({ view, barRef }) {
       icon: '🛡️',
       shortLabel: 'L2 参谋',
       title: 'L2 · 参谋模式',
-      code: 'ADVISOR WITH APPROVAL',
       badgeText: '逐项问你',
       badgeTone: 'blue',
       bullets: [
-        '包含 L1 助手的全部能力',
-        '想改项目文件前会先发请求',
-        '想调整主对话或子代理时也会先请示',
-        '每次重要操作都会弹窗问你',
-        '你点同意后才会执行',
+        '需要改文件或调动主对话前，每次都会先弹窗请示你',
+        '只有你点同意后才会执行，全程可控',
       ],
       footer: '先提出修改方案，等你点头同意再动手。',
     },
@@ -910,15 +987,11 @@ export function ChiefComposerBar({ view, barRef }) {
       icon: '⚡',
       shortLabel: 'L3 参谋长',
       title: 'L3 · 参谋长模式',
-      code: 'CHIEF OF STAFF',
       badgeText: '需确认风险',
       badgeTone: 'amber',
       bullets: [
-        '包含 L2 参谋的全部能力',
-        '不用逐个问你，可直接动手推进',
-        '可以切换主对话的模型或状态',
-        '可以协调子代理怎么干活',
-        '开启前需要先看风险说明并打勾确认',
+        '可自主推进任务、切换模型与协调子代理',
+        '权限很高，开启前请先确认风险提示',
       ],
       footer: '权限很高，开启前请确认你了解风险。',
     },
@@ -940,7 +1013,12 @@ export function ChiefComposerBar({ view, barRef }) {
     : String(tm.compactThresholdInput || '64K')
   const isLowTokenThreshold = thresholdMode === 'tokens' && thresholdTokensNum < 32000
   const isLowPctThreshold = thresholdMode === 'pct' && pct < 25
-  const pctSelectChoices = Array.from(new Set([10, 15, 20, 25, 30, 35, 40, 45, 50, 55, 60, 65, 70, 75, 80, 85, 90, 95, pct])).sort((a, b) => a - b)
+  const pctPresetList = [
+    { val: 65, label: '65% 稳妥' },
+    { val: 80, label: '80% 推荐' },
+    { val: 90, label: '90% 极限' },
+  ]
+  const isCustomPct = ![65, 80, 90].includes(pct)
   const isSmartCompact = Boolean(tm.smartCompact)
   const globalSafetyOn = meta.globalSafetyGuardEnabled !== false
   const sessionSafetyOn = meta.sessionSafetyGuardEnabled !== false
@@ -1006,13 +1084,624 @@ export function ChiefComposerBar({ view, barRef }) {
     }
     void updateSecConfig({ tacticalModes: { [key]: val } })
   }
-  const placeholder = secImages.length > 0
-    ? bi('已放 ' + secImages.length + ' 张图，按回车直接发送，或写点说明…', `${secImages.length} image(s) attached. Press Enter to send or add text…`)
-    : (activeTarget === 'auto'
-        ? bi(`直接说你想让${chiefShortName(view)}做什么：整理档案、加拦截规则、改计划或问问题…`, `Tell ${chiefShortName(view)} what to do: organize archives, add block rules, edit plans, or ask…`)
-        : activeTarget === 'all'
-          ? bi('给所有人发消息（', 'Message everyone (') + modeObj.label + ')…'
-          : (bi('给 @', 'To @') + shortAgentName(activePeer ? activePeer.name : activeTarget, true) + ' ' + modeObj.label + '…'))
+  const stopActiveVoiceCapture = (cancelOnly = false) => {
+    if (browserRecCtrlRef.current) {
+      const ctrl = browserRecCtrlRef.current
+      browserRecCtrlRef.current = null
+      try { if (cancelOnly) ctrl.abort(); else ctrl.stop() } catch {}
+      setVoiceInterim('')
+      return null
+    }
+    if (voiceRecCtrlRef.current) {
+      const ctrl = voiceRecCtrlRef.current
+      voiceRecCtrlRef.current = null
+      if (cancelOnly) {
+        try { ctrl.cancel() } catch {}
+        return null
+      }
+      try { return ctrl.stop() } catch { return null }
+    }
+    return null
+  }
+
+  const handleVoiceCaptureFinish = async (captured, purpose) => {
+    if (!captured || !captured.audioBase64 || captured.durationMs < 250 || captured.peak < 0.002) {
+      patch({
+        voiceRecState: 'idle',
+        voiceRecPurpose: '',
+        voiceRecLevel: 0,
+        voiceRecElapsedMs: 0,
+        voiceInterimText: '',
+        notice: bi('🎙️ 录音太短或声音太轻，请靠近麦克风再试一次', '🎙️ Recording too short or quiet, please try again'),
+      })
+      return
+    }
+    patch({
+      voiceRecState: 'transcribing',
+      voiceRecPurpose: purpose,
+      voiceRecLevel: 0,
+      voiceInterimText: '',
+      voiceVadHeardSpeech: false,
+    })
+    try {
+      const res = await transcribeRecordedWaveApi({
+        audioBase64: captured.audioBase64,
+        mimeType: captured.mimeType || 'audio/wav',
+        mode: purpose,
+        durationMs: captured.durationMs || 0,
+      })
+      if (!res || !res.ok || !res.text) {
+        if (voiceRecHasBrowserStt()) setVoiceUseBrowserStt(true)
+        patch({
+          voiceRecState: 'idle',
+          voiceRecPurpose: '',
+          voiceRecLevel: 0,
+          voiceRecElapsedMs: 0,
+          notice: `⚠️ ${(res && res.error) || bi('语音转写失败', 'Transcription failed')}`,
+        })
+        return
+      }
+      if (purpose === 'voice_chat') {
+        patch({ voiceRecState: 'idle', voiceRecPurpose: '', voiceRecLevel: 0, voiceRecElapsedMs: 0 })
+        await submitChiefBar(res.text, '', {
+          voiceChat: true,
+          voiceTranscriptId: res.voiceTranscriptId || '',
+        })
+      } else {
+        const prevText = String(store.secInput || '').trim()
+        const nextText = prevText ? `${prevText} ${res.text}` : res.text
+        patch({
+          secInput: nextText,
+          voiceRecState: 'idle',
+          voiceRecPurpose: '',
+          voiceRecLevel: 0,
+          voiceRecElapsedMs: 0,
+          notice: bi('🎤 已转文字放入许愿框（并同步存入语音手记）', '🎤 Inserted into composer & saved to Voice Inbox'),
+        })
+        if (runtimeRefs.secInputEl && typeof runtimeRefs.secInputEl.focus === 'function') {
+          runtimeRefs.secInputEl.focus()
+        }
+      }
+    } catch (err) {
+      patch({
+        voiceRecState: 'idle',
+        voiceRecPurpose: '',
+        voiceRecLevel: 0,
+        voiceRecElapsedMs: 0,
+        notice: `⚠️ ${String((err && err.message) || err || bi('语音识别异常', 'Voice error'))}`,
+      })
+    }
+  }
+
+  const handleVoiceAction = async (purpose = 'dictation') => {
+    if (view.secBusy || view.voiceRecState === 'transcribing') return
+    if (view.voiceRecState === 'recording') {
+      const activePurpose = view.voiceRecPurpose || purpose
+      const captured = stopActiveVoiceCapture(false)
+      if (captured) {
+        await handleVoiceCaptureFinish(captured, activePurpose)
+      } else {
+        patch({
+          voiceRecState: 'idle',
+          voiceRecPurpose: '',
+          voiceRecLevel: 0,
+          voiceRecElapsedMs: 0,
+          voiceInterimText: '',
+        })
+      }
+      return
+    }
+
+    stopChiefSpeech()
+    setVoiceElapsedMs(0)
+    setVoiceInterim('')
+    voiceLevelTickRef.current = 0
+    const vadActive = purpose === 'voice_chat' && Boolean(store.voiceHandsFree)
+    const vadSilenceMs = Number(meta.tts && meta.tts.vadSilenceMs) || 1300
+
+    if (voiceRecCanRecord() && !voiceUseBrowserStt) {
+      try {
+        patch({
+          voiceRecState: 'recording',
+          voiceRecPurpose: purpose,
+          voiceRecLevel: 0,
+          voiceRecElapsedMs: 0,
+          voiceInterimText: '',
+          voiceVadHeardSpeech: false,
+        })
+        voiceRecCtrlRef.current = await startChiefVoiceRecording({
+          onLevel: (lv, ms) => {
+            setVoiceElapsedMs(ms)
+            const now = Date.now()
+            if (now - voiceLevelTickRef.current >= 80) {
+              voiceLevelTickRef.current = now
+              patch({
+                voiceRecElapsedMs: ms,
+                voiceRecLevel: Math.min(1, Math.max(0, Number(lv) * 4.5)),
+              })
+            }
+          },
+          onMaxDuration: () => {
+            const cap = stopActiveVoiceCapture(false)
+            if (cap) void handleVoiceCaptureFinish(cap, purpose)
+          },
+          vad: vadActive
+            ? {
+                enabled: true,
+                silenceMs: vadSilenceMs,
+                onSpeechStart: () => patch({ voiceVadHeardSpeech: true }),
+                onAutoStop: reason => {
+                  if (reason === 'idle-timeout') {
+                    stopActiveVoiceCapture(true)
+                    patch({
+                      voiceRecState: 'idle',
+                      voiceRecPurpose: '',
+                      voiceRecLevel: 0,
+                      voiceRecElapsedMs: 0,
+                      voiceInterimText: '',
+                      voiceVadHeardSpeech: false,
+                      notice: bi('🎧 一段时间未听到声音，免提已暂停；轻触光球随时继续', '🎧 Hands-free paused after silence; tap orb to resume'),
+                    })
+                    return
+                  }
+                  const cap = stopActiveVoiceCapture(false)
+                  if (cap) void handleVoiceCaptureFinish(cap, purpose)
+                },
+              }
+            : null,
+        })
+        return
+      } catch (err) {
+        voiceRecCtrlRef.current = null
+        if (!voiceRecHasBrowserStt()) {
+          patch({
+            voiceRecState: 'idle',
+            voiceRecPurpose: '',
+            voiceRecLevel: 0,
+            voiceRecElapsedMs: 0,
+            notice: `⚠️ ${String((err && err.message) || err || bi('无法打开麦克风', 'Microphone unavailable'))}`,
+          })
+          return
+        }
+      }
+    }
+
+    if (voiceRecHasBrowserStt()) {
+      patch({
+        voiceRecState: 'recording',
+        voiceRecPurpose: purpose,
+        voiceRecLevel: 0.18,
+        voiceRecElapsedMs: 0,
+        voiceInterimText: '',
+      })
+      browserRecCtrlRef.current = startBrowserSpeechDictation({
+        lang: 'zh-CN',
+        onInterim: t => {
+          setVoiceInterim(t)
+          patch({ voiceInterimText: t })
+        },
+        onResult: async finalTxt => {
+          browserRecCtrlRef.current = null
+          setVoiceInterim('')
+          patch({
+            voiceRecState: 'idle',
+            voiceRecPurpose: '',
+            voiceRecLevel: 0,
+            voiceRecElapsedMs: 0,
+            voiceInterimText: '',
+          })
+          if (!finalTxt) return
+          const rec = await recordBrowserVoiceTranscriptApi({
+            text: finalTxt,
+            mode: purpose,
+            provider: 'browser',
+          })
+          const vTid = (rec && rec.ok && rec.id) ? rec.id : ''
+          if (purpose === 'voice_chat') {
+            await submitChiefBar(finalTxt, '', { voiceChat: true, voiceTranscriptId: vTid })
+          } else {
+            const prevText = String(store.secInput || '').trim()
+            patch({ secInput: prevText ? `${prevText} ${finalTxt}` : finalTxt })
+          }
+        },
+        onError: errCode => {
+          browserRecCtrlRef.current = null
+          setVoiceInterim('')
+          const errMap = {
+            'not-allowed': bi('未允许麦克风权限，请在浏览器地址栏允许后再试（或检查 DeepSeek 凭据走云端转写）', 'Microphone permission denied; allow access in browser settings'),
+            'service-not-allowed': bi('当前浏览器限制了在线语音识别服务，请授予麦克风权限或改用文字输入', 'Speech recognition service disallowed'),
+            'audio-capture': bi('未检测到可用的麦克风设备，请检查电脑录音输入设置', 'No working microphone device found'),
+            'no-speech': bi('刚才没有听到说话声音，请靠近麦克风再试一次', 'No speech heard, please try again'),
+            network: bi('浏览器语音识别连不上云端服务，建议改用文字或检查网络连接', 'Browser speech recognition network error'),
+            aborted: bi('语音录制已取消', 'Voice input cancelled'),
+          }
+          const friendlyMsg = errMap[String(errCode || '').toLowerCase()] || `${bi('语音识别遇到问题：', 'Speech error: ')}${errCode}`
+          patch({
+            voiceRecState: 'idle',
+            voiceRecPurpose: '',
+            voiceRecLevel: 0,
+            voiceRecElapsedMs: 0,
+            voiceInterimText: '',
+            notice: `⚠️ ${friendlyMsg}`,
+          })
+        },
+        onEnd: () => {
+          browserRecCtrlRef.current = null
+          setVoiceInterim('')
+          if (store.voiceRecState === 'recording') {
+            patch({
+              voiceRecState: 'idle',
+              voiceRecPurpose: '',
+              voiceRecLevel: 0,
+              voiceRecElapsedMs: 0,
+              voiceInterimText: '',
+            })
+          }
+        },
+      })
+      return
+    }
+
+    patch({
+      notice: bi('当前环境未检测到可用麦克风接口，请检查系统录音权限。', 'No microphone capture API detected in current environment.'),
+    })
+  }
+
+  const getWakeNames = () => {
+    const custom = String((store.chiefMeta && store.chiefMeta.chiefName) || '').trim()
+    const shortN = chiefShortName(store)
+    const dispN = chiefDisplayName(store)
+    return [custom, shortN, dispN, '参谋长', '小参谋'].filter(Boolean)
+  }
+
+  const checkMicUnavailable = async () => {
+    try {
+      if (typeof navigator !== 'undefined' && navigator.permissions && typeof navigator.permissions.query === 'function') {
+        const st = await navigator.permissions.query({ name: 'microphone' })
+        if (st && st.state === 'denied') return true
+      }
+      if (typeof navigator !== 'undefined' && navigator.mediaDevices && typeof navigator.mediaDevices.enumerateDevices === 'function') {
+        const devs = await navigator.mediaDevices.enumerateDevices()
+        if (Array.isArray(devs) && devs.length > 0 && !devs.some(d => d && d.kind === 'audioinput')) {
+          return true
+        }
+      }
+    } catch {}
+    return false
+  }
+
+  const stopWakeWordListener = (disableSetting = false) => {
+    wakeLoopActiveRef.current = false
+    try {
+      if (wakeRecCtrlRef.current) {
+        if (typeof wakeRecCtrlRef.current.cancel === 'function') wakeRecCtrlRef.current.cancel()
+        else if (typeof wakeRecCtrlRef.current.abort === 'function') wakeRecCtrlRef.current.abort()
+      }
+    } catch {}
+    wakeRecCtrlRef.current = null
+    patch({
+      voiceWakeListening: false,
+      ...(disableSetting ? { voiceWakeEnabled: false } : {}),
+    })
+  }
+
+  const activateVoiceByWakeCall = async (matchInfo, rawText, fromMic = false) => {
+    stopWakeWordListener(false)
+    const micUnavailable = await checkMicUnavailable()
+    const handsFreeReady = fromMic && !micUnavailable
+    patch({
+      voiceModeActive: true,
+      voiceStageMinimized: false,
+      voiceHandsFree: handsFreeReady,
+      voiceVadHeardSpeech: false,
+      voiceHandoffDraft: '',
+      voiceInterimText: '',
+      secInput: '',
+    })
+    if (matchInfo && matchInfo.isGreetingOnly) {
+      const chiefTitle = chiefShortName(store)
+      const replyText = bi(
+        `我在呢！我是${chiefTitle}，直接说吧～`,
+        `I'm here! This is ${chiefTitle}, go ahead.`,
+      )
+      patch({
+        secLatestReply: {
+          text: replyText,
+          actions: ['🎙️ 叫名唤醒'],
+          at: Date.now(),
+        },
+      })
+      const speakRes = await speakChiefText(replyText, {
+        itemId: `wake:${Date.now()}`,
+        label: bi('叫名唤醒', 'Wake Reply'),
+        style: 'full',
+      })
+      if (
+        fromMic
+        && !micUnavailable
+        && store.voiceModeActive
+        && !store.secBusy
+        && store.voiceRecState === 'idle'
+        && !(speakRes && speakRes.cancelled)
+      ) {
+        setTimeout(() => {
+          if (store.voiceModeActive && !store.secBusy && store.voiceRecState === 'idle') {
+            void handleVoiceAction('voice_chat')
+          }
+        }, 280)
+      }
+      return
+    }
+    const prompt = (matchInfo && matchInfo.remainder) ? matchInfo.remainder : rawText
+    await submitChiefBar(prompt, '', { voiceChat: true })
+  }
+
+  const startBrowserWakeFallback = () => {
+    if (!voiceRecHasBrowserStt()) return false
+    const handleWakeTranscript = (txt) => {
+      const clean = String(txt || '').trim()
+      if (!clean || !store.voiceWakeEnabled || store.voiceModeActive) return
+      const now = Date.now()
+      if (now - wakeCooldownRef.current < 3000) return
+      const hit = matchChiefWakeCall(clean, getWakeNames(), { allowAnywhere: true })
+      if (hit.matched) {
+        wakeCooldownRef.current = now
+        void activateVoiceByWakeCall(hit, clean, true)
+      }
+    }
+    wakeRecCtrlRef.current = startBrowserSpeechDictation({
+      lang: 'zh-CN',
+      continuous: true,
+      onInterim: handleWakeTranscript,
+      onResult: handleWakeTranscript,
+      onError: () => {
+        wakeRecCtrlRef.current = null
+        stopWakeWordListener(false)
+      },
+      onEnd: () => {
+        wakeRecCtrlRef.current = null
+        if (wakeLoopActiveRef.current && store.voiceWakeEnabled && !store.voiceModeActive) {
+          setTimeout(() => {
+            if (wakeLoopActiveRef.current && store.voiceWakeEnabled && !store.voiceModeActive && !wakeRecCtrlRef.current) {
+              startBrowserWakeFallback()
+            }
+          }, 600)
+        } else {
+          patch({ voiceWakeListening: false })
+        }
+      },
+    })
+    return Boolean(wakeRecCtrlRef.current)
+  }
+
+  const runLocalWakeCycle = async () => {
+    if (!wakeLoopActiveRef.current || !store.voiceWakeEnabled || store.voiceModeActive) return
+    if (store.secBusy || store.voiceRecState !== 'idle') {
+      setTimeout(() => { void runLocalWakeCycle() }, 800)
+      return
+    }
+    let settled = false
+    const finishSegment = async (reason) => {
+      if (settled) return
+      settled = true
+      const ctrl = wakeRecCtrlRef.current
+      wakeRecCtrlRef.current = null
+      if (!ctrl) return
+      if (reason === 'idle-timeout') {
+        try { ctrl.cancel() } catch {}
+        if (wakeLoopActiveRef.current && store.voiceWakeEnabled && !store.voiceModeActive) {
+          setTimeout(() => { void runLocalWakeCycle() }, 120)
+        }
+        return
+      }
+      let cap = null
+      try { cap = ctrl.stop() } catch {}
+      if (cap && cap.audioBase64 && cap.durationMs >= 200 && cap.peak >= 0.004) {
+        try {
+          const res = await transcribeRecordedWaveApi({
+            audioBase64: cap.audioBase64,
+            mimeType: cap.mimeType || 'audio/wav',
+            mode: 'dictation',
+            durationMs: cap.durationMs || 0,
+            prefer: 'auto',
+            saveToInbox: false,
+          })
+          if (res && res.ok) {
+            wakeFailCountRef.current = 0
+            const heardText = String(res.text || '').trim()
+            if (heardText) {
+              const hit = matchChiefWakeCall(heardText, getWakeNames(), { allowAnywhere: true })
+              if (hit.matched) {
+                wakeCooldownRef.current = Date.now()
+                await activateVoiceByWakeCall(hit, heardText, true)
+                return
+              }
+            }
+          } else {
+            wakeFailCountRef.current += 1
+          }
+        } catch {
+          wakeFailCountRef.current += 1
+        }
+        if (wakeFailCountRef.current >= 3) {
+          if (startBrowserWakeFallback()) return
+          stopWakeWordListener(false)
+          patch({
+            notice: bi(
+              `本地语音转写暂不可用；直接在输入框喊「${chiefShortName(store)}」也能唤醒语音模式`,
+              `Local speech recognition unavailable; typing "${chiefShortName(store)}" also wakes Voice Mode`,
+            ),
+          })
+          return
+        }
+      }
+      if (wakeLoopActiveRef.current && store.voiceWakeEnabled && !store.voiceModeActive) {
+        setTimeout(() => { void runLocalWakeCycle() }, 120)
+      }
+    }
+
+    try {
+      wakeRecCtrlRef.current = await startChiefVoiceRecording({
+        maxDurationMs: 6500,
+        onMaxDuration: () => { void finishSegment('max-duration') },
+        vad: {
+          enabled: true,
+          speechThreshold: 0.015,
+          silenceMs: 750,
+          minSpeechMs: 200,
+          maxIdleMs: 18000,
+          onAutoStop: reason => { void finishSegment(reason) },
+        },
+      })
+    } catch {
+      wakeRecCtrlRef.current = null
+      if (startBrowserWakeFallback()) return
+      stopWakeWordListener(false)
+      patch({
+        notice: bi(
+          `无法打开麦克风；直接在输入框喊「${chiefShortName(store)}」也能自动进入语音模式`,
+          `Cannot open mic; typing "${chiefShortName(store)}" also enters Voice Mode`,
+        ),
+      })
+    }
+  }
+
+  const startWakeWordListener = async () => {
+    if (wakeLoopActiveRef.current || wakeRecCtrlRef.current) return
+    const micUnavailable = await checkMicUnavailable()
+    if (micUnavailable) {
+      patch({
+        voiceWakeEnabled: false,
+        voiceWakeListening: false,
+        notice: bi(
+          `未检测到可用麦克风权限；直接在输入框喊「${chiefShortName(store)}」同样可自动唤醒语音模式`,
+          `No mic permission detected; typing "${chiefShortName(store)}" also wakes Voice Mode`,
+        ),
+      })
+      return
+    }
+    if (voiceRecCanRecord()) {
+      wakeLoopActiveRef.current = true
+      wakeFailCountRef.current = 0
+      const wakeShort = chiefShortName(store)
+      patch({
+        voiceWakeEnabled: true,
+        voiceWakeListening: true,
+        notice: bi(
+          `🎙️ 叫名唤醒已开启：随时喊「${wakeShort && wakeShort !== '参谋长' ? `${wakeShort} / 参谋长` : '参谋长'}」自动进入语音模式`,
+          `🎙️ Wake Call ON: say "${wakeShort || 'Chief'}" anytime to enter Voice Mode`,
+        ),
+      })
+      void runLocalWakeCycle()
+      return
+    }
+    if (voiceRecHasBrowserStt()) {
+      wakeLoopActiveRef.current = true
+      patch({ voiceWakeEnabled: true, voiceWakeListening: true })
+      if (startBrowserWakeFallback()) return
+    }
+    patch({
+      voiceWakeEnabled: false,
+      voiceWakeListening: false,
+      notice: bi(
+        `当前环境不支持麦克风识别；直接在输入框喊「${chiefShortName(store)}」也能唤醒语音模式`,
+        `Mic recognition unavailable; typing "${chiefShortName(store)}" also wakes Voice Mode`,
+      ),
+    })
+  }
+
+  const toggleWakeWord = async () => {
+    if (store.voiceWakeEnabled || store.voiceWakeListening) {
+      stopWakeWordListener(true)
+      patch({ notice: bi('已关闭叫名唤醒待命', 'Wake Call OFF') })
+      return
+    }
+    await startWakeWordListener()
+  }
+
+  const exitVoiceModeAll = () => {
+    stopActiveVoiceCapture(true)
+    stopChiefSpeech()
+    patch({
+      voiceModeActive: false,
+      voiceStageMinimized: false,
+      voiceHandsFree: false,
+      voiceVadHeardSpeech: false,
+      voiceHandoffDraft: '',
+      voiceRecState: 'idle',
+      voiceRecPurpose: '',
+      voiceRecLevel: 0,
+      voiceRecElapsedMs: 0,
+      voiceInterimText: '',
+    })
+    if (store.voiceWakeEnabled) {
+      setTimeout(() => {
+        if (store.voiceWakeEnabled && !store.voiceModeActive) {
+          void startWakeWordListener()
+        }
+      }, 400)
+    }
+  }
+
+  const toggleVoiceMode = async () => {
+    const next = !view.voiceModeActive
+    if (!next) {
+      exitVoiceModeAll()
+      return
+    }
+    stopWakeWordListener(false)
+    let defaultHandsFree = Boolean(meta.tts && meta.tts.handsFreeVad)
+    const micUnavailable = await checkMicUnavailable()
+    if (micUnavailable) defaultHandsFree = false
+    patch({
+      voiceModeActive: true,
+      voiceStageMinimized: false,
+      voiceHandsFree: defaultHandsFree,
+      voiceVadHeardSpeech: false,
+      voiceHandoffDraft: '',
+    })
+    if (defaultHandsFree && !micUnavailable) {
+      setTimeout(() => {
+        if (store.voiceModeActive && store.voiceHandsFree && store.voiceRecState === 'idle' && !store.secBusy) {
+          void handleVoiceAction('voice_chat')
+        }
+      }, 120)
+    }
+  }
+
+  runtimeRefs.triggerVoiceAction = handleVoiceAction
+  runtimeRefs.exitVoiceMode = exitVoiceModeAll
+  runtimeRefs.toggleVoiceMode = toggleVoiceMode
+  runtimeRefs.toggleWakeWord = toggleWakeWord
+
+  const submitCurrentComposer = () => {
+    const rawText = String(store.secInput || '').trim()
+    const imgs = Array.isArray(store.secImages) ? store.secImages : []
+    if (!view.voiceModeActive && !overrideHasExplicitTarget(activeTarget) && rawText && !imgs.length) {
+      const wakeHit = matchChiefWakeCall(rawText, getWakeNames())
+      if (wakeHit.matched) {
+        return activateVoiceByWakeCall(wakeHit, rawText, false)
+      }
+    }
+    if (view.voiceModeActive && !overrideHasExplicitTarget(activeTarget)) {
+      return submitChiefBar('', '', { voiceChat: true })
+    }
+    return submitChiefBar()
+  }
+
+  function overrideHasExplicitTarget(tgt) {
+    return tgt && tgt !== 'auto'
+  }
+
+  const placeholder = view.voiceModeActive
+    ? bi('✨ 极速口语模式（秒回并自动朗读）：打字回车或点上方开麦…', '✨ Voice Mode (fast chat + TTS): type or tap talk…')
+    : (secImages.length > 0
+        ? bi('已放 ' + secImages.length + ' 张图，按回车发送或补充说明…', `${secImages.length} image(s) attached. Enter to send…`)
+        : (activeTarget === 'auto'
+            ? bi(`问问${chiefShortName(view)}，或吩咐改计划、加规则…`, `Ask ${chiefShortName(view)} or give instructions…`)
+            : activeTarget === 'all'
+              ? bi('给所有人发消息（', 'Message everyone (') + modeObj.label + ')…'
+              : (bi('给 @', 'To @') + shortAgentName(activePeer ? activePeer.name : activeTarget, true) + ' ' + modeObj.label + '…')))
 
   return h(
     'div',
@@ -1221,25 +1910,60 @@ export function ChiefComposerBar({ view, barRef }) {
                     }, '按 Token 数'),
                   ),
                   thresholdMode === 'pct'
-                    ? h('select', {
-                        value: String(pct),
-                        title: '对话占满多少比例时自动存档并压缩（10%–95%，低于 25% 会提醒）',
-                        style: {
-                          height: 26,
-                          minWidth: 74,
-                          borderRadius: 8,
-                          border: isLowPctThreshold ? '1px solid var(--dnb-amber)' : '1px solid var(--dnb-border-strong)',
-                          background: 'var(--dnb-card)',
-                          color: 'var(--dnb-text)',
-                          fontSize: 11.5,
-                          fontWeight: 500,
-                          padding: '0 8px',
-                          cursor: 'pointer',
-                        },
-                        onChange: e => toggleTacticalField('compactThresholdPct', Number(e.target.value)),
-                      }, pctSelectChoices.map(v =>
-                        h('option', { key: v, value: String(v) }, `${v}%`),
-                      ))
+                    ? h(
+                        'div',
+                        { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
+                        pctPresetList.map(opt =>
+                          h('button', {
+                            key: opt.val,
+                            type: 'button',
+                            className: 'dnb-mini-btn',
+                            'data-tone': pct === opt.val && !view.compactCustomOpen ? 'accent' : undefined,
+                            onClick: () => {
+                              patch({ compactCustomOpen: false })
+                              toggleTacticalField('compactThresholdPct', opt.val)
+                            },
+                          }, opt.label)),
+                        h('button', {
+                          type: 'button',
+                          className: 'dnb-mini-btn',
+                          'data-tone': (view.compactCustomOpen || isCustomPct) ? 'accent' : undefined,
+                          onClick: () => patch({ compactCustomOpen: !view.compactCustomOpen }),
+                        }, isCustomPct ? `自定义 (${pct}%)` : '自定义'),
+                        (view.compactCustomOpen || isCustomPct)
+                          ? h('input', {
+                              type: 'number',
+                              min: 10,
+                              max: 95,
+                              value: view.compactPctDraft !== undefined && view.compactPctDraft !== null ? String(view.compactPctDraft) : String(pct),
+                              title: '输入 10–95 之间的百分比后回车保存',
+                              style: {
+                                width: 58,
+                                height: 24,
+                                borderRadius: 7,
+                                border: isLowPctThreshold ? '1px solid var(--dnb-amber)' : '1px solid var(--dnb-border-strong)',
+                                background: 'var(--dnb-card)',
+                                color: 'var(--dnb-text)',
+                                fontSize: 11.5,
+                                padding: '0 6px',
+                              },
+                              onChange: e => patch({ compactPctDraft: e.target.value }),
+                              onKeyDown: e => {
+                                if (e.key === 'Enter') {
+                                  e.preventDefault()
+                                  const v = Number(e.currentTarget.value)
+                                  patch({ compactPctDraft: null, compactCustomOpen: false })
+                                  if (Number.isFinite(v)) toggleTacticalField('compactThresholdPct', v)
+                                }
+                              },
+                              onBlur: e => {
+                                const v = Number(e.currentTarget.value)
+                                patch({ compactPctDraft: null })
+                                if (Number.isFinite(v) && v !== pct) toggleTacticalField('compactThresholdPct', v)
+                              },
+                            })
+                          : null,
+                      )
                     : h(
                         'div',
                         { style: { display: 'flex', alignItems: 'center', gap: 6 } },
@@ -1297,35 +2021,7 @@ export function ChiefComposerBar({ view, barRef }) {
                       : `现在设的 ${pct}% 太低了，压缩太勤容易丢细节，建议选 30%–80%`))
               : null,
           ),
-          // Row 3: Strict Verify
-          h(
-            'div',
-            { className: 'dnb-tactical-row' },
-            h(
-              'div',
-              { style: { flex: 1, minWidth: 0 } },
-              h('div', { style: { fontSize: 12, fontWeight: 500, color: 'var(--dnb-text)', display: 'flex', alignItems: 'center', gap: 6 } },
-                h(Icon, { name: 'checkCircle', size: 12.5, style: { color: tm.strictVerify ? 'var(--dnb-sage)' : 'var(--dnb-text-3)' } }),
-                '完工前核实证据'),
-              h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '必须贴出文件或命令运行结果，没核实就不算完工'),
-            ),
-            h(Switch, { checked: Boolean(tm.strictVerify), onChange: v => toggleTacticalField('strictVerify', v) }),
-          ),
-          // Row 5: Concise Brief
-          h(
-            'div',
-            { className: 'dnb-tactical-row' },
-            h(
-              'div',
-              { style: { flex: 1, minWidth: 0 } },
-              h('div', { style: { fontSize: 12, fontWeight: 500, color: 'var(--dnb-text)', display: 'flex', alignItems: 'center', gap: 6 } },
-                h(Icon, { name: 'alignLeft', size: 12.5, style: { color: tm.conciseBrief ? 'var(--dnb-accent)' : 'var(--dnb-text-3)' } }),
-                '极简汇报模式'),
-              h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '只用几句大白话汇报重点，少放复杂数字'),
-            ),
-            h(Switch, { checked: Boolean(tm.conciseBrief), onChange: v => toggleTacticalField('conciseBrief', v) }),
-          ),
-          // Row 5.5: Chief-exclusive External Memory quick toggle
+          // Row 3: Chief-exclusive External Memory quick toggle
           (() => {
             const extCfg = meta.externalMemory || {}
             const extStatus = meta.externalMemoryStatus || {}
@@ -1382,81 +2078,127 @@ export function ChiefComposerBar({ view, barRef }) {
               ),
             )
           })(),
-          // Row 6: Chief Thinking Effort Adaptive Control + Team Effort Mode (Auto / Manual)
-          h(
-            'div',
-            { className: 'dnb-tactical-row', style: { flexDirection: 'column', alignItems: 'stretch', gap: 6 } },
-            h('div', { style: { fontSize: 12, fontWeight: 500, color: 'var(--dnb-text)', display: 'flex', alignItems: 'center', gap: 6 } },
-              h(Icon, { name: 'sparkles', size: 12.5, style: { color: 'var(--dnb-accent)' } }),
-              '参谋长思考强度'),
-            h(EffortFanGauge, {
-              value: meta.thinkingEffort || 'auto',
-              skin: view.uiSkin,
-              onChange: nextKey => void updateSecConfig({ thinkingEffort: nextKey }),
-            }),
-            (() => {
-              const teamMode = meta.teamEffortMode === 'manual' ? 'manual' : 'auto'
-              return h(
-                'div',
-                { className: 'dnb-team-effort-row' },
-                h(
-                  'div',
-                  { className: 'dnb-team-effort-info' },
-                  h('div', { className: 'dnb-team-effort-title' }, '主对话和子代理的思考深度'),
-                  h('div', { className: 'dnb-team-effort-sub' },
-                    teamMode === 'manual'
-                      ? '手动：参谋长不插手，由你自己调'
-                      : '自动（默认）：参谋长按任务难度帮你调'),
-                ),
-                h(
-                  'div',
-                  { className: 'dnb-team-effort-seg', role: 'group', 'aria-label': '团队思考深度调整方式' },
-                  h('button', {
-                    type: 'button',
-                    className: 'dnb-team-effort-btn',
-                    'data-active': teamMode === 'auto' ? '1' : '0',
-                    title: '自动：按任务难度帮你调主对话和子代理的思考深度',
-                    onClick: () => {
-                      if (teamMode !== 'auto') void updateSecConfig({ teamEffortMode: 'auto' })
-                    },
-                  }, '自动'),
-                  h('button', {
-                    type: 'button',
-                    className: 'dnb-team-effort-btn',
-                    'data-active': teamMode === 'manual' ? '1' : '0',
-                    title: '手动：参谋长不再改动主对话和子代理的思考深度',
-                    onClick: () => {
-                      if (teamMode !== 'manual') void updateSecConfig({ teamEffortMode: 'manual' })
-                    },
-                  }, '手动'),
-                ),
-              )
-            })(),
-          ),
-          // Collapsible Dual Mandatory Disclaimer Footer
+          // Collapsible Advanced Controls Group (collapsed by default)
           h(
             'div',
             { style: { marginTop: 2 } },
             h('button', {
               type: 'button',
               className: 'dnb-text-filter-btn',
-              style: { width: '100%', justifyContent: 'space-between', padding: '4px 6px', fontSize: 10.5 },
-              onClick: () => patch({ chiefDisclaimerOpen: !view.chiefDisclaimerOpen }),
+              style: { width: '100%', justifyContent: 'space-between', padding: '5px 8px', fontSize: 11, borderRadius: 8, background: 'var(--dnb-surface-sub, rgba(128,128,128,0.06))' },
+              onClick: () => patch({ tacticalAdvancedOpen: !view.tacticalAdvancedOpen }),
             },
-              h('span', null, 'ⓘ 注意事项：模型效果和规则冲突'),
-              h('span', { style: { fontSize: 10, opacity: 0.7 } }, view.chiefDisclaimerOpen ? '▴ 收起' : '▾ 展开'),
+              h('span', { style: { fontWeight: 550, color: 'var(--dnb-text-2)' } },
+                view.tacticalAdvancedOpen ? '▾ 更多高级控制（核实 / 极简 / 思考深度）' : '▸ 更多高级控制（核实 / 极简 / 思考深度 / 注意事项）'),
+              h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)', whiteSpace: 'nowrap', flexShrink: 0 } },
+                `思考:${(THINKING_EFFORT_OPTIONS.find(o => o.key === (meta.thinkingEffort || 'auto')) || {}).shortLabel || '自动'}`),
             ),
-            view.chiefDisclaimerOpen
+            view.tacticalAdvancedOpen
               ? h(
                   'div',
-                  { className: 'dnb-disclaimer-box', style: { marginTop: 4 } },
-                  h('div', { style: { marginBottom: 4 } },
-                    h('strong', null, '说明 1（模型能力）：'),
-                    '自动检查、存档压缩和规则拦截的效果，主要看你给参谋长选了哪个大模型。不同模型在拆任务和听指令上的表现差别很大。',
+                  { style: { display: 'flex', flexDirection: 'column', gap: 6, marginTop: 6 } },
+                  h(
+                    'div',
+                    { className: 'dnb-tactical-row' },
+                    h(
+                      'div',
+                      { style: { flex: 1, minWidth: 0 } },
+                      h('div', { style: { fontSize: 12, fontWeight: 500, color: 'var(--dnb-text)', display: 'flex', alignItems: 'center', gap: 6 } },
+                        h(Icon, { name: 'checkCircle', size: 12.5, style: { color: tm.strictVerify ? 'var(--dnb-sage)' : 'var(--dnb-text-3)' } }),
+                        '完工前核实证据'),
+                      h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '必须贴出文件或命令运行结果，没核实就不算完工'),
+                    ),
+                    h(Switch, { checked: Boolean(tm.strictVerify), onChange: v => toggleTacticalField('strictVerify', v) }),
                   ),
-                  h('div', null,
-                    h('strong', null, '说明 2（规则冲突）：'),
-                    '如果你在项目里加了太多其他的提示词或全局 Rules，可能会和本插件的规则打架，导致重复提醒或跑偏。',
+                  h(
+                    'div',
+                    { className: 'dnb-tactical-row' },
+                    h(
+                      'div',
+                      { style: { flex: 1, minWidth: 0 } },
+                      h('div', { style: { fontSize: 12, fontWeight: 500, color: 'var(--dnb-text)', display: 'flex', alignItems: 'center', gap: 6 } },
+                        h(Icon, { name: 'alignLeft', size: 12.5, style: { color: tm.conciseBrief ? 'var(--dnb-accent)' : 'var(--dnb-text-3)' } }),
+                        '极简汇报模式'),
+                      h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 1 } }, '只用几句大白话汇报重点，少放复杂数字'),
+                    ),
+                    h(Switch, { checked: Boolean(tm.conciseBrief), onChange: v => toggleTacticalField('conciseBrief', v) }),
+                  ),
+                  h(
+                    'div',
+                    { className: 'dnb-tactical-row', style: { flexDirection: 'column', alignItems: 'stretch', gap: 6 } },
+                    h('div', { style: { fontSize: 12, fontWeight: 500, color: 'var(--dnb-text)', display: 'flex', alignItems: 'center', gap: 6 } },
+                      h(Icon, { name: 'sparkles', size: 12.5, style: { color: 'var(--dnb-accent)' } }),
+                      '参谋长思考强度'),
+                    h(EffortFanGauge, {
+                      value: meta.thinkingEffort || 'auto',
+                      skin: view.uiSkin,
+                      onChange: nextKey => void updateSecConfig({ thinkingEffort: nextKey }),
+                    }),
+                    (() => {
+                      const teamMode = meta.teamEffortMode === 'manual' ? 'manual' : 'auto'
+                      return h(
+                        'div',
+                        { className: 'dnb-team-effort-row' },
+                        h(
+                          'div',
+                          { className: 'dnb-team-effort-info' },
+                          h('div', { className: 'dnb-team-effort-title' }, '主对话和子代理的思考深度'),
+                          h('div', { className: 'dnb-team-effort-sub' },
+                            teamMode === 'manual'
+                              ? '手动：参谋长不插手，由你自己调'
+                              : '自动（默认）：参谋长按任务难度帮你调'),
+                        ),
+                        h(
+                          'div',
+                          { className: 'dnb-team-effort-seg', role: 'group', 'aria-label': '团队思考深度调整方式' },
+                          h('button', {
+                            type: 'button',
+                            className: 'dnb-team-effort-btn',
+                            'data-active': teamMode === 'auto' ? '1' : '0',
+                            title: '自动：按任务难度帮你调主对话和子代理的思考深度',
+                            onClick: () => {
+                              if (teamMode !== 'auto') void updateSecConfig({ teamEffortMode: 'auto' })
+                            },
+                          }, '自动'),
+                          h('button', {
+                            type: 'button',
+                            className: 'dnb-team-effort-btn',
+                            'data-active': teamMode === 'manual' ? '1' : '0',
+                            title: '手动：参谋长不再改动主对话和子代理的思考深度',
+                            onClick: () => {
+                              if (teamMode !== 'manual') void updateSecConfig({ teamEffortMode: 'manual' })
+                            },
+                          }, '手动'),
+                        ),
+                      )
+                    })(),
+                  ),
+                  h(
+                    'div',
+                    { style: { marginTop: 2 } },
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-text-filter-btn',
+                      style: { width: '100%', justifyContent: 'space-between', padding: '4px 6px', fontSize: 10.5 },
+                      onClick: () => patch({ chiefDisclaimerOpen: !view.chiefDisclaimerOpen }),
+                    },
+                      h('span', null, 'ⓘ 注意事项：模型效果和规则冲突'),
+                      h('span', { style: { fontSize: 10, opacity: 0.7 } }, view.chiefDisclaimerOpen ? '▴ 收起' : '▾ 展开'),
+                    ),
+                    view.chiefDisclaimerOpen
+                      ? h(
+                          'div',
+                          { className: 'dnb-disclaimer-box', style: { marginTop: 4 } },
+                          h('div', { style: { marginBottom: 4 } },
+                            h('strong', null, '说明 1（模型能力）：'),
+                            '自动检查、存档压缩和规则拦截的效果，主要看你给参谋长选了哪个大模型。不同模型在拆任务和听指令上的表现差别很大。',
+                          ),
+                          h('div', null,
+                            h('strong', null, '说明 2（规则冲突）：'),
+                            '如果你在项目里加了太多其他的提示词或全局 Rules，可能会和本插件的规则打架，导致重复提醒或跑偏。',
+                          ),
+                        )
+                      : null,
                   ),
                 )
               : null,
@@ -1613,7 +2355,6 @@ export function ChiefComposerBar({ view, barRef }) {
                     active ? h(Icon, { name: 'check', size: 13, style: { color: opt.key === 'chief' ? 'var(--dnb-amber)' : 'var(--dnb-accent)' } }) : null,
                   ),
                 ),
-                h('div', { className: 'dnb-perm-subcode', style: opt.key === 'chief' ? { color: 'var(--dnb-amber)' } : undefined }, opt.code),
                 h(
                   'ul',
                   { className: 'dnb-perm-bullets' },
@@ -1684,6 +2425,39 @@ export function ChiefComposerBar({ view, barRef }) {
             h(Icon, { name: 'shieldCheck', size: 11.5 }),
             `${pendingApprovalsList[0].operationLabel || '敏感操作'}（还有 ${pendingApprovalsList.length} 项等你确认）`),
           h('span', { style: { flexShrink: 0, textDecoration: 'underline' } }, '点此确认 →'),
+        )
+      : null,
+
+    // Active TTS Speech Mini Now-Playing Bar (only when loading or playing)
+    (view.ttsPlayer && view.ttsPlayer.status !== 'idle')
+      ? h(
+          'div',
+          { className: 'dnb-tts-nowbar' },
+          h(
+            'div',
+            { className: 'dnb-tts-nowbar-left' },
+            h('span', { className: 'dnb-tts-wave', 'aria-hidden': true },
+              h('span', null),
+              h('span', null),
+              h('span', null),
+            ),
+            h('span', { className: 'dnb-tts-nowbar-label' },
+              view.ttsPlayer.status === 'loading'
+                ? bi('正在合成语音…', 'Synthesizing voice…')
+                : `${bi('正在播报', 'Speaking')}: ${view.ttsPlayer.label || bi('参谋长', 'Chief')}`),
+            view.ttsPlayer.provider
+              ? h('span', { className: 'dnb-tts-nowbar-tag' },
+                  view.ttsPlayer.provider === 'deepseek'
+                    ? 'DeepSeek'
+                    : (view.ttsPlayer.provider === 'openai-compat' ? 'OpenAI TTS' : bi('系统语音', 'System')))
+              : null,
+          ),
+          h('button', {
+            type: 'button',
+            className: 'dnb-mini-btn',
+            style: { flexShrink: 0, padding: '2px 8px' },
+            onClick: () => stopChiefSpeech(),
+          }, h(Icon, { name: 'stop', size: 10 }), bi('停止', 'Stop')),
         )
       : null,
 
@@ -1790,10 +2564,93 @@ export function ChiefComposerBar({ view, barRef }) {
         )
       : null,
 
-    // DS-Bot Style Rounded Pill Input + Centered `+` Tactical Button + Attach Image + Up-Arrow Send Button
+    // Voice Capture Active Strip OR Minimized Voice Mode Dock
+    ((view.voiceRecState === 'recording' || view.voiceRecState === 'transcribing')
+      && !(view.voiceModeActive && !view.voiceStageMinimized && view.voiceRecPurpose === 'voice_chat'))
+      ? h(
+          'div',
+          { className: 'dnb-voice-rec-strip' },
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 } },
+            h('span', { className: 'dnb-tts-wave' }, h('span'), h('span'), h('span')),
+            h('span', { style: { fontWeight: 600 } },
+              view.voiceRecState === 'transcribing'
+                ? bi('正在转文字并存入语音手记…', 'Transcribing & saving to Voice Inbox…')
+                : (view.voiceRecPurpose === 'voice_chat'
+                    ? bi(`正在聆听唠嗑 ${Math.round(voiceElapsedMs / 1000)}s…`, `Listening ${Math.round(voiceElapsedMs / 1000)}s…`)
+                    : bi(`语音输入录音中 ${Math.round(voiceElapsedMs / 1000)}s…`, `Dictating ${Math.round(voiceElapsedMs / 1000)}s…`))),
+            voiceInterim
+              ? h('span', { style: { color: 'var(--dnb-text-3)', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, voiceInterim)
+              : null,
+          ),
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
+            view.voiceRecState === 'recording'
+              ? h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  'data-tone': 'accent',
+                  onClick: () => void handleVoiceAction(view.voiceRecPurpose || 'dictation'),
+                }, view.voiceRecPurpose === 'voice_chat' ? bi('✔ 说完发送', '✔ Send') : bi('✔ 完成转文字', '✔ Transcribe'))
+              : null,
+            h('button', {
+              type: 'button',
+              className: 'dnb-mini-btn',
+              onClick: () => {
+                stopActiveVoiceCapture(true)
+                patch({ voiceRecState: 'idle', voiceRecPurpose: '', voiceRecLevel: 0, voiceRecElapsedMs: 0, voiceInterimText: '' })
+              },
+            }, bi('取消', 'Cancel')),
+          ),
+        )
+      : ((view.voiceModeActive && view.voiceStageMinimized)
+          ? h(
+              'div',
+              { className: 'dnb-voice-mode-dock' },
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 7, minWidth: 0 } },
+                h(Icon, { name: 'voiceSpark', size: 15, style: { color: 'var(--dnb-accent)', flexShrink: 0 } }),
+                h('div', { style: { minWidth: 0 } },
+                  h('div', { style: { fontWeight: 600, fontSize: 11.5 } },
+                    bi('语音面聊模式已收起（极速口语 · 自动朗读）', 'Voice Mode Minimized (Fast Chat + TTS)')),
+                  h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
+                    bi('当前可直接打字或开麦，对话自动存入语音手记待梦境整理。', 'Type or speak anytime; queued for Dream Roam.')),
+                ),
+              ),
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  'data-tone': 'accent',
+                  disabled: Boolean(view.secBusy),
+                  onClick: () => void handleVoiceAction('voice_chat'),
+                }, h(Icon, { name: 'mic', size: 11.5 }), bi('开口唠嗑', 'Talk')),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  onClick: () => patch({ voiceStageMinimized: false }),
+                }, bi('✨ 展开模糊舞台', '✨ Stage')),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  onClick: exitVoiceModeAll,
+                }, bi('退出语音', 'Exit')),
+              ),
+            )
+          : null),
+
+    // DS-Bot Style Rounded Pill Input + Centered `+` Tactical Button + Attach Image + Voice Input + Voice Mode + Up-Arrow Send Button
     h(
       'div',
-      { className: 'dnb-sec-shell' },
+      {
+        className: 'dnb-sec-shell',
+        'data-voice-mode': view.voiceModeActive ? '1' : '0',
+      },
       h('button', {
         type: 'button',
         className: 'dnb-plus-btn',
@@ -1856,16 +2713,47 @@ export function ChiefComposerBar({ view, barRef }) {
         onKeyDown: e => {
           if (e.key === 'Enter' && !e.shiftKey) {
             e.preventDefault()
-            void submitChiefBar()
+            void submitCurrentComposer()
           }
         },
       }),
       h('button', {
         type: 'button',
+        className: 'dnb-voice-btn',
+        disabled: Boolean(view.secBusy) || view.voiceRecState === 'transcribing',
+        'data-recording': (view.voiceRecState === 'recording' && view.voiceRecPurpose === 'dictation') ? '1' : '0',
+        title: view.voiceRecState === 'recording' && view.voiceRecPurpose === 'dictation'
+          ? bi('点击结束录音并转文字打入许愿框', 'Stop & transcribe into composer')
+          : bi('语音输入：说话转文字打入许愿框（同步保存语音手记）', 'Voice Input: dictate text into composer'),
+        onClick: () => void handleVoiceAction('dictation'),
+      }, h(Icon, { name: 'mic', size: 15 })),
+      h('button', {
+        type: 'button',
+        className: 'dnb-voice-btn',
+        'data-active': view.voiceWakeEnabled ? '1' : '0',
+        'data-wake': view.voiceWakeListening ? '1' : '0',
+        title: view.voiceWakeEnabled
+          ? bi(`叫名唤醒待命中（喊「${chiefShortName(view)}」会自动回复并开语音，点击关闭）`, `Wake Call ON (say "${chiefShortName(view)}" to wake Voice Mode)`)
+          : bi(`开启叫名唤醒：喊「${chiefShortName(view)}」自动回复并进入语音模式（打字叫名也随时生效）`, `Enable Wake Call: say "${chiefShortName(view)}" to auto-reply and enter Voice Mode`),
+        onClick: () => void toggleWakeWord(),
+      }, h(Icon, { name: 'waves', size: 15 })),
+      h('button', {
+        type: 'button',
+        className: 'dnb-voice-btn',
+        disabled: Boolean(view.secBusy) || view.voiceRecState === 'transcribing',
+        'data-active': view.voiceModeActive ? '1' : '0',
+        'data-recording': (view.voiceRecState === 'recording' && view.voiceRecPurpose === 'voice_chat') ? '1' : '0',
+        title: view.voiceModeActive
+          ? bi('语音模式已开启：当前屏幕直接对话（点击退出，快捷键 Alt+V）', 'Voice Mode ON (click or Alt+V to exit)')
+          : bi('一键开启语音模式：当前屏幕对话并自动朗读（快捷键 Alt+V）', 'Voice Mode: inline spoken chat + TTS (Alt+V)'),
+        onClick: () => void toggleVoiceMode(),
+      }, h(Icon, { name: 'voiceSpark', size: 16 })),
+      h('button', {
+        type: 'button',
         className: 'dnb-sec-send',
         disabled: !canSend,
         title: bi(`发给 ${chiefDisplayName(view)}`, `Send to ${chiefDisplayName(view)}`),
-        onClick: () => void submitChiefBar(),
+        onClick: () => void submitCurrentComposer(),
       },
         view.secBusy
           ? h(Icon, { name: 'refresh', size: 13, style: { animation: 'dnb-spin 0.9s linear infinite' } })

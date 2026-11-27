@@ -25,6 +25,7 @@ import {
   cleanMultiline,
   secretLike,
   loadChiefState,
+  resolveWorkspaceConfig,
   mutateChiefState,
   ensureWorkspace,
   stripCheckpointNoise,
@@ -36,6 +37,7 @@ import {
 } from './chief-state.js'
 import { callChiefLlm } from './chief-models.js'
 import { notifyDreamOrIdleAsync } from './external-memory.js'
+import { listVoiceTranscripts, digestVoiceInboxForDreamRoam } from './voice-inbox.js'
 import { deliverCrossMessage } from './chief-network.js'
 import { getChiefView } from './chief-view.js'
 
@@ -1056,10 +1058,15 @@ export async function relayArchivesWithChief(deps, { sessionId, items = [], inst
  * sorts them into filing-cabinet drawers, and weaves lightweight keyword hooks (`hasHook=true`).
  * Strictly forbidden from writing workspace code, pinning items back to Desktop, or pushing to Lead.
  */
-export async function runManagedDreamRoam(deps, { sessionId = '', maxPerVault = 6 } = {}) {
+export async function runManagedDreamRoam(
+  deps,
+  { sessionId = '', maxPerVault = 6, voiceInboxCustomDir = '', memoryCustomDir = '' } = {},
+) {
   const rootId = (deps && deps.resolveRootSessionId && deps.resolveRootSessionId(sessionId)) || String(sessionId || 'global')
   let sessionProcessed = 0
   let globalProcessed = 0
+  let voiceProcessed = 0
+  let voiceDigest = null
   const cap = Math.max(1, Math.min(12, Number(maxPerVault) || 6))
 
   const hasOwnSession = Boolean(rootId && rootId !== 'global')
@@ -1092,19 +1099,45 @@ export async function runManagedDreamRoam(deps, { sessionId = '', maxPerVault = 
     }
   } catch {}
 
-  if (!todoSessIds.length && !todoGlobIds.length && !alreadyHookedWatchIds.length) {
-    return { ok: true, roamed: 0, sessionProcessed: 0, globalProcessed: 0 }
+  let pendingVoiceCount = 0
+  try {
+    const vList = listVoiceTranscripts({ customDir: voiceInboxCustomDir, limit: 20 })
+    pendingVoiceCount = Number(vList && vList.pendingCount) || 0
+  } catch {}
+
+  if (!todoSessIds.length && !todoGlobIds.length && !alreadyHookedWatchIds.length && !pendingVoiceCount) {
+    return { ok: true, roamed: 0, sessionProcessed: 0, globalProcessed: 0, voiceProcessed: 0 }
   }
 
   const dreamWorkId = getChiefActiveWork(rootId)
     ? ''
-    : beginChiefActiveWork(rootId, { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游 · 轻拢卷宗与织就钩子中...' })
+    : beginChiefActiveWork(rootId, { tone: 'dream', tab: 'archive', label: '🌙 参谋长正在梦境漫游 · 整理语音手记与归整卷宗中...' })
 
   try {
+    const extCfgDream = resolveWorkspaceConfig(loadChiefState(), rootId).externalMemory
     if (alreadyHookedWatchIds.length && sessOpt) {
       try {
         mutateArchive({ op: 'clearUnpinnedWatch', ids: alreadyHookedWatchIds, vaultScope: 'session' }, sessOpt)
       } catch {}
+    }
+    if (pendingVoiceCount > 0) {
+      const voiceCallLlm = deps && typeof deps.callLlmOverride === 'function'
+        ? (opts => deps.callLlmOverride({ sessionId: rootId, reasonKind: 'dream_roam', ...opts }))
+        : (deps && deps.offlineHeuristicOnly
+            ? null
+            : (opts => callChiefLlm(deps, { sessionId: rootId, reasonKind: 'dream_roam', effortOverride: 'off', ...opts })))
+      voiceDigest = await digestVoiceInboxForDreamRoam({
+        rawCfg: extCfgDream,
+        sessionId: rootId,
+        customDir: voiceInboxCustomDir,
+        memoryDir: memoryCustomDir,
+        callLlm: voiceCallLlm,
+        upsertArchiveFn: buildChiefArchiveUpsertFn(deps, rootId),
+        maxItems: Math.max(6, cap),
+      }).catch(() => null)
+      if (voiceDigest && voiceDigest.ok) {
+        voiceProcessed = Number(voiceDigest.processedCount) || 0
+      }
     }
     if (todoSessIds.length && hasOwnSession) {
       const res = await organizeArchivesWithChief(deps, {
@@ -1129,7 +1162,6 @@ export async function runManagedDreamRoam(deps, { sessionId = '', maxPerVault = 
       if (res && res.ok) globalProcessed = Number(res.updatedCount) || 0
     }
     try {
-      const extCfgDream = resolveWorkspaceConfig(loadChiefState(), rootId).externalMemory
       void notifyDreamOrIdleAsync(extCfgDream, {
         sessionId: rootId,
         workspaceCwd: (globOpt && globOpt.cwd) || '',
@@ -1139,9 +1171,11 @@ export async function runManagedDreamRoam(deps, { sessionId = '', maxPerVault = 
     } catch {}
     return {
       ok: true,
-      roamed: sessionProcessed + globalProcessed,
+      roamed: sessionProcessed + globalProcessed + voiceProcessed,
       sessionProcessed,
       globalProcessed,
+      voiceProcessed,
+      ...(voiceDigest ? { voiceDigest } : {}),
     }
   } finally {
     if (dreamWorkId) endChiefActiveWork(rootId, dreamWorkId)

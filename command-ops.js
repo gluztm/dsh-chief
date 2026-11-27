@@ -95,16 +95,17 @@ export function applyFactChanges(ws, numberedFacts, changes, actor = 'user', met
       }
       ws.facts.push(fact)
       if (ws.facts.length > FACTS_CAP) ws.facts = ws.facts.slice(-FACTS_CAP)
-      applied.push({ op: 'add', text: fact.text })
+      applied.push({ op: 'add', text: fact.text, category: fact.category })
     } else if (op === 'edit') {
       const target = numberedFacts[Number(ch.index) - 1]
       const nextText = clamp(ch.text, FACT_TEXT_MAX)
       if (!target || !nextText || secretLike(nextText)) continue
       const found = ws.facts.find(f => f.id === target.id)
       if (found && !found.pinned) {
+        const prevText = found.text
         found.text = nextText
         found.updatedAt = Date.now()
-        applied.push({ op: 'edit', text: nextText })
+        applied.push({ op: 'edit', text: nextText, oldText: prevText, category: found.category || 'discipline' })
       }
     } else if (op === 'remove') {
       const target = numberedFacts[Number(ch.index) - 1]
@@ -112,7 +113,7 @@ export function applyFactChanges(ws, numberedFacts, changes, actor = 'user', met
       const idx = ws.facts.findIndex(f => f.id === target.id)
       if (idx !== -1 && !ws.facts[idx].pinned) {
         const [removed] = ws.facts.splice(idx, 1)
-        applied.push({ op: 'remove', text: removed.text })
+        applied.push({ op: 'remove', text: removed.text, category: removed.category || 'discipline' })
       }
     }
   }

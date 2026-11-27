@@ -316,7 +316,7 @@ export const CSS_CHIEF = `
     font: inherit;
     font-size: 12.5px;
     line-height: 1.4;
-    padding: 4px 0;
+    padding: 4px 4px 4px 0;
     outline: none;
   }
   .dnb-sec-input::placeholder {
@@ -804,20 +804,17 @@ export const CSS_CHIEF = `
   /* v1.6.0 Closing Pack: Scenario Presets, Chief LLM Ledger & Budget Progress */
   .dnb-preset-grid {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
+    grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
     gap: 6px;
     padding: 8px 10px 10px;
-  }
-  @container dnb-head (max-width: 340px) {
-    .dnb-preset-grid {
-      grid-template-columns: 1fr;
-    }
   }
   .dnb-preset-card {
     display: flex;
     flex-direction: column;
     align-items: flex-start;
     gap: 4px;
+    min-width: 0;
+    overflow: hidden;
     padding: 8px 8px 9px;
     border-radius: 10px;
     border: 1px solid var(--dnb-border);
@@ -856,7 +853,10 @@ export const CSS_CHIEF = `
     background: var(--dnb-card);
     color: var(--dnb-text-2);
     border: 1px solid var(--dnb-border);
-    white-space: nowrap;
+    white-space: normal;
+    max-width: 100%;
+    line-height: 1.3;
+    word-break: break-word;
   }
   .dnb-preset-card[data-active="1"] .dnb-preset-tag {
     color: var(--dnb-accent);

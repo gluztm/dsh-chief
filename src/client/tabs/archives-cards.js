@@ -85,7 +85,7 @@ function resolveDossierViewerMeta(item, scope) {
     shortText = '参阅中'
   } else if ((vs && (vs.code === 'global_hooked' || vs.code === 'session_hooked' || vs.mode === 'chief_hook')) || (item && item.hasHook)) {
     dataViewer = 'hook'
-    shortText = '见钩'
+    shortText = '按需可查'
   } else if (scope === 'precipitated' || (scope === 'global' && !(item && item.hasHook))) {
     dataViewer = 'human'
     shortText = '仅人类'
@@ -338,7 +338,8 @@ export function renderArchiveFolderDrawer({
   )
 }
 
-export function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', openMenuKey, setOpenMenuKey }) {
+export function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '', openMenuKey, setOpenMenuKey, onJumpToArchive = null }) {
+  const [historyOpen, setHistoryOpen] = React.useState(false)
   const activeScope = scopeOverride || (view.archiveTabScope === 'global' ? 'global' : 'session')
   const isGlobalScope = activeScope === 'global'
   const isOpen = Boolean(view.archiveOpenFiles && view.archiveOpenFiles[item.id])
@@ -348,6 +349,11 @@ export function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '
   const movingThis = view.archiveMoveId === item.id
   const clip = PAPERCLIP_META[item.paperclip] || PAPERCLIP_META.silver
   const points = detail && Array.isArray(detail.points) ? detail.points : []
+  const relations = detail && detail.relations && typeof detail.relations === 'object' ? detail.relations : null
+  const outgoingLinks = relations && Array.isArray(relations.outgoing) ? relations.outgoing : []
+  const incomingLinks = relations && Array.isArray(relations.incoming) ? relations.incoming : []
+  const staleDeps = relations && Array.isArray(relations.staleDependencies) ? relations.staleDependencies : []
+  const historyList = detail && Array.isArray(detail.history) ? detail.history : []
 
   const toggleOpenFile = () => {
     const nextOpen = !isOpen
@@ -503,6 +509,39 @@ export function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '
           item.summary
             ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', lineHeight: 1.48 } }, item.summary)
             : null,
+          staleDeps.length > 0
+            ? h(
+                'div',
+                {
+                  className: 'dnb-stale-dep-banner',
+                  style: {
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    flexWrap: 'wrap',
+                    padding: '6px 9px',
+                    borderRadius: 8,
+                    background: 'rgba(244, 63, 94, 0.1)',
+                    border: '1px solid rgba(244, 63, 94, 0.35)',
+                    fontSize: 11,
+                    color: '#fb7185',
+                  },
+                },
+                h('span', { style: { fontWeight: 600 } }, '⚠️ 本档案引用了已作废（暗铜）档案：'),
+                staleDeps.map(dep =>
+                  h('button', {
+                    key: 'stale-' + dep.id,
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    style: { height: 21, fontSize: 10.5, borderColor: 'rgba(244,63,94,0.4)', color: '#fda4af' },
+                    onClick: e => {
+                      e.stopPropagation()
+                      if (typeof onJumpToArchive === 'function') onJumpToArchive(dep.id, dep.folder || '')
+                    },
+                  }, `《${clampTitle(dep.title, 20)}》`),
+                ),
+              )
+            : null,
 
           // Folder switcher (revealed when Move clicked from More menu)
           !isGlobalScope && movingThis
@@ -611,6 +650,68 @@ export function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '
                 })
               : h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', padding: '2px 0' } }, '还没拆出要点，点右下角 ⋯ 让参谋长整理一下。'),
 
+          // WikiLinks & Backlinks
+          (outgoingLinks.length > 0 || incomingLinks.length > 0)
+            ? h(
+                'div',
+                {
+                  className: 'dnb-archive-relations',
+                  style: {
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 5,
+                    padding: '7px 9px',
+                    borderRadius: 8,
+                    border: '1px solid var(--dnb-border)',
+                    background: 'var(--dnb-card)',
+                    fontSize: 11,
+                  },
+                },
+                outgoingLinks.length > 0
+                  ? h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
+                      h('span', { style: { color: 'var(--dnb-text-3)', fontSize: 10.5 } }, '🔗 引用：'),
+                      outgoingLinks.map(lk =>
+                        h('button', {
+                          key: 'out-' + lk.id,
+                          type: 'button',
+                          className: 'dnb-mini-btn',
+                          style: {
+                            height: 21,
+                            fontSize: 10.5,
+                            ...(lk.paperclip === 'copper' ? { color: '#fb7185', borderColor: 'rgba(244,63,94,0.38)' } : {}),
+                          },
+                          onClick: e => {
+                            e.stopPropagation()
+                            if (typeof onJumpToArchive === 'function') onJumpToArchive(lk.id, lk.folder || '')
+                          },
+                        }, `${lk.paperclip === 'copper' ? '⚠️ ' : ''}[[${clampTitle(lk.title, 18)}]]${lk.paperclip === 'copper' ? ' (已作废)' : ''}`),
+                      ),
+                    )
+                  : null,
+                incomingLinks.length > 0
+                  ? h(
+                      'div',
+                      { style: { display: 'flex', alignItems: 'center', gap: 5, flexWrap: 'wrap' } },
+                      h('span', { style: { color: 'var(--dnb-text-3)', fontSize: 10.5 } }, '↩️ 被引用：'),
+                      incomingLinks.map(lk =>
+                        h('button', {
+                          key: 'in-' + lk.id,
+                          type: 'button',
+                          className: 'dnb-mini-btn',
+                          style: { height: 21, fontSize: 10.5 },
+                          onClick: e => {
+                            e.stopPropagation()
+                            if (typeof onJumpToArchive === 'function') onJumpToArchive(lk.id, lk.folder || '')
+                          },
+                        }, `《${clampTitle(lk.title, 18)}》`),
+                      ),
+                    )
+                  : null,
+              )
+            : null,
+
           // Lossless Raw Body
           showRaw && detail
             ? h(
@@ -628,6 +729,88 @@ export function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '
                   }, '复制'),
                 ),
                 h('pre', { className: 'dnb-pre', style: { maxHeight: 220 } }, detail.body || '（空）'),
+              )
+            : null,
+
+          // Evolution Snapshots & One-Click Rollback
+          historyOpen && historyList.length > 0
+            ? h(
+                'div',
+                {
+                  className: 'dnb-archive-history',
+                  style: {
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 5,
+                    padding: '7px 9px',
+                    borderRadius: 8,
+                    border: '1px solid var(--dnb-border)',
+                    background: 'var(--dnb-card)',
+                  },
+                },
+                h(
+                  'div',
+                  { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', fontSize: 10.5, color: 'var(--dnb-text-3)' } },
+                  h('span', null, `🕒 最近 ${historyList.length} 版演进快照（回滚也会自动留存当前版）`),
+                  h('button', {
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    style: { height: 20, fontSize: 10 },
+                    onClick: () => setHistoryOpen(false),
+                  }, '收起'),
+                ),
+                historyList.map((snap, hIdx) =>
+                  h(
+                    'div',
+                    {
+                      key: 'hist-' + hIdx + '-' + (snap.updatedAt || 0),
+                      style: {
+                        display: 'flex',
+                        alignItems: 'center',
+                        justifyContent: 'space-between',
+                        gap: 8,
+                        padding: '5px 7px',
+                        borderRadius: 6,
+                        background: 'var(--dnb-surface-sub, rgba(148,163,184,0.06))',
+                        border: '1px solid var(--dnb-border)',
+                      },
+                    },
+                    h(
+                      'div',
+                      { style: { minWidth: 0, flex: 1 } },
+                      h('div', { style: { fontSize: 11, fontWeight: 600, color: 'var(--dnb-text)', display: 'flex', gap: 6, flexWrap: 'wrap' } },
+                        h('span', null, `#${hIdx + 1}`),
+                        h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)', fontWeight: 400 } },
+                          `${snap.by === 'chief' ? '参谋' : '用户'} · ${snap.updatedAt ? timeLabel(snap.updatedAt) : '旧版'}`),
+                      ),
+                      h('div', {
+                        style: {
+                          fontSize: 10.5,
+                          color: 'var(--dnb-text-2)',
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                          marginTop: 1,
+                        },
+                      }, (snap.body || snap.summary || snap.title || '').replace(/\s+/g, ' ').slice(0, 72)),
+                    ),
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-mini-btn',
+                      'data-tone': 'accent',
+                      style: { flexShrink: 0, height: 22, fontSize: 10.5 },
+                      onClick: e => {
+                        e.stopPropagation()
+                        if (!confirm(`确定回滚到第 #${hIdx + 1} 版快照吗？当前版本仍会保留在历史里。`)) return
+                        setHistoryOpen(false)
+                        void mutateArchiveApi(
+                          { op: 'rollbackHistory', archiveId: item.id, versionIndex: hIdx, vaultScope: activeScope },
+                          '⏪ 已回滚到该历史版本',
+                        )
+                      },
+                    }, '⏪ 回滚'),
+                  ),
+                ),
               )
             : null,
 
@@ -679,7 +862,15 @@ export function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '
             ),
             h(
               'div',
-              { className: 'dnb-more-wrap', onClick: e => e.stopPropagation() },
+              { className: 'dnb-more-wrap', style: { display: 'flex', alignItems: 'center', gap: 5 }, onClick: e => e.stopPropagation() },
+              historyList.length > 0
+                ? h('button', {
+                    type: 'button',
+                    className: 'dnb-mini-btn',
+                    'data-tone': historyOpen ? 'accent' : undefined,
+                    onClick: () => setHistoryOpen(v => !v),
+                  }, `🕒 历史 (${historyList.length})`)
+                : null,
               h('button', {
                 type: 'button',
                 className: 'dnb-mini-btn',
@@ -771,6 +962,16 @@ export function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '
                         patch({ archiveRawView: { ...(view.archiveRawView || {}), [item.id]: !showRaw } })
                       },
                     }, showRaw ? '隐藏原文' : '📄 看原文'),
+                    historyList.length > 0
+                      ? h('button', {
+                          type: 'button',
+                          className: 'dnb-more-item',
+                          onClick: () => {
+                            setOpenMenuKey('')
+                            setHistoryOpen(v => !v)
+                          },
+                        }, historyOpen ? '收起历史版本' : `🕒 历史版本 (${historyList.length})`)
+                      : null,
                     h('button', {
                       type: 'button',
                       className: 'dnb-more-item',
@@ -778,7 +979,7 @@ export function ArchiveDossierCard({ item, idx, folders, view, scopeOverride = '
                         setOpenMenuKey('')
                         void mutateArchiveApi({ op: 'cycleClip', archiveId: item.id, vaultScope: activeScope }, '已切换重要程度')
                       },
-                    }, `📎 换曲别针 (${clip.short})`),
+                    }, `🏷️ 标记重要程度 (${clip.short})`),
                     h('button', {
                       type: 'button',
                       className: 'dnb-more-item',

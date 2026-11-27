@@ -64,7 +64,7 @@ try {
   // =========================================================================
   // W1: Version alignment (>= 1.6.0), client bundle markers & light-theme rules
   // =========================================================================
-  assert.ok(/^1\.([6-9]|[1-9]\d)\.\d+/.test(pkgJson.version), `W1 package.json must be >= 1.6.0 (got ${pkgJson.version})`)
+  assert.ok(/^(?:1\.([6-9]|[1-9]\d)|[2-9]\.\d+)\.\d+/.test(pkgJson.version), `W1 package.json must be >= 1.6.0 (got ${pkgJson.version})`)
   assert.equal(schemaMod.BACKEND_BUILD, pkgJson.version, 'W1 board-schema BACKEND_BUILD must align with package.json')
   assert.equal(constMod.EXPECTED_BACKEND_BUILD, pkgJson.version, 'W1 constants EXPECTED_BACKEND_BUILD must align with package.json')
 

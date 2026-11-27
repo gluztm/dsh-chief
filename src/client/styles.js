@@ -32,6 +32,7 @@ import { CSS_TASKS_FLOW } from './styles/tasks-flow.js'
 import { CSS_BUBBLE } from './styles/bubble.js'
 import { CSS_V180 } from './styles/v180.js'
 import { CSS_EXTMEM } from './styles/extmem.js'
+import { CSS_TTS } from './styles/tts.js'
 import { CSS_SKINS } from './styles/skins.js'
 import { readSavedCustomSkin, applyCustomSkinStyle } from './custom-theme.js'
 
@@ -46,6 +47,7 @@ const STYLE_SHEETS = [
   CSS_BUBBLE,
   CSS_V180,
   CSS_EXTMEM,
+  CSS_TTS,
   CSS_SKINS,
 ]
 

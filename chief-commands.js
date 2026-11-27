@@ -82,6 +82,7 @@ import {
 } from './chief-network.js'
 import { sanitizeConciseBriefText, getChiefView } from './chief-view.js'
 import { organizeArchivesWithChief, distillSessionArchivesToGlobal, buildChiefArchiveUpsertFn } from './chief-archives.js'
+import { appendVoiceTranscript, attachVoiceTranscriptReply } from './voice-inbox.js'
 import { buildChiefCompactFn } from './chief-compaction.js'
 import {
   ASK_CHIEF_SYSTEM,
@@ -96,7 +97,15 @@ import {
   buildRecentChiefChatWindow,
   shouldInspectRelayAsCommand,
 } from './command-helpers.js'
-import { prefetchForChief, syncChiefTurnAsync, maybeAutoDistillTurnAsync } from './external-memory.js'
+import {
+  prefetchForChief,
+  syncChiefTurnAsync,
+  maybeAutoDistillTurnAsync,
+  listExternalMemoryItems,
+  addExternalMemoryItem,
+  updateExternalMemoryItem,
+  removeExternalMemoryItem,
+} from './external-memory.js'
 import {
   applyFactChanges,
   applyBoardOps,
@@ -111,6 +120,70 @@ import {
   registerAskOrCommandChiefRunner,
   handleLeadDirectRequestToChief,
 } from './command-ops.js'
+
+const FACT_TO_EXTMEM_CATEGORY = {
+  discipline: 'boundary',
+  architecture: 'decision',
+  progress: 'lesson',
+  preference: 'preference',
+  team: 'collab',
+}
+
+async function syncAppliedFactsToExternalMemory(rawExtCfg, appliedFacts, { sessionId = '', projectKey = '', workspaceCwd = '' } = {}) {
+  if (!Array.isArray(appliedFacts) || !appliedFacts.length) return
+  if (!rawExtCfg || rawExtCfg.enabled === false) return
+  const slotKind = (rawExtCfg.memorySlot && rawExtCfg.memorySlot.kind) || 'builtin-md'
+  if (slotKind !== 'builtin-md' && slotKind !== 'none') return
+  const map = rawExtCfg.workspacePolicies || {}
+  const policy = map[`session:${sessionId}`] || map[sessionId] || map[`project:${projectKey}`] || map[workspaceCwd] || 'read-write'
+  if (policy !== 'read-write') return
+
+  let cachedItems = null
+  const getItems = async () => {
+    if (cachedItems) return cachedItems
+    const res = await listExternalMemoryItems(rawExtCfg, { sessionId, projectKey, workspaceCwd })
+    cachedItems = Array.isArray(res && res.items) ? res.items : []
+    return cachedItems
+  }
+
+  for (const f of appliedFacts) {
+    if (!f || !f.text) continue
+    const extCat = FACT_TO_EXTMEM_CATEGORY[f.category] || 'decision'
+    if (f.op === 'add') {
+      await addExternalMemoryItem(rawExtCfg, {
+        text: f.text,
+        category: extCat,
+        pinned: extCat === 'preference' || extCat === 'boundary',
+        sessionId,
+        projectKey,
+        workspaceCwd,
+      })
+      cachedItems = null
+    } else if (f.op === 'edit') {
+      const needle = String(f.oldText || '').trim()
+      const items = needle ? await getItems() : []
+      const hit = needle
+        ? items.find(it => it && (String(it.text || '').trim() === needle || String(it.text || '').includes(needle.slice(0, 32))))
+        : null
+      if (hit && hit.id) {
+        await updateExternalMemoryItem(rawExtCfg, { id: hit.id, text: f.text, category: extCat })
+      } else {
+        await addExternalMemoryItem(rawExtCfg, { text: f.text, category: extCat, sessionId, projectKey, workspaceCwd })
+      }
+      cachedItems = null
+    } else if (f.op === 'remove') {
+      const needle = String(f.text || '').trim()
+      const items = needle ? await getItems() : []
+      const hit = needle
+        ? items.find(it => it && (String(it.text || '').trim() === needle || String(it.text || '').includes(needle.slice(0, 32))))
+        : null
+      if (hit && hit.id) {
+        await removeExternalMemoryItem(rawExtCfg, { id: hit.id, sessionId, projectKey, workspaceCwd })
+        cachedItems = null
+      }
+    }
+  }
+}
 
 export { isExplicitCompactCommand }
 export {
@@ -130,10 +203,16 @@ export async function askOrCommandChief(deps, {
   forcedMode = 'steer',
   quickAction = '',
   images = [],
+  voiceChat = false,
+  voiceTranscriptId = '',
+  voiceInboxCustomDir = '',
   _resumeCtx = null,
   _fromLeadRequest = false,
   _wallBlockerEscalation = false,
 }) {
+  const isVoiceChat = Boolean(voiceChat)
+  const cleanVoiceTranscriptId = typeof voiceTranscriptId === 'string' ? voiceTranscriptId.trim() : ''
+  const cleanVoiceInboxDir = typeof voiceInboxCustomDir === 'string' ? voiceInboxCustomDir : ''
   const rawInput = cleanMultiline(text, 2000)
   const rawImages = Array.isArray(images) ? images : []
   if (!rawInput && !rawImages.length) {
@@ -178,7 +257,7 @@ export async function askOrCommandChief(deps, {
     hasChiefRiskAck,
   })
   const permRank = permissionRank(permissionMode)
-  const isConciseBrief = Boolean(effCfg.tacticalModes && effCfg.tacticalModes.conciseBrief)
+  const isConciseBrief = !isVoiceChat && Boolean(effCfg.tacticalModes && effCfg.tacticalModes.conciseBrief)
   const view = clusterView(state, rootId)
   const targetOpt = archiveTargetForRoot(deps, rootId)
   const peerProgress = Array.isArray(directory.cluster) && directory.cluster.length > 1
@@ -325,7 +404,7 @@ export async function askOrCommandChief(deps, {
   }
 
   // Fast path: if user explicitly picked a concrete target pill AND used direct relay mode without asking chief to decompose
-  if (forcedTarget && forcedTarget !== 'auto') {
+  if (!isVoiceChat && forcedTarget && forcedTarget !== 'auto') {
     const delivery = await deliverCrossMessage(deps, {
       fromSession: rootId,
       fromLabel: '用户 (经 DSH 参谋长)',
@@ -361,7 +440,7 @@ export async function askOrCommandChief(deps, {
   }
 
   // Direct natural-language command to organize/curate the Engineering Archive Cabinet (`整理档案` / `收纳档案`)
-  if (!forcedTarget || forcedTarget === 'auto') {
+  if (!isVoiceChat && (!forcedTarget || forcedTarget === 'auto')) {
     if (/(?:档案|卷宗|老笔记)/.test(input) && /(?:整理|收纳|归类|分拣|拆解)/.test(input)) {
       if (permRank < 1) {
         return denyChiefSystemInAdvisor('整理参谋档案', '整理与归类档案库属于「参谋系统维护」操作，需「L1 · 助手模式」及以上权限。')
@@ -665,13 +744,15 @@ export async function askOrCommandChief(deps, {
     && permissionMode === 'chief',
   )
 
-  const askReasonKind = statusOnlyInquiry
-    ? 'quick_status'
-    : (/筑墙|物理墙|拦截规则|guard.?wall/i.test(input)
-        ? 'craft_wall'
-        : (isBlankContext
-            ? 'blank_explore'
-            : ((effCfg.tacticalModes && effCfg.tacticalModes.intervention) ? 'strong_intervention' : 'ask_chat')))
+  const askReasonKind = isVoiceChat
+    ? 'voice_chat'
+    : (statusOnlyInquiry
+        ? 'quick_status'
+        : (/筑墙|物理墙|拦截规则|guard.?wall/i.test(input)
+            ? 'craft_wall'
+            : (isBlankContext
+                ? 'blank_explore'
+                : ((effCfg.tacticalModes && effCfg.tacticalModes.intervention) ? 'strong_intervention' : 'ask_chat'))))
 
   const extProjectKey = resolveProjectKey(cwdForPromptWalls || '')
   const isWorkModeForExtMem = ['wall_blocked', 'craft_wall', 'strong_intervention', 'quick_status'].includes(askReasonKind) || Boolean(_wallBlockerEscalation)
@@ -704,8 +785,21 @@ export async function askOrCommandChief(deps, {
     ASK_CHIEF_SYSTEM,
     ...(chiefIdentityLine ? [chiefIdentityLine] : []),
     ...(extMem && extMem.staticBlock ? [extMem.staticBlock] : []),
-    ...(isConciseBrief ? [CONCISE_BRIEF_ASK_EXTRA] : []),
+    ...(isConciseBrief && !isVoiceChat ? [CONCISE_BRIEF_ASK_EXTRA] : []),
     ...(quickAction === 'consult_chief' ? [CONSULT_CHIEF_EXTRA] : []),
+    ...(isVoiceChat
+      ? [
+          '',
+          '🎙️ 【语音聊天模式 · 口语直觉交流与真实发令】：',
+          '- 用户正在与你语音面对面交流，系统会自动把 `reply` 转为语音朗读，因此 `reply` 需口语化、简洁自然（1~3 句即可），避免大段代码或 Markdown 表格。',
+          '- 平时讨论或问进展时，直接用 `reply` 回答，不要无故打扰主对话。',
+          '- **极其重要 — 下达推动/催办指令时必须真发 `relays`**：当用户明确让你推动、催办、告诉主对话继续或改任务（如“push 一下主对话 / 催他继续 / 告诉主对话去做… / 改任务状态”）时，**即使当前处于 L0/L1 权限，也必须在同一个合法 JSON 中真实填写 `"relays": [{"target":"lead","mode":"followup","subject":"用户语音催办","text":"给主对话的具体可执行指令"}]`（必要时可附 `"elevationRequest": {"targetMode":"strategist","reason":"向主对话递送推动/催办指令需要 L2 参谋权限"}`）**，系统会按 L0–L3 自动弹提权/确认窗并在批准后立即递送；**绝对禁止在没有触发真实 `relays` 的情况下嘴上在 `reply` 里声称“已经替你催了/已发出/让它接着做”！**',
+          ...(permRank >= 1
+            ? ['- 若用户在聊天中透露了值得长期记住的个人偏好、回答习惯、技术决定或规矩，可在同一个 JSON 中附带可选 `"memoryChanges": [{"op":"add","category":"preference|discipline|architecture|progress|team","text":"一句完整记忆"}]`，系统会自动写入你的长期记忆本。']
+            : []),
+          '- 若用户明确要求“先整理成任务草稿给我看、确认后再发给主对话”，可在同一个 JSON 中附加可选 `"handoffDraft": "给主对话的简明执行指令"`（前端会弹出人工确认按钮后再发送）。',
+        ]
+      : []),
     ...(_wallBlockerEscalation
       ? [
           '',
@@ -715,7 +809,7 @@ export async function askOrCommandChief(deps, {
           '- 只有确认确被某条规则彻底卡死无法推进时，才可在 `"wallRemovalProposals"` 中提出针对该精确 `wallId` 的暂停/删除申请单供人类逐项批示！',
         ]
       : []),
-    ...(isBlankContext
+    ...(isBlankContext && !isVoiceChat
       ? [
           '',
           '🌱 【当前处于空白新上下文（主对话尚未开聊 · 首轮勘探与计划立项策略）】：',
@@ -726,7 +820,7 @@ export async function askOrCommandChief(deps, {
           '- 若尚无主对话历史，除非用户明确命令且会话已存在，不要无故调用 `session_compact`。',
         ].filter(Boolean)
       : []),
-    ...(statusOnlyInquiry
+    ...(statusOnlyInquiry && !isVoiceChat
       ? [
           '',
           '⚡ 【当前问题属于「主对话/团队实时态势询问」快速通道】：',
@@ -735,7 +829,7 @@ export async function askOrCommandChief(deps, {
         ]
       : []),
     '',
-    CHIEF_TOOLS_PROMPT_GUIDE,
+    ...(isVoiceChat ? [] : [CHIEF_TOOLS_PROMPT_GUIDE]),
   ].join('\n')
 
   const upsertArchiveFn = buildChiefArchiveUpsertFn(deps, rootId)
@@ -753,12 +847,17 @@ export async function askOrCommandChief(deps, {
     hasChiefRiskAck,
     policyPlugins,
     board,
-    maxSteps: statusOnlyInquiry ? 1 : 4,
+    maxSteps: (statusOnlyInquiry || isVoiceChat) ? 1 : 4,
     readOnlyToolsOnly: false,
     safetyGuardEnabled,
-    disableTools: statusOnlyInquiry || (_wallBlockerEscalation && permRank < 3),
+    disableTools: Boolean(statusOnlyInquiry || isVoiceChat || (_wallBlockerEscalation && permRank < 3)),
     lazyDeferWorkspaceWritesToLead,
-    callLlmFn: (callOpts) => callChiefLlm(deps, { reasonKind: askReasonKind, ...callOpts, maxTokens: SUMMARY_MAX_TOKENS }),
+    callLlmFn: (callOpts) => callChiefLlm(deps, {
+      reasonKind: askReasonKind,
+      ...(isVoiceChat ? { effortOverride: 'off' } : {}),
+      ...callOpts,
+      maxTokens: isVoiceChat ? Math.min(SUMMARY_MAX_TOKENS, 420) : SUMMARY_MAX_TOKENS,
+    }),
     extractJsonFn: extractJsonObject,
     upsertArchiveFn,
     compactNowFn,
@@ -781,9 +880,10 @@ export async function askOrCommandChief(deps, {
       const retryRes = await callChiefLlm(deps, {
         sessionId: rootId,
         reasonKind: askReasonKind,
-        system: `${effectiveSystem}\n\n【格式纠偏（最高优先级）】严禁输出 \`<|open|>tools\`、\`<|sep|>\`、\`<|close|>\`、\`<|open|>call\` 等原生工具协议标记！请直接用自然中文回答用户问题，并仅输出单个合法 JSON 对象：\`{"reply":"- 【结论】..."}\`。`,
+        ...(isVoiceChat ? { effortOverride: 'off' } : {}),
+        system: `${effectiveSystem}\n\n【格式纠偏（最高优先级）】严禁输出 \`<|open|>tools\`、\`<|sep|>\`、\`<|close|>\`、\`<|open|>call\` 等原生工具协议标记！请直接用自然中文回答用户问题，并仅输出单个合法 JSON 对象：\`{"reply":"${isVoiceChat ? '你的口语回答' : '- 【结论】...'}"}\`。`,
         prompt: promptLines.join('\n'),
-        maxTokens: SUMMARY_MAX_TOKENS,
+        maxTokens: isVoiceChat ? Math.min(SUMMARY_MAX_TOKENS, 420) : SUMMARY_MAX_TOKENS,
       })
       if (retryRes && retryRes.ok && retryRes.text) {
         llmRes = retryRes
@@ -849,6 +949,23 @@ export async function askOrCommandChief(deps, {
         } else {
           loopBadges.push('⚠️ 压缩未完成')
         }
+      }
+    }
+  }
+
+  // Normalize colloquial non-JSON voice reply so it still flows through relays, memoryChanges & permission gates
+  if (!parsed && isVoiceChat && llmRes.ok && llmRes.text) {
+    const voicePlain = stripModelControlMarkup(stripToolCallMarkup(llmRes.text)).trim()
+    if (voicePlain && !voicePlain.startsWith('{') && voicePlain.length >= 4) {
+      parsed = {
+        reply: cleanMultiline(voicePlain, 1800),
+        relays: [],
+        boardOps: [],
+        boundProposals: [],
+        wallProposals: [],
+        archiveOps: [],
+        networkOps: [],
+        memoryChanges: [],
       }
     }
   }
@@ -1098,8 +1215,13 @@ export async function askOrCommandChief(deps, {
       conciseBrief: isConciseBrief,
     })
     const usedLocalFallback = !usablePlainLlm && !archiveFallback && !llmRes.ok
+    const friendlyFallbackNote = /401|auth|invalid.*key|unauthorized/i.test(String(llmRes.error || ''))
+      ? '后台模型接口暂时鉴权未通过，已切换本地状态汇报'
+      : '后台模型暂时忙或超时，已切换本地状态汇报'
     const rawFallbackReply = usedLocalFallback && !isConciseBrief
-      ? `- 【⚠️ 参谋模型暂未响应（${clamp(llmRes.error || '连接超时或限流', 96)}），已切换本地状态兜底】\n${fallbackCoreReply}`
+      ? (isVoiceChat
+          ? `${friendlyFallbackNote}。${String(fallbackCoreReply || '').replace(/^\s*-\s*【[^】]+】\s*/gm, '')}`
+          : `- 【⚠️ ${friendlyFallbackNote}】\n${fallbackCoreReply}`)
       : fallbackCoreReply
     const replyText = isConciseBrief ? sanitizeConciseBriefText(rawFallbackReply) : rawFallbackReply
     const fallbackBounds = (permRank >= 1 && quickAction !== 'consult_chief') ? extractFallbackBoundProposalsFromText(rawFallbackReply, input) : []
@@ -1165,6 +1287,15 @@ export async function askOrCommandChief(deps, {
         callLlm: deps && deps.callLlmOverride ? null : (opts => callChiefLlm(deps, { sessionId: rootId, ...opts })),
       })
     }
+    if (replyText && (cleanVoiceTranscriptId || isVoiceChat)) {
+      try {
+        if (cleanVoiceTranscriptId) {
+          attachVoiceTranscriptReply(cleanVoiceTranscriptId, replyText, { customDir: cleanVoiceInboxDir, sessionId: rootId })
+        } else if (isVoiceChat && input) {
+          appendVoiceTranscript({ text: input, mode: 'voice_chat', provider: 'voice-chat', sessionId: rootId, chiefReply: replyText, customDir: cleanVoiceInboxDir })
+        }
+      } catch {}
+    }
     return {
       ok: true,
       reply: replyText,
@@ -1193,6 +1324,25 @@ export async function askOrCommandChief(deps, {
     opClass: 'workflow',
     tool: 'relay',
   })
+
+  // Anti-lip-service guard in Voice Mode: ensure push/relay voice commands actually route through L0-L3 relays & elevation gates
+  const VOICE_PUSH_INTENT_RE = /(?:push|催|推一下|推动|推他|推它|叫主对话|叫他|让主对话|让他|给主对话|发给主对话|通知主对话|主会话.{0,12}(?:暂停|停了|继续|推进|干活|执行)|派给主对话)/i
+  const VOICE_PURE_QUESTION_RE = /^(?:能|可以|要|需要|该不该|是不是要|能不能).*(?:吗|呢|\?|？)$/i
+  const REPLY_CLAIMED_SENT_RE = /(?:已(?:经)?(?:替你|帮你|为您)?(?:给|向|对)?主对话|已(?:经)?(?:替你|帮你|为您)?(?:催|推|通知|推送|转达|发(?:出|送)?|派发|安排)|马上(?:催|推|去催|通知)|这就(?:去|替你|帮你)?(?:催|推|通知)|让(?:他|它|主对话)(?:接着|继续))/i
+  if (
+    isVoiceChat
+    && (!Array.isArray(parsed.relays) || parsed.relays.length === 0)
+    && !(parsed && typeof parsed.handoffDraft === 'string' && parsed.handoffDraft.trim())
+    && VOICE_PUSH_INTENT_RE.test(input)
+    && (!VOICE_PURE_QUESTION_RE.test(input.trim()) || REPLY_CLAIMED_SENT_RE.test(String(parsed.reply || '')))
+  ) {
+    parsed.relays = [{
+      target: 'lead',
+      mode: 'followup',
+      subject: '用户语音催办指令',
+      text: `用户通过语音指令要求继续推进：${clamp(String(parsed.reply || input).replace(/^[-•\s]+/, ''), 400)}`,
+    }]
+  }
 
   for (const r of (Array.isArray(parsed.relays) ? parsed.relays : []).slice(0, 8)) {
     if (!r || !r.text) continue
@@ -1635,18 +1785,35 @@ export async function askOrCommandChief(deps, {
     : (compactToolRec && compactToolRec.ok === false && !compactToolRec.pendingApproval
         ? `（⚠️ 实测压缩提示：${compactToolRec.error || '压缩未完成'}）`
         : '')
+  const voiceBlockedLipService = Boolean(
+    isVoiceChat
+    && (finalElevation || queuedApprovals.length > 0 || deliveryFailures.length > 0)
+    && REPLY_CLAIMED_SENT_RE.test(cleanedParsedReply),
+  )
+  let honestVoiceReply = cleanedParsedReply
   const permissionStatusNotes = []
-  for (const failMsg of [...new Set(deliveryFailures)]) {
-    permissionStatusNotes.push(`- 【⚠️ 主对话通道受阻】${failMsg}`)
+  if (voiceBlockedLipService) {
+    if (finalElevation) {
+      const tgtMeta = CHIEF_PERMISSION_META[finalElevation.targetMode] || {}
+      honestVoiceReply = `当前为「${CHIEF_PERMISSION_META[permissionMode].level} · ${CHIEF_PERMISSION_META[permissionMode].title}」，暂不能直接向主对话发令，已为你弹出提权至「${tgtMeta.level || 'L2'} · ${tgtMeta.title || finalElevation.targetMode}」确认窗，批准后我立刻催主对话继续！`
+    } else if (queuedApprovals.length > 0) {
+      honestVoiceReply = `当前为「L2 · 参谋模式」，催办指令已进入逐项确认弹窗（共 ${queuedApprovals.length} 项），点「允许本次操作」后我立刻发给主对话！`
+    } else if (deliveryFailures.length > 0) {
+      honestVoiceReply = `主对话通道暂时受阻，催办指令尚未送达：${deliveryFailures[0]}`
+    }
+  } else {
+    for (const failMsg of [...new Set(deliveryFailures)]) {
+      permissionStatusNotes.push(`- 【⚠️ 主对话通道受阻】${failMsg}`)
+    }
+    if (queuedApprovals.length > 0 && !/操作授权|允许本次操作/.test(cleanedParsedReply)) {
+      permissionStatusNotes.push(`- 【🛡️ 待逐项确认】已为您弹出「操作授权请求」弹窗（共 ${queuedApprovals.length} 项受控操作），点击「允许本次操作」后才会实际执行。`)
+    }
+    if (finalElevation && !/提权/.test(cleanedParsedReply)) {
+      const tgtMeta = CHIEF_PERMISSION_META[finalElevation.targetMode] || {}
+      permissionStatusNotes.push(`- 【🔐 已申请提权】当前为「${CHIEF_PERMISSION_META[permissionMode].level} · ${CHIEF_PERMISSION_META[permissionMode].title}」，已向您发起提权至「${tgtMeta.level || ''} · ${tgtMeta.title || finalElevation.targetMode}」的申请弹窗。`)
+    }
   }
-  if (queuedApprovals.length > 0 && !/操作授权|允许本次操作/.test(cleanedParsedReply)) {
-    permissionStatusNotes.push(`- 【🛡️ 待逐项确认】已为您弹出「操作授权请求」弹窗（共 ${queuedApprovals.length} 项受控操作），点击「允许本次操作」后才会实际执行。`)
-  }
-  if (finalElevation && !/提权/.test(cleanedParsedReply)) {
-    const tgtMeta = CHIEF_PERMISSION_META[finalElevation.targetMode] || {}
-    permissionStatusNotes.push(`- 【🔐 已申请提权】当前为「${CHIEF_PERMISSION_META[permissionMode].level} · ${CHIEF_PERMISSION_META[permissionMode].title}」，已向您发起提权至「${tgtMeta.level || ''} · ${tgtMeta.title || finalElevation.targetMode}」的申请弹窗。`)
-  }
-  const baseParsedReply = cleanedParsedReply || buildSmartFallbackReply({ input, board, liveDigest, directory, facts: numberedFacts, mailbox: view.mailbox, conciseBrief: isConciseBrief }) || '- 【已执行】已按你的吩咐安排妥当。'
+  const baseParsedReply = honestVoiceReply || buildSmartFallbackReply({ input, board, liveDigest, directory, facts: numberedFacts, mailbox: view.mailbox, conciseBrief: isConciseBrief }) || '- 【已执行】已按你的吩咐安排妥当。'
   const combinedParsedReply = [
     compactOutcomeNote,
     baseParsedReply,
@@ -1654,6 +1821,9 @@ export async function askOrCommandChief(deps, {
   ].filter(Boolean).join('\n')
   const rawReplyText = cleanMultiline(combinedParsedReply, 1800)
   const replyText = isConciseBrief ? sanitizeConciseBriefText(rawReplyText) : rawReplyText
+  const voiceHandoffDraft = isVoiceChat && parsed && typeof parsed.handoffDraft === 'string'
+    ? clamp(parsed.handoffDraft.trim(), 500)
+    : ''
 
   const BOUND_COL_LABEL = { forbidden: '禁止红线', allowed: '必做事项', notes: '注意事项' }
   const createdInquiries = []
@@ -1924,7 +2094,14 @@ export async function askOrCommandChief(deps, {
       forceReceipt: mainTurnIsReceipt,
     })
   })
-  if (!isResumeTurn && !_fromLeadRequest && replyText && !relayResults.length && !appliedFacts.length && !executedBoardOps.length) {
+  if (appliedFacts.length > 0) {
+    await syncAppliedFactsToExternalMemory(effCfg.externalMemory, appliedFacts, {
+      sessionId: rootId,
+      projectKey: extProjectKey,
+      workspaceCwd: cwdForPromptWalls,
+    }).catch(() => null)
+  }
+  if (!isResumeTurn && !_fromLeadRequest && replyText && !relayResults.length) {
     void syncChiefTurnAsync(effCfg.externalMemory, {
       userText: input,
       chiefReply: replyText,
@@ -2000,6 +2177,16 @@ export async function askOrCommandChief(deps, {
     } catch {}
   }
 
+  if (replyText && (cleanVoiceTranscriptId || isVoiceChat)) {
+    try {
+      if (cleanVoiceTranscriptId) {
+        attachVoiceTranscriptReply(cleanVoiceTranscriptId, replyText, { customDir: cleanVoiceInboxDir, sessionId: rootId })
+      } else if (isVoiceChat && input) {
+        appendVoiceTranscript({ text: input, mode: 'voice_chat', provider: 'voice-chat', sessionId: rootId, chiefReply: replyText, customDir: cleanVoiceInboxDir })
+      }
+    } catch {}
+  }
+
   return {
     ok: true,
     reply: replyText,
@@ -2018,6 +2205,7 @@ export async function askOrCommandChief(deps, {
     pendingApprovals: queuedApprovals,
     thinkingEffort: llmRes.thinkingEffort || '',
     thinkingEffortMode: llmRes.thinkingEffortMode || effCfg.thinkingEffort || 'auto',
+    ...(voiceHandoffDraft ? { voiceHandoffDraft } : {}),
     ...(extMem && extMem.recallMeta ? { memoryRecall: extMem.recallMeta } : {}),
     ...(extMem && extMem.moodBadge ? { moodBadge: extMem.moodBadge } : {}),
     ...(finalElevation ? { elevationRequested: finalElevation } : {}),

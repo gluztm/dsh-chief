@@ -101,11 +101,11 @@ export const DEFAULT_MANAGED_BUDGET_MAX_TOKENS = 300_000
 export const CHIEF_UI_LANGS = ['auto', 'zh', 'en']
 
 export const DEFAULT_EXTERNAL_MEMORY_CONFIG = {
-  enabled: false,
+  enabled: true,
   memorySlot: {
     enabled: true,
-    kind: 'none',
-    label: '',
+    kind: 'builtin-md',
+    label: '参谋自带记事本',
     endpoint: '',
     vaultPath: '',
     cordisProviderId: '',
@@ -137,6 +137,7 @@ export const DEFAULT_EXTERNAL_MEMORY_CONFIG = {
   },
   embedding: {
     enabled: false,
+    provider: 'openai',
     baseUrl: '',
     model: '',
     apiKeyEnv: '',
@@ -147,7 +148,7 @@ export const DEFAULT_EXTERNAL_MEMORY_CONFIG = {
   autoDistill: {
     enabled: true,
     minTurns: 2,
-    cooldownSec: 90,
+    cooldownSec: 60,
   },
   workspacePolicies: {},
 }
@@ -191,7 +192,9 @@ export function normalizeExternalMemoryConfig(raw, prevConfig = null) {
   const rawEmb = src.embedding && typeof src.embedding === 'object' ? src.embedding : {}
   const rawDistill = src.autoDistill && typeof src.autoDistill === 'object' ? src.autoDistill : {}
 
-  const memKind = EXT_MEM_KINDS.includes(rawMem.kind) ? rawMem.kind : (EXT_MEM_KINDS.includes(prevMem.kind) && !('kind' in rawMem) ? prevMem.kind : 'none')
+  const memKind = EXT_MEM_KINDS.includes(rawMem.kind)
+    ? rawMem.kind
+    : (EXT_MEM_KINDS.includes(prevMem.kind) && !('kind' in rawMem) ? prevMem.kind : DEFAULT_EXTERNAL_MEMORY_CONFIG.memorySlot.kind)
   const moodKind = EXT_MOOD_KINDS.includes(rawMood.kind) ? rawMood.kind : (EXT_MOOD_KINDS.includes(prevMood.kind) && !('kind' in rawMood) ? prevMood.kind : 'none')
 
   const resolveToken = (incoming, prevObj) => {
@@ -224,12 +227,16 @@ export function normalizeExternalMemoryConfig(raw, prevConfig = null) {
     return ''
   }
 
+  const memLabel = pickStr(rawMem, prevMem, 'label', 60)
+
   return {
-    enabled: typeof src.enabled === 'boolean' ? src.enabled : Boolean(prev && prev.enabled),
+    enabled: typeof src.enabled === 'boolean'
+      ? src.enabled
+      : (prev && typeof prev.enabled === 'boolean' ? prev.enabled : DEFAULT_EXTERNAL_MEMORY_CONFIG.enabled),
     memorySlot: {
       enabled: pickBool(rawMem, prevMem, 'enabled', DEFAULT_EXTERNAL_MEMORY_CONFIG.memorySlot.enabled),
       kind: memKind,
-      label: pickStr(rawMem, prevMem, 'label', 60),
+      label: memLabel || (memKind === 'builtin-md' ? DEFAULT_EXTERNAL_MEMORY_CONFIG.memorySlot.label : ''),
       endpoint: 'endpoint' in rawMem
         ? normalizeHttpEndpointUrl(rawMem.endpoint)
         : normalizeHttpEndpointUrl(prevMem.endpoint),
@@ -297,15 +304,39 @@ export function normalizeExternalMemoryConfig(raw, prevConfig = null) {
         800,
       ),
     },
-    embedding: {
-      enabled: pickBool(rawEmb, prevEmb, 'enabled', DEFAULT_EXTERNAL_MEMORY_CONFIG.embedding.enabled),
-      baseUrl: 'baseUrl' in rawEmb
+    embedding: (() => {
+      const nextBaseUrl = 'baseUrl' in rawEmb
         ? normalizeHttpEndpointUrl(rawEmb.baseUrl)
-        : normalizeHttpEndpointUrl(prevEmb.baseUrl),
-      model: pickStr(rawEmb, prevEmb, 'model', 120),
-      apiKeyEnv: 'apiKeyEnv' in rawEmb
-        ? normalizeEnvVarName(rawEmb.apiKeyEnv)
-        : normalizeEnvVarName(prevEmb.apiKeyEnv),
+        : normalizeHttpEndpointUrl(prevEmb.baseUrl)
+      const detectUrlProvider = (u) => {
+        const low = String(u || '').toLowerCase()
+        if (!low) return ''
+        if ((low.includes(':11434') && !/\/v1(?:\/embeddings)?$/i.test(low)) || low.includes('/api/embed')) return 'ollama'
+        if (low.includes('generativelanguage.googleapis.com') || low.includes(':embedcontent')) return 'gemini'
+        return ''
+      }
+      const allowed = ['openai', 'ollama', 'gemini']
+      const rawP = typeof rawEmb.provider === 'string' ? rawEmb.provider.trim().toLowerCase() : ''
+      const prevP = typeof prevEmb.provider === 'string' ? prevEmb.provider.trim().toLowerCase() : ''
+      const urlP = detectUrlProvider(nextBaseUrl)
+      const provider = (() => {
+        if (rawP === 'ollama' || rawP === 'gemini') return rawP
+        if (rawP === 'openai') {
+          if (urlP === 'gemini' || (urlP === 'ollama' && !rawEmb.providerExplicit)) return urlP
+          return 'openai'
+        }
+        if (urlP) return urlP
+        if (allowed.includes(prevP)) return prevP
+        return DEFAULT_EXTERNAL_MEMORY_CONFIG.embedding.provider
+      })()
+      return {
+        enabled: pickBool(rawEmb, prevEmb, 'enabled', DEFAULT_EXTERNAL_MEMORY_CONFIG.embedding.enabled),
+        provider,
+        baseUrl: nextBaseUrl,
+        model: pickStr(rawEmb, prevEmb, 'model', 120),
+        apiKeyEnv: 'apiKeyEnv' in rawEmb
+          ? normalizeEnvVarName(rawEmb.apiKeyEnv)
+          : normalizeEnvVarName(prevEmb.apiKeyEnv),
       apiKey: (() => {
         if (rawEmb && rawEmb.clearApiKey === true) return ''
         if (typeof rawEmb.apiKey === 'string' && rawEmb.apiKey.trim()) {
@@ -319,12 +350,13 @@ export function normalizeExternalMemoryConfig(raw, prevConfig = null) {
         500,
         8000,
       ),
-      weight: (() => {
-        const rawW = 'weight' in rawEmb ? Number(rawEmb.weight) : Number(prevEmb.weight)
-        if (!Number.isFinite(rawW)) return DEFAULT_EXTERNAL_MEMORY_CONFIG.embedding.weight
-        return Number(Math.min(0.9, Math.max(0.1, rawW)).toFixed(2))
-      })(),
-    },
+        weight: (() => {
+          const rawW = 'weight' in rawEmb ? Number(rawEmb.weight) : Number(prevEmb.weight)
+          if (!Number.isFinite(rawW)) return DEFAULT_EXTERNAL_MEMORY_CONFIG.embedding.weight
+          return Number(Math.min(0.9, Math.max(0.1, rawW)).toFixed(2))
+        })(),
+      }
+    })(),
     autoDistill: {
       enabled: pickBool(rawDistill, prevDistill, 'enabled', DEFAULT_EXTERNAL_MEMORY_CONFIG.autoDistill.enabled),
       minTurns: normalizeBoundedInt(
@@ -363,6 +395,259 @@ export function redactExternalMemoryConfigForUi(raw) {
       apiKey: '',
       hasApiKey: Boolean(norm.embedding.apiKey),
     },
+  }
+}
+
+export const DEFAULT_TTS_CONFIG = {
+  enabled: false,
+  provider: 'deepseek',
+  voiceId: 'stella',
+  format: 'wav',
+  filterMarkdown: true,
+  baseUrl: '',
+  model: 'tts-1',
+  apiKeyEnv: '',
+  apiKey: '',
+  browserVoice: '',
+  speed: 1.0,
+  volume: 0.9,
+  autoSpeakAlerts: false,
+  autoSpeakReplies: false,
+  speechStyle: 'brief',
+  fallbackToBrowser: true,
+  timeoutMs: 18000,
+  handsFreeVad: false,
+  vadSilenceMs: 1300,
+}
+
+const TTS_PROVIDERS = ['deepseek', 'openai-compat', 'browser']
+const TTS_FORMATS = ['wav', 'mp3', 'opus', 'pcm']
+const TTS_SPEECH_STYLES = ['brief', 'full']
+
+export function normalizeTtsConfig(raw, prevConfig = null) {
+  const src = raw && typeof raw === 'object' ? raw : {}
+  const prev = prevConfig && typeof prevConfig === 'object' ? prevConfig : {}
+  const pickBool = (key, defVal) => {
+    if (typeof src[key] === 'boolean') return src[key]
+    if (typeof prev[key] === 'boolean') return prev[key]
+    return defVal
+  }
+  const pickStr = (key, defVal, maxLen = 120) => {
+    if (typeof src[key] === 'string') {
+      return src[key].replace(/[\r\n]+/g, ' ').trim().slice(0, maxLen)
+    }
+    if (typeof prev[key] === 'string') {
+      return prev[key].replace(/[\r\n]+/g, ' ').trim().slice(0, maxLen)
+    }
+    return defVal
+  }
+
+  const rawProvider = typeof src.provider === 'string' ? src.provider.trim().toLowerCase() : ''
+  const prevProvider = typeof prev.provider === 'string' ? prev.provider.trim().toLowerCase() : ''
+  const provider = TTS_PROVIDERS.includes(rawProvider)
+    ? rawProvider
+    : (TTS_PROVIDERS.includes(prevProvider) ? prevProvider : DEFAULT_TTS_CONFIG.provider)
+
+  const rawFormat = typeof src.format === 'string' ? src.format.trim().toLowerCase() : ''
+  const prevFormat = typeof prev.format === 'string' ? prev.format.trim().toLowerCase() : ''
+  const format = TTS_FORMATS.includes(rawFormat)
+    ? rawFormat
+    : (TTS_FORMATS.includes(prevFormat) ? prevFormat : DEFAULT_TTS_CONFIG.format)
+
+  const rawStyle = typeof src.speechStyle === 'string' ? src.speechStyle.trim().toLowerCase() : ''
+  const prevStyle = typeof prev.speechStyle === 'string' ? prev.speechStyle.trim().toLowerCase() : ''
+  const speechStyle = TTS_SPEECH_STYLES.includes(rawStyle)
+    ? rawStyle
+    : (TTS_SPEECH_STYLES.includes(prevStyle) ? prevStyle : DEFAULT_TTS_CONFIG.speechStyle)
+
+  const rawSpeed = 'speed' in src ? Number(src.speed) : Number(prev.speed)
+  const speed = Number.isFinite(rawSpeed)
+    ? Number(Math.min(1.5, Math.max(0.75, rawSpeed)).toFixed(2))
+    : DEFAULT_TTS_CONFIG.speed
+
+  const rawVolume = 'volume' in src ? Number(src.volume) : Number(prev.volume)
+  const volume = Number.isFinite(rawVolume)
+    ? Number(Math.min(1.0, Math.max(0.1, rawVolume)).toFixed(2))
+    : DEFAULT_TTS_CONFIG.volume
+
+  const apiKey = (() => {
+    if (src.clearApiKey === true) return ''
+    if (typeof src.apiKey === 'string' && src.apiKey.trim()) {
+      return src.apiKey.trim().slice(0, 512)
+    }
+    return typeof prev.apiKey === 'string' ? prev.apiKey.trim().slice(0, 512) : ''
+  })()
+
+  return {
+    enabled: pickBool('enabled', DEFAULT_TTS_CONFIG.enabled),
+    provider,
+    voiceId: pickStr('voiceId', DEFAULT_TTS_CONFIG.voiceId, 120) || DEFAULT_TTS_CONFIG.voiceId,
+    format,
+    filterMarkdown: pickBool('filterMarkdown', DEFAULT_TTS_CONFIG.filterMarkdown),
+    baseUrl: 'baseUrl' in src
+      ? normalizeHttpEndpointUrl(src.baseUrl)
+      : normalizeHttpEndpointUrl(prev.baseUrl),
+    model: pickStr('model', DEFAULT_TTS_CONFIG.model, 120) || DEFAULT_TTS_CONFIG.model,
+    apiKeyEnv: 'apiKeyEnv' in src
+      ? normalizeEnvVarName(src.apiKeyEnv)
+      : normalizeEnvVarName(prev.apiKeyEnv),
+    apiKey,
+    browserVoice: pickStr('browserVoice', DEFAULT_TTS_CONFIG.browserVoice, 120),
+    speed,
+    volume,
+    autoSpeakAlerts: pickBool('autoSpeakAlerts', DEFAULT_TTS_CONFIG.autoSpeakAlerts),
+    autoSpeakReplies: pickBool('autoSpeakReplies', DEFAULT_TTS_CONFIG.autoSpeakReplies),
+    speechStyle,
+    fallbackToBrowser: pickBool('fallbackToBrowser', DEFAULT_TTS_CONFIG.fallbackToBrowser),
+    timeoutMs: normalizeBoundedInt(
+      'timeoutMs' in src ? src.timeoutMs : prev.timeoutMs,
+      DEFAULT_TTS_CONFIG.timeoutMs,
+      5000,
+      45000,
+    ),
+    handsFreeVad: pickBool('handsFreeVad', DEFAULT_TTS_CONFIG.handsFreeVad),
+    vadSilenceMs: normalizeBoundedInt(
+      'vadSilenceMs' in src ? src.vadSilenceMs : prev.vadSilenceMs,
+      DEFAULT_TTS_CONFIG.vadSilenceMs,
+      600,
+      3000,
+    ),
+  }
+}
+
+export function redactTtsConfigForUi(raw) {
+  const norm = normalizeTtsConfig(raw)
+  return {
+    ...norm,
+    apiKey: '',
+    hasApiKey: Boolean(norm.apiKey),
+  }
+}
+
+export const DEFAULT_PAGER_CONFIG = {
+  enabled: false,
+  channel: 'feishu',
+  webhookUrl: '',
+  secret: '',
+  telegramBotToken: '',
+  telegramChatId: '',
+  quietPrefix: '[DSH 参谋长]',
+  cooldownSec: 15,
+  timeoutMs: 10000,
+  events: {
+    approvalRequired: true,
+    wallBlocked: true,
+    hazardHalt: true,
+    taskDone: true,
+    budgetBreak: true,
+  },
+}
+
+const PAGER_CHANNELS = ['feishu', 'dingtalk', 'wecom', 'telegram', 'discord', 'webhook']
+
+export function normalizePagerConfig(raw, prevConfig = null) {
+  const src = raw && typeof raw === 'object' ? raw : {}
+  const prev = prevConfig && typeof prevConfig === 'object' ? prevConfig : {}
+  const prevEv = prev.events && typeof prev.events === 'object' ? prev.events : {}
+  const rawEv = src.events && typeof src.events === 'object' ? src.events : {}
+
+  const pickBool = (key, defVal) => {
+    if (typeof src[key] === 'boolean') return src[key]
+    if (typeof prev[key] === 'boolean') return prev[key]
+    return defVal
+  }
+  const pickEventBool = (key, defVal) => {
+    if (typeof rawEv[key] === 'boolean') return rawEv[key]
+    if (typeof prevEv[key] === 'boolean') return prevEv[key]
+    return defVal
+  }
+  const pickStr = (key, defVal, maxLen = 120) => {
+    if (typeof src[key] === 'string') {
+      return src[key].replace(/[\r\n]+/g, ' ').trim().slice(0, maxLen)
+    }
+    if (typeof prev[key] === 'string') {
+      return prev[key].replace(/[\r\n]+/g, ' ').trim().slice(0, maxLen)
+    }
+    return defVal
+  }
+
+  const rawCh = typeof src.channel === 'string' ? src.channel.trim().toLowerCase() : ''
+  const prevCh = typeof prev.channel === 'string' ? prev.channel.trim().toLowerCase() : ''
+  const channel = PAGER_CHANNELS.includes(rawCh)
+    ? rawCh
+    : (PAGER_CHANNELS.includes(prevCh) ? prevCh : DEFAULT_PAGER_CONFIG.channel)
+
+  const webhookUrl = (() => {
+    if (src.clearWebhookUrl === true) return ''
+    if (typeof src.webhookUrl === 'string' && src.webhookUrl.trim()) {
+      return normalizeHttpEndpointUrl(src.webhookUrl)
+    }
+    return typeof prev.webhookUrl === 'string' ? normalizeHttpEndpointUrl(prev.webhookUrl) : ''
+  })()
+
+  const secret = (() => {
+    if (src.clearSecret === true) return ''
+    if (typeof src.secret === 'string' && src.secret.trim()) {
+      return src.secret.trim().slice(0, 512)
+    }
+    return typeof prev.secret === 'string' ? prev.secret.trim().slice(0, 512) : ''
+  })()
+
+  const telegramBotToken = (() => {
+    if (src.clearTelegramBotToken === true) return ''
+    if (typeof src.telegramBotToken === 'string' && src.telegramBotToken.trim()) {
+      return src.telegramBotToken.trim().slice(0, 256)
+    }
+    return typeof prev.telegramBotToken === 'string' ? prev.telegramBotToken.trim().slice(0, 256) : ''
+  })()
+
+  return {
+    enabled: pickBool('enabled', DEFAULT_PAGER_CONFIG.enabled),
+    channel,
+    webhookUrl,
+    secret,
+    telegramBotToken,
+    telegramChatId: pickStr('telegramChatId', DEFAULT_PAGER_CONFIG.telegramChatId, 80),
+    quietPrefix: pickStr('quietPrefix', DEFAULT_PAGER_CONFIG.quietPrefix, 40) || DEFAULT_PAGER_CONFIG.quietPrefix,
+    cooldownSec: normalizeBoundedInt(
+      'cooldownSec' in src ? src.cooldownSec : prev.cooldownSec,
+      DEFAULT_PAGER_CONFIG.cooldownSec,
+      3,
+      300,
+    ),
+    timeoutMs: normalizeBoundedInt(
+      'timeoutMs' in src ? src.timeoutMs : prev.timeoutMs,
+      DEFAULT_PAGER_CONFIG.timeoutMs,
+      3000,
+      25000,
+    ),
+    events: {
+      approvalRequired: pickEventBool('approvalRequired', DEFAULT_PAGER_CONFIG.events.approvalRequired),
+      wallBlocked: pickEventBool('wallBlocked', DEFAULT_PAGER_CONFIG.events.wallBlocked),
+      hazardHalt: pickEventBool('hazardHalt', DEFAULT_PAGER_CONFIG.events.hazardHalt),
+      taskDone: pickEventBool('taskDone', DEFAULT_PAGER_CONFIG.events.taskDone),
+      budgetBreak: pickEventBool('budgetBreak', DEFAULT_PAGER_CONFIG.events.budgetBreak),
+    },
+  }
+}
+
+export function redactPagerConfigForUi(raw) {
+  const norm = normalizePagerConfig(raw)
+  let webhookHostHint = ''
+  if (norm.webhookUrl) {
+    try {
+      webhookHostHint = new URL(norm.webhookUrl).host
+    } catch {}
+  }
+  return {
+    ...norm,
+    webhookUrl: '',
+    secret: '',
+    telegramBotToken: '',
+    hasWebhookUrl: Boolean(norm.webhookUrl),
+    webhookHostHint,
+    hasSecret: Boolean(norm.secret),
+    hasTelegramBotToken: Boolean(norm.telegramBotToken),
   }
 }
 
@@ -413,6 +698,50 @@ export function normalizeUiLang(raw) {
   if (s === 'zh' || s === 'zh-cn' || s === 'zh-hans') return 'zh'
   if (s === 'en' || s === 'en-us' || s === 'en-gb') return 'en'
   return 'auto'
+}
+
+export const CHIEF_UI_SKINS = ['glass', 'editorial', 'botanical', 'starlight', 'classic', 'tide', 'custom']
+
+export function normalizeUiSkinPref(raw) {
+  const clean = typeof raw === 'string' ? raw.trim().toLowerCase() : ''
+  return CHIEF_UI_SKINS.includes(clean) ? clean : ''
+}
+
+const SERVER_HEX6_RE = /^#[0-9a-f]{6}$/i
+const SERVER_DATA_IMG_RE = /^data:image\/(?:png|jpeg|webp|gif);base64,[A-Za-z0-9+/=]+$/
+
+export function normalizeServerCustomSkin(raw) {
+  if (raw === null || raw === false) return null
+  if (!raw || typeof raw !== 'object') return null
+  const pickHex = (v, fb) => {
+    const s = String(v || '').trim()
+    return SERVER_HEX6_RE.test(s) ? s.toLowerCase() : fb
+  }
+  const cleanName = String(raw.name || '').replace(/[\r\n<>"{}]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 24)
+  const cleanMood = String(raw.moodNote || '').replace(/[\r\n<>]/g, ' ').replace(/\s+/g, ' ').trim().slice(0, 120)
+  const rawImg = String(raw.bgImageUrl || '').trim()
+  const bgImageUrl = (rawImg.length <= 480000 && SERVER_DATA_IMG_RE.test(rawImg)) ? rawImg : ''
+  const bgImageStorage = bgImageUrl ? 'inline' : ''
+  const rawOpacity = Number(raw.bgImageOpacity)
+  const rawBlur = Number(raw.bgImageBlur)
+  return {
+    name: cleanName || '流光定制',
+    accentHex: pickHex(raw.accentHex, '#8b7cf6'),
+    secondaryHex: pickHex(raw.secondaryHex, '#5cc9a7'),
+    warmHex: pickHex(raw.warmHex, '#f0b868'),
+    bgTintHex: pickHex(raw.bgTintHex, '#171928'),
+    bgImageUrl,
+    bgImageStorage,
+    bgImageEnabled: raw.bgImageEnabled !== false,
+    bgImageOpacity: Number.isFinite(rawOpacity) ? Math.round(Math.min(0.80, Math.max(0.06, rawOpacity)) * 100) / 100 : 0.28,
+    bgImageBlur: Number.isFinite(rawBlur) ? Math.round(Math.min(32, Math.max(0, rawBlur))) : 10,
+    ambientGlow: raw.ambientGlow !== false,
+    radius: ['round', 'medium', 'sharp'].includes(raw.radius) ? raw.radius : 'round',
+    serifTitle: Boolean(raw.serifTitle),
+    moodNote: cleanMood,
+    source: ['image', 'chief', 'manual'].includes(raw.source) ? raw.source : 'manual',
+    updatedAt: Math.max(0, Number(raw.updatedAt) || 0),
+  }
 }
 
 export function normalizeManagedBudgetCalls(raw) {
@@ -597,6 +926,19 @@ export function normalizeAlertEvent(raw) {
   }
 }
 
+const alertEventListeners = []
+
+export function registerAlertEventListener(fn) {
+  if (typeof fn !== 'function') return () => {}
+  if (!alertEventListeners.includes(fn)) {
+    alertEventListeners.push(fn)
+  }
+  return () => {
+    const idx = alertEventListeners.indexOf(fn)
+    if (idx >= 0) alertEventListeners.splice(idx, 1)
+  }
+}
+
 export function pushAlertEventToWs(ws, spec = {}) {
   if (!ws || typeof ws !== 'object') return null
   if (!Array.isArray(ws.alertEvents)) ws.alertEvents = []
@@ -611,6 +953,11 @@ export function pushAlertEventToWs(ws, spec = {}) {
   ws.alertEvents.push(norm)
   if (ws.alertEvents.length > ALERT_EVENTS_CAP) {
     ws.alertEvents = ws.alertEvents.slice(-ALERT_EVENTS_CAP)
+  }
+  for (const listener of alertEventListeners) {
+    try {
+      listener(norm, ws)
+    } catch {}
   }
   return norm
 }
@@ -1522,6 +1869,8 @@ export function resolveWorkspaceConfig(state, sessionId = '') {
     notifyEnabled,
     notifySound,
     uiLang,
+    uiSkin: normalizeUiSkinPref(base.uiSkin),
+    customSkin: normalizeServerCustomSkin(base.customSkin),
     managedBudgetMaxCalls,
     managedBudgetMaxTokens,
     thinkingEffort,
@@ -1537,6 +1886,8 @@ export function resolveWorkspaceConfig(state, sessionId = '') {
     globalSafetyGuardEnabled,
     sessionSafetyGuardEnabled,
     externalMemory: normalizeExternalMemoryConfig(base.externalMemory),
+    tts: normalizeTtsConfig(base.tts),
+    remotePager: normalizePagerConfig(base.remotePager),
     tacticalModes: mergedTactical,
   }
 }
@@ -1624,6 +1975,8 @@ export function normalizeState(raw) {
       notifyEnabled: typeof cfg.notifyEnabled === 'boolean' ? cfg.notifyEnabled : true,
       notifySound: typeof cfg.notifySound === 'boolean' ? cfg.notifySound : false,
       uiLang: normalizeUiLang(cfg.uiLang),
+      uiSkin: normalizeUiSkinPref(cfg.uiSkin),
+      customSkin: normalizeServerCustomSkin(cfg.customSkin),
       managedBudgetMaxCalls: normalizeManagedBudgetCalls(cfg.managedBudgetMaxCalls),
       managedBudgetMaxTokens: normalizeManagedBudgetTokens(cfg.managedBudgetMaxTokens),
       thinkingEffort: normalizeThinkingEffort(cfg.thinkingEffort),
@@ -1634,6 +1987,8 @@ export function normalizeState(raw) {
       autoReview: !stopped && paceMode !== 'manual',
       ...(globalPlugRes.ok && globalPlugRes.plugins.length > 0 ? { policyPlugins: globalPlugRes.plugins } : {}),
       externalMemory: normalizeExternalMemoryConfig(cfg.externalMemory),
+      tts: normalizeTtsConfig(cfg.tts),
+      remotePager: normalizePagerConfig(cfg.remotePager),
       tacticalModes: normalizeTacticalModes(cfg.tacticalModes),
       ...(Array.isArray(cfg.guardWallPresetsSeededPaths)
         ? {

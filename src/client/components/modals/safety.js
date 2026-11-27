@@ -458,8 +458,13 @@ export function ElevationRequestModal({ view }) {
           h('span', null, `${CHIEF_PERMISSION_LABELS[req.fromMode] || req.fromMode} → 申请 ${CHIEF_PERMISSION_LABELS[req.targetMode] || req.targetMode}`),
         ),
         h('div', { className: 'dnb-op-kv' },
-          h('span', { className: 'dnb-op-k' }, '谁发起的：'),
-          h('span', { className: 'dnb-op-code' }, req.by || 'chief'),
+          h('span', { className: 'dnb-op-k' }, '发起方：'),
+          h('span', { className: 'dnb-op-code' },
+            (() => {
+              const rawBy = String(req.by || 'chief').trim()
+              const byMap = { chief: '参谋长', lead: '主对话', user: '你', operator: '你', system: '系统' }
+              return byMap[rawBy] || rawBy
+            })()),
         ),
         h('div', { className: 'dnb-op-kv' },
           h('span', { className: 'dnb-op-k' }, '原因：'),
@@ -468,7 +473,25 @@ export function ElevationRequestModal({ view }) {
         req.requestedActionSummary
           ? h('div', { className: 'dnb-op-kv' },
               h('span', { className: 'dnb-op-k' }, '准备做什么：'),
-              h('span', null, req.requestedActionSummary),
+              h('span', null, (() => {
+                const rawSum = String(req.requestedActionSummary || '').trim()
+                const opLabels = {
+                  'objective.set': '设置当前目标',
+                  'plan.set': '制定推进步骤',
+                  'task.add': '新增任务卡片',
+                  'task.update': '更新任务进度',
+                  'task.dispatch': '派发子代理',
+                  'note.write': '记录临时便签',
+                  'note.pin': '置顶重点便签',
+                  'bounds.propose': '提议新增边界',
+                  'cursor.set': '更新断点记录',
+                }
+                if (/^boardOps[:：]/i.test(rawSum)) {
+                  const list = rawSum.replace(/^boardOps[:：]\s*/i, '').split(/[,\s/、]+/).filter(Boolean)
+                  return list.map(k => opLabels[k] || k).join(' / ') || rawSum
+                }
+                return rawSum
+              })()),
             )
           : null,
       ),

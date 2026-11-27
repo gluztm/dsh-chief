@@ -30,7 +30,7 @@ import {
   summarizeLlmLedger,
   stripModelControlMarkup,
 } from './chief-state.js'
-import { redactExternalMemoryConfigForUi } from './state-schema.js'
+import { redactExternalMemoryConfigForUi, redactTtsConfigForUi, redactPagerConfigForUi } from './state-schema.js'
 import { resolveProjectKey } from './archives.js'
 import { getExternalMemoryRuntimeStatus } from './external-memory.js'
 import { listChiefModels, callChiefLlm } from './chief-models.js'
@@ -550,6 +550,8 @@ export async function getChiefView(deps, sessionId, { regenerate = false, autoSu
     config: {
       ...effectiveConfig,
       externalMemory: extMemRedacted,
+      tts: redactTtsConfigForUi(effectiveConfig.tts),
+      remotePager: redactPagerConfigForUi(effectiveConfig.remotePager),
       chiefName: effectiveConfig.chiefName || '',
     },
     externalMemoryStatus: extMemStatus,

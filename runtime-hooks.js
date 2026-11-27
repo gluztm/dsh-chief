@@ -113,8 +113,13 @@ export function createRuntimeHooks(deps) {
   function apply(ctx) {
     const runtime = {
       get(name) {
+        if (typeof ctx.get !== 'function') return undefined
         try {
-          return typeof ctx.get === 'function' ? ctx.get(name) : undefined
+          const soft = ctx.get(name, false)
+          if (soft !== undefined) return soft
+        } catch {}
+        try {
+          return ctx.get(name)
         } catch {
           return undefined
         }

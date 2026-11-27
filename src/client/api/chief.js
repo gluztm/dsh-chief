@@ -23,6 +23,7 @@ import {
   rollChiefBrandNickname,
 } from '../utils.js'
 import { bi } from '../i18n.js'
+import { speakChiefText } from '../tts.js'
 import { apiBridge, call, applySecView, classifyChiefWorkFx, resolveChiefSuggestionWorkFx, withChiefWorkFx } from './transport.js'
 import { refresh, loadHandoff } from './board.js'
 import { loadArchives } from './archives.js'
@@ -211,6 +212,12 @@ export async function updateSecConfig(nextCfg) {
     const resolvedExternalMemory = cfgObj && cfgObj.externalMemory && typeof cfgObj.externalMemory === 'object'
       ? cfgObj.externalMemory
       : null
+    const resolvedTts = cfgObj && cfgObj.tts && typeof cfgObj.tts === 'object'
+      ? cfgObj.tts
+      : null
+    const resolvedPager = cfgObj && cfgObj.remotePager && typeof cfgObj.remotePager === 'object'
+      ? cfgObj.remotePager
+      : null
     const updatedSubagents = resolvedLocks && Array.isArray(store.subagents)
       ? store.subagents.map(ag => {
           if (!ag || typeof ag !== 'object') return ag
@@ -227,12 +234,14 @@ export async function updateSecConfig(nextCfg) {
     patch({
       compactInputDraft: null,
       compactLowWarning: value.compactLowWarning || '',
-      ...((resolvedLocks || resolvedTeamEffortMode || resolvedSessionEnabled !== null || resolvedDefaultAutoEnable !== null || resolvedRunMode !== null || resolvedPaceMode !== null || resolvedGlobalSafety !== null || resolvedSessionSafety !== null || resolvedTacticalModes || resolvedChiefName !== null || resolvedExternalMemory !== null)
+      ...((resolvedLocks || resolvedTeamEffortMode || resolvedSessionEnabled !== null || resolvedDefaultAutoEnable !== null || resolvedRunMode !== null || resolvedPaceMode !== null || resolvedGlobalSafety !== null || resolvedSessionSafety !== null || resolvedTacticalModes || resolvedChiefName !== null || resolvedExternalMemory !== null || resolvedTts !== null || resolvedPager !== null)
         ? {
             chiefMeta: {
               ...store.chiefMeta,
               ...(resolvedChiefName !== null ? { chiefName: resolvedChiefName } : {}),
               ...(resolvedExternalMemory !== null ? { externalMemory: resolvedExternalMemory } : {}),
+              ...(resolvedTts !== null ? { tts: resolvedTts } : {}),
+              ...(resolvedPager !== null ? { remotePager: resolvedPager } : {}),
               ...(resolvedLocks ? { lockedModelEfforts: resolvedLocks } : {}),
               ...(resolvedTeamEffortMode ? { teamEffortMode: resolvedTeamEffortMode === 'manual' ? 'manual' : 'auto' } : {}),
               ...(resolvedSessionEnabled !== null ? { sessionEnabled: resolvedSessionEnabled } : {}),
@@ -389,6 +398,10 @@ export async function updateSecConfig(nextCfg) {
       patch({ notice: nextCfg.notifyEnabled ? bi('🔔 已开启桌面通知提醒', '🔔 Desktop alerts on') : bi('🔕 已关闭桌面通知提醒', '🔕 Desktop alerts off') })
     } else if (typeof nextCfg.notifySound === 'boolean') {
       patch({ notice: nextCfg.notifySound ? bi('🔊 已开启提示音', '🔊 Sound on') : bi('🔇 已关闭提示音', '🔇 Sound off') })
+    } else if (nextCfg.tts && typeof nextCfg.tts === 'object') {
+      patch({ notice: bi('🎙️ 已保存语音参谋长设置', '🎙️ Chief voice settings saved') })
+    } else if (nextCfg.remotePager && typeof nextCfg.remotePager === 'object') {
+      patch({ notice: bi('📱 已保存手机远程传呼设置', '📱 Remote pager settings saved') })
     } else if (typeof nextCfg.sessionEnabled === 'boolean') {
       patch({
         notice: nextCfg.sessionEnabled
@@ -514,6 +527,7 @@ export async function decideElevation(elevationId, decision, targetMode, confirm
       elevationBusy: false,
       elevationAgreed: false,
       elevationChosenMode: '',
+      ...(decision === 'approve' ? { secLatestReply: null } : {}),
       notice: decision === 'approve'
         ? (value && value.resumed
             ? ('已批准升到 ' + (CHIEF_PERMISSION_LABELS[value.permissionMode || targetMode] || targetMode) + ' 并继续运行')
@@ -915,14 +929,17 @@ export async function ingestSecImageFiles(fileList) {
 }
 
 
-export async function submitChiefBar(overrideText = '', quickTag = '') {
+export async function submitChiefBar(overrideText = '', quickTag = '', extraOpts = null) {
+  const opts = extraOpts && typeof extraOpts === 'object' ? extraOpts : {}
+  const voiceChat = Boolean(opts.voiceChat)
+  const voiceTranscriptId = typeof opts.voiceTranscriptId === 'string' ? opts.voiceTranscriptId : ''
   const text = String(overrideText || store.secInput || '').trim()
   const imgs = overrideText ? [] : (Array.isArray(store.secImages) ? store.secImages : [])
   if ((!text && !imgs.length) || store.secBusy) return
-  const target = overrideText ? 'auto' : (store.secTarget || 'auto')
+  const target = (overrideText || voiceChat) ? 'auto' : (store.secTarget || 'auto')
   const mode = store.secMode || 'steer'
   const fxSpec = classifyChiefWorkFx(text, quickTag)
-  await withChiefWorkFx(fxSpec, async () => {
+  const runSubmit = async () => {
     patch({
       secBusy: true,
       chiefQuickAction: quickTag || '',
@@ -939,6 +956,8 @@ export async function submitChiefBar(overrideText = '', quickTag = '') {
           target,
           mode,
           ...(quickTag ? { quickAction: quickTag } : {}),
+          ...(voiceChat ? { voiceChat: true } : {}),
+          ...(voiceTranscriptId ? { voiceTranscriptId } : {}),
           images: imgs.map(({ name, mediaType, data }) => ({ name, mediaType, data })),
         }),
       })
@@ -1014,6 +1033,38 @@ export async function submitChiefBar(overrideText = '', quickTag = '') {
           void loadArchives(true)
         }
         if (actions.length) void refresh()
+        if (voiceChat && value.voiceHandoffDraft) {
+          patch({ voiceHandoffDraft: String(value.voiceHandoffDraft) })
+        }
+        if (voiceChat && value.reply) {
+          void (async () => {
+            const speakRes = await speakChiefText(value.reply, {
+              itemId: `voice-chat:${Date.now()}`,
+              label: bi('语音唠嗑', 'Voice Chat'),
+              style: 'full',
+            })
+            if (
+              store.voiceModeActive
+              && store.voiceHandsFree
+              && !store.secBusy
+              && store.voiceRecState === 'idle'
+              && !(speakRes && speakRes.cancelled)
+              && typeof runtimeRefs.triggerVoiceAction === 'function'
+            ) {
+              setTimeout(() => {
+                if (
+                  store.voiceModeActive
+                  && store.voiceHandsFree
+                  && !store.secBusy
+                  && store.voiceRecState === 'idle'
+                  && typeof runtimeRefs.triggerVoiceAction === 'function'
+                ) {
+                  void runtimeRefs.triggerVoiceAction('voice_chat')
+                }
+              }, 380)
+            }
+          })()
+        }
       }
     } catch (error) {
       patch({
@@ -1023,7 +1074,12 @@ export async function submitChiefBar(overrideText = '', quickTag = '') {
     } finally {
       patch({ secBusy: false, chiefQuickAction: '' })
     }
-  })
+  }
+  if (voiceChat) {
+    await runSubmit()
+    return
+  }
+  await withChiefWorkFx(fxSpec, runSubmit)
 }
 
 
@@ -1342,6 +1398,213 @@ export function importExternalMemorySourceApi(source, maxItems = 60) {
     source: source && typeof source === 'object' ? source : {},
     maxItems,
   })
+}
+
+export async function fetchChiefTtsStatusApi() {
+  try {
+    const out = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'tts.status',
+      }),
+    })
+    if (out && out.ok) {
+      patch({ ttsStatusInfo: out })
+    }
+    return out
+  } catch (error) {
+    return { ok: false, error: String((error && error.message) || error || '读取语音状态失败') }
+  }
+}
+
+export async function probeChiefTtsApi({ config = null, text = '' } = {}) {
+  try {
+    const out = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'tts.probe',
+        ...(config && typeof config === 'object' ? { config } : {}),
+        ...(typeof text === 'string' && text.trim() ? { text: text.trim() } : {}),
+      }),
+    })
+    if (out && out.ttsStatus) {
+      patch({ ttsStatusInfo: out.ttsStatus })
+    }
+    return out
+  } catch (error) {
+    return { ok: false, error: String((error && error.message) || error || '试听请求失败') }
+  }
+}
+
+export async function recordBrowserVoiceTranscriptApi({
+  text = '',
+  mode = 'dictation',
+  provider = 'browser',
+  durationMs = 0,
+  chiefReply = '',
+} = {}) {
+  try {
+    return await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'tts.voice_inbox_record',
+        text,
+        mode,
+        provider,
+        durationMs,
+        ...(chiefReply ? { chiefReply } : {}),
+      }),
+    })
+  } catch (error) {
+    return { ok: false, error: String((error && error.message) || error) }
+  }
+}
+
+export async function fetchVoiceInboxApi(limit = 40) {
+  try {
+    const out = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'tts.voice_inbox_list',
+        limit,
+      }),
+    })
+    if (out && out.ok) {
+      patch({ voiceInboxData: out })
+    }
+    return out
+  } catch (error) {
+    return { ok: false, error: String((error && error.message) || error || '加载语音收件区失败') }
+  }
+}
+
+export async function deleteVoiceInboxApi(id = '') {
+  try {
+    const out = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'tts.voice_inbox_delete',
+        id,
+      }),
+    })
+    if (out && out.ok) void fetchVoiceInboxApi()
+    return out
+  } catch (error) {
+    return { ok: false, error: String((error && error.message) || error || '删除失败') }
+  }
+}
+
+export async function dreamDigestVoiceInboxApi() {
+  try {
+    const out = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'tts.voice_inbox_dream_now',
+      }),
+    })
+    if (out && out.ok) void fetchVoiceInboxApi()
+    return out
+  } catch (error) {
+    return { ok: false, error: String((error && error.message) || error || '梦境整理失败') }
+  }
+}
+
+export async function fetchRemotePagerStatusApi() {
+  try {
+    const out = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'pager.status',
+      }),
+    })
+    if (out && out.ok) {
+      patch({ pagerStatusInfo: out })
+    }
+    return out
+  } catch (error) {
+    return { ok: false, error: String((error && error.message) || error || '读取传呼状态失败') }
+  }
+}
+
+export async function testRemotePagerApi({ config = null, text = '' } = {}) {
+  try {
+    const out = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'pager.test',
+        ...(config && typeof config === 'object' ? { config } : {}),
+        ...(typeof text === 'string' && text.trim() ? { text: text.trim() } : {}),
+      }),
+    })
+    if (out && out.pagerStatus) {
+      patch({ pagerStatusInfo: out.pagerStatus })
+    }
+    return out
+  } catch (error) {
+    return { ok: false, error: String((error && error.message) || error || '传呼测试失败') }
+  }
+}
+
+export async function sendRemotePagerDigestApi({ title = '', body = '', level = 'info', config = null } = {}) {
+  try {
+    const out = await call('chief/fact', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || '',
+        op: 'pager.send',
+        ...(title ? { title } : {}),
+        ...(body ? { body } : {}),
+        level,
+        ...(config && typeof config === 'object' ? { config } : {}),
+      }),
+    })
+    if (out && out.pagerStatus) {
+      patch({ pagerStatusInfo: out.pagerStatus })
+    }
+    return out
+  } catch (error) {
+    return { ok: false, error: String((error && error.message) || error || '发送远程传呼失败') }
+  }
+}
+
+let themeSyncTimer = null
+let pendingThemeSyncPatch = {}
+
+runtimeRefs.syncThemeToServer = (themePatch = {}) => {
+  if (!themePatch || typeof themePatch !== 'object') return
+  pendingThemeSyncPatch = { ...pendingThemeSyncPatch, ...themePatch }
+  if (themeSyncTimer) clearTimeout(themeSyncTimer)
+  themeSyncTimer = setTimeout(() => {
+    const payload = { ...pendingThemeSyncPatch }
+    pendingThemeSyncPatch = {}
+    themeSyncTimer = null
+    if (!Object.keys(payload).length) return
+    void call('chief/config', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        session: store.sessionId || 'global',
+        ...payload,
+      }),
+    }).catch(() => null)
+  }, 240)
 }
 
 apiBridge.loadChiefView = loadChiefView

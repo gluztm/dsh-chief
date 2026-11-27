@@ -16,6 +16,8 @@ const ARCHIVE_CAP = 500
 
 export const POINTS_CAP = 32
 
+export const ARCHIVE_HISTORY_CAP = 5
+
 export const PRECIPITATED_CAP = 300
 
 export const DESKTOP_TOKEN_BUDGET = 2400
@@ -642,6 +644,72 @@ export function normalizeTags(list) {
   return out
 }
 
+export function tokenizeArchiveBilingual(text) {
+  if (typeof text !== 'string' || !text) return []
+  const lower = text.toLowerCase()
+  const tokens = []
+  const latinMatches = lower.match(/[a-z0-9][a-z0-9._-]*/g)
+  if (latinMatches) {
+    for (const w of latinMatches) {
+      if (w.length <= 64) tokens.push(w)
+    }
+  }
+  const cjkSeqs = lower.match(/[\u4e00-\u9fff]+/g)
+  if (cjkSeqs) {
+    for (const seqStr of cjkSeqs) {
+      if (seqStr.length === 1) {
+        tokens.push(seqStr)
+        continue
+      }
+      if (seqStr.length <= 4) tokens.push(seqStr)
+      for (let i = 0; i < seqStr.length - 1; i += 1) {
+        tokens.push(seqStr.slice(i, i + 2))
+      }
+    }
+  }
+  return tokens
+}
+
+export function extractArchiveWikiLinks(text) {
+  if (typeof text !== 'string' || !text) return []
+  const seen = new Set()
+  const out = []
+  const re = /\[\[([^\]\n]{1,120})\]\]/g
+  let m
+  while ((m = re.exec(text)) !== null) {
+    const target = m[1].split('|')[0].trim()
+    if (!target) continue
+    const low = target.toLowerCase()
+    if (seen.has(low)) continue
+    seen.add(low)
+    out.push(target)
+    if (out.length >= 16) break
+  }
+  return out
+}
+
+export function normalizeArchiveHistory(raw) {
+  if (!Array.isArray(raw)) return []
+  const out = []
+  for (const snap of raw) {
+    if (!snap || typeof snap !== 'object') continue
+    const title = clamp(snap.title || '', 180)
+    const body = cleanMultiline(snap.body || '', 8000)
+    if (!title && !body) continue
+    out.push({
+      title: title || '历史版本',
+      summary: clamp(snap.summary || '', 140),
+      paperclip: ['gold', 'silver', 'copper'].includes(snap.paperclip) ? snap.paperclip : 'silver',
+      pointsCount: Math.max(0, Math.round(Number(snap.pointsCount) || 0)),
+      body,
+      updatedAt: Number(snap.updatedAt) || Date.now(),
+      by: clamp(snap.by || 'user', 40),
+    })
+    if (out.length >= ARCHIVE_HISTORY_CAP) break
+  }
+  return out
+}
+
 export function normalizeSessionIdList(list, cap = 32) {
   if (!Array.isArray(list)) return []
   return [...new Set(list.map(s => String(s || '').trim()).filter(Boolean))].slice(0, cap)
@@ -756,6 +824,11 @@ export function normalizeArchiveItem(raw) {
   const chiefDeliveredSessions = normalizeSessionIdList(raw.chiefDeliveredSessions)
   const organizedBy = ['auto', 'chief', 'user'].includes(raw.organizedBy) ? raw.organizedBy : 'auto'
   const tags = normalizeTags(Array.isArray(raw.tags) ? raw.tags : [])
+  const rawLinks = Array.isArray(raw.links) ? raw.links.map(x => String(x || '').trim()).filter(Boolean) : []
+  const ptLinkText = points.map(p => `${p.title || ''} ${p.detail || ''}`).join('\n')
+  const wikiLinks = extractArchiveWikiLinks(`${body}\n${ptLinkText}`)
+  const links = [...new Set([...rawLinks, ...wikiLinks])].slice(0, 20)
+  const history = normalizeArchiveHistory(raw.history)
   const hook = deriveHookFromStructuredItem({
     ...raw,
     title,
@@ -778,6 +851,8 @@ export function normalizeArchiveItem(raw) {
     folder,
     paperclip,
     tags,
+    links,
+    history,
     cold: raw.cold !== false,
     takenOutSessions,
     chiefMountedSessions,

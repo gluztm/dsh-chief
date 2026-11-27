@@ -19,7 +19,7 @@ import { clamp, scrubExternalMemoryText } from './state-schema.js'
 
 const MCP_PROTOCOL_VERSION = '2024-11-05'
 const MCP_CACHE_TTL_MS = 60_000
-const MCP_CLIENT_INFO = { name: 'dsh-chief', version: '1.9.0' }
+const MCP_CLIENT_INFO = { name: 'dsh-chief', version: '2.0.0' }
 const mcpSessionCache = new Map()
 let rpcSeq = 1
 

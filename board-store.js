@@ -298,11 +298,14 @@ export function createBoardStore(deps) {
     try {
       if (file === boardFile()) {
         const pinnedOnly = normalizeBounds(board.bounds)
+        const pausedPinned = normalizeBounds(board.pausedBounds)
         return {
           ...board,
           bounds: pinnedOnly,
           pinnedBounds: pinnedOnly,
           localBounds: { allowed: [], forbidden: [], notes: [] },
+          pausedBounds: pausedPinned,
+          pausedPinnedBounds: pausedPinned,
           inherited: { anchors: 0, notes: 0, bounds: false, objective: false },
         }
       }
@@ -343,6 +346,18 @@ export function createBoardStore(deps) {
       out.bounds = mergedBounds
       out.pinnedBounds = pinnedBounds
       out.localBounds = localBounds
+      const pausedPinnedBounds = normalizeBounds(shared.pausedBounds)
+      const rawLocalPaused = normalizeBounds(board.pausedBounds)
+      const mergedPausedBounds = { allowed: [], forbidden: [], notes: [] }
+      for (const col of BOUND_FIELDS) {
+        const activeSet = new Set(mergedBounds[col] || [])
+        const ppList = (pausedPinnedBounds[col] || []).filter(item => !activeSet.has(item))
+        const ppSet = new Set(ppList)
+        const lpList = (rawLocalPaused[col] || []).filter(item => !activeSet.has(item) && !ppSet.has(item))
+        mergedPausedBounds[col] = ppList.concat(lpList).slice(0, BOUND_CAP)
+      }
+      out.pausedBounds = mergedPausedBounds
+      out.pausedPinnedBounds = pausedPinnedBounds
       inherited.bounds = Boolean(
         pinnedBounds.allowed.length || pinnedBounds.forbidden.length || pinnedBounds.notes.length,
       )

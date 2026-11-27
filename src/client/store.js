@@ -97,6 +97,7 @@ export const store = {
   error: '',
   notice: '',
   busy: false,
+  settingsSubTab: 'basics',
   sessionId: '',
   inputActions: null,
   searchOpen: false,
@@ -184,6 +185,46 @@ export const store = {
     managedIdleTimeoutMs: 15 * 60 * 1000,
     notifyEnabled: true,
     notifySound: false,
+    tts: {
+      enabled: false,
+      provider: 'deepseek',
+      voiceId: 'stella',
+      format: 'wav',
+      filterMarkdown: true,
+      baseUrl: '',
+      model: 'tts-1',
+      apiKeyEnv: '',
+      apiKey: '',
+      hasApiKey: false,
+      browserVoice: '',
+      speed: 1.0,
+      volume: 0.9,
+      autoSpeakAlerts: false,
+      autoSpeakReplies: false,
+      speechStyle: 'brief',
+      fallbackToBrowser: true,
+      timeoutMs: 18000,
+      handsFreeVad: false,
+      vadSilenceMs: 1300,
+    },
+    remotePager: {
+      enabled: false,
+      channel: 'feishu',
+      hasWebhookUrl: false,
+      webhookHostHint: '',
+      hasSecret: false,
+      hasTelegramBotToken: false,
+      telegramChatId: '',
+      quietPrefix: '[DSH 参谋长]',
+      cooldownSec: 15,
+      events: {
+        approvalRequired: true,
+        wallBlocked: true,
+        hazardHalt: true,
+        taskDone: true,
+        budgetBreak: true,
+      },
+    },
     uiLang: 'auto',
     managedBudgetMaxCalls: 30,
     managedBudgetMaxTokens: 300000,
@@ -236,6 +277,28 @@ export const store = {
     activeWork: null,
     backendBuild: '',
   },
+  ttsPlayer: {
+    status: 'idle',
+    itemId: '',
+    label: '',
+    provider: '',
+    error: '',
+  },
+  ttsStatusInfo: null,
+  voiceModeActive: false,
+  voiceStageMinimized: false,
+  voiceHandsFree: false,
+  voiceWakeEnabled: false,
+  voiceWakeListening: false,
+  voiceVadHeardSpeech: false,
+  voiceRecState: 'idle',
+  voiceRecPurpose: '',
+  voiceRecElapsedMs: 0,
+  voiceRecLevel: 0,
+  voiceInterimText: '',
+  voiceHandoffDraft: '',
+  voiceInboxData: null,
+  pagerStatusInfo: null,
   seenBackendWorkIds: {},
   staleBackendDetected: false,
   staleBackendDismissed: false,
@@ -293,6 +356,8 @@ export const store = {
   seenAlertEventIds: {},
   ledgerExpanded: false,
   settingsOpen: false,
+  themeOpen: false,
+  themeStudioTab: 'presets',
   chiefRiskModalOpen: false,
   chiefRiskAgreed: false,
   chiefRiskBusy: false,
@@ -416,6 +481,11 @@ export const runtimeRefs = {
   initialRightbarSeeded: false,
   userDismissedChief: false,
   alertBaselineBySession: {},
+  ttsChatBaselineBySession: {},
+  ttsSeenChatIds: {},
+  ttsLastAutoAlertAt: 0,
+  triggerVoiceAction: null,
+  exitVoiceMode: null,
 }
 
 let noticeTimer = null
@@ -651,30 +721,51 @@ function collapseRightbarIfOpen() {
 
 function findConversationTabEl(targetViewId) {
   if (typeof document === 'undefined' || typeof document.querySelectorAll !== 'function') return null
-  const primaryTabs = Array.from(document.querySelectorAll('[data-conversation-tabs] [role="tab"]'))
-  const allTabs = primaryTabs.length
-    ? primaryTabs
-    : Array.from(document.querySelectorAll('[role="tablist"] [role="tab"]'))
-  // Never match tabs inside Chief's own panel or right sidebar dock
-  const tabs = allTabs.filter(el => !el.closest('.dnb-panel') && !el.closest('.dnb-dock-page'))
-  if (!tabs.length) return null
+  const isInsideChiefOrDock = (el) => Boolean(
+    el && typeof el.closest === 'function' && el.closest(
+      '.dnb-panel, .dnb-dock-page, [data-dockkit-strip-tabs], [data-dockkit-pane], [data-dockkit-root], [data-dockkit-tab], [data-sidebar-right], [class*="dockkit"]',
+    ),
+  )
   const isChiefTab = (el) => {
     const txt = String(el.textContent || '').trim()
-    const key = el.getAttribute && (el.getAttribute('data-view') || el.getAttribute('data-id') || el.getAttribute('id') || '')
+    const key = el.getAttribute && (
+      el.getAttribute('data-view')
+      || el.getAttribute('data-tab-id')
+      || el.getAttribute('data-id')
+      || el.getAttribute('id')
+      || ''
+    )
     return key === SIDE_ID || txt === BRAND_NAME || txt === 'DSH Chief' || txt.includes('参谋长') || txt === 'Chief'
   }
+  const isChatTab = (el) => {
+    if (isChiefTab(el)) return false
+    const txt = String(el.textContent || '').trim().toLowerCase()
+    const key = String((el.getAttribute && (el.getAttribute('data-view') || el.getAttribute('data-tab-id') || '')) || '').trim().toLowerCase()
+    return txt === '对话' || txt === 'chat' || key === 'chat'
+  }
+
+  let tabs = Array.from(document.querySelectorAll('[data-conversation-tabs] [role="tab"], [data-conversation-tabs] button'))
+    .filter(el => !isInsideChiefOrDock(el))
+
+  if (!tabs.length) {
+    const lists = Array.from(document.querySelectorAll('[role="tablist"]'))
+      .filter(listEl => !isInsideChiefOrDock(listEl))
+    for (const listEl of lists) {
+      const listBtns = Array.from(listEl.querySelectorAll('[role="tab"], button'))
+        .filter(el => !isInsideChiefOrDock(el))
+      if (listBtns.some(isChatTab) && listBtns.some(isChiefTab)) {
+        tabs = listBtns
+        break
+      }
+    }
+  }
+
+  if (!tabs.length) return null
   if (targetViewId === SIDE_ID) {
     return tabs.find(isChiefTab) || null
   }
   if (targetViewId === 'chat') {
-    return (
-      tabs.find((el) => {
-        const txt = String(el.textContent || '').trim()
-        return !isChiefTab(el) && (txt === '对话' || txt.toLowerCase() === 'chat')
-      })
-      || tabs.find(el => !isChiefTab(el))
-      || null
-    )
+    return tabs.find(isChatTab) || tabs.find(el => !isChiefTab(el)) || null
   }
   return tabs.find(el => String(el.textContent || '').trim() === String(targetViewId)) || null
 }
@@ -690,7 +781,7 @@ export function switchConversationView(targetViewId) {
   }
   const tabEl = findConversationTabEl(target)
   if (tabEl) {
-    if (tabEl.getAttribute && tabEl.getAttribute('aria-selected') === 'true') {
+    if (tabEl.getAttribute && (tabEl.getAttribute('aria-selected') === 'true' || tabEl.getAttribute('data-state') === 'active')) {
       return true
     }
     if (typeof tabEl.click === 'function') {
@@ -703,7 +794,7 @@ export function switchConversationView(targetViewId) {
   return false
 }
 
-export function saveUiSkin(nextSkin) {
+export function saveUiSkin(nextSkin, { syncServer = true } = {}) {
   const clean = normalizeUiSkin(nextSkin)
   if (clean === 'custom') {
     applyCustomSkinStyle(store.customSkin)
@@ -720,6 +811,9 @@ export function saveUiSkin(nextSkin) {
     }
   } catch {}
   patch({ uiSkin: clean })
+  if (syncServer && typeof runtimeRefs.syncThemeToServer === 'function') {
+    runtimeRefs.syncThemeToServer({ uiSkin: clean })
+  }
   return clean
 }
 
@@ -748,9 +842,32 @@ export async function hydrateCustomSkinWallpaper() {
   }
 }
 
-export function saveCustomSkin(nextPartial, { activate = true, wallpaperBlob = undefined } = {}) {
+export function buildServerSafeCustomSkin(skin) {
+  if (!skin || typeof skin !== 'object') return null
+  const isInlineImg = skin.bgImageStorage === 'inline' && typeof skin.bgImageUrl === 'string' && skin.bgImageUrl.startsWith('data:image/')
+  return {
+    name: skin.name || '流光定制',
+    accentHex: skin.accentHex,
+    secondaryHex: skin.secondaryHex,
+    warmHex: skin.warmHex,
+    bgTintHex: skin.bgTintHex,
+    bgImageUrl: isInlineImg ? skin.bgImageUrl : '',
+    bgImageStorage: isInlineImg ? 'inline' : '',
+    bgImageEnabled: skin.bgImageEnabled !== false,
+    bgImageOpacity: skin.bgImageOpacity,
+    bgImageBlur: skin.bgImageBlur,
+    ambientGlow: skin.ambientGlow !== false,
+    radius: skin.radius,
+    serifTitle: Boolean(skin.serifTitle),
+    moodNote: skin.moodNote || '',
+    source: skin.source || 'manual',
+    updatedAt: Number(skin.updatedAt) || Date.now(),
+  }
+}
+
+export function saveCustomSkin(nextPartial, { activate = true, wallpaperBlob = undefined, syncServer = true } = {}) {
   const prev = store.customSkin || {}
-  const baseMerged = { ...prev, ...(nextPartial || {}), updatedAt: Date.now() }
+  const baseMerged = { ...prev, ...(nextPartial || {}), updatedAt: (nextPartial && Number(nextPartial.updatedAt)) || Date.now() }
   if (wallpaperBlob && typeof Blob !== 'undefined' && wallpaperBlob instanceof Blob) {
     const objUrl = createManagedWallpaperUrl(wallpaperBlob)
     if (objUrl) {
@@ -761,7 +878,13 @@ export function saveCustomSkin(nextPartial, { activate = true, wallpaperBlob = u
   const clean = writeSavedCustomSkin(baseMerged)
   applyCustomSkinStyle(clean)
   patch({ customSkin: clean })
-  if (activate) saveUiSkin('custom')
+  if (activate) saveUiSkin('custom', { syncServer: false })
+  if (syncServer && typeof runtimeRefs.syncThemeToServer === 'function') {
+    runtimeRefs.syncThemeToServer({
+      customSkin: buildServerSafeCustomSkin(clean),
+      ...(activate ? { uiSkin: 'custom' } : {}),
+    })
+  }
 
   if (wallpaperBlob && typeof Blob !== 'undefined' && wallpaperBlob instanceof Blob) {
     void saveCustomWallpaperBlob(wallpaperBlob).then(async idbRes => {
@@ -782,10 +905,27 @@ export function saveCustomSkin(nextPartial, { activate = true, wallpaperBlob = u
   return clean
 }
 
-export function openCustomThemeModal() {
+export function openThemeStudio(subTab = '') {
   applyCustomSkinStyle(store.customSkin)
   void hydrateCustomSkinWallpaper()
-  patch({ customThemeModalOpen: true, skinMenuOpen: false })
+  const targetTab = subTab === 'presets' || subTab === 'diy'
+    ? subTab
+    : (store.uiSkin === 'custom' ? 'diy' : 'presets')
+  patch({
+    themeOpen: true,
+    themeStudioTab: targetTab,
+    settingsOpen: false,
+    skinMenuOpen: false,
+    customThemeModalOpen: false,
+    secModelMenuOpen: false,
+    secPaceMenuOpen: false,
+    secPermMenuOpen: false,
+    tacticalMenuOpen: false,
+  })
+}
+
+export function openCustomThemeModal() {
+  openThemeStudio('diy')
 }
 
 export function saveNavLayout(nextLayout) {
@@ -828,20 +968,36 @@ export function openChiefInMainPage() {
   if (cur === 'sidebar') {
     savePlacementPref({ placement: 'both' })
   }
+  const hasMainMounted = () => Boolean(store.convView || store.panel === SIDE_ID)
+  const scheduleVerify = () => {
+    if (typeof setTimeout !== 'function') return
+    setTimeout(() => {
+      if (hasMainMounted()) return
+      if (selectPanel(SIDE_ID)) {
+        setTimeout(() => {
+          if (!hasMainMounted()) patch({ open: true })
+        }, 120)
+        return
+      }
+      patch({ open: true })
+    }, 220)
+  }
   const tryActivateConvTab = () => {
     const tabEl = findConversationTabEl(SIDE_ID)
     if (tabEl && switchConversationView(SIDE_ID)) {
       collapseRightbarIfOpen()
       patch({ open: false })
+      scheduleVerify()
       return true
     }
     return false
   }
-  const tryActivate = () => {
+  const tryActivateMainPage = () => {
     if (tryActivateConvTab()) return true
     if (runtimeRefs.layout && typeof runtimeRefs.layout.selectPanel === 'function' && selectPanel(SIDE_ID)) {
       collapseRightbarIfOpen()
       patch({ open: false })
+      scheduleVerify()
       return true
     }
     return false
@@ -851,9 +1007,9 @@ export function openChiefInMainPage() {
     collapseRightbarIfOpen()
   }
   const finishRetry = () => {
-    if (!tryActivate()) {
+    if (!tryActivateMainPage()) {
       setTimeout(() => {
-        if (!tryActivate()) patch({ open: true })
+        if (!tryActivateMainPage()) patch({ open: true })
       }, 90)
     }
   }
@@ -865,7 +1021,7 @@ export function openChiefInMainPage() {
     })
     return true
   }
-  return tryActivate()
+  return tryActivateMainPage()
 }
 
 export function openChiefInRightbar() {
@@ -893,14 +1049,29 @@ export function openChief() {
     runtimeRefs.initialRightbarSeeded = true
     whenUnplaced(() => {
       if (switchConversationView(SIDE_ID)) return
-      if (selectPanel(SIDE_ID)) return
+      if (selectPanel(SIDE_ID)) {
+        if (typeof setTimeout === 'function') {
+          setTimeout(() => {
+            if (!chiefShown()) patch({ open: true })
+          }, 110)
+        }
+        return
+      }
       patch({ open: true })
     })
     return 'dock'
   }
   if (switchConversationView(SIDE_ID)) return 'conv-view'
-  if (selectPanel(SIDE_ID)) return 'page'
-  return ''
+  if (selectPanel(SIDE_ID)) {
+    if (typeof setTimeout === 'function') {
+      setTimeout(() => {
+        if (!chiefShown()) patch({ open: true })
+      }, 110)
+    }
+    return 'page'
+  }
+  patch({ open: true })
+  return 'overlay'
 }
 
 export function closeChief() {

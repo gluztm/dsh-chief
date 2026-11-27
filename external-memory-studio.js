@@ -79,24 +79,38 @@ export function resolveEmbeddingApiKey(embCfg = {}) {
   return typeof embCfg.apiKey === 'string' ? embCfg.apiKey.trim() : ''
 }
 
-function buildEmbeddingEndpoint(baseUrl = '') {
+function resolveEmbeddingProvider(embCfg = {}) {
+  const explicit = typeof embCfg.provider === 'string' ? embCfg.provider.trim().toLowerCase() : ''
+  if (explicit === 'ollama' || explicit === 'gemini' || explicit === 'openai') return explicit
+  const url = String(embCfg.baseUrl || '').toLowerCase()
+  if (url.includes(':11434') || url.includes('/api/embed')) return 'ollama'
+  if (url.includes('generativelanguage.googleapis.com') || url.includes(':embedcontent')) return 'gemini'
+  return 'openai'
+}
+
+function buildEmbeddingEndpoint(baseUrl = '', provider = 'openai', model = '') {
   const clean = String(baseUrl || '').trim().replace(/\/+$/, '')
   if (!clean) return ''
+  if (provider === 'ollama') {
+    const root = clean.replace(/\/(?:v1|api\/embed(?:dings)?)$/i, '')
+    return `${root}/api/embed`
+  }
+  if (provider === 'gemini') {
+    if (/:embedContent$/i.test(clean)) return clean
+    const m = String(model || '').trim().replace(/^models\//, '')
+    return `${clean}/models/${encodeURIComponent(m)}:embedContent`
+  }
   return /\/embeddings$/i.test(clean) ? clean : `${clean}/embeddings`
 }
 
 export async function fetchEmbeddingVectors(embCfg = {}, texts = [], signal = null) {
-  const endpoint = buildEmbeddingEndpoint(embCfg.baseUrl)
+  const provider = resolveEmbeddingProvider(embCfg)
   const model = typeof embCfg.model === 'string' ? embCfg.model.trim() : ''
+  const endpoint = buildEmbeddingEndpoint(embCfg.baseUrl, provider, model)
   const inputs = (Array.isArray(texts) ? texts : [texts]).map(t => String(t || '').trim()).filter(Boolean)
   if (!endpoint || !model || !inputs.length) return []
 
   const apiKey = resolveEmbeddingApiKey(embCfg)
-  const headers = {
-    'content-type': 'application/json',
-    ...(apiKey ? { authorization: /^(?:Bearer|Token)\s+/i.test(apiKey) ? apiKey : `Bearer ${apiKey}` } : {}),
-  }
-
   const timeoutMs = Math.max(500, Math.min(8000, Number(embCfg.timeoutMs) || 2500))
   const ac = new AbortController()
   const timer = setTimeout(() => {
@@ -112,6 +126,77 @@ export async function fetchEmbeddingVectors(embCfg = {}, texts = [], signal = nu
   }
 
   try {
+    if (provider === 'ollama') {
+      const headers = { 'content-type': 'application/json' }
+      const res = await fetch(endpoint, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ model, input: inputs }),
+        signal: ac.signal,
+      })
+      if (res.status === 404) {
+        const legacyEndpoint = endpoint.replace(/\/api\/embed$/i, '/api/embeddings')
+        const out = []
+        for (const text of inputs) {
+          const legRes = await fetch(legacyEndpoint, {
+            method: 'POST',
+            headers,
+            body: JSON.stringify({ model, prompt: text }),
+            signal: ac.signal,
+          })
+          if (!legRes.ok) {
+            const errTxt = await legRes.text().catch(() => '')
+            throw new Error(`HTTP ${legRes.status}: ${clamp(errTxt || legRes.statusText || 'ollama embedding failed', 160)}`)
+          }
+          const legPayload = await legRes.json()
+          out.push(Array.isArray(legPayload && legPayload.embedding) ? legPayload.embedding.map(Number) : [])
+        }
+        return out
+      }
+      if (!res.ok) {
+        const errTxt = await res.text().catch(() => '')
+        throw new Error(`HTTP ${res.status}: ${clamp(errTxt || res.statusText || 'ollama embedding failed', 160)}`)
+      }
+      const payload = await res.json()
+      const rows = Array.isArray(payload && payload.embeddings)
+        ? payload.embeddings
+        : (Array.isArray(payload && payload.embedding) ? [payload.embedding] : [])
+      return rows.map(vec => (Array.isArray(vec) ? vec.map(Number) : []))
+    }
+
+    if (provider === 'gemini') {
+      const headers = {
+        'content-type': 'application/json',
+        ...(apiKey ? { 'x-goog-api-key': apiKey } : {}),
+      }
+      const out = []
+      for (const text of inputs) {
+        const res = await fetch(endpoint, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify({
+            model: model.startsWith('models/') ? model : `models/${model}`,
+            content: { parts: [{ text }] },
+          }),
+          signal: ac.signal,
+        })
+        if (!res.ok) {
+          const errTxt = await res.text().catch(() => '')
+          throw new Error(`HTTP ${res.status}: ${clamp(errTxt || res.statusText || 'gemini embedding failed', 160)}`)
+        }
+        const payload = await res.json()
+        const vals = payload && payload.embedding && Array.isArray(payload.embedding.values)
+          ? payload.embedding.values
+          : []
+        out.push(vals.map(Number))
+      }
+      return out
+    }
+
+    const headers = {
+      'content-type': 'application/json',
+      ...(apiKey ? { authorization: /^(?:Bearer|Token)\s+/i.test(apiKey) ? apiKey : `Bearer ${apiKey}` } : {}),
+    }
     const res = await fetch(endpoint, {
       method: 'POST',
       headers,
@@ -242,21 +327,49 @@ export async function rerankBuiltinItemsWithEmbeddings(items = [], query = '', e
   }
 }
 
-export async function probeEmbeddingApi(embCfg = {}) {
-  const endpoint = buildEmbeddingEndpoint(embCfg.baseUrl)
-  const model = typeof embCfg.model === 'string' ? embCfg.model.trim() : ''
-  if (!endpoint || !model) {
-    return { ok: false, error: '请先填写向量 API 地址与模型名称' }
+function formatFriendlyEmbeddingProbeError(err, provider = 'openai', baseUrl = '') {
+  const rawMsg = clamp((err && err.message) || String(err || '向量连接测试失败'), 200)
+  const low = rawMsg.toLowerCase()
+  if (low.includes('timeout') || low.includes('abort')) {
+    return provider === 'ollama'
+      ? '连接本地 Ollama 超时，请确认服务已启动且模型未卡在首次加载'
+      : '连接向量接口超时，请检查网络或接口地址是否正确'
   }
+  if (low.includes('fetch failed') || low.includes('econnrefused') || low.includes('enotfound')) {
+    if (provider === 'ollama') {
+      return `无法连接到本地 Ollama（${baseUrl || 'http://127.0.0.1:11434'}），请确认 Ollama 服务已开启`
+    }
+    return `无法连接到向量接口（${baseUrl || provider}），请检查网络、代理或 Base URL 是否正确`
+  }
+  if (provider === 'gemini' && (low.includes('401') || low.includes('403') || low.includes('api key'))) {
+    return 'Gemini API Key 无效或无权访问该模型，请检查密钥设置'
+  }
+  if (low.includes('404') && provider === 'ollama') {
+    return 'Ollama 接口返回 404，请确认模型已 pull 到本机且 Ollama 版本正常'
+  }
+  return rawMsg
+}
+
+export async function probeEmbeddingApi(embCfg = {}) {
+  const provider = resolveEmbeddingProvider(embCfg)
+  const model = typeof embCfg.model === 'string' ? embCfg.model.trim() : ''
+  const endpoint = buildEmbeddingEndpoint(embCfg.baseUrl, provider, model)
+  if (!endpoint || !model) {
+    return { ok: false, provider, error: '请先填写向量 API 地址与模型名称' }
+  }
+  const probeCfg = provider === 'ollama'
+    ? { ...embCfg, timeoutMs: Math.max(Number(embCfg.timeoutMs) || 2500, 5000) }
+    : embCfg
   const t0 = Date.now()
   try {
-    const vecs = await fetchEmbeddingVectors(embCfg, ['connectivity test'])
+    const vecs = await fetchEmbeddingVectors(probeCfg, ['connectivity test'])
     const first = vecs[0]
     if (!Array.isArray(first) || first.length === 0) {
-      return { ok: false, model, latencyMs: Date.now() - t0, error: '接口未返回有效的向量数组' }
+      return { ok: false, provider, model, latencyMs: Date.now() - t0, error: '接口未返回有效的向量数组' }
     }
     return {
       ok: true,
+      provider,
       model,
       dimensions: first.length,
       latencyMs: Date.now() - t0,
@@ -264,9 +377,10 @@ export async function probeEmbeddingApi(embCfg = {}) {
   } catch (err) {
     return {
       ok: false,
+      provider,
       model,
       latencyMs: Date.now() - t0,
-      error: clamp((err && err.message) || String(err || '向量连接测试失败'), 180),
+      error: formatFriendlyEmbeddingProbeError(err, provider, embCfg.baseUrl),
     }
   }
 }

@@ -308,6 +308,39 @@ export function Icon({ name, size = 14, style, filled = false }) {
         h('path', { d: 'M9.5 6.8h3a2.5 2.5 0 0 1 2.5 2.5v2.2M15 11.5h2.7v3' }),
         h('path', { d: 'M6.2 9.5v4.8a2.5 2.5 0 0 0 2.5 2.5h5.8' }),
       )
+    case 'volume':
+      return h('svg', props,
+        h('polygon', { points: '11 5 6 9 2 9 2 15 6 15 11 19 11 5' }),
+        h('path', { d: 'M15.5 8.5a5 5 0 0 1 0 7M18.5 5.5a9 9 0 0 1 0 13' }),
+      )
+    case 'volumeOff':
+      return h('svg', props,
+        h('polygon', { points: '11 5 6 9 2 9 2 15 6 15 11 19 11 5' }),
+        h('path', { d: 'm22 9-6 6M16 9l6 6' }),
+      )
+    case 'waves':
+      return h('svg', props,
+        h('path', { d: 'M4 10v4M8 7v10M12 4v16M16 7v10M20 10v4' }),
+      )
+    case 'mic':
+      return h('svg', props,
+        h('rect', { x: 9, y: 2.5, width: 6, height: 11, rx: 3 }),
+        h('path', { d: 'M5.5 11.5a6.5 6.5 0 0 0 13 0M12 18v3.5M8.5 21.5h7' }),
+      )
+    case 'voiceSpark':
+      return h('svg', props,
+        h('path', { d: 'M4.5 10.5v6M8.5 6.5v13.5M12.5 9.5v7.5M16.5 13v4' }),
+        h('path', {
+          d: 'M18.8 3.2 19.6 5.4 21.8 6.2 19.6 7 18.8 9.2 18 7 15.8 6.2 18 5.4z',
+          fill: 'currentColor',
+          stroke: 'none',
+        }),
+      )
+    case 'eye':
+      return h('svg', props,
+        h('path', { d: 'M2 12s3.8-6.5 10-6.5S22 12 22 12s-3.8 6.5-10 6.5S2 12 2 12z' }),
+        h('circle', { cx: 12, cy: 12, r: 2.8 }),
+      )
     default:
       return null
   }
@@ -609,6 +642,19 @@ export function parseNarrativeBlocks(raw) {
   return blocks
 }
 
+function renderInlineStrongText(raw) {
+  const txt = String(raw || '')
+  if (!txt.includes('**')) return txt
+  const parts = txt.split(/(\*\*[^*\n]{1,120}\*\*)/g)
+  if (parts.length === 1) return txt
+  return parts.map((part, idx) => {
+    if (part.startsWith('**') && part.endsWith('**') && part.length > 4) {
+      return h('strong', { key: idx, style: { fontWeight: 600, color: 'var(--dnb-text)' } }, part.slice(2, -2))
+    }
+    return part
+  })
+}
+
 export function renderStructuredItem(item, key) {
   if (!item) return null
   if (item.kind === 'bullet') {
@@ -619,7 +665,7 @@ export function renderStructuredItem(item, key) {
         'div',
         { key, className: 'dnb-prose-kv-row', 'data-tone': tone.tone },
         h('span', { className: 'dnb-prose-kv-key' }, cleanBadge),
-        h('span', { className: 'dnb-prose-kv-val' }, item.body),
+        h('span', { className: 'dnb-prose-kv-val' }, renderInlineStrongText(item.body)),
       )
     }
     return h(
@@ -647,10 +693,10 @@ export function renderStructuredItem(item, key) {
           marginTop: 7.5,
         },
       }),
-      h('span', { style: { flex: 1, minWidth: 0, wordBreak: 'break-word' } }, item.body),
+      h('span', { style: { flex: 1, minWidth: 0, wordBreak: 'break-word' } }, renderInlineStrongText(item.body)),
     )
   }
-  return h('p', { key, className: 'dnb-prose-p' }, item.body)
+  return h('p', { key, className: 'dnb-prose-p' }, renderInlineStrongText(item.body))
 }
 
 export function renderStructuredText(rawText) {
@@ -692,6 +738,7 @@ export function parseSixGoalBrief(raw) {
 }
 
 export function extractReplySummaryLine(rawText) {
+  const stripInlineBold = s => String(s || '').replace(/\*\*([^*\n]{1,120})\*\*/g, '$1')
   const raw = String(rawText || '').trim()
   if (!raw) return ''
   const six = parseSixGoalBrief(raw)
@@ -705,26 +752,27 @@ export function extractReplySummaryLine(rawText) {
       && !isBenignQuietStatusText(blocked.body),
     )
     if (hasHardBlocker) {
-      return `受阻：${blocked.body}`
+      return `受阻：${stripInlineBold(blocked.body)}`
     }
     const preferred = six.find(r => r.role === 'progress')
       || six.find(r => r.role === 'advice')
       || six.find(r => r.role === 'goal')
       || six[0]
-    if (preferred && preferred.body) return preferred.body
+    if (preferred && preferred.body) return stripInlineBold(preferred.body)
   }
   const blocks = parseNarrativeBlocks(raw)
   for (const blk of blocks) {
     for (const it of (blk.items || [])) {
       const body = String(it && it.body ? it.body : '').trim()
       if (!body) continue
+      const cleanBody = stripInlineBold(body)
       if (it.kind === 'bullet' && it.badge) {
         const cleanBadge = stripLeadingEmoji(it.badge)
-        if (cleanBadge && cleanBadge !== body && !body.startsWith(cleanBadge) && body.length < 24) {
-          return `${cleanBadge} · ${body}`
+        if (cleanBadge && cleanBadge !== cleanBody && !cleanBody.startsWith(cleanBadge) && cleanBody.length < 24) {
+          return `${cleanBadge} · ${cleanBody}`
         }
       }
-      return body
+      return cleanBody
     }
   }
   const fallback = raw
@@ -732,7 +780,7 @@ export function extractReplySummaryLine(rawText) {
     .split(/\r?\n/)
     .map(l => l.trim().replace(/^#{1,3}\s+/, '').replace(/^(?:[-*•]|\d+[.)、])\s+/, '').replace(/^【[^】]{1,14}】\s*/, '').trim())
     .find(Boolean)
-  return fallback || raw
+  return stripInlineBold(fallback || raw)
 }
 
 export function orderChatHistoryNewestFirst(rawList) {

@@ -16,9 +16,8 @@ import {
   RUN_MODE_OPTIONS,
   THINKING_EFFORT_OPTIONS,
   DEFAULT_UI_SKIN,
-  UI_SKIN_OPTIONS,
 } from '../constants.js'
-import { bi, tabLabel, runModeMeta, effortMeta, chiefDisplayName } from '../i18n.js'
+import { bi, tabLabel, runModeMeta, effortMeta, chiefDisplayName, chiefShortName } from '../i18n.js'
 import {
   store,
   patch,
@@ -36,10 +35,9 @@ import {
   closeChief,
   toggleChief,
   reserveCornerSpace,
-  saveUiSkin,
   saveNavLayout,
   scrollWorkspaceSection,
-  openCustomThemeModal,
+  openThemeStudio,
   runtimeRefs,
 } from '../store.js'
 import {
@@ -60,8 +58,10 @@ import {
   adoptSession,
   fetchGithubStarStatus,
   toggleGithubStarApi,
+  submitChiefBar,
 } from '../api.js'
 import { Style } from '../styles.js'
+import { speakChiefText, stopChiefSpeech } from '../tts.js'
 import { Icon, ChiefErrorBoundary, SearchDrawer } from './common.js'
 import {
   ModelPickerPopover,
@@ -83,6 +83,7 @@ import {
   AuditLogModal,
   AwayPresetConfirmModal,
   CustomThemeModal,
+  ThemeStudioView,
 } from './modals.js'
 import { TasksTab } from '../tabs/tasks.js'
 import { ArchiveTab } from '../tabs/archives.js'
@@ -344,10 +345,211 @@ function ChiefWorkStageOverlay({ fx }) {
   )
 }
 
+function ChiefVoiceModeStage({ view }) {
+  if (!view || !view.voiceModeActive || view.voiceStageMinimized) return null
+  const isRecording = view.voiceRecState === 'recording'
+  const isThinking = view.voiceRecState === 'transcribing' || Boolean(view.secBusy)
+  const ttsPlayer = view.ttsPlayer || {}
+  const isSpeaking = ttsPlayer.status === 'playing' || ttsPlayer.status === 'loading'
+  const stageState = isRecording
+    ? 'recording'
+    : (isThinking ? 'thinking' : (isSpeaking ? 'speaking' : 'idle'))
+
+  const secElapsed = Math.max(0, Math.round((Number(view.voiceRecElapsedMs) || 0) / 1000))
+  const lv = isRecording ? Math.min(1, Math.max(0, Number(view.voiceRecLevel) || 0)) : 0
+  const rawCaption = view.voiceInterimText
+    || (view.secLatestReply && view.secLatestReply.text ? view.secLatestReply.text : '')
+  const captionText = String(rawCaption || '')
+    .replace(/^\s*[-•]\s*【[^】]+】\s*/gm, '')
+    .trim()
+
+  const statusTitle = stageState === 'recording'
+    ? bi(`正在聆听 · ${secElapsed}s`, `Listening · ${secElapsed}s`)
+    : (stageState === 'thinking'
+        ? (view.voiceRecState === 'transcribing'
+            ? bi('正在转写语音手记…', 'Transcribing voice note…')
+            : bi(`${chiefDisplayName(view)} 正在组织口语回复…`, `${chiefDisplayName(view)} is replying…`))
+        : (stageState === 'speaking'
+            ? bi(`${chiefDisplayName(view)} 正在语音回答…`, `${chiefDisplayName(view)} is speaking…`)
+            : bi(`与 ${chiefDisplayName(view)} 语音面聊中`, `Voice Chat with ${chiefDisplayName(view)}`)))
+
+  const isHandsFree = Boolean(view.voiceHandsFree)
+  const vadHeard = Boolean(view.voiceVadHeardSpeech)
+  const handoffDraft = typeof view.voiceHandoffDraft === 'string' ? view.voiceHandoffDraft.trim() : ''
+
+  const statusSub = stageState === 'recording'
+    ? (isHandsFree
+        ? (vadHeard
+            ? bi('已听见声音 · 说完停顿约 1.3 秒自动发送', 'Speech detected · pauses auto-send')
+            : bi('免提倾听中 · 请直接开口说话（停顿自动发送）', 'Hands-free listening · speak naturally'))
+        : bi('轻触光球结束录音并发送（极速口语 · 秒回不写长文）', 'Tap the orb to send your voice note'))
+    : (stageState === 'thinking'
+        ? bi('极速口语快答，完成后自动语音播报', 'Fast spoken reply · auto-speaks result')
+        : (stageState === 'speaking'
+            ? bi(isHandsFree ? '轻触光球随时插话打断 · 播完自动继续听' : '轻触光球可随时打断当前播报', 'Tap orb to interrupt speech')
+            : bi('轻触光球开口说话 · 语音自动存入手记待梦境整理', 'Tap the orb to speak · queued for Dream Roam')))
+
+  const onOrbClick = () => {
+    if (stageState === 'thinking') return
+    if (stageState === 'speaking') {
+      stopChiefSpeech()
+      if (isHandsFree && typeof runtimeRefs.triggerVoiceAction === 'function') {
+        setTimeout(() => {
+          if (store.voiceModeActive && store.voiceRecState === 'idle' && typeof runtimeRefs.triggerVoiceAction === 'function') {
+            void runtimeRefs.triggerVoiceAction('voice_chat')
+          }
+        }, 120)
+      }
+      return
+    }
+    if (typeof runtimeRefs.triggerVoiceAction === 'function') {
+      void runtimeRefs.triggerVoiceAction('voice_chat')
+    }
+  }
+
+  const toggleHandsFree = () => {
+    const next = !isHandsFree
+    patch({ voiceHandsFree: next })
+    if (next && stageState === 'idle' && typeof runtimeRefs.triggerVoiceAction === 'function') {
+      void runtimeRefs.triggerVoiceAction('voice_chat')
+    }
+  }
+
+  return h(
+    'div',
+    {
+      className: 'dnb-voice-stage',
+      'data-state': stageState,
+      role: 'dialog',
+      'aria-label': bi('语音面聊舞台', 'Voice Chat Stage'),
+    },
+    h('div', { className: 'dnb-voice-stage-glow', 'aria-hidden': true }),
+    h(
+      'div',
+      { className: 'dnb-voice-orb-wrap' },
+      h('span', { className: 'dnb-voice-orb-ring', 'aria-hidden': true }),
+      h('span', { className: 'dnb-voice-orb-ring-2', 'aria-hidden': true }),
+      h(
+        'button',
+        {
+          type: 'button',
+          className: 'dnb-voice-orb',
+          disabled: stageState === 'thinking',
+          style: { '--voice-lv': lv.toFixed(3) },
+          title: statusSub,
+          onClick: onOrbClick,
+        },
+        h('span', { className: 'dnb-voice-orb-halo', 'aria-hidden': true }),
+        h(
+          'span',
+          { className: 'dnb-voice-orb-blobs', 'aria-hidden': true },
+          h('span', { className: 'dnb-voice-orb-blob-a' }),
+          h('span', { className: 'dnb-voice-orb-blob-b' }),
+          h('span', { className: 'dnb-voice-orb-blob-c' }),
+        ),
+        h('span', { className: 'dnb-voice-orb-glass', 'aria-hidden': true }),
+        h(
+          'span',
+          { className: 'dnb-voice-orb-core' },
+          stageState === 'recording'
+            ? h(Icon, { name: 'mic', size: 30 })
+            : (stageState === 'thinking'
+                ? h(Icon, { name: 'refresh', size: 28, style: { animation: 'dnb-spin 0.9s linear infinite' } })
+                : (stageState === 'speaking'
+                    ? h('span', { className: 'dnb-tts-wave', style: { transform: 'scale(1.85)' } }, h('span'), h('span'), h('span'))
+                    : h(Icon, { name: 'voiceSpark', size: 32 }))),
+        ),
+      ),
+    ),
+    h('div', { className: 'dnb-voice-stage-title' }, statusTitle),
+    h('div', { className: 'dnb-voice-stage-sub' }, statusSub),
+    captionText
+      ? h('div', { className: 'dnb-voice-caption' }, captionText)
+      : null,
+    handoffDraft
+      ? h(
+          'div',
+          { className: 'dnb-voice-handoff-card' },
+          h('div', { style: { fontSize: 11, fontWeight: 650, opacity: 0.9 } },
+            bi('🎯 参谋长整理好的待办（需你点确认再发给主对话）：', '🎯 Task Draft for @lead (confirm to send):')),
+          h('div', { style: { fontSize: 11.5, lineHeight: 1.45, opacity: 0.95, wordBreak: 'break-word' } }, handoffDraft),
+          h(
+            'div',
+            { style: { display: 'flex', alignItems: 'center', gap: 6, justifyContent: 'flex-end' } },
+            h('button', {
+              type: 'button',
+              className: 'dnb-mini-btn',
+              'data-tone': 'accent',
+              disabled: Boolean(view.secBusy),
+              onClick: () => {
+                const msg = handoffDraft
+                patch({ voiceHandoffDraft: '', voiceStageMinimized: true })
+                void submitChiefBar(msg, '', { voiceChat: false })
+              },
+            }, bi('📨 确认发给 @主对话', '📨 Send to @lead')),
+            h('button', {
+              type: 'button',
+              className: 'dnb-mini-btn',
+              onClick: () => patch({ voiceHandoffDraft: '' }),
+            }, bi('忽略', 'Dismiss')),
+          ),
+        )
+      : null,
+    h(
+      'div',
+      { className: 'dnb-voice-stage-actions' },
+      h('button', {
+        type: 'button',
+        className: 'dnb-voice-stage-pill-btn',
+        'data-active': isHandsFree ? '1' : '0',
+        onClick: toggleHandsFree,
+      }, h(Icon, { name: 'waves', size: 12 }), isHandsFree ? bi('免提连续：开', 'Hands-Free: ON') : bi('免提连续：关', 'Hands-Free: OFF')),
+      h('button', {
+        type: 'button',
+        className: 'dnb-voice-stage-pill-btn',
+        'data-active': view.voiceWakeEnabled ? '1' : '0',
+        title: bi('开启后喊参谋长名字会自动回复并进入语音模式', 'Say Chief name to wake and start voice chat'),
+        onClick: () => {
+          if (typeof runtimeRefs.toggleWakeWord === 'function') void runtimeRefs.toggleWakeWord()
+        },
+      }, h(Icon, { name: 'mic', size: 12 }), view.voiceWakeEnabled ? bi('叫名唤醒：开', 'Wake Call: ON') : bi('叫名唤醒：关', 'Wake Call: OFF')),
+      h('button', {
+        type: 'button',
+        className: 'dnb-voice-stage-pill-btn',
+        onClick: () => patch({ voiceStageMinimized: true }),
+      }, h(Icon, { name: 'eye', size: 12 }), bi('收起看内容', 'Show Panel')),
+      stageState === 'speaking'
+        ? h('button', {
+            type: 'button',
+            className: 'dnb-voice-stage-pill-btn',
+            onClick: () => stopChiefSpeech(),
+          }, h(Icon, { name: 'stop', size: 11.5 }), bi('停止播报', 'Stop Speech'))
+        : (view.secLatestReply && view.secLatestReply.text
+            ? h('button', {
+                type: 'button',
+                className: 'dnb-voice-stage-pill-btn',
+                onClick: () => void speakChiefText(view.secLatestReply.text, {
+                  itemId: `voice-replay:${view.secLatestReply.at || 1}`,
+                  label: bi('重听回答', 'Replay'),
+                  style: 'full',
+                }),
+              }, h(Icon, { name: 'volume', size: 12 }), bi('重听上句', 'Replay'))
+            : null),
+      h('button', {
+        type: 'button',
+        className: 'dnb-voice-stage-pill-btn',
+        onClick: () => {
+          if (typeof runtimeRefs.exitVoiceMode === 'function') runtimeRefs.exitVoiceMode()
+          else patch({ voiceModeActive: false, voiceStageMinimized: false, voiceHandsFree: false, voiceHandoffDraft: '' })
+        },
+      }, h(Icon, { name: 'x', size: 12 }), bi('退出语音', 'Exit Voice')),
+    ),
+  )
+}
+
 function PanelInner(props) {
   const view = useStore()
   const [gearDeg, setGearDeg] = React.useState(0)
-  const [skinMenuAnchor, setSkinMenuAnchor] = React.useState('')
   const [expandedRailTabs, setExpandedRailTabs] = React.useState(() => ({ [(view && view.tab === 'plan' ? 'tasks' : (view && view.tab)) || 'chief']: true }))
   const isPage = !!(props && props.variant === 'main')
   const isDock = !!(props && props.variant === 'dock')
@@ -375,13 +577,20 @@ function PanelInner(props) {
   }, [activeSkin])
 
   React.useEffect(() => {
-    if (!skinMenuAnchor) return undefined
-    const onKey = e => {
-      if (e && e.key === 'Escape') setSkinMenuAnchor('')
+    if (!isDock && !isPage && !view.open) return undefined
+    const onShortcut = e => {
+      if (e && e.altKey && !e.ctrlKey && !e.metaKey && String(e.key || '').toLowerCase() === 'v') {
+        e.preventDefault()
+        if (typeof runtimeRefs.toggleVoiceMode === 'function') {
+          void runtimeRefs.toggleVoiceMode()
+        } else {
+          patch({ voiceModeActive: !store.voiceModeActive, voiceStageMinimized: false })
+        }
+      }
     }
-    document.addEventListener('keydown', onKey)
-    return () => document.removeEventListener('keydown', onKey)
-  }, [skinMenuAnchor])
+    document.addEventListener('keydown', onShortcut)
+    return () => document.removeEventListener('keydown', onShortcut)
+  }, [isDock, isPage, view.open])
 
   React.useEffect(() => {
     const host = isDock || isPage || view.open ? selfRef.current : null
@@ -469,140 +678,27 @@ function PanelInner(props) {
         ),
         h(HandoffTab, { view }),
       )
-    : view.tab === 'chief'
-      ? h(ChiefTab, { board, view })
-      : view.tab === 'peers'
-        ? h(PeersTab, { view })
-        : view.tab === 'archive'
-          ? h(ArchiveTab, { board, view })
-          : view.tab === 'extmem'
-            ? h(ExternalMemoryTab, { view })
-            : view.tab === 'boundaries'
-              ? h(BoundariesTab, { store: view })
-              : h(TasksTab, { board, view })
+    : view.themeOpen
+      ? h(ThemeStudioView, { view })
+      : view.tab === 'chief'
+        ? h(ChiefTab, { board, view })
+        : view.tab === 'peers'
+          ? h(PeersTab, { view })
+          : view.tab === 'archive'
+            ? h(ArchiveTab, { board, view })
+            : view.tab === 'extmem'
+              ? h(ExternalMemoryTab, { view })
+              : view.tab === 'boundaries'
+                ? h(BoundariesTab, { store: view })
+                : h(TasksTab, { board, view })
 
   const cursorBlocked = normalizeCursorBlocked(board && board.cursor && board.cursor.blocked)
   const cursorText = board && board.cursor && (board.cursor.next || board.cursor.step || cursorBlocked)
     ? (cursorBlocked ? '卡住了：' + cursorBlocked : (board.cursor.next || board.cursor.step))
     : ''
 
-  const renderSkinPopover = (extraClass = '') => h(
-    React.Fragment,
-    null,
-    h('div', {
-      style: { position: 'fixed', inset: 0, zIndex: 140 },
-      onClick: e => {
-        e.stopPropagation()
-        setSkinMenuAnchor('')
-      },
-    }),
-    h(
-      'div',
-      {
-        className: extraClass ? `dnb-skin-pop ${extraClass}` : 'dnb-skin-pop',
-        role: 'menu',
-        'aria-label': bi('选择视觉主题', 'Choose UI Theme'),
-        onClick: e => e.stopPropagation(),
-      },
-      h('div', { className: 'dnb-skin-pop-title' }, bi('视觉主题 · 一键换肤', 'Appearance · Select Theme')),
-      UI_SKIN_OPTIONS.map(opt => {
-        const isCur = activeSkin === opt.key
-        if (opt.key === 'custom') {
-          const cSkin = view.customSkin || {}
-          const hasSavedCustom = Number(cSkin.updatedAt) > 0
-          const displayTitle = hasSavedCustom ? cSkin.name : bi(opt.zh, opt.en)
-          const displaySub = hasSavedCustom ? bi('自定义 DIY', 'Custom DIY') : bi(opt.tagZh, opt.tagEn)
-          const displaySwatches = Array.isArray(cSkin.swatches) && cSkin.swatches.length === 3 ? cSkin.swatches : opt.swatches
-          return h(
-            React.Fragment,
-            { key: opt.key },
-            h('div', { className: 'dnb-skin-pop-sep' }),
-            h(
-              'div',
-              { className: 'dnb-skin-pop-custom-row' },
-              h(
-                'button',
-                {
-                  type: 'button',
-                  className: 'dnb-skin-pop-item',
-                  'data-active': isCur ? '1' : '0',
-                  title: bi(opt.descZh, opt.descEn),
-                  onClick: e => {
-                    e.stopPropagation()
-                    if (!hasSavedCustom || isCur) {
-                      setSkinMenuAnchor('')
-                      openCustomThemeModal()
-                      return
-                    }
-                    saveUiSkin('custom')
-                    setSkinMenuAnchor('')
-                    patch({ notice: bi('已切换主题：', 'Theme set to: ') + displayTitle })
-                  },
-                },
-                h(
-                  'div',
-                  { style: { display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 } },
-                  h('span', { style: { fontSize: 12, fontWeight: isCur ? 600 : 500, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' } }, displayTitle),
-                  h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, displaySub),
-                ),
-                h(
-                  'div',
-                  { className: 'dnb-skin-swatches' },
-                  displaySwatches.map((hex, idx) =>
-                    h('span', { key: `${hex}-${idx}`, className: 'dnb-skin-swatch-dot', style: { background: hex } })),
-                ),
-              ),
-              h(
-                'button',
-                {
-                  type: 'button',
-                  className: 'dnb-skin-pop-edit-btn',
-                  title: bi('导入图片取色或让参谋长 DIY', 'Extract image palette or ask Chief to DIY'),
-                  onClick: e => {
-                    e.stopPropagation()
-                    setSkinMenuAnchor('')
-                    openCustomThemeModal()
-                  },
-                },
-                bi('调色', 'DIY'),
-              ),
-            ),
-          )
-        }
-        return h(
-          'button',
-          {
-            key: opt.key,
-            type: 'button',
-            className: 'dnb-skin-pop-item',
-            'data-active': isCur ? '1' : '0',
-            title: bi(opt.descZh, opt.descEn),
-            onClick: e => {
-              e.stopPropagation()
-              saveUiSkin(opt.key)
-              setSkinMenuAnchor('')
-              patch({ notice: bi('已切换主题：', 'Theme set to: ') + bi(opt.zh, opt.en) })
-            },
-          },
-          h(
-            'div',
-            { style: { display: 'flex', flexDirection: 'column', gap: 1, minWidth: 0 } },
-            h('span', { style: { fontSize: 12, fontWeight: isCur ? 600 : 500 } }, bi(opt.zh, opt.en)),
-            h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, bi(opt.tagZh, opt.tagEn)),
-          ),
-          h(
-            'div',
-            { className: 'dnb-skin-swatches' },
-            opt.swatches.map(hex =>
-              h('span', { key: hex, className: 'dnb-skin-swatch-dot', style: { background: hex } })),
-          ),
-        )
-      }),
-    ),
-  )
-
   const activeRailSub = (() => {
-    if (view.settingsOpen) return ''
+    if (view.settingsOpen || view.themeOpen) return ''
     const curTab = view.tab === 'plan' ? 'tasks' : (view.tab || 'chief')
     if (curTab === 'chief') return `chief:${view.chiefSubTab || 'all'}`
     if (curTab === 'tasks') return `tasks:${view.tasksSubTab || 'plan'}`
@@ -646,30 +742,19 @@ function PanelInner(props) {
         h(
           'div',
           { className: 'dnb-head-rail-moved' },
-          h(
-            'div',
-            {
-              style: { position: 'relative', display: 'inline-flex', alignItems: 'center' },
+          h('button', {
+            type: 'button',
+            className: 'dnb-gear-btn dnb-skin-head-btn',
+            'data-active': view.themeOpen ? '1' : '0',
+            'aria-label': bi('外观与主题工坊', 'Appearance & Theme Studio'),
+            'aria-pressed': view.themeOpen ? 'true' : 'false',
+            title: bi('打开外观主题与 DIY 工坊页（6 套精选预设 + 自定义工坊）', 'Open Appearance & DIY Theme Studio page'),
+            onClick: e => {
+              e.stopPropagation()
+              if (view.themeOpen) patch({ themeOpen: false })
+              else openThemeStudio()
             },
-            h('button', {
-              type: 'button',
-              className: 'dnb-gear-btn dnb-skin-head-btn',
-              'data-active': skinMenuAnchor === 'head' ? '1' : '0',
-              'aria-label': bi('切换外观主题', 'Switch Appearance Theme'),
-              'aria-pressed': skinMenuAnchor === 'head' ? 'true' : 'false',
-              title: bi('切换插件外观主题（晨雾琉璃 / 温润纸感 / 静谧森系 / 星夜幻想）', 'Switch UI theme (Frosted Mist / Warm Paper / Botanical / Starlight)'),
-              onClick: e => {
-                e.stopPropagation()
-                setSkinMenuAnchor(v => (v === 'head' ? '' : 'head'))
-                patch({
-                  secModelMenuOpen: false,
-                  secPaceMenuOpen: false,
-                  secPermMenuOpen: false,
-                })
-              },
-            }, h(Icon, { name: 'palette', size: 13.5 })),
-            skinMenuAnchor === 'head' ? renderSkinPopover() : null,
-          ),
+          }, h(Icon, { name: 'palette', size: 13.5 })),
           h('button', {
             type: 'button',
             className: 'dnb-gear-btn dnb-layout-toggle-btn',
@@ -682,7 +767,6 @@ function PanelInner(props) {
               if (e.currentTarget && typeof e.currentTarget.blur === 'function') e.currentTarget.blur()
               const next = (view.navLayout || 'sidebar') === 'sidebar' ? 'top' : 'sidebar'
               saveNavLayout(next)
-              setSkinMenuAnchor('')
               patch({
                 notice: next === 'sidebar'
                   ? bi('已切换为左侧极简工作台（宽屏生效）', 'Switched to Left Rail Studio (wide view)')
@@ -695,18 +779,34 @@ function PanelInner(props) {
             h('rect', { x: 3, y: 4, width: 18, height: 16, rx: 2.5 }),
             h('path', { d: (view.navLayout || 'sidebar') === 'sidebar' ? 'M9 4v16' : 'M3 9h18' }),
           )),
+          (() => {
+            const ttsPlayer = view.ttsPlayer || {}
+            const isTtsActive = ttsPlayer.status === 'playing' || ttsPlayer.status === 'loading'
+            return isTtsActive
+              ? h('button', {
+                  type: 'button',
+                  className: 'dnb-gear-btn dnb-tts-head-btn',
+                  'aria-label': bi('停止语音播报', 'Stop speech playback'),
+                  title: bi('正在语音播报，点击立即静音停止', 'Speaking now — click to stop'),
+                  onClick: e => {
+                    e.stopPropagation()
+                    stopChiefSpeech()
+                  },
+                }, h(Icon, { name: 'waves', size: 13.5 }))
+              : null
+          })(),
           h('button', {
             type: 'button',
             className: 'dnb-gear-btn',
             'data-active': view.settingsOpen ? '1' : '0',
             'aria-label': bi('设置', 'Settings'),
             'aria-pressed': view.settingsOpen ? 'true' : 'false',
-            title: bi('设置：外观主题、给参谋长取名、模式预设、桌面通知和用量上限', 'Settings: theme, Chief name, presets, alerts, and caps'),
+            title: bi('设置：给参谋长取名、模式预设、桌面通知和用量上限', 'Settings: Chief name, presets, alerts, and caps'),
             onClick: () => {
               setGearDeg(d => d + 180)
-              setSkinMenuAnchor('')
               patch({
                 settingsOpen: !view.settingsOpen,
+                themeOpen: false,
                 secModelMenuOpen: false,
                 secPaceMenuOpen: false,
                 secPermMenuOpen: false,
@@ -794,6 +894,22 @@ function PanelInner(props) {
               }),
             )
           })(),
+          h('button', {
+            type: 'button',
+            className: 'dnb-icon-btn',
+            'data-active': (view.voiceModeActive && !view.voiceStageMinimized) ? '1' : '0',
+            style: view.voiceModeActive ? { color: 'var(--dnb-accent)' } : undefined,
+            title: view.voiceModeActive
+              ? bi('正在语音面聊（点击退出，快捷键 Alt+V）', 'Voice Chat Active (Alt+V to exit)')
+              : bi(`一键唤起语音面聊（快捷键 Alt+V，或叫「${chiefShortName(view)}」）`, `Quick Voice Chat (Alt+V, or call "${chiefShortName(view)}")`),
+            onClick: () => {
+              if (typeof runtimeRefs.toggleVoiceMode === 'function') {
+                void runtimeRefs.toggleVoiceMode()
+              } else {
+                patch({ voiceModeActive: !view.voiceModeActive, voiceStageMinimized: false })
+              }
+            },
+          }, h(Icon, { name: 'voiceSpark', size: 15 })),
           h('button', {
             className: 'dnb-icon-btn',
             'data-active': view.searchOpen ? '1' : '0',
@@ -925,7 +1041,7 @@ function PanelInner(props) {
                     : tab.key === 'archive'
                       ? archiveBadge
                       : 0
-              const isSegActive = !view.settingsOpen && (view.tab === tab.key || (tab.key === 'tasks' && view.tab === 'plan'))
+              const isSegActive = !view.settingsOpen && !view.themeOpen && (view.tab === tab.key || (tab.key === 'tasks' && view.tab === 'plan'))
               return h(
                 'button',
                 {
@@ -938,6 +1054,7 @@ function PanelInner(props) {
                   onClick: () => patch({
                     tab: tab.key,
                     settingsOpen: false,
+                    themeOpen: false,
                     secModelMenuOpen: false,
                     secPaceMenuOpen: false,
                     secPermMenuOpen: false,
@@ -1035,7 +1152,9 @@ function PanelInner(props) {
                   alignItems: 'center',
                 },
               },
-              h('span', null, view.error),
+              h('span', null, /^failed to fetch$/i.test(String(view.error).trim())
+                ? bi('与本地服务暂时断开连接，正在自动重连…', 'Temporarily disconnected from local service, reconnecting…')
+                : view.error),
               h('span', { style: { cursor: 'pointer', paddingLeft: 8 }, onClick: () => patch({ error: '' }) }, '×'),
             )
           : null,
@@ -1043,7 +1162,10 @@ function PanelInner(props) {
         // Two-Column Workspace Shell when 'sidebar' layout on Wide Views
         h(
           'div',
-          { className: 'dnb-workspace-shell' },
+          {
+            className: 'dnb-workspace-shell',
+            'data-voice-stage': (view.voiceModeActive && !view.voiceStageMinimized) ? '1' : '0',
+          },
           (view.navLayout || 'sidebar') === 'sidebar'
             ? h(
                 'aside',
@@ -1059,7 +1181,7 @@ function PanelInner(props) {
                   'div',
                   { className: 'dnb-workspace-rail-list' },
                   TABS.map(tab => {
-                    const isTabCur = !view.settingsOpen && (view.tab === tab.key || (tab.key === 'tasks' && view.tab === 'plan'))
+                    const isTabCur = !view.settingsOpen && !view.themeOpen && (view.tab === tab.key || (tab.key === 'tasks' && view.tab === 'plan'))
                     const isExpanded = Boolean(expandedRailTabs[tab.key])
                     const tabIcon = tab.key === 'chief'
                       ? 'sparkles'
@@ -1101,6 +1223,7 @@ function PanelInner(props) {
                         { k: 'desktop', zh: '认知桌面', en: 'Desktop' },
                         { k: 'session', zh: '本局档案', en: 'Session' },
                         { k: 'global', zh: '全局档案', en: 'Global' },
+                        { k: 'notes', zh: '语音手记', en: 'Voice Notes' },
                         { k: 'precipitated', zh: '冷藏档案', en: 'Cold Vault' },
                       ],
                       extmem: [
@@ -1137,7 +1260,7 @@ function PanelInner(props) {
                     }
                     const handleSubClick = (subKey) => {
                       if (tab.key === 'chief') {
-                        const patchObj = { tab: 'chief', settingsOpen: false, chiefSubTab: subKey }
+                        const patchObj = { tab: 'chief', settingsOpen: false, themeOpen: false, chiefSubTab: subKey }
                         if (subKey === 'all') {
                           patchObj.chiefDigestCollapsed = false
                         } else if (subKey === 'digest') {
@@ -1148,7 +1271,7 @@ function PanelInner(props) {
                         return
                       }
                       if (tab.key === 'tasks') {
-                        const patchObj = { tab: 'tasks', settingsOpen: false, tasksSubTab: subKey }
+                        const patchObj = { tab: 'tasks', settingsOpen: false, themeOpen: false, tasksSubTab: subKey }
                         if (subKey === 'plan') patchObj.planObjCollapsed = false
                         if (subKey === 'board') patchObj.boardSectionCollapsed = false
                         if (subKey === 'handoff') patchObj.handoffSectionCollapsed = false
@@ -1157,7 +1280,7 @@ function PanelInner(props) {
                         return
                       }
                       if (tab.key === 'peers') {
-                        const patchObj = { tab: 'peers', settingsOpen: false, peersSubTab: subKey }
+                        const patchObj = { tab: 'peers', settingsOpen: false, themeOpen: false, peersSubTab: subKey }
                         if (subKey === 'all') {
                           patchObj.peersNetCollapsed = false
                           patchObj.peersMailCollapsed = false
@@ -1171,16 +1294,21 @@ function PanelInner(props) {
                         return
                       }
                       if (tab.key === 'archive') {
-                        patch({ tab: 'archive', settingsOpen: false, archiveTabScope: subKey })
-                        void loadArchives(false)
+                        patch({ tab: 'archive', settingsOpen: false, themeOpen: false, archiveTabScope: subKey })
+                        if (subKey === 'notes') {
+                          void loadArchives(false, '', 'global')
+                          if (view.sessionId) void loadArchives(false, '', 'session')
+                        } else {
+                          void loadArchives(false)
+                        }
                         return
                       }
                       if (tab.key === 'extmem') {
-                        patch({ tab: 'extmem', settingsOpen: false, extMemSubTab: subKey })
+                        patch({ tab: 'extmem', settingsOpen: false, themeOpen: false, extMemSubTab: subKey })
                         return
                       }
                       if (tab.key === 'boundaries') {
-                        const patchObj = { tab: 'boundaries', settingsOpen: false, boundSubTab: subKey }
+                        const patchObj = { tab: 'boundaries', settingsOpen: false, themeOpen: false, boundSubTab: subKey }
                         if (subKey === 'walls') patchObj.wallCollapsed = false
                         if (subKey === 'rules') patchObj.boundCollapsedCols = {}
                         patch(patchObj)
@@ -1204,6 +1332,7 @@ function PanelInner(props) {
                             patch({
                               tab: tab.key,
                               settingsOpen: false,
+                              themeOpen: false,
                               secModelMenuOpen: false,
                               secPaceMenuOpen: false,
                               secPermMenuOpen: false,
@@ -1254,25 +1383,20 @@ function PanelInner(props) {
                   'div',
                   { className: 'dnb-workspace-rail-foot' },
                   h(
-                    'div',
-                    { style: { position: 'relative' } },
-                    h(
-                      'button',
-                      {
-                        type: 'button',
-                        className: 'dnb-workspace-nav-btn',
-                        'data-active': skinMenuAnchor === 'rail' ? '1' : '0',
-                        onClick: e => {
-                          e.stopPropagation()
-                          setSkinMenuAnchor(v => (v === 'rail' ? '' : 'rail'))
-                          patch({ secModelMenuOpen: false, secPaceMenuOpen: false, secPermMenuOpen: false })
-                        },
+                    'button',
+                    {
+                      type: 'button',
+                      className: 'dnb-workspace-nav-btn',
+                      'data-active': view.themeOpen ? '1' : '0',
+                      onClick: e => {
+                        e.stopPropagation()
+                        if (view.themeOpen) patch({ themeOpen: false })
+                        else openThemeStudio()
                       },
-                      h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 7 } },
-                        h(Icon, { name: 'palette', size: 13 }),
-                        bi('外观主题', 'Appearance')),
-                    ),
-                    skinMenuAnchor === 'rail' ? renderSkinPopover('dnb-skin-pop-rail') : null,
+                    },
+                    h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 7 } },
+                      h(Icon, { name: 'palette', size: 13 }),
+                      bi('外观主题', 'Appearance')),
                   ),
                   h(
                     'button',
@@ -1281,8 +1405,7 @@ function PanelInner(props) {
                       className: 'dnb-workspace-nav-btn',
                       'data-active': view.settingsOpen ? '1' : '0',
                       onClick: () => {
-                        setSkinMenuAnchor('')
-                        patch({ settingsOpen: !view.settingsOpen })
+                        patch({ settingsOpen: !view.settingsOpen, themeOpen: false })
                       },
                     },
                     h('span', { style: { display: 'inline-flex', alignItems: 'center', gap: 7 } },
@@ -1295,7 +1418,6 @@ function PanelInner(props) {
                       type: 'button',
                       className: 'dnb-workspace-nav-btn',
                       onClick: () => {
-                        setSkinMenuAnchor('')
                         saveNavLayout('top')
                         patch({ notice: bi('已切回顶部经典标签排列', 'Switched to Top Classic Tabs') })
                       },
@@ -1308,20 +1430,37 @@ function PanelInner(props) {
               )
             : null,
 
-          // Tab Body Protected by Error Boundary
-          h(
-            'div',
-            { className: 'dnb-body' },
-            h(ChiefErrorBoundary, { key: view.tab + ':' + (view.sessionId || 'none') }, body),
-          ),
+          // Tab Body Protected by Error Boundary + Inline Screen Voice Stage (no global blur overlay)
+          (() => {
+            const showVoiceStage = Boolean(view.voiceModeActive && !view.voiceStageMinimized)
+            return h(
+              'div',
+              {
+                className: 'dnb-body',
+                style: showVoiceStage
+                  ? { display: 'flex', flexDirection: 'column', padding: 0, overflow: 'hidden' }
+                  : undefined,
+              },
+              showVoiceStage ? h(ChiefVoiceModeStage, { view }) : null,
+              h(
+                'div',
+                { style: showVoiceStage ? { display: 'none' } : undefined },
+                h(ChiefErrorBoundary, { key: view.tab + ':' + (view.sessionId || 'none') }, body),
+              ),
+            )
+          })(),
         ),
       ),
 
       // Persistent Bottom Chief Input & Relay Bar
       h(ChiefComposerBar, { view, barRef: secBarRef }),
 
-      // Chief System Active Working Stage FX Overlay (Frontend action OR Backend auto-maintenance)
-      h(ChiefWorkStageOverlay, { fx: view.chiefWorkFx || (meta && meta.activeWork) || null }),
+      // Chief System Active Working Stage FX Overlay (suppressed while inline Voice Stage is open)
+      h(ChiefWorkStageOverlay, {
+        fx: (view.voiceModeActive && !view.voiceStageMinimized)
+          ? null
+          : (view.chiefWorkFx || (meta && meta.activeWork) || null),
+      }),
 
       // Scoped Modal Overlays (Strictly bounded inside .dnb-panel)
       h(ChiefRiskConfirmModal, { view }),
@@ -1499,17 +1638,27 @@ export function CornerTrigger() {
       title: '打开 ' + BRAND_NAME,
       'aria-label': BRAND_NAME,
       onClick: () => {
+        if (!urlSid && !view.sessionId) {
+          if (selectPanel(SIDE_ID)) {
+            setTimeout(() => {
+              if (!store.panel && !store.open && !store.convView) patch({ open: true })
+            }, 110)
+            return
+          }
+          patch({ open: true })
+          return
+        }
         if (openChief()) return
         patch({ open: true })
       },
       style: {
         position: 'fixed',
-        right: '16px',
-        bottom: '88px',
+        right: '20px',
+        bottom: '20px',
         zIndex: 30,
-        width: '36px',
-        height: '36px',
-        borderRadius: '18px',
+        width: '34px',
+        height: '34px',
+        borderRadius: '17px',
         border: '1px solid var(--dsw-alias-border-l2, rgba(128,128,136,0.25))',
         background: 'var(--dsw-alias-bg-elevated, rgba(38,38,42,0.9))',
         backdropFilter: 'blur(12px)',

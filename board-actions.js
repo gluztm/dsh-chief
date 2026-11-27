@@ -913,12 +913,20 @@ export function createBoardActions(deps) {
         const val = str(args.item !== undefined ? args.item : args.text, '').trim().slice(0, 400)
         if (!val) return { ok: false, error: 'bounds.add requires non-empty item' }
         const pin = asBool(args.pinned) === true || isSameFile
+        const localPaused = normalizeBounds(board.pausedBounds)
 
         if (pin) {
           let capErr = ''
           withBoardLock(sharedFile, () => {
             const sb = isSameFile ? board : loadBoard(sharedFile)
             const sBounds = normalizeBounds(sb.bounds)
+            const sPaused = normalizeBounds(sb.pausedBounds)
+            let changed = false
+            if (sPaused[col].includes(val)) {
+              sPaused[col] = sPaused[col].filter(x => x !== val)
+              sb.pausedBounds = sPaused
+              changed = true
+            }
             if (!sBounds[col].includes(val)) {
               if (sBounds[col].length >= BOUND_CAP) {
                 capErr = 'bounds list too long: ' + BOUND_CAP + ' is the cap'
@@ -926,22 +934,29 @@ export function createBoardActions(deps) {
               }
               sBounds[col].push(val)
               sb.bounds = sBounds
-              if (!isSameFile) {
-                pushLog(sb, '📌 新增全局共享边界（' + col + '）：' + val.slice(0, 50), by, session)
-                saveBoard(sb, sharedFile)
-              }
+              changed = true
+            }
+            if (changed && !isSameFile) {
+              pushLog(sb, '📌 新增全局共享边界（' + col + '）：' + val.slice(0, 50), by, session)
+              saveBoard(sb, sharedFile)
             }
           })
           if (capErr) return { ok: false, error: capErr }
           if (!isSameFile) {
             localBounds[col] = localBounds[col].filter(x => x !== val)
+            localPaused[col] = localPaused[col].filter(x => x !== val)
             board.bounds = localBounds
+            board.pausedBounds = localPaused
           }
           pushLog(board, '📌 定住全局边界（' + col + '）：' + val.slice(0, 50), by, session)
           return { ok: true, pinned: true, item: val, board: saveBoard(board, file) }
         }
 
         const sharedSnap = normalizeBounds(loadBoard(sharedFile).bounds)
+        if (localPaused[col].includes(val)) {
+          localPaused[col] = localPaused[col].filter(x => x !== val)
+          board.pausedBounds = localPaused
+        }
         if (!sharedSnap[col].includes(val) && !localBounds[col].includes(val)) {
           if (sharedSnap[col].length + localBounds[col].length >= BOUND_CAP) {
             return { ok: false, error: 'bounds list too long: ' + BOUND_CAP + ' is the cap' }
@@ -956,6 +971,102 @@ export function createBoardActions(deps) {
       if (action === 'bounds.pin') {
         const val = str(args.item !== undefined ? args.item : args.text, '').trim().slice(0, 400)
         if (!val) return { ok: false, error: 'bounds.pin requires item' }
+
+        if (args.paused !== undefined) {
+          if (String(args._callerOrigin || '').trim() === 'chief_llm') {
+            return {
+              ok: false,
+              blockedBySafetyGuard: true,
+              rule: 'bounds_forbidden_protected',
+              error: '安全卫兵拦截：暂挂或恢复工作边界仅限用户在面板手动操作，参谋不可擅自暂挂。',
+            }
+          }
+          const shouldPause = asBool(args.paused) === true
+          const localPaused = normalizeBounds(board.pausedBounds)
+
+          if (shouldPause) {
+            let movedInShared = false
+            withBoardLock(sharedFile, () => {
+              const sb = isSameFile ? board : loadBoard(sharedFile)
+              const sBounds = normalizeBounds(sb.bounds)
+              const sPaused = normalizeBounds(sb.pausedBounds)
+              if (sBounds[col].includes(val)) {
+                sBounds[col] = sBounds[col].filter(x => x !== val)
+                if (!sPaused[col].includes(val) && sPaused[col].length < BOUND_CAP) {
+                  sPaused[col].push(val)
+                }
+                sb.bounds = sBounds
+                sb.pausedBounds = sPaused
+                movedInShared = true
+                if (!isSameFile) {
+                  pushLog(sb, '⏸ 暂挂全局边界（' + col + '）：' + val.slice(0, 50), by, session)
+                  saveBoard(sb, sharedFile)
+                }
+              }
+            })
+            if (!isSameFile) {
+              if (movedInShared) {
+                localBounds[col] = localBounds[col].filter(x => x !== val)
+                localPaused[col] = localPaused[col].filter(x => x !== val)
+              } else if (localBounds[col].includes(val)) {
+                localBounds[col] = localBounds[col].filter(x => x !== val)
+                if (!localPaused[col].includes(val) && localPaused[col].length < BOUND_CAP) {
+                  localPaused[col].push(val)
+                }
+              }
+              board.bounds = localBounds
+              board.pausedBounds = localPaused
+            }
+            pushLog(board, '⏸ 已暂挂边界（' + col + '）：' + val.slice(0, 50), by, session)
+            return { ok: true, paused: true, item: val, board: saveBoard(board, file) }
+          }
+
+          let resumedInShared = false
+          let capErr = ''
+          withBoardLock(sharedFile, () => {
+            const sb = isSameFile ? board : loadBoard(sharedFile)
+            const sBounds = normalizeBounds(sb.bounds)
+            const sPaused = normalizeBounds(sb.pausedBounds)
+            if (sPaused[col].includes(val)) {
+              if (!sBounds[col].includes(val)) {
+                if (sBounds[col].length >= BOUND_CAP) {
+                  capErr = 'bounds list too long: ' + BOUND_CAP + ' is the cap'
+                  return
+                }
+                sBounds[col].push(val)
+              }
+              sPaused[col] = sPaused[col].filter(x => x !== val)
+              sb.bounds = sBounds
+              sb.pausedBounds = sPaused
+              resumedInShared = true
+              if (!isSameFile) {
+                pushLog(sb, '▶ 恢复全局边界（' + col + '）：' + val.slice(0, 50), by, session)
+                saveBoard(sb, sharedFile)
+              }
+            }
+          })
+          if (capErr) return { ok: false, error: capErr }
+          if (!isSameFile) {
+            if (resumedInShared) {
+              localBounds[col] = localBounds[col].filter(x => x !== val)
+              localPaused[col] = localPaused[col].filter(x => x !== val)
+            } else if (localPaused[col].includes(val)) {
+              const sharedSnap = normalizeBounds(loadBoard(sharedFile).bounds)
+              if (!sharedSnap[col].includes(val) && !localBounds[col].includes(val)) {
+                if (sharedSnap[col].length + localBounds[col].length >= BOUND_CAP) {
+                  return { ok: false, error: 'bounds list too long: ' + BOUND_CAP + ' is the cap' }
+                }
+                localBounds[col].push(val)
+              }
+              localPaused[col] = localPaused[col].filter(x => x !== val)
+            }
+            board.bounds = localBounds
+            board.pausedBounds = localPaused
+          }
+          pushLog(board, '▶ 已恢复边界（' + col + '）：' + val.slice(0, 50), by, session)
+          return { ok: true, paused: false, item: val, board: saveBoard(board, file) }
+        }
+
         const pin = asBool(args.pinned) !== false
 
         if (pin) {
@@ -1014,15 +1125,28 @@ export function createBoardActions(deps) {
         withBoardLock(sharedFile, () => {
           const sb = isSameFile ? board : loadBoard(sharedFile)
           const sBounds = normalizeBounds(sb.bounds)
+          const sPaused = normalizeBounds(sb.pausedBounds)
+          let changed = false
           if (sBounds[col].includes(val)) {
             sBounds[col] = sBounds[col].filter(x => x !== val)
             sb.bounds = sBounds
-            if (!isSameFile) saveBoard(sb, sharedFile)
+            changed = true
           }
+          if (sPaused[col].includes(val)) {
+            sPaused[col] = sPaused[col].filter(x => x !== val)
+            sb.pausedBounds = sPaused
+            changed = true
+          }
+          if (changed && !isSameFile) saveBoard(sb, sharedFile)
         })
         if (!isSameFile) {
           localBounds[col] = localBounds[col].filter(x => x !== val)
           board.bounds = localBounds
+          const localPaused = normalizeBounds(board.pausedBounds)
+          if (localPaused[col].includes(val)) {
+            localPaused[col] = localPaused[col].filter(x => x !== val)
+            board.pausedBounds = localPaused
+          }
         }
         pushLog(board, '移除边界（' + col + '）：' + val.slice(0, 50), by, session)
         return { ok: true, removed: val, board: saveBoard(board, file) }
@@ -1036,26 +1160,45 @@ export function createBoardActions(deps) {
         withBoardLock(sharedFile, () => {
           const sb = isSameFile ? board : loadBoard(sharedFile)
           const sBounds = normalizeBounds(sb.bounds)
+          const sPaused = normalizeBounds(sb.pausedBounds)
+          let changed = false
           const idx = sBounds[col].indexOf(oldVal)
           if (idx !== -1) {
             sBounds[col][idx] = newVal
             sBounds[col] = [...new Set(sBounds[col])]
             sb.bounds = sBounds
             editedInShared = true
-            if (!isSameFile) saveBoard(sb, sharedFile)
+            changed = true
           }
+          const pIdx = sPaused[col].indexOf(oldVal)
+          if (pIdx !== -1) {
+            sPaused[col][pIdx] = newVal
+            sPaused[col] = [...new Set(sPaused[col])]
+            sb.pausedBounds = sPaused
+            editedInShared = true
+            changed = true
+          }
+          if (changed && !isSameFile) saveBoard(sb, sharedFile)
         })
         if (!isSameFile) {
+          const localPaused = normalizeBounds(board.pausedBounds)
           if (editedInShared) {
             localBounds[col] = localBounds[col].filter(x => x !== oldVal && x !== newVal)
+            localPaused[col] = localPaused[col].filter(x => x !== oldVal && x !== newVal)
           } else {
             const idx = localBounds[col].indexOf(oldVal)
             if (idx !== -1) {
               localBounds[col][idx] = newVal
               localBounds[col] = [...new Set(localBounds[col])]
             }
+            const pIdx = localPaused[col].indexOf(oldVal)
+            if (pIdx !== -1) {
+              localPaused[col][pIdx] = newVal
+              localPaused[col] = [...new Set(localPaused[col])]
+            }
           }
           board.bounds = localBounds
+          board.pausedBounds = localPaused
         }
         pushLog(board, '修订边界（' + col + '）：' + newVal.slice(0, 50), by, session)
         return { ok: true, pinned: editedInShared, item: newVal, board: saveBoard(board, file) }

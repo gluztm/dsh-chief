@@ -261,21 +261,23 @@ export async function mutateArchiveApi(payload, toastLabel = '') {
       if (payload.op === 'switchCabinet' || payload.op === 'createCabinet' || payload.op === 'deleteCabinet') {
         patch({ archiveDetails: {}, archiveOpenFolders: {}, archiveOpenFiles: {} })
       }
+      const relationSensitiveOp = payload.op === 'save'
+        || payload.op === 'delete'
+        || payload.op === 'cycleClip'
+        || payload.op === 'setClip'
+        || payload.op === 'rollbackHistory'
+      let workingDetails = relationSensitiveOp ? {} : { ...(store.archiveDetails || {}) }
       if (value.item && value.item.id) {
-        patch({
-          archiveDetails: {
-            ...(store.archiveDetails || {}),
-            [value.item.id]: value.item,
-          },
-        })
+        workingDetails[value.item.id] = value.item
       }
       if (payload.op === 'delete' && (payload.archiveId || payload.id)) {
         const delId = payload.archiveId || payload.id
         const nextOpen = { ...(store.archiveOpenFiles || {}) }
-        const nextDet = { ...(store.archiveDetails || {}) }
         delete nextOpen[delId]
-        delete nextDet[delId]
-        patch({ archiveOpenFiles: nextOpen, archiveDetails: nextDet })
+        delete workingDetails[delId]
+        patch({ archiveOpenFiles: nextOpen, archiveDetails: workingDetails })
+      } else if (relationSensitiveOp || (value.item && value.item.id)) {
+        patch({ archiveDetails: workingDetails })
       }
       if (value.archives && typeof value.archives === 'object') {
         const targetScopeForHeaders = payload.op === 'pullPrecipitated'
@@ -328,10 +330,24 @@ export async function mutateArchiveApi(payload, toastLabel = '') {
         } else {
           extraPatch.notice = '当前暂无可收纳的临时便签'
         }
+      } else if ((payload.op === 'cycleClip' || payload.op === 'setClip') && value.paperclip === 'copper' && Array.isArray(value.affectedDependents) && value.affectedDependents.length > 0) {
+        const deps = value.affectedDependents
+        const names = deps.slice(0, 3).map(d => `《${d.title || '未命名'}》`).join('、')
+        extraPatch.notice = `⚠️ 已标为暗铜（作废）！仍有 ${deps.length} 份活跃档案正在引用它：${names}${deps.length > 3 ? ' 等' : ''}`
+      } else if (payload.op === 'rollbackHistory') {
+        extraPatch.notice = toastLabel || '⏪ 已回滚到该历史版本（原版本已自动留存快照）'
       } else if (toastLabel) {
         extraPatch.notice = toastLabel
       }
       if (Object.keys(extraPatch).length) patch(extraPatch)
+      if (relationSensitiveOp) {
+        const targetScopeForReload = vaultScope === 'global' ? 'global' : 'session'
+        const updatedId = value.item && value.item.id ? value.item.id : ''
+        const openIds = Object.keys(store.archiveOpenFiles || {}).filter(id => store.archiveOpenFiles[id] && id !== updatedId)
+        for (const oid of openIds) {
+          void loadArchiveDetail(oid, true, { scope: targetScopeForReload })
+        }
+      }
       if (payload.op === 'copyToGlobal' && store.archiveTabScope === 'global') {
         void loadArchives(true, '', 'global')
       } else if (payload.op === 'pullPrecipitated' && store.archiveTabScope === payload.targetScope) {
@@ -688,6 +704,20 @@ export async function searchColdArchives(queryText) {
   }
 }
 
+
+/** Bilingual BM25 archive search API for UI live search box (non-blocking against single-flight loadArchives) */
+export async function searchArchivesRemoteApi(queryText, scope = 'session') {
+  const q = String(queryText || '').trim()
+  if (!q) return { ok: true, items: [] }
+  const activeScope = scope === 'global' ? 'global' : 'session'
+  const qs = new URLSearchParams({ q, scope: activeScope })
+  const sid = store.sessionId || sessionIdFromUrl()
+  if (sid) qs.set('session', sid)
+  if (activeScope !== 'global' && store.archiveCabinetId && store.archiveCabinetId !== 'cab-global') {
+    qs.set('cabinetId', store.archiveCabinetId)
+  }
+  return call('archives?' + qs.toString())
+}
 
 apiBridge.applyArchiveHeaders = applyArchiveHeaders
 apiBridge.loadArchives = loadArchives

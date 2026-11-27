@@ -25,6 +25,7 @@ import {
   saveMemoryPromptApi,
   resetMemoryPromptApi,
   distillMemoryNowApi,
+  fetchVoiceInboxApi,
 } from '../api.js'
 import { Icon, Switch, AccCard } from '../components/common.js'
 import {
@@ -78,6 +79,7 @@ const EXTMEM_DEFAULT_DRAFT = {
   },
   embedding: {
     enabled: false,
+    provider: 'openai',
     baseUrl: '',
     model: '',
     apiKeyEnv: '',
@@ -218,6 +220,18 @@ export function ExternalMemoryTab({ view }) {
   const [probeQuery, setProbeQuery] = React.useState('我平时的回复习惯和项目规矩有哪些')
   const [probeBusy, setProbeBusy] = React.useState(false)
   const [probeResult, setProbeResult] = React.useState(null)
+  const [showMemoryFilePath, setShowMemoryFilePath] = React.useState(false)
+
+  React.useEffect(() => {
+    void fetchVoiceInboxApi()
+  }, [subTab])
+
+  const latestReplyAt = (view.secLatestReply && view.secLatestReply.at) || 0
+  React.useEffect(() => {
+    if (latestReplyAt > 0 && view.tab === 'extmem' && subTab === 'book') {
+      void refreshDiscoveryAndList()
+    }
+  }, [latestReplyAt])
 
   React.useEffect(() => {
     setDraft(mergeExtMemTabDraft(meta.externalMemory))
@@ -868,70 +882,93 @@ export function ExternalMemoryTab({ view }) {
               : h(
                   'div',
                   { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
-                  h(
-                    'div',
-                    { className: 'dnb-extmem-capture', style: { gap: 8 } },
-                    h(
+                  (() => {
+                    const vData = view.voiceInboxData || null
+                    const vPendingCount = vData ? (Number(vData.pendingCount) || 0) : 0
+                    if (!vPendingCount) return null
+                    return h(
                       'div',
-                      { style: { display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap' } },
-                      h('input', {
-                        className: 'dnb-input',
-                        style: { ...EXTMEM_INPUT_STYLE, flex: '1 1 160px' },
-                        placeholder: bi('检索关键词…', 'Filter notes…'),
-                        value: bookSearch,
-                        onChange: e => setBookSearch(e.target.value),
-                      }),
-                      [
-                        { key: 'all', label: bi('全部', 'All') },
-                        { key: 'pinned', label: bi('常驻', 'Pinned') },
-                        { key: 'fading', label: bi('渐淡', 'Fading') },
-                      ].map(sf =>
-                        h('button', {
-                          key: sf.key,
-                          type: 'button',
-                          className: 'dnb-mini-btn',
-                          'data-tone': stageFilter === sf.key ? 'accent' : undefined,
-                          onClick: () => setStageFilter(sf.key),
-                        }, sf.label)),
-                      draft.moodSlot.enabled
-                        ? h('button', {
-                            type: 'button',
-                            className: 'dnb-mini-btn',
-                            'data-tone': emotionSplitActive ? 'accent' : undefined,
-                            onClick: () => {
-                              const nextSplit = !emotionSplitActive
-                              void saveConfig({
-                                ...draft,
-                                moodSlot: { ...draft.moodSlot, emotionSplitView: nextSplit },
-                              }, nextSplit ? bi('已拆分为独立「情感记忆」分栏', 'Split Emotion Memory into separate view') : bi('已合并回「记忆清单」', 'Merged Emotion Memory into list'))
-                              if (nextSplit) setSubTab('emotion')
-                            },
-                          }, h(Icon, { name: 'heart', size: 11 }), emotionSplitActive ? bi('已分栏', 'Split') : bi('拆出情感', 'Split Emotion'))
-                        : null,
-                    ),
-                      h(
+                      {
+                        className: 'dnb-strip-bar',
+                        style: { '--dnb-strip-color': 'var(--dnb-accent)', padding: '6px 10px' },
+                      },
+                      h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)', display: 'inline-flex', alignItems: 'center', gap: 6 } },
+                        h(Icon, { name: 'mic', size: 12.5, style: { color: 'var(--dnb-accent)' } }),
+                        bi(`🎙️ 有 ${vPendingCount} 条待整理语音手记`, `${vPendingCount} pending voice note(s)`)),
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        'data-tone': 'accent',
+                        onClick: () => patch({ tab: 'archive', archiveTabScope: 'notes' }),
+                      }, bi('去档案·手记查看 →', 'Open Archive Notes →')),
+                    )
+                  })(),
+                  !(items.length === 0 && !String(bookSearch || '').trim() && catFilter === 'all' && stageFilter === 'all')
+                    ? h(
                         'div',
-                        { className: 'dnb-extmem-cat-pills' },
-                        h('button', {
-                          type: 'button',
-                          className: 'dnb-extmem-cat-pill',
-                          'data-active': catFilter === 'all' ? '1' : '0',
-                          onClick: () => setCatFilter('all'),
-                        }, `${bi('全部', 'All')} (${emotionSplitActive ? (stats.total - emotionItems.length) : stats.total})`),
-                        engCatOrder.map(cat => {
-                          const m = extMemCatMeta(cat)
-                          const cnt = stats.byCategory[cat] || 0
-                          return h('button', {
-                            key: cat,
+                        { className: 'dnb-extmem-capture', style: { gap: 8 } },
+                        h(
+                          'div',
+                          { style: { display: 'flex', gap: 7, alignItems: 'center', flexWrap: 'wrap' } },
+                          h('input', {
+                            className: 'dnb-input',
+                            style: { ...EXTMEM_INPUT_STYLE, flex: '1 1 160px' },
+                            placeholder: bi('检索关键词…', 'Filter notes…'),
+                            value: bookSearch,
+                            onChange: e => setBookSearch(e.target.value),
+                          }),
+                          [
+                            { key: 'all', label: bi('全部', 'All') },
+                            { key: 'pinned', label: bi('常驻', 'Pinned') },
+                            { key: 'fading', label: bi('渐淡', 'Fading') },
+                          ].map(sf =>
+                            h('button', {
+                              key: sf.key,
+                              type: 'button',
+                              className: 'dnb-mini-btn',
+                              'data-tone': stageFilter === sf.key ? 'accent' : undefined,
+                              onClick: () => setStageFilter(sf.key),
+                            }, sf.label)),
+                          draft.moodSlot.enabled
+                            ? h('button', {
+                                type: 'button',
+                                className: 'dnb-mini-btn',
+                                'data-tone': emotionSplitActive ? 'accent' : undefined,
+                                onClick: () => {
+                                  const nextSplit = !emotionSplitActive
+                                  void saveConfig({
+                                    ...draft,
+                                    moodSlot: { ...draft.moodSlot, emotionSplitView: nextSplit },
+                                  }, nextSplit ? bi('已拆分为独立「情感记忆」分栏', 'Split Emotion Memory into separate view') : bi('已合并回「记忆清单」', 'Merged Emotion Memory into list'))
+                                  if (nextSplit) setSubTab('emotion')
+                                },
+                              }, h(Icon, { name: 'heart', size: 11 }), emotionSplitActive ? bi('已分栏', 'Split') : bi('拆出情感', 'Split Emotion'))
+                            : null,
+                        ),
+                        h(
+                          'div',
+                          { className: 'dnb-extmem-cat-pills' },
+                          h('button', {
                             type: 'button',
                             className: 'dnb-extmem-cat-pill',
-                            style: { '--cat-color': m.color },
-                            'data-active': catFilter === cat ? '1' : '0',
-                            onClick: () => setCatFilter(catFilter === cat ? 'all' : cat),
-                          }, h('span', { className: 'dnb-extmem-cat-dot' }), `${bi(m.labelZh, m.labelEn)} ${cnt}`)
-                        }),
-                      ),
-                    ),
+                            'data-active': catFilter === 'all' ? '1' : '0',
+                            onClick: () => setCatFilter('all'),
+                          }, `${bi('全部', 'All')} (${emotionSplitActive ? (stats.total - emotionItems.length) : stats.total})`),
+                          engCatOrder.map(cat => {
+                            const m = extMemCatMeta(cat)
+                            const cnt = stats.byCategory[cat] || 0
+                            return h('button', {
+                              key: cat,
+                              type: 'button',
+                              className: 'dnb-extmem-cat-pill',
+                              style: { '--cat-color': m.color },
+                              'data-active': catFilter === cat ? '1' : '0',
+                              onClick: () => setCatFilter(catFilter === cat ? 'all' : cat),
+                            }, h('span', { className: 'dnb-extmem-cat-dot' }), `${bi(m.labelZh, m.labelEn)} ${cnt}`)
+                          }),
+                        ),
+                      )
+                    : null,
 
               !writable
                 ? h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-3)', padding: '8px 11px', borderRadius: 9, border: '1px solid var(--dnb-border)', background: 'var(--dnb-surface-sub)' } },
@@ -1063,8 +1100,17 @@ export function ExternalMemoryTab({ view }) {
                         : null,
                     ),
               memoryPath
-                ? h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', padding: '0 4px', wordBreak: 'break-all' } },
-                    `${bi('明文存储文件：', 'Plain file: ')}${memoryPath}`)
+                ? h('div', { style: { padding: '0 4px', display: 'flex', flexDirection: 'column', gap: 4 } },
+                    h('button', {
+                      type: 'button',
+                      className: 'dnb-mini-btn',
+                      style: { alignSelf: 'flex-start', fontSize: 10.5 },
+                      onClick: () => setShowMemoryFilePath(v => !v),
+                    }, showMemoryFilePath ? bi('▾ 隐藏明文路径', '▾ Hide file path') : bi('📁 查看本地文件位置', '📁 View local file path')),
+                    showMemoryFilePath
+                      ? h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', wordBreak: 'break-all' } },
+                          `${bi('明文存储文件：', 'Plain file: ')}${memoryPath}`)
+                      : null)
                 : null,
                 ))
           : null,
@@ -1296,17 +1342,17 @@ export function ExternalMemoryTab({ view }) {
                   { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8 } },
                   h('div', null,
                     h('div', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } },
-                      bi('向量增强 API（可选 · 平台直连）', 'Optional Embedding API')),
+                      bi('向量增强（可选 · OpenAI 兼容 / 本地 Ollama / Gemini）', 'Optional Embedding (OpenAI / Ollama / Gemini)')),
                     h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)', marginTop: 2 } },
-                      bi('不配完全不影响使用；若你有平台 Embedding 接口，开启后可实现语义近义词检索重排（仅请求云端 API，绝不在本地加载大模型）。',
-                        'Optional: boosts semantic recall using an OpenAI-compatible /embeddings endpoint. Leave off for zero-setup.')),
+                      bi('不配完全不影响使用；可连接本机 Ollama 免费运行，或使用云端 OpenAI / Gemini Embedding 进行语义近义词重排。',
+                        'Optional: boosts semantic recall via local Ollama, Google Gemini, or any OpenAI-compatible /embeddings API.')),
                   ),
                   h(Switch, {
                     checked: Boolean(draft.embedding.enabled),
                     onChange: on => void saveConfig({
                       ...draft,
                       embedding: { ...draft.embedding, enabled: on },
-                    }, on ? bi('已开启平台向量增强', 'Embedding API enabled') : bi('已关闭向量增强，使用轻量纯文本检索', 'Embedding API off')),
+                    }, on ? bi('已开启向量增强', 'Embedding API enabled') : bi('已关闭向量增强，使用轻量纯文本检索', 'Embedding API off')),
                   }),
                 ),
                 h(
@@ -1328,18 +1374,67 @@ export function ExternalMemoryTab({ view }) {
                       { style: { display: 'flex', flexDirection: 'column', gap: 8, paddingTop: 6, borderTop: '1px solid var(--dnb-border)' } },
                       h(
                         'div',
+                        { style: { display: 'flex', gap: 6, flexWrap: 'wrap', alignItems: 'center' } },
+                        h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, bi('接入协议：', 'Protocol:')),
+                        h(
+                          'div',
+                          { className: 'dnb-seg', style: { padding: 2, flexWrap: 'wrap', width: 'auto' } },
+                          [
+                            { key: 'openai', label: bi('OpenAI 兼容', 'OpenAI-Compat') },
+                            { key: 'ollama', label: bi('本地 Ollama', 'Local Ollama') },
+                            { key: 'gemini', label: 'Google Gemini' },
+                          ].map(opt =>
+                            h('button', {
+                              key: opt.key,
+                              type: 'button',
+                              className: 'dnb-seg-btn',
+                              style: { padding: '3px 10px', fontSize: 11, flex: '0 0 auto', whiteSpace: 'nowrap' },
+                              'data-active': (draft.embedding.provider || 'openai') === opt.key ? '1' : '0',
+                              onClick: () => {
+                                const patchEmb = { provider: opt.key, providerExplicit: opt.key === 'openai' }
+                                if (opt.key === 'ollama') {
+                                  if (!draft.embedding.baseUrl || !String(draft.embedding.baseUrl).includes(':11434')) {
+                                    patchEmb.baseUrl = 'http://127.0.0.1:11434'
+                                  }
+                                  if (!draft.embedding.model) patchEmb.model = 'bge-m3'
+                                } else if (opt.key === 'gemini') {
+                                  if (!draft.embedding.baseUrl || !String(draft.embedding.baseUrl).includes('googleapis.com')) {
+                                    patchEmb.baseUrl = 'https://generativelanguage.googleapis.com/v1beta'
+                                  }
+                                  if (!draft.embedding.model || draft.embedding.model === 'bge-m3') {
+                                    patchEmb.model = 'gemini-embedding-001'
+                                  }
+                                }
+                                setEmbProbeResult(null)
+                                updateEmbeddingSlot(patchEmb)
+                              },
+                            }, opt.label)),
+                        ),
+                      ),
+                      h(
+                        'div',
                         { style: { display: 'flex', gap: 5, flexWrap: 'wrap', alignItems: 'center' } },
                         h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, bi('快速填入：', 'Presets:')),
                         [
-                          { label: 'SiliconFlow (bge-m3)', baseUrl: 'https://api.siliconflow.cn/v1', model: 'BAAI/bge-m3' },
-                          { label: 'OpenAI (3-small)', baseUrl: 'https://api.openai.com/v1', model: 'text-embedding-3-small' },
-                          { label: '通义 DashScope', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'text-embedding-v3' },
+                          { label: '本地 Ollama (bge-m3)', provider: 'ollama', baseUrl: 'http://127.0.0.1:11434', model: 'bge-m3' },
+                          { label: 'Google Gemini', provider: 'gemini', baseUrl: 'https://generativelanguage.googleapis.com/v1beta', model: 'gemini-embedding-001' },
+                          { label: 'SiliconFlow (bge-m3)', provider: 'openai', baseUrl: 'https://api.siliconflow.cn/v1', model: 'BAAI/bge-m3' },
+                          { label: 'OpenAI (3-small)', provider: 'openai', baseUrl: 'https://api.openai.com/v1', model: 'text-embedding-3-small' },
+                          { label: '通义 DashScope', provider: 'openai', baseUrl: 'https://dashscope.aliyuncs.com/compatible-mode/v1', model: 'text-embedding-v3' },
                         ].map(pre =>
                           h('button', {
                             key: pre.label,
                             type: 'button',
                             className: 'dnb-mini-btn',
-                            onClick: () => updateEmbeddingSlot({ baseUrl: pre.baseUrl, model: pre.model }),
+                            onClick: () => {
+                              setEmbProbeResult(null)
+                              updateEmbeddingSlot({
+                                provider: pre.provider,
+                                providerExplicit: pre.provider === 'openai',
+                                baseUrl: pre.baseUrl,
+                                model: pre.model,
+                              })
+                            },
                           }, pre.label)),
                       ),
                       h(
@@ -1348,54 +1443,76 @@ export function ExternalMemoryTab({ view }) {
                         h('input', {
                           className: 'dnb-input',
                           style: EXTMEM_INPUT_STYLE,
-                          placeholder: bi('Base URL（如 https://api.siliconflow.cn/v1）', 'Base URL'),
+                          placeholder: draft.embedding.provider === 'ollama'
+                            ? bi('Ollama 地址（默认 http://127.0.0.1:11434）', 'Ollama URL (http://127.0.0.1:11434)')
+                            : (draft.embedding.provider === 'gemini'
+                                ? bi('Gemini API（https://generativelanguage.googleapis.com/v1beta）', 'Gemini API Base URL')
+                                : bi('Base URL（如 https://api.siliconflow.cn/v1）', 'Base URL')),
                           value: draft.embedding.baseUrl,
-                          onChange: e => updateEmbeddingSlot({ baseUrl: e.target.value }),
+                          onChange: e => {
+                            const val = e.target.value
+                            const low = val.toLowerCase()
+                            const inferred = (low.includes(':11434') && !/\/v1(?:\/embeddings)?$/i.test(low)) || low.includes('/api/embed')
+                              ? 'ollama'
+                              : (low.includes('generativelanguage.googleapis.com') || low.includes(':embedcontent') ? 'gemini' : '')
+                            updateEmbeddingSlot({
+                              baseUrl: val,
+                              ...(inferred ? { provider: inferred, providerExplicit: false } : {}),
+                            })
+                          },
                         }),
                         h('input', {
                           className: 'dnb-input',
                           style: EXTMEM_INPUT_STYLE,
-                          placeholder: bi('模型名称（如 BAAI/bge-m3）', 'Model name'),
+                          placeholder: draft.embedding.provider === 'ollama'
+                            ? bi('本地模型（如 bge-m3 / nomic-embed-text）', 'Ollama model (e.g. bge-m3)')
+                            : (draft.embedding.provider === 'gemini'
+                                ? bi('模型名（如 gemini-embedding-001）', 'Model (e.g. gemini-embedding-001)')
+                                : bi('模型名称（如 BAAI/bge-m3）', 'Model name')),
                           value: draft.embedding.model,
                           onChange: e => updateEmbeddingSlot({ model: e.target.value }),
                         }),
                       ),
-                      h(
-                        'div',
-                        { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 7 } },
-                        h('input', {
-                          className: 'dnb-input',
-                          style: EXTMEM_INPUT_STYLE,
-                          placeholder: bi('API Key 环境变量名（推荐）', 'API Key Env Var'),
-                          value: draft.embedding.apiKeyEnv,
-                          onChange: e => updateEmbeddingSlot({ apiKeyEnv: e.target.value }),
-                        }),
-                        h(
-                          'div',
-                          { style: { display: 'flex', gap: 5, alignItems: 'center' } },
-                          h('input', {
-                            type: 'password',
-                            className: 'dnb-input',
-                            style: EXTMEM_INPUT_STYLE,
-                            placeholder: draft.embedding.hasApiKey ? bi('已存 API Key（留空不变）', 'Saved key') : bi('或直接填 API Key', 'Or API Key'),
-                            value: draft.embedding.apiKey,
-                            onChange: e => {
-                              setClearEmbKey(false)
-                              updateEmbeddingSlot({ apiKey: e.target.value })
-                            },
-                          }),
-                          draft.embedding.hasApiKey
-                            ? h('button', {
-                                type: 'button',
-                                className: 'dnb-mini-btn',
-                                onClick: () => {
-                                  setClearEmbKey(true)
-                                  updateEmbeddingSlot({ apiKey: '', hasApiKey: false })
+                      draft.embedding.provider === 'ollama'
+                        ? h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', padding: '2px 2px' } },
+                            bi('💡 本地 Ollama 默认免 API Key 直连（自动优先请求 /api/embed，旧版自动回退 /api/embeddings）。',
+                              '💡 Local Ollama connects without an API key (uses /api/embed with automatic /api/embeddings fallback).'))
+                        : h(
+                            'div',
+                            { style: { display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(150px, 1fr))', gap: 7 } },
+                            h('input', {
+                              className: 'dnb-input',
+                              style: EXTMEM_INPUT_STYLE,
+                              placeholder: bi('API Key 环境变量名（推荐）', 'API Key Env Var'),
+                              value: draft.embedding.apiKeyEnv,
+                              onChange: e => updateEmbeddingSlot({ apiKeyEnv: e.target.value }),
+                            }),
+                            h(
+                              'div',
+                              { style: { display: 'flex', gap: 5, alignItems: 'center' } },
+                              h('input', {
+                                type: 'password',
+                                className: 'dnb-input',
+                                style: EXTMEM_INPUT_STYLE,
+                                placeholder: draft.embedding.hasApiKey ? bi('已存 API Key（留空不变）', 'Saved key') : bi('或直接填 API Key', 'Or API Key'),
+                                value: draft.embedding.apiKey,
+                                onChange: e => {
+                                  setClearEmbKey(false)
+                                  updateEmbeddingSlot({ apiKey: e.target.value })
                                 },
-                              }, bi('清除', 'Clear'))
-                            : null,
-                        ),
-                      ),
+                              }),
+                              draft.embedding.hasApiKey
+                                ? h('button', {
+                                    type: 'button',
+                                    className: 'dnb-mini-btn',
+                                    onClick: () => {
+                                      setClearEmbKey(true)
+                                      updateEmbeddingSlot({ apiKey: '', hasApiKey: false })
+                                    },
+                                  }, bi('清除', 'Clear'))
+                                : null,
+                            ),
+                          ),
                       embProbeResult
                         ? h('div', {
                             style: {
@@ -1407,9 +1524,9 @@ export function ExternalMemoryTab({ view }) {
                               color: embProbeResult.ok ? 'var(--dnb-sage, #58c9a8)' : 'var(--dnb-coral, #f28b88)',
                             },
                           }, embProbeResult.ok
-                            ? bi(`✅ 向量接口正常 · ${embProbeResult.model} (${embProbeResult.dimensions} 维) · ${embProbeResult.latencyMs}ms`,
-                                `✅ Connected · ${embProbeResult.model} (${embProbeResult.dimensions}d) · ${embProbeResult.latencyMs}ms`)
-                            : (embProbeResult.error || bi('连接失败', 'Connection failed')))
+                            ? bi(`✅ [${embProbeResult.provider || 'openai'}] 向量接口正常 · ${embProbeResult.model} (${embProbeResult.dimensions} 维) · ${embProbeResult.latencyMs}ms`,
+                                `✅ [${embProbeResult.provider || 'openai'}] Connected · ${embProbeResult.model} (${embProbeResult.dimensions}d) · ${embProbeResult.latencyMs}ms`)
+                            : `[${embProbeResult.provider || draft.embedding.provider || 'openai'}] ${embProbeResult.error || bi('连接失败', 'Connection failed')}`)
                         : null,
                       h(
                         'div',
@@ -1424,7 +1541,7 @@ export function ExternalMemoryTab({ view }) {
                           type: 'button',
                           className: 'dnb-primary-btn',
                           style: { minHeight: 30, padding: '0 13px', fontSize: 11.5 },
-                          onClick: () => void saveConfig({ ...draft, enabled: true }, bi('向量 API 配置已保存', 'Embedding settings saved')),
+                          onClick: () => void saveConfig({ ...draft, enabled: true }, bi('向量配置已保存', 'Embedding settings saved')),
                         }, bi('保存向量配置', 'Save Embedding')),
                       ),
                     )

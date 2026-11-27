@@ -249,6 +249,18 @@ flowchart LR
 </details>
 
 <details>
+<summary>v2.0.0 改了什么</summary>
+
+- **🎙️ 语音参谋长、行内语音舞台与真实发令闭环（`chief-tts.js` / `src/client/tts.js` / `voice-recorder.js`）**：支持 DeepSeek 原生 `/v1/tools/tts`、OpenAI 兼容 `/v1/audio/speech` 与浏览器离线朗读（密钥与代码路径自动口语脱敏），以及 SenseVoice / DeepSeek ASR 双通道识别；取消全屏毛玻璃遮罩，面板内联展开语音面聊舞台（`Alt+V` 一键呼出、免提连续 VAD、叫名唤醒），并加固语音发令防空口支票守卫（严格走 L0–L3 提权与逐项确认投递 `@lead`）。
+- **📲 手机远程传呼与里程碑推送（`remote-pager.js`）**：支持 **飞书 / 钉钉 / 企业微信 / Telegram / Discord / 自定义 Webhook** 6 个通道，自动将待审批、提权、安全拦停、高危急停、托管收工与预算熔断脱敏推送到手机端。
+- **🎙️ 「档案 → 手记」独立子页签 & 梦境手记收件区（`voice-inbox.js`）**：语音输入与语音唠嗑先脱敏落盘 `~/.dsh/chief/voice-inbox/`，经「🌙 梦境整理」拆入长期记忆、用户画像、日记与手记文稿（与 `@lead` 0 字节隔离）；并在「档案」下新增第 5 个子页签 `🎙️ 手记`，让「全局 / 本局」专注工程档案、「记忆」专注记忆清单。
+- **🎨 独立「外观与主题工坊」页面 & 多端同步（致谢 `@iridiumgit` · [Issue #7](https://github.com/gluztm/dsh-chief/issues/7)）**：`精选预设 (5)` 保留 5 套官方主题；`DIY 工坊` 新增「🌊 社区配色」收纳 `@iridiumgit` 贡献的深浅双模 **「潮汐蓝 (`tide`)」**，并支持图片提色、壁纸叠层、AI DIY 与配色 JSON 导入导出；选中皮肤与自定义配色同步至服务端 `~/.dsh/chief/`，跨浏览器、局域网与 Tailnet 自动一致。
+- **📚 档案双语 BM25 搜正文 · 演进回滚 · `[[双链]]` 预警 · 三协议向量工坊（`archive-core.js` / `archive-dossiers.js` / `external-memory-studio.js` · `X1–X4`）**：工程档案上线 CJK+Latin BM25 智能检索正文与亮金优先排序；每次编辑自动保存最多 5 版 `history[]` 快照支持 UI 一键无损回滚；支持 `[[目标卷宗]]` 双向跳转、暗铜作废下游预警与无幽灵残留更新；记忆工坊新增 OpenAI 兼容 / 本地 Ollama / Google Gemini 三协议向量客户端与一键预设。
+- **⏸ 边界「暂挂」、开箱记忆写入与全量小白瘦身**：支持单条边界随时勾选暂挂/恢复；内置 `builtin-md` 长期记忆本改为默认开启且参谋对话可自主同步写入；完成 `+` 控制面板、任务交接单、记忆空态、边界添加栏与排版行话的多轮真机打磨。
+
+</details>
+
+<details>
 <summary>v1.9.0 改了什么</summary>
 
 - **🧠 参谋专属「记忆工作台」与外部记忆桥接（对 `@lead` 严格 0 字节隔离）**：上线零配置 `MEMORY.md` 纯文本记事本、2D/3D 星云星图（少节点零重叠排斥 + 年轮回放）、艾宾浩斯活力巩固、5 维可锁定 `USER_PROFILE.md` 用户画像、提示词工坊、X-Ray 召回测试与可选 Embedding API 语义重排；开放支持 `mcp-http`、`chief-http`（含独立心境槽位）、只读 `markdown-vault` 与 `cordis-provider`，内置 KV Cache 静态前置、无信号门卫、3 次超时熔断与口语前缀自动剥离。
@@ -345,14 +357,14 @@ flowchart LR
 在已装好 [dshmarket](https://github.com/dsh-market/dsh-market) 的 DSH 里直接搜 **`dsh-chief`** 或 **`DSH 参谋长`** 就能点安装，也可以用命令行（网页版把 `desktop` 换成 `web`）：
 
 ```bash
-# 方式 1：通过 npm 安装最新版（v1.9.0）
+# 方式 1：通过 npm 安装最新版（v2.0.0）
 dsh plugin --profile desktop add dsh-chief
 
 # 方式 2：从 GitHub 仓库直接安装（与 main 最新代码同步）
 dsh plugin --profile desktop add github:gluztm/dsh-chief
 
-# 方式 3：安装 GitHub Release 预构建包（v1.9.0）
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.9.0/dsh-chief-1.9.0.tgz
+# 方式 3：安装 GitHub Release 预构建包（v2.0.0）
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v2.0.0/dsh-chief-2.0.0.tgz
 ```
 
 装好后重启或刷新 DSH 客户端，点工作区右上角 **✦ `DSH 参谋长`** 图标打开面板。
@@ -366,22 +378,22 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 </details>
 
 <details>
-<summary>模块结构与数据流 (v1.9.0)</summary>
+<summary>模块结构与数据流 (v2.0.0)</summary>
 
-**一句话**：`50` 个后端模块加 `45` 个前端模块，本地数据全部留在 `~/.dsh/chief/`，未启用的普通会话零介入，已启用会话只有「认知桌面」会每轮注入主对话；参谋长自定义名称、记忆工作台、自定义主题与 GitHub Star 状态严格对 `@lead` 主对话 0 字节隔离。
+**一句话**：`53` 个后端模块加 `48` 个前端模块，本地数据全部留在 `~/.dsh/chief/`，未启用的普通会话零介入，已启用会话只有「认知桌面」会每轮注入主对话；参谋长自定义名称、记忆工作台、语音手记、主题配置与 GitHub Star 状态严格对 `@lead` 主对话 0 字节隔离。
 
-`v1.9.0` 包含 **50 个后端模块（含 `pkg/safety/` 下 9 个独立安全内核模块、`external-memory*.js`、`guard-wall-presets.js`、`chief-theme-diy.js` 与 `github-star.js`）+ 45 个前端模块**（含 5+1 套双模主题与记忆星图模块，无环依赖、无 `export let` 可变导出），方便审查与长期维护。详情见 [ARCHITECTURE.md](ARCHITECTURE.md)。
+`v2.0.0` 包含 **53 个后端模块（含 `pkg/safety/` 下 9 个独立安全内核模块、`chief-tts.js`、`voice-inbox.js`、`remote-pager.js`、`external-memory*.js`、`guard-wall-presets.js`、`chief-theme-diy.js` 与 `github-star.js`）+ 48 个前端模块**（无环依赖、无 `export let` 可变导出），方便审查与长期维护。详情见 [ARCHITECTURE.md](ARCHITECTURE.md)。
 
 ```mermaid
 flowchart TB
-  subgraph UI["DSH 右侧栏 & 主页面 Tab (client.js <- 45 个前端模块 · 6 页签 + 5+1 套主题)"]
-    T1["参谋页 (问答框 · 自适应思考深度控件 · 可点击收起遮罩 · 战报导出)"]
-    T2["任务页 (目标圆环 · 流程画布/流光节点合一 · 子代理发出/回归 · 交接部署)"]
-    T3["协同页 (协同系统 2.0 · Codex/Claude/Gemini CLI · 实时输出流 · 链式转交 · 防自回旋路由)"]
-    T5["档案页 (认知桌面 · 三层档案抽屉 · 0 字节冷库)"]
+  subgraph UI["DSH 右侧栏 & 主页面 Tab (client.js <- 48 个前端模块 · 6 页签 + 独立主题工坊)"]
+    T1["参谋页 (行内语音舞台 · 叫名唤醒 · 极简控制面板 · 战报导出)"]
+    T2["任务页 (目标圆环 · 流光流程画布 · 子代理发出/回归 · 收折交接单)"]
+    T3["协同页 (协同系统 2.0 · Codex/Claude/Gemini CLI · 实时输出流 · 防自回旋路由)"]
+    T5["档案页 (认知桌面 · 本局 · 全局 · 语音手记 · 0 字节冷藏)"]
     T6["记忆页 (MEMORY.md · 2D/3D 星图 · 用户画像 · Embedding / MCP / 外部桥接)"]
-    T7["边界页 (自定义拦截规则 · 3 套开箱预设包 v2 · 柔和语义红线)"]
-    T8["顶栏 (GitHub Star · 6 套主题 + DIY 工坊 · 自定义参谋名称 · 左侧导航/顶部页签)"]
+    T7["边界页 (自定义拦截规则 · 一键暂挂 · 3 套开箱预设包 v2)"]
+    T8["顶栏 & 设置 (GitHub Star · 外观与 DIY 主题工坊 · 语音 TTS · 手机远程传呼)"]
   end
 
   subgraph Core["本地后端存储与安全内核 (零外部依赖 · 45 个后端模块)"]

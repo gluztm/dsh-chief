@@ -108,6 +108,10 @@ import {
   DEFAULT_EXTERNAL_MEMORY_CONFIG,
   normalizeExternalMemoryConfig,
   redactExternalMemoryConfigForUi,
+  normalizeTtsConfig,
+  redactTtsConfigForUi,
+  normalizePagerConfig,
+  redactPagerConfigForUi,
   scrubExternalMemoryText,
   normalizeAlertEvent,
   normalizeLockedModelEfforts,
@@ -125,6 +129,8 @@ import {
   getChiefActiveWork,
   OFFICIAL_HARNESS_CATALOG,
   stripModelControlMarkup,
+  normalizeUiSkinPref,
+  normalizeServerCustomSkin,
 } from './state-schema.js'
 import {
   archiveTargetForRoot,
@@ -132,6 +138,7 @@ import {
   persistChiefImagesToWorkspace,
   admitChiefImages,
 } from './state-media.js'
+import { registerPagerConfigGetter } from './remote-pager.js'
 
 export {
   markTaskResumingActive,
@@ -391,6 +398,14 @@ function chiefDir() {
   const home = process.env.DSH_HOME || path.join(os.homedir(), '.dsh')
   return path.join(home, 'chief')
 }
+
+registerPagerConfigGetter(() => {
+  try {
+    return loadChiefState().config.remotePager
+  } catch {
+    return null
+  }
+})
 
 function stateFilePath() {
   return path.join(chiefDir(), 'chief-state.json')
@@ -1142,7 +1157,7 @@ export function updateChiefConfig(patch) {
       error: '参谋长名称检测到疑似密钥/令牌，已硬拦截拒绝写入',
     }
   }
-  const GLOBAL_ONLY_CFG_KEYS = new Set(['defaultAutoEnableSessions', 'uiLang', 'notifyEnabled', 'notifySound', 'chiefName', 'externalMemory'])
+  const GLOBAL_ONLY_CFG_KEYS = new Set(['defaultAutoEnableSessions', 'uiLang', 'uiSkin', 'customSkin', 'notifyEnabled', 'notifySound', 'chiefName', 'externalMemory', 'tts', 'remotePager'])
   const META_CFG_KEYS = new Set([
     'sessionId',
     'session',
@@ -1259,6 +1274,12 @@ export function updateChiefConfig(patch) {
       if (typeof safePatch.uiLang === 'string') {
         state.config.uiLang = normalizeUiLang(safePatch.uiLang)
       }
+      if (typeof safePatch.uiSkin === 'string') {
+        state.config.uiSkin = normalizeUiSkinPref(safePatch.uiSkin)
+      }
+      if (safePatch.customSkin !== undefined) {
+        state.config.customSkin = normalizeServerCustomSkin(safePatch.customSkin)
+      }
       if (typeof safePatch.notifyEnabled === 'boolean') {
         state.config.notifyEnabled = safePatch.notifyEnabled
       }
@@ -1271,11 +1292,25 @@ export function updateChiefConfig(patch) {
       if (safePatch.externalMemory && typeof safePatch.externalMemory === 'object') {
         state.config.externalMemory = normalizeExternalMemoryConfig(safePatch.externalMemory, state.config.externalMemory)
       }
+      if (safePatch.tts && typeof safePatch.tts === 'object') {
+        state.config.tts = normalizeTtsConfig(safePatch.tts, state.config.tts)
+      }
+      if (safePatch.remotePager && typeof safePatch.remotePager === 'object') {
+        state.config.remotePager = normalizePagerConfig(safePatch.remotePager, state.config.remotePager)
+      }
       const nextCfg = resolveWorkspaceConfig(state, sid)
       const redactedExt = redactExternalMemoryConfigForUi(nextCfg.externalMemory)
+      const redactedTts = redactTtsConfigForUi(nextCfg.tts)
+      const redactedPager = redactPagerConfigForUi(nextCfg.remotePager)
       return {
         ok: true,
-        config: { ...nextCfg, externalMemory: redactedExt, tacticalModes: { ...nextCfg.tacticalModes } },
+        config: {
+          ...nextCfg,
+          externalMemory: redactedExt,
+          tts: redactedTts,
+          remotePager: redactedPager,
+          tacticalModes: { ...nextCfg.tacticalModes },
+        },
         llmLedger: summarizeLlmLedger(existingWs && existingWs.llmLedger, nextCfg),
       }
     }
@@ -1690,8 +1725,20 @@ export function updateChiefConfig(patch) {
     if (typeof safePatch.chiefName === 'string') {
       state.config.chiefName = normalizeChiefName(safePatch.chiefName)
     }
+    if (typeof safePatch.uiSkin === 'string') {
+      state.config.uiSkin = normalizeUiSkinPref(safePatch.uiSkin)
+    }
+    if (safePatch.customSkin !== undefined) {
+      state.config.customSkin = normalizeServerCustomSkin(safePatch.customSkin)
+    }
     if (safePatch.externalMemory && typeof safePatch.externalMemory === 'object') {
       state.config.externalMemory = normalizeExternalMemoryConfig(safePatch.externalMemory, state.config.externalMemory)
+    }
+    if (safePatch.tts && typeof safePatch.tts === 'object') {
+      state.config.tts = normalizeTtsConfig(safePatch.tts, state.config.tts)
+    }
+    if (safePatch.remotePager && typeof safePatch.remotePager === 'object') {
+      state.config.remotePager = normalizePagerConfig(safePatch.remotePager, state.config.remotePager)
     }
     if (typeof safePatch.sessionEnabled === 'boolean') {
       ws.config.sessionEnabled = safePatch.sessionEnabled
@@ -1769,6 +1816,8 @@ export function updateChiefConfig(patch) {
       config: {
         ...finalCfg,
         externalMemory: redactExternalMemoryConfigForUi(finalCfg.externalMemory),
+        tts: redactTtsConfigForUi(finalCfg.tts),
+        remotePager: redactPagerConfigForUi(finalCfg.remotePager),
         tacticalModes: { ...finalCfg.tacticalModes },
       },
       llmLedger: summarizeLlmLedger(ws.llmLedger, finalCfg),

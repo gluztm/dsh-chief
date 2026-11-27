@@ -60,7 +60,7 @@ try {
   const pkgJson = JSON.parse(fs.readFileSync(path.join(PKG, 'package.json'), 'utf8'))
   const schemaMod = await import(modUrl('board-schema.js'))
   const constMod = await import(modUrl('src/client/constants.js'))
-  assert.ok(/^1\.(?:[89]|[1-9]\d)\.\d+/.test(pkgJson.version), `B1 package.json must be >= 1.8.0, got ${pkgJson.version}`)
+  assert.ok(/^(?:1\.(?:[89]|[1-9]\d)|[2-9]\.\d+)\.\d+/.test(pkgJson.version), `B1 package.json must be >= 1.8.0, got ${pkgJson.version}`)
   assert.equal(schemaMod.BACKEND_BUILD, pkgJson.version, 'B1 board-schema BACKEND_BUILD must align with package.json')
   assert.equal(constMod.EXPECTED_BACKEND_BUILD, pkgJson.version, 'B1 constants EXPECTED_BACKEND_BUILD must align with package.json')
   assert.ok(Array.isArray(pkgJson.files) && pkgJson.files.includes('github-star.js'), 'B1 package.json files must include github-star.js')

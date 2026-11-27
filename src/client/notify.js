@@ -7,8 +7,102 @@
 
 import { store, patch, runtimeRefs } from './store.js'
 import { bi, formatBi } from './i18n.js'
+import { maybeAutoSpeakAlert } from './tts.js'
 
 const ALERT_RECENT_WINDOW_MS = 120_000
+const TAB_BADGE_STORAGE_KEY = 'dsh-chief:tab-badge-enabled'
+
+let tabBadgeTimer = null
+let tabBadgeBaseTitle = ''
+let tabBadgeListenersBound = false
+
+export function isTabTitleBadgeEnabled() {
+  try {
+    if (typeof localStorage !== 'undefined' && typeof localStorage.getItem === 'function') {
+      const val = localStorage.getItem(TAB_BADGE_STORAGE_KEY)
+      if (val === '0' || val === 'false') return false
+    }
+  } catch {}
+  return true
+}
+
+export function setTabTitleBadgeEnabled(on) {
+  const next = Boolean(on)
+  try {
+    if (typeof localStorage !== 'undefined' && typeof localStorage.setItem === 'function') {
+      localStorage.setItem(TAB_BADGE_STORAGE_KEY, next ? '1' : '0')
+    }
+  } catch {}
+  if (!next) clearTabTitleBadge()
+  return next
+}
+
+export function clearTabTitleBadge() {
+  if (tabBadgeTimer) {
+    clearInterval(tabBadgeTimer)
+    tabBadgeTimer = null
+  }
+  try {
+    if (typeof document !== 'undefined' && tabBadgeBaseTitle) {
+      document.title = tabBadgeBaseTitle
+    }
+  } catch {}
+  tabBadgeBaseTitle = ''
+}
+
+function bindTabBadgeClearListeners() {
+  if (tabBadgeListenersBound || typeof document === 'undefined' || typeof window === 'undefined') return
+  tabBadgeListenersBound = true
+  try {
+    document.addEventListener('visibilitychange', () => {
+      if (!document.hidden) clearTabTitleBadge()
+    })
+    window.addEventListener('focus', () => {
+      clearTabTitleBadge()
+    })
+  } catch {}
+}
+
+/** Flash a compact alert badge in the browser tab title when waiting for user input. */
+export function flashTabTitleBadge(prefix = '🔔 需要你', { force = false, autoResetMs = 20000 } = {}) {
+  try {
+    if (typeof document === 'undefined' || typeof document.title !== 'string') return false
+    if (!force && !isTabTitleBadgeEnabled()) return false
+    if (!force && typeof document.hidden === 'boolean' && !document.hidden) return false
+    bindTabBadgeClearListeners()
+    const cleanPrefix = String(prefix || '🔔 需要你').trim() || '🔔 需要你'
+    if (!tabBadgeBaseTitle) {
+      const curTitle = document.title.replace(/^\[?🔔[^\]]*\]?\s*·\s*/u, '').trim()
+      tabBadgeBaseTitle = curTitle || 'DeepSeek Harness'
+    }
+    if (tabBadgeTimer) {
+      clearInterval(tabBadgeTimer)
+      tabBadgeTimer = null
+    }
+    let showBadge = true
+    const applyFrame = () => {
+      try {
+        document.title = showBadge ? `${cleanPrefix} · ${tabBadgeBaseTitle}` : tabBadgeBaseTitle
+      } catch {}
+    }
+    applyFrame()
+    if (typeof setInterval === 'function') {
+      const started = Date.now()
+      tabBadgeTimer = setInterval(() => {
+        if (Date.now() - started >= autoResetMs) {
+          clearTabTitleBadge()
+          return
+        }
+        showBadge = !showBadge
+        applyFrame()
+      }, 1100)
+      if (tabBadgeTimer && typeof tabBadgeTimer.unref === 'function') tabBadgeTimer.unref()
+    }
+    return true
+  } catch {
+    return false
+  }
+}
 
 /** Play a brief, soft 2-note WebAudio chime when audible cues are enabled. */
 export function playGentleChime(level = 'info') {
@@ -130,7 +224,7 @@ function localizedAlertCopy(ev) {
 }
 
 /** Dispatch a desktop notification (if granted) and optional chime for one milestone event. */
-export function fireChiefAlertNotification(ev, { sound = false } = {}) {
+export function fireChiefAlertNotification(ev, { sound = false, flashTitle = false } = {}) {
   const { title, body } = localizedAlertCopy(ev)
   let notifiedDesktop = false
   try {
@@ -149,8 +243,9 @@ export function fireChiefAlertNotification(ev, { sound = false } = {}) {
   if (sound) {
     playedSound = playGentleChime(ev && ev.level ? ev.level : 'info')
   }
+  const flashedTitle = flashTabTitleBadge(bi('🔔 需要你', '🔔 Attention'), { force: Boolean(flashTitle) })
   const toast = body ? `${title}：${body}` : title
-  return { title, body, toast, notifiedDesktop, playedSound }
+  return { title, body, toast, notifiedDesktop, playedSound, flashedTitle }
 }
 
 /**
@@ -196,6 +291,17 @@ export function processIncomingAlertEvents(events, { notifyEnabled = true, notif
       seenAlertEventIds: seen,
       notice: formatBi('{msg}', '{msg}', { msg: dispatchRes.toast.slice(0, 120) }),
     })
+    const ttsCfg = store.chiefMeta && store.chiefMeta.tts
+    if (ttsCfg && ttsCfg.enabled && ttsCfg.autoSpeakAlerts) {
+      if (dispatchRes && dispatchRes.playedSound && typeof setTimeout === 'function') {
+        const speakTid = setTimeout(() => {
+          void maybeAutoSpeakAlert(latest, dispatchRes)
+        }, 260)
+        if (speakTid && typeof speakTid.unref === 'function') speakTid.unref()
+      } else {
+        void maybeAutoSpeakAlert(latest, dispatchRes)
+      }
+    }
   } else {
     patch({ seenAlertEventIds: seen })
   }

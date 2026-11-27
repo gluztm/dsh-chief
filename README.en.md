@@ -248,6 +248,18 @@ Read the full story and tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md
 </details>
 
 <details>
+<summary>What Changed in v2.0.0</summary>
+
+- **🎙️ Dual-Mode Voice Chief, Inline Stage & Real Relay Execution (`chief-tts.js` / `src/client/tts.js` / `voice-recorder.js`)**: Adds DeepSeek native `/v1/tools/tts`, OpenAI-compatible `/v1/audio/speech`, and offline browser speech with secret/path/code scrubbing plus SenseVoice + DeepSeek `/v1/tools/asr` STT; replaces the full-screen blur overlay with an inline Voice Stage (`Alt+V` hotkey, hands-free VAD, name-call wake word with homophone & typed wake tolerance) and enforces real L0–L3 relay/elevation execution on push commands instead of empty verbal promises.
+- **📲 Mobile Remote Pager (`remote-pager.js`)**: Dispatches milestone & approval alerts across **Feishu / DingTalk / WeCom / Telegram / Discord / Webhook** with payload redaction, HMAC signing, and cooldown deduplication.
+- **🎙️ Voice Inbox & Dedicated `Archives → Voice Notes` Subtab (`voice-inbox.js` / `src/client/tabs/archives.js`)**: Queues dictation and Voice Mode transcripts into `~/.dsh/chief/voice-inbox/` with 0-byte `@lead` isolation, digests them via Dream Roam into Memory/Profile/Diary/Manuscripts, and moves voice manuscripts into their own dedicated 5th Archives subtab (`🎙️ Notes`).
+- **🎨 Dedicated Theme Studio Page & Multi-Origin Server Sync (thanks to `@iridiumgit` · [Issue #7](https://github.com/gluztm/dsh-chief/issues/7))**: Keeps 5 curated presets up front and embeds the full DIY Workshop (including the new `Community` card featuring `@iridiumgit`'s adaptive **Tide Blue (`tide`)** theme, canvas image palette extraction, Chief AI DIY, and JSON import/export) alongside server-side persistence in `~/.dsh/chief/` for consistent skins across localhost, LAN, Tailnet, and browsers.
+- **📚 Bilingual BM25 Dossier Search, Version Rollback, `[[WikiLinks]]` & 3-Protocol Embedding (`archive-core.js` / `archive-dossiers.js` / `external-memory-studio.js` · `X1–X4`)**: Adds CJK+Latin BM25 full-body search with gold-clip priority, automatic 5-version `history[]` snapshots with 1-click UI rollback, clickable `[[Target]]` cross-links with copper deprecation warnings (zero ghost links), and native `OpenAI / Local Ollama / Google Gemini` protocol support in Memory Studio.
+- **⏸ Pause Rules, Default Memory Writing & End-to-End UX Streamlining**: Adds a 1-click pause checkbox on individual boundary rules, enables `builtin-md` Chief memory writing out of the box, and streamlines high-frequency controls across the `+` popover, Tasks handoff bar, empty Memory tab, Guards bar, and narrow-sidebar Settings layout.
+
+</details>
+
+<details>
 <summary>What Changed in v1.9.0</summary>
 
 - **🧠 Chief-Only Memory Studio & External Memory Bridge (`dsh-chief.provider/v1`, 0-byte `@lead` isolation)**: Adds an out-of-the-box `MEMORY.md` notebook, 2D SVG / 3D Canvas Constellation Starfield (with bounding-box overlap prevention and timeline replay), Ebbinghaus decay/reinforcement, locked 5-section `USER_PROFILE.md`, Prompt Studio (`PROMPTS.json`), X-Ray probe, and optional OpenAI-compatible Embedding API semantic rerank; also bridges `mcp-http`, dual-slot `chief-http` (optional muted `moodSlot`), read-only `markdown-vault` (BM25), and `cordis-provider`, with KV-Cache static-first prompts, trivial-query gating, 3-strike circuit breaker, and oral-prefix stripping.
@@ -344,14 +356,14 @@ Read the full story and tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md
 Search **`dsh-chief`** inside [dshmarket](https://github.com/dsh-market/dsh-market) / DSH Plugin Market, or install via CLI (replace `desktop` with `web` for the web profile):
 
 ```bash
-# Option 1: Install latest release (v1.9.0) from npm
+# Option 1: Install latest release (v2.0.0) from npm
 dsh plugin --profile desktop add dsh-chief
 
 # Option 2: Install directly from GitHub main branch
 dsh plugin --profile desktop add github:gluztm/dsh-chief
 
-# Option 3: Install prebuilt GitHub Release tarball (v1.9.0)
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v1.9.0/dsh-chief-1.9.0.tgz
+# Option 3: Install prebuilt GitHub Release tarball (v2.0.0)
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v2.0.0/dsh-chief-2.0.0.tgz
 ```
 
 | DeepSeek Harness (DSH) Version | Panel / Board / Vaults / Pre-Execute Walls | Named Subagent Tree (`task.dispatch` / `team.*`) | Notes |
@@ -363,22 +375,22 @@ dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/do
 </details>
 
 <details>
-<summary>Modular Architecture (v1.9.0)</summary>
+<summary>Modular Architecture (v2.0.0)</summary>
 
-**In one sentence:** `50` backend modules and `45` frontend modules run locally under `~/.dsh/chief/`, staying completely inactive in unactivated chats, injecting only the Cognitive Desktop into main chat, and keeping custom Chief naming, Memory Studio, DIY themes, and GitHub Star sync strictly 0-byte isolated from `@lead`.
+**In one sentence:** `53` backend modules and `48` frontend modules run locally under `~/.dsh/chief/`, staying completely inactive in unactivated chats, injecting only the Cognitive Desktop into main chat, and keeping custom Chief naming, Memory Studio, Voice Notes, Theme Studio, and GitHub Star sync strictly 0-byte isolated from `@lead`.
 
-`v1.9.0` spans **50 backend modules (including 9 isolated modules under `pkg/safety/`, `external-memory*.js`, `guard-wall-presets.js`, `chief-theme-diy.js`, and `github-star.js`) and 45 frontend modules** (zero `export let`, acyclic) for easy audit and maintenance. See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and contracts.
+`v2.0.0` spans **53 backend modules (including 9 isolated modules under `pkg/safety/`, `chief-tts.js`, `voice-inbox.js`, `remote-pager.js`, `external-memory*.js`, `guard-wall-presets.js`, `chief-theme-diy.js`, and `github-star.js`) and 48 frontend modules** (zero `export let`, acyclic) for easy audit and maintenance. See [ARCHITECTURE.md](ARCHITECTURE.md) for boundaries and contracts.
 
 ```mermaid
 flowchart TB
-  subgraph UI["DSH Right Sidebar & Main Tab (client.js <- 45 modules · 6 Tabs + 5+1 UI Skins)"]
-    T1["Chief Tab (Skin-Morphing Effort Dial · Dismissible Overlay · Report Export)"]
-    T2["Tasks Tab (Bento Objective · Unified Beam Flow + Subagent Dispatch/Return · Handoff)"]
+  subgraph UI["DSH Right Sidebar & Main Tab (client.js <- 48 modules · 6 Tabs + Theme Studio)"]
+    T1["Chief Tab (Inline Voice Stage · Name Wake · Lean Control Panel · Report Export)"]
+    T2["Tasks Tab (Bento Objective · Unified Beam Flow · Compact Handoff Bar)"]
     T3["Peers Tab (Collab 2.0 · Codex/Claude/Gemini CLI · Live Stream · Verified Routing)"]
-    T5["Archives (Cognitive Desktop · 3-Tier Drawers · 0-byte Cold Vault)"]
+    T5["Archives (Cognitive Desktop · Session · Global · Voice Notes · 0-byte Cold Vault)"]
     T6["Memory Tab (MEMORY.md · 2D/3D Starfield · User Profile · Embedding / MCP Bridge)"]
-    T7["Guards Tab (Guard Walls · 3 Preset Packs v2 · Calm Hairline Rules)"]
-    T8["Header (GitHub Star · 6 Skins + DIY Studio · Chief Naming · Left Rail / Top Tabs)"]
+    T7["Guards Tab (Guard Walls · 1-Click Pause Rules · 3 Preset Packs v2)"]
+    T8["Header & Settings (GitHub Star · Appearance & DIY Studio · Voice TTS · Mobile Pager)"]
   end
 
   subgraph Core["Local Backend & Safety Kernel (Zero External Deps · 45 modules)"]

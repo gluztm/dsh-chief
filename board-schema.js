@@ -8,7 +8,7 @@ import { normalizeMemory } from './memory.js'
 
 export const API = '/api/dsh-chief'
 
-export const BACKEND_BUILD = '1.9.0'
+export const BACKEND_BUILD = '2.0.0'
 
 export const BOARD_VERSION = 1
 
@@ -458,6 +458,7 @@ export function normalizeBoard(raw) {
     // (digest, panel) disagree about which shape the board has.
     mode: board.mode === 'goal' ? 'goal' : 'plan',
     bounds: normalizeBounds(board.bounds),
+    pausedBounds: normalizeBounds(board.pausedBounds),
     // Unknown settings keys are dropped on purpose; every flag the plugin reads
     // must be listed here or it silently disappears on the next load.
     settings: {
@@ -600,6 +601,8 @@ export function summary(board, subagents) {
     objective: board.objective,
     bounds: board.bounds || { allowed: [], forbidden: [], notes: [] },
     ...(board.pinnedBounds ? { pinnedBounds: board.pinnedBounds } : {}),
+    ...(board.pausedBounds ? { pausedBounds: board.pausedBounds } : {}),
+    ...(board.pausedPinnedBounds ? { pausedPinnedBounds: board.pausedPinnedBounds } : {}),
     plan: board.plan,
     notes: board.notes.slice(0, NOTE_LIMIT).map(note => ({
       id: note.id,

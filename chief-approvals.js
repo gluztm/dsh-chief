@@ -1098,7 +1098,7 @@ export async function handleElevationDecision(deps, {
       role: 'chief',
       kind: 'receipt',
       ...(elevTaskId ? { resumeTaskId: elevTaskId } : {}),
-      text: `- 【🔐 已批准提权】当前会话权限已升级为「**${meta.level} · ${meta.title}**」${chosenMode === 'chief' ? '（已完成高风险确认）' : ''}。`,
+      text: `- 【🔐 已批准提权】当前会话权限已升级为「${meta.level} · ${meta.title}」${chosenMode === 'chief' ? '（已完成高风险确认）' : ''}。`,
       actions: [`🔐 升至 ${meta.level}`],
       at: Date.now(),
     })

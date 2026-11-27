@@ -314,8 +314,8 @@ export const CSS_MODALS = `
   }
   .dnb-vault-seg {
     display: grid;
-    grid-template-columns: repeat(4, minmax(0, 1fr));
-    gap: 3px;
+    grid-template-columns: repeat(5, minmax(0, 1fr));
+    gap: 2px;
     padding: 3px;
     border-radius: 10px;
     border: 1px solid var(--dnb-border);
@@ -327,14 +327,14 @@ export const CSS_MODALS = `
     display: inline-flex;
     align-items: center;
     justify-content: center;
-    gap: 4px;
+    gap: 3px;
     min-height: 27px;
-    padding: 3px 5px;
+    padding: 3px 3px;
     border-radius: 7px;
     border: 1px solid transparent;
     background: transparent;
     color: var(--dnb-text-2);
-    font-size: 11.5px;
+    font-size: 11px;
     font-weight: 500;
     cursor: pointer;
     transition: background 0.15s ease, color 0.15s ease, border-color 0.15s ease;
@@ -376,6 +376,11 @@ export const CSS_MODALS = `
     background: linear-gradient(180deg, rgba(16, 185, 129, 0.14), rgba(16, 185, 129, 0.05));
     border-color: rgba(16, 185, 129, 0.34);
   }
+  .dnb-vault-seg-btn[data-active="1"][data-scope="notes"] {
+    --dnb-vault-bar: #a855f7;
+    background: linear-gradient(180deg, rgba(168, 85, 247, 0.14), rgba(168, 85, 247, 0.05));
+    border-color: rgba(168, 85, 247, 0.34);
+  }
   .dnb-vault-seg-btn[data-active="1"][data-scope="precipitated"] {
     --dnb-vault-bar: #06b6d4;
     background: linear-gradient(180deg, rgba(6, 182, 212, 0.14), rgba(6, 182, 212, 0.05));
@@ -415,6 +420,12 @@ export const CSS_MODALS = `
     background: linear-gradient(180deg, #ecfdf5 0%, #ffffff 100%);
     border-color: rgba(5, 150, 105, 0.28);
     color: #065f46;
+  }
+  html[data-ds-theme-source="light"] .dnb-vault-seg-btn[data-active="1"][data-scope="notes"] {
+    --dnb-vault-bar: #7c3aed;
+    background: linear-gradient(180deg, #f5f3ff 0%, #ffffff 100%);
+    border-color: rgba(124, 58, 237, 0.28);
+    color: #5b21b6;
   }
   html[data-ds-theme-source="light"] .dnb-vault-seg-btn[data-active="1"][data-scope="precipitated"] {
     --dnb-vault-bar: #0891b2;
@@ -459,10 +470,10 @@ export const CSS_MODALS = `
     left: 12px;
     right: calc(12px + var(--dnb-safe-right, 0px));
     bottom: calc(100% + 6px);
-    max-height: min(68vh, 520px);
+    max-height: min(72vh, 560px);
     overflow-y: auto;
     z-index: 70;
-    padding: 10px;
+    padding: 10px 10px 14px;
     background-color: #1f2024;
     background-image: linear-gradient(var(--dnb-popover), var(--dnb-popover));
     display: flex;

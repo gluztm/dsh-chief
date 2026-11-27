@@ -195,7 +195,7 @@ export function decideAdaptiveChiefEffort({
   const rk = String(reasonKind || '').trim().toLowerCase()
   const txt = String(userText || '').trim()
 
-  if (rk === 'chat_summary' || rk === 'dream_roam' || rk === 'quick_status' || rk === 'auto_summary') {
+  if (rk === 'chat_summary' || rk === 'dream_roam' || rk === 'quick_status' || rk === 'auto_summary' || rk === 'voice_chat') {
     return 'off'
   }
   if (rk === 'hazard_diagnosis' || rk === 'multi_wall_collision') {

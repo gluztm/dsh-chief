@@ -7,6 +7,7 @@
 import fs from 'node:fs'
 import {
   POINTS_CAP,
+  ARCHIVE_HISTORY_CAP,
   SECRET_PATTERN,
   DEFAULT_ARCHIVE_FOLDERS,
   DESKTOP_TOKEN_BUDGET,
@@ -26,6 +27,9 @@ import {
   normalizeFolder,
   normalizePoint,
   normalizeTags,
+  tokenizeArchiveBilingual,
+  extractArchiveWikiLinks,
+  normalizeArchiveHistory,
   normalizeSessionIdList,
   normalizeDesktopMeta,
   estimateArchiveTokens,
@@ -415,21 +419,29 @@ export function listArchiveHeaders(rootSessionId = '', opts = {}, targetOpt) {
     return (b.updatedAt || 0) - (a.updatedAt || 0)
   })
 
-  const filtered = sorted.filter((it) => {
-    if (folderFilter && it.folder !== folderFilter) return false
-    if (clipFilter && it.paperclip !== clipFilter) return false
-    if (!needle) return true
-    const hay = [
-      it.title,
-      it.summary,
-      (it.hookKeywords || []).join(' '),
-      it.hookCue || '',
-      (it.tags || []).join(' '),
-      ...(it.points || []).map(p => `${p.title} ${p.cue}`),
-      it.body,
-    ].join('\n').toLowerCase()
-    return hay.includes(needle)
-  })
+  let filtered
+  if (!needle) {
+    filtered = sorted.filter((it) => {
+      if (folderFilter && it.folder !== folderFilter) return false
+      if (clipFilter && it.paperclip !== clipFilter) return false
+      return true
+    })
+  } else {
+    const preFiltered = sorted.filter((it) => {
+      if (folderFilter && it.folder !== folderFilter) return false
+      if (clipFilter && it.paperclip !== clipFilter) return false
+      return true
+    })
+    const ranked = scoreAndRankArchiveItems(
+      { ...store, items: preFiltered },
+      String((opts && opts.query) || ''),
+      { folder: '', limit: preFiltered.length || 500 },
+    )
+    const byId = new Map(preFiltered.map(it => [it.id, it]))
+    filtered = (Array.isArray(ranked.hits) ? ranked.hits : [])
+      .map(h => byId.get(h.id))
+      .filter(Boolean)
+  }
 
   const countsByFolder = {}
   const goldByFolder = {}
@@ -530,6 +542,74 @@ export function listArchiveHeaders(rootSessionId = '', opts = {}, targetOpt) {
   }
 }
 
+function pushArchiveHistorySnapshot(item, by = 'user') {
+  if (!item || typeof item !== 'object') return
+  const snap = {
+    title: clamp(item.title || '', 180),
+    summary: clamp(item.summary || '', 140),
+    paperclip: ['gold', 'silver', 'copper'].includes(item.paperclip) ? item.paperclip : 'silver',
+    pointsCount: Array.isArray(item.points) ? item.points.length : 0,
+    body: cleanMultiline(item.body || '', 8000),
+    updatedAt: Number(item.updatedAt) || Date.now(),
+    by: clamp(by || item.by || 'user', 40),
+  }
+  const prev = Array.isArray(item.history) ? item.history : []
+  item.history = [snap, ...prev].slice(0, ARCHIVE_HISTORY_CAP)
+}
+
+function collectArchiveLinksForItem(rawLinks, body = '', points = []) {
+  const base = Array.isArray(rawLinks) ? rawLinks.map(x => String(x || '').trim()).filter(Boolean) : []
+  const ptTxt = (Array.isArray(points) ? points : []).map(p => `${p?.title || ''} ${p?.detail || ''}`).join('\n')
+  const extracted = extractArchiveWikiLinks(`${body || ''}\n${ptTxt}`)
+  return [...new Set([...base, ...extracted])].slice(0, 20)
+}
+
+function computeArchiveRelations(storeItems = [], targetItem) {
+  const items = Array.isArray(storeItems) ? storeItems : []
+  if (!targetItem) return { outgoing: [], incoming: [], staleDependencies: [] }
+  const byId = new Map()
+  const byTitleKey = new Map()
+  for (const it of items) {
+    if (!it || !it.id) continue
+    byId.set(it.id, it)
+    const tk = normalizeArchiveTitleKey(it.title)
+    if (tk) byTitleKey.set(tk, it)
+  }
+
+  const resolveLinkTarget = (ref) => {
+    const clean = String(ref || '').trim()
+    if (!clean) return null
+    return byId.get(clean) || byTitleKey.get(normalizeArchiveTitleKey(clean)) || null
+  }
+
+  const outgoing = []
+  const outSeen = new Set()
+  const targetLinks = collectArchiveLinksForItem(targetItem.links, targetItem.body, targetItem.points)
+  for (const ref of targetLinks) {
+    const matched = resolveLinkTarget(ref)
+    if (matched && matched.id !== targetItem.id && !outSeen.has(matched.id)) {
+      outSeen.add(matched.id)
+      outgoing.push({ id: matched.id, title: matched.title, folder: matched.folder, paperclip: matched.paperclip })
+    }
+  }
+
+  const incoming = []
+  const inSeen = new Set()
+  const selfTitleKey = normalizeArchiveTitleKey(targetItem.title)
+  for (const other of items) {
+    if (!other || other.id === targetItem.id || inSeen.has(other.id)) continue
+    const otherLinks = collectArchiveLinksForItem(other.links, other.body, other.points)
+    const hitsSelf = otherLinks.some(ref => ref === targetItem.id || normalizeArchiveTitleKey(ref) === selfTitleKey)
+    if (hitsSelf) {
+      inSeen.add(other.id)
+      incoming.push({ id: other.id, title: other.title, folder: other.folder, paperclip: other.paperclip })
+    }
+  }
+
+  const staleDependencies = outgoing.filter(x => x.paperclip === 'copper')
+  return { outgoing, incoming, staleDependencies }
+}
+
 export function getArchiveDetail(idOrTitle = '', rootSessionId = '', targetOpt) {
   const target = String(idOrTitle || '').trim()
   if (!target) return { ok: false, error: 'archive id or title required' }
@@ -546,6 +626,7 @@ export function getArchiveDetail(idOrTitle = '', rootSessionId = '', targetOpt) 
     || store.items.find(it => it.title.toLowerCase().includes(target.toLowerCase()))
   if (!hit) return { ok: false, error: '未找到工程档案：' + target }
 
+  const relations = computeArchiveRelations(store.items, hit)
   return {
     ok: true,
     vaultScope: isGlobal ? 'global' : (resolved.vaultScope || 'session'),
@@ -559,6 +640,9 @@ export function getArchiveDetail(idOrTitle = '', rootSessionId = '', targetOpt) 
       folder: hit.folder,
       paperclip: hit.paperclip,
       tags: hit.tags,
+      links: collectArchiveLinksForItem(hit.links, hit.body, hit.points),
+      history: normalizeArchiveHistory(hit.history),
+      relations,
       cold: hit.cold,
       takenOut: Boolean(sid && Array.isArray(hit.takenOutSessions) && hit.takenOutSessions.includes(sid)),
       chiefMounted: Boolean(isGlobal && sid && Array.isArray(hit.chiefMountedSessions) && hit.chiefMountedSessions.includes(sid)),
@@ -609,36 +693,89 @@ export function getTakenOutArchivesForSession(rootSessionId = '', targetOpt) {
 function scoreAndRankArchiveItems(store, query = '', opts = {}) {
   const folder = String((opts && opts.folder) || '').trim()
   const limit = Math.max(1, Math.min(Number(opts && opts.limit) || 8, 25))
-  const rawQ = String(query || '').trim().toLowerCase()
-  const terms = rawQ
-    .replace(/[？?！!。，,、：:“”"'()（）[\]【】]/g, ' ')
-    .split(/\s+/)
-    .filter(Boolean)
+  const rawQ = String(query || '').trim()
+  const allItems = store && Array.isArray(store.items) ? store.items : []
+  const pool = allItems.filter(it => !folder || it.folder === folder)
 
   const scored = []
-  for (const it of (store && Array.isArray(store.items) ? store.items : [])) {
-    if (folder && it.folder !== folder) continue
-    if (!terms.length) {
-      scored.push({ score: it.paperclip === 'gold' ? 5 : 2, it })
-      continue
+  if (!rawQ) {
+    for (const it of pool) {
+      const baseScore = it.paperclip === 'gold' ? 5 : it.paperclip === 'copper' ? 1 : 2
+      scored.push({ score: baseScore, it })
     }
-    const titleLow = it.title.toLowerCase()
-    const sumLow = it.summary.toLowerCase()
-    const tagLow = (it.tags || []).join(' ').toLowerCase()
-    const ptsLow = (it.points || []).map(p => `${p.title} ${p.cue} ${p.detail}`).join('\n').toLowerCase()
-    const bodyLow = (it.body || '').toLowerCase()
+  } else {
+    const qTokens = [...new Set(tokenizeArchiveBilingual(rawQ))]
+    const qLower = rawQ.toLowerCase()
+    const rawTerms = qLower
+      .replace(/[？?！!。，,、：:“”"'()（）[\]【】]/g, ' ')
+      .split(/\s+/)
+      .filter(Boolean)
 
-    let score = 0
-    for (const term of terms) {
-      if (titleLow.includes(term)) score += 8
-      if (tagLow.includes(term)) score += 5
-      if (sumLow.includes(term)) score += 4
-      if (ptsLow.includes(term)) score += 3
-      else if (bodyLow.includes(term)) score += 2
+    const addFreq = (map, tokens, weight) => {
+      for (const t of tokens) {
+        map.set(t, (map.get(t) || 0) + weight)
+      }
     }
-    if (score > 0) {
-      if (it.paperclip === 'gold') score += 1
-      scored.push({ score, it })
+
+    const docs = pool.map((it) => {
+      const titleT = tokenizeArchiveBilingual(it.title || '')
+      const tagT = tokenizeArchiveBilingual((it.tags || []).join(' '))
+      const sumT = tokenizeArchiveBilingual(it.summary || '')
+      const ptsT = tokenizeArchiveBilingual((it.points || []).map(p => `${p.title || ''} ${p.cue || ''} ${p.detail || ''}`).join(' '))
+      const bodyT = tokenizeArchiveBilingual(it.body || '')
+
+      const weightedTerms = new Map()
+      addFreq(weightedTerms, titleT, 3.4)
+      addFreq(weightedTerms, tagT, 2.4)
+      addFreq(weightedTerms, sumT, 1.9)
+      addFreq(weightedTerms, ptsT, 1.4)
+      addFreq(weightedTerms, bodyT, 1.0)
+
+      const docLen = Math.max(
+        1,
+        titleT.length * 3.4 + tagT.length * 2.4 + sumT.length * 1.9 + ptsT.length * 1.4 + bodyT.length,
+      )
+      return { it, weightedTerms, docLen }
+    })
+
+    const docCount = docs.length || 1
+    const avgDl = docs.reduce((s, d) => s + d.docLen, 0) / docCount || 1
+    const df = new Map()
+    for (const qt of qTokens) {
+      let c = 0
+      for (const d of docs) {
+        if (d.weightedTerms.has(qt)) c += 1
+      }
+      df.set(qt, c)
+    }
+
+    const k1 = 1.35
+    const b = 0.6
+    for (const d of docs) {
+      let score = 0
+      for (const qt of qTokens) {
+        const tf = d.weightedTerms.get(qt) || 0
+        if (tf <= 0) continue
+        const n = df.get(qt) || 0
+        const idf = Math.log(1 + (docCount - n + 0.5) / (n + 0.5))
+        const tfNorm = (tf * (k1 + 1)) / (tf + k1 * (1 - b + (b * d.docLen) / avgDl))
+        const lenBoost = qt.length >= 2 ? 1.25 : 0.65
+        score += idf * tfNorm * lenBoost
+      }
+      const titleLow = (d.it.title || '').toLowerCase()
+      const sumLow = (d.it.summary || '').toLowerCase()
+      const bodyLow = (d.it.body || '').toLowerCase()
+      if (titleLow.includes(qLower)) score += 3.0
+      else if (sumLow.includes(qLower)) score += 1.6
+      else if (bodyLow.includes(qLower)) score += 0.9
+      for (const term of rawTerms) {
+        if (term.length >= 2 && titleLow.includes(term)) score += 1.2
+      }
+      if (score > 0) {
+        if (d.it.paperclip === 'gold') score *= 1.12
+        else if (d.it.paperclip === 'copper') score *= 0.65
+        scored.push({ score, it: d.it })
+      }
     }
   }
 
@@ -646,9 +783,9 @@ function scoreAndRankArchiveItems(store, query = '', opts = {}) {
   const folderLabelMap = new Map((store && Array.isArray(store.folders) ? store.folders : []).map(f => [f.id, f.label]))
 
   return {
-    totalArchives: store && Array.isArray(store.items) ? store.items.length : 0,
+    totalArchives: allItems.length,
     matchCount: scored.length,
-    hits: scored.slice(0, limit).map(({ it }) => ({
+    hits: scored.slice(0, limit).map(({ it, score }) => ({
       id: it.id,
       title: it.title,
       folder: it.folder,
@@ -656,6 +793,8 @@ function scoreAndRankArchiveItems(store, query = '', opts = {}) {
       paperclip: it.paperclip,
       summary: it.summary,
       tags: it.tags,
+      links: Array.isArray(it.links) ? it.links : [],
+      score: Number(score.toFixed(2)),
       points: (it.points || []).map(p => ({ id: p.id, title: p.title, cue: p.cue })),
       updatedAt: it.updatedAt,
     })),
@@ -938,7 +1077,13 @@ export function mutateArchive(payload = {}, targetOpt) {
       }
 
       if (existing) {
+        const titleChanged = typeof payload.title === 'string' && payload.title.trim() && clamp(payload.title, 180) !== existing.title
         const bodyChanged = typeof payload.body === 'string' && payload.body.trim() !== existing.body.trim()
+        const summaryChanged = typeof payload.summary === 'string' && payload.summary.trim() && clamp(payload.summary, 140) !== existing.summary
+        const pointsChanged = Array.isArray(payload.points) && payload.points.length > 0
+        if (titleChanged || bodyChanged || summaryChanged || pointsChanged) {
+          pushArchiveHistorySnapshot(existing, payload.by || 'user')
+        }
         if (typeof payload.title === 'string' && payload.title.trim()) {
           existing.title = clamp(payload.title, 180)
         }
@@ -973,6 +1118,14 @@ export function mutateArchive(payload = {}, targetOpt) {
             140,
           )
         }
+        const linksBase = Array.isArray(payload.links)
+          ? payload.links
+          : ((bodyChanged || (Array.isArray(payload.points) && payload.points.length)) ? [] : existing.links)
+        existing.links = collectArchiveLinksForItem(
+          linksBase,
+          existing.body,
+          existing.points,
+        )
         const hookNow = deriveHookFromStructuredItem({
           ...existing,
           ...(Array.isArray(payload.hookKeywords) ? { hookKeywords: payload.hookKeywords } : {}),
@@ -987,7 +1140,10 @@ export function mutateArchive(payload = {}, targetOpt) {
         return {
           ok: true,
           isSystemGlobalVault: resolved.vaultScope === 'global',
-          item: existing,
+          item: {
+            ...existing,
+            relations: computeArchiveRelations(store.items, existing),
+          },
           meta: getArchiveMeta(rootSessionId, lockTarget),
         }
       }
@@ -1001,6 +1157,7 @@ export function mutateArchive(payload = {}, targetOpt) {
         ? store.items.find(it => normalizeArchiveTitleKey(it.title) === titleKey)
         : null
       if (sameTitle && payload.upsertByTitle !== false) {
+        pushArchiveHistorySnapshot(sameTitle, payload.by || 'user')
         sameTitle.body = nextBody || sameTitle.body
         if (payload.folder) sameTitle.folder = str(payload.folder, sameTitle.folder).trim()
         if (['gold', 'silver', 'copper'].includes(payload.paperclip)) sameTitle.paperclip = payload.paperclip
@@ -1014,13 +1171,21 @@ export function mutateArchive(payload = {}, targetOpt) {
           payload.summary || (sameTitle.points[0] && sameTitle.points[0].cue) || firstMeaningfulSentence(sameTitle.body) || sameTitle.title,
           140,
         )
+        sameTitle.links = collectArchiveLinksForItem(
+          Array.isArray(payload.links) ? payload.links : [],
+          sameTitle.body,
+          sameTitle.points,
+        )
         sameTitle.contentHash = computeEntryContentHash(sameTitle)
         sameTitle.updatedAt = Date.now()
         saveArchiveStore(store, lockTarget)
         return {
           ok: true,
           isSystemGlobalVault: resolved.vaultScope === 'global',
-          item: sameTitle,
+          item: {
+            ...sameTitle,
+            relations: computeArchiveRelations(store.items, sameTitle),
+          },
           updatedExisting: true,
           meta: getArchiveMeta(rootSessionId, lockTarget),
         }
@@ -1239,6 +1404,35 @@ export function mutateArchive(payload = {}, targetOpt) {
       }
     }
 
+    if (op === 'rollbackHistory') {
+      const id = str(payload.archiveId || payload.id, '').trim()
+      const item = store.items.find(it => it.id === id)
+      if (!item) return { ok: false, error: '未找到该工程档案：' + id }
+      const historyList = Array.isArray(item.history) ? item.history : []
+      const vIdx = Math.max(0, Math.floor(Number(payload.versionIndex) || 0))
+      const snap = historyList[vIdx]
+      if (!snap) return { ok: false, error: `历史快照版本 [${vIdx}] 不存在` }
+      pushArchiveHistorySnapshot(item, payload.by || 'user')
+      item.title = snap.title || item.title
+      item.body = snap.body
+      item.paperclip = ['gold', 'silver', 'copper'].includes(snap.paperclip) ? snap.paperclip : item.paperclip
+      item.points = extractStructuredPoints(item.title, item.body)
+      item.summary = clamp(snap.summary || (item.points[0] && item.points[0].cue) || firstMeaningfulSentence(item.body) || item.title, 140)
+      item.links = collectArchiveLinksForItem([], item.body, item.points)
+      item.contentHash = computeEntryContentHash(item)
+      item.updatedAt = Date.now()
+      saveArchiveStore(store, lockTarget)
+      return {
+        ok: true,
+        id: item.id,
+        item: {
+          ...item,
+          relations: computeArchiveRelations(store.items, item),
+        },
+        rolledBackFrom: { versionIndex: vIdx, updatedAt: snap.updatedAt },
+      }
+    }
+
     if (op === 'cycleClip' || op === 'setClip') {
       const id = str(payload.archiveId || payload.id, '').trim()
       const item = store.items.find(it => it.id === id)
@@ -1252,7 +1446,11 @@ export function mutateArchive(payload = {}, targetOpt) {
       }
       item.updatedAt = Date.now()
       saveArchiveStore(store, lockTarget)
-      return { ok: true, id: item.id, paperclip: item.paperclip }
+      const relations = computeArchiveRelations(store.items, item)
+      const affectedDependents = item.paperclip === 'copper'
+        ? relations.incoming.filter(dep => dep.paperclip !== 'copper')
+        : []
+      return { ok: true, id: item.id, paperclip: item.paperclip, affectedDependents }
     }
 
     if (op === 'moveFolder') {
@@ -1440,6 +1638,7 @@ export function applyChiefArchiveCurations(curations = [], newFolders = [], targ
       if (!c || !c.id) continue
       const target = store.items.find(it => it.id === c.id)
       if (!target) continue
+      pushArchiveHistorySnapshot(target, 'chief')
       if (typeof c.folder === 'string' && c.folder.trim()) {
         const fId = c.folder.trim().slice(0, 48)
         target.folder = fId

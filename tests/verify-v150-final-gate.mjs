@@ -323,7 +323,7 @@ try {
   // =========================================================================
   // F1: Version alignment, client selectors & frosted dream glass, 0 stale term
   // =========================================================================
-  assert.match(String(pkgJson.version || ''), /^1\.[5-9]\.\d+/, 'F1 package.json version must be >= 1.5.0')
+  assert.match(String(pkgJson.version || ''), /^(?:1\.(?:[5-9]|[1-9]\d)|[2-9]\.\d+)\.\d+/, 'F1 package.json version must be >= 1.5.0')
   assert.equal(schemaMod.BACKEND_BUILD, pkgJson.version, 'F1 board-schema BACKEND_BUILD must align with package.json')
   assert.equal(constMod.EXPECTED_BACKEND_BUILD, pkgJson.version, 'F1 constants EXPECTED_BACKEND_BUILD must align with package.json')
 

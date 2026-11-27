@@ -5,9 +5,9 @@
  */
 
 import { React, h } from '../react-runtime.js'
-import { DEFAULT_UI_SKIN, UI_SKIN_OPTIONS, EXPECTED_BACKEND_BUILD } from '../constants.js'
+import { EXPECTED_BACKEND_BUILD } from '../constants.js'
 import { bi, getUiLangPref, presetList, chiefDisplayName } from '../i18n.js'
-import { store, patch, savePlacementPref, saveUiSkin, openCustomThemeModal, saveNavLayout } from '../store.js'
+import { patch, savePlacementPref, saveNavLayout, openThemeStudio } from '../store.js'
 import {
   clampTitle,
   shortSession,
@@ -31,12 +31,25 @@ import {
   requestTransferWithGuard,
   askLeadModel,
   copyText,
+  fetchChiefTtsStatusApi,
+  probeChiefTtsApi,
+  fetchRemotePagerStatusApi,
+  testRemotePagerApi,
+  sendRemotePagerDigestApi,
 } from '../api.js'
 import {
   fireChiefAlertNotification,
   getNotificationPermissionState,
   requestNotificationPermission,
+  isTabTitleBadgeEnabled,
+  setTabTitleBadgeEnabled,
 } from '../notify.js'
+import {
+  listBrowserSpeechVoices,
+  playChiefAudioBase64,
+  speakChiefText,
+  stopChiefSpeech,
+} from '../tts.js'
 import { buildSessionReportMarkdown, downloadSessionReportMarkdown } from '../report.js'
 import { Icon, Switch, AccCard, renderStructuredText } from '../components/common.js'
 
@@ -59,6 +72,7 @@ export function PlanTab({
   const [rejectingGoal, setRejectingGoal] = React.useState(false)
   const [rejectReason, setRejectReason] = React.useState('')
   const [showHandoffPreview, setShowHandoffPreview] = React.useState(false)
+  const [goalMenuOpen, setGoalMenuOpen] = React.useState(false)
 
   React.useEffect(() => {
     void loadTargets()
@@ -326,8 +340,11 @@ export function PlanTab({
   }
 
   React.useEffect(() => {
-    if (!contextMenu) return undefined
-    const close = () => setContextMenu(null)
+    if (!contextMenu && !goalMenuOpen) return undefined
+    const close = () => {
+      setContextMenu(null)
+      setGoalMenuOpen(false)
+    }
     const onKey = e => { if (e.key === 'Escape') close() }
     document.addEventListener('click', close)
     document.addEventListener('keydown', onKey)
@@ -335,7 +352,7 @@ export function PlanTab({
       document.removeEventListener('click', close)
       document.removeEventListener('keydown', onKey)
     }
-  }, [contextMenu])
+  }, [contextMenu, goalMenuOpen])
 
   const objCollapsed = Boolean(view.planObjCollapsed)
   const handoffCollapsed = view.handoffSectionCollapsed !== false
@@ -417,28 +434,6 @@ export function PlanTab({
               h('button', {
                 type: 'button',
                 className: 'dnb-pill',
-                style: { height: 22, padding: '0 7px', fontSize: 10.5, gap: 4 },
-                title: bi('导出整理好的任务报告 (.md)', 'Export clean task report (.md)'),
-                onClick: () => {
-                  const md = buildSessionReportMarkdown({
-                    board,
-                    secView: view.secView,
-                    chiefMeta: view.chiefMeta,
-                    subagents: view.subagents,
-                    guardWalls: view.guardWalls,
-                    sessionId: view.sessionId,
-                  })
-                  const dl = downloadSessionReportMarkdown(md, view.sessionId)
-                  if (dl && dl.ok) {
-                    patch({ notice: bi('已导出任务报告：', 'Exported report: ') + dl.filename })
-                  } else {
-                    copyText(md, bi('任务报告已复制到剪贴板', 'Report copied to clipboard'))
-                  }
-                },
-              }, h(Icon, { name: 'fileText', size: 11 }), bi('战报', 'Report')),
-              h('button', {
-                type: 'button',
-                className: 'dnb-pill',
                 style: {
                   height: 22,
                   padding: '0 8px',
@@ -471,6 +466,58 @@ export function PlanTab({
                   patch({ tab: 'tasks' })
                 },
               }, h(Icon, { name: 'sparkles', size: 11 }), bi('拆成步骤', 'Break Down')),
+              h(
+                'div',
+                { className: 'dnb-more-wrap' },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pill',
+                  style: { height: 22, padding: '0 6px', fontSize: 11 },
+                  'data-active': goalMenuOpen ? '1' : '0',
+                  title: bi('战报导出与目标解释', 'Report export & explain'),
+                  onClick: () => setGoalMenuOpen(v => !v),
+                }, '⋯'),
+                goalMenuOpen
+                  ? h(
+                      'div',
+                      { className: 'dnb-more-menu', style: { minWidth: 164 } },
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-more-item',
+                        onClick: () => {
+                          setGoalMenuOpen(false)
+                          const md = buildSessionReportMarkdown({
+                            board,
+                            secView: view.secView,
+                            chiefMeta: view.chiefMeta,
+                            subagents: view.subagents,
+                            guardWalls: view.guardWalls,
+                            sessionId: view.sessionId,
+                          })
+                          const dl = downloadSessionReportMarkdown(md, view.sessionId)
+                          if (dl && dl.ok) {
+                            patch({ notice: bi('已导出任务报告：', 'Exported report: ') + dl.filename })
+                          } else {
+                            copyText(md, bi('任务报告已复制到剪贴板', 'Report copied to clipboard'))
+                          }
+                        },
+                      }, h(Icon, { name: 'fileText', size: 12 }), bi('导出任务战报 (.md)', 'Export Report (.md)')),
+                      hasGoalText
+                        ? h('button', {
+                            type: 'button',
+                            className: 'dnb-more-item',
+                            onClick: () => {
+                              setGoalMenuOpen(false)
+                              void askLeadModel(
+                                `请用通俗易懂的大白话给我解释一下当前核心目标「${String(current).trim().slice(0, 120)}」：核心卡点是什么、整体打算怎么解决？`,
+                                '咨询核心目标',
+                              )
+                            },
+                          }, h(Icon, { name: 'sparkles', size: 12 }), bi('用大白话解释目标', 'Explain Goal'))
+                        : null,
+                    )
+                  : null,
+              ),
             ),
           ),
           !objCollapsed
@@ -510,7 +557,7 @@ export function PlanTab({
                       },
                       hasGoalText ? current : bi('还没设置目标，点击这里写下…', 'No objective set — click to write…'),
                     ),
-                (isInterventionLocked || isGoalMode || objective !== null || hasGoalText)
+                (isInterventionLocked || isGoalMode || showTextarea)
                   ? h(
                       'div',
                       { className: 'dnb-bento-goal-foot' },
@@ -521,7 +568,7 @@ export function PlanTab({
                               ? bi('强介入中目标已锁，关掉强介入可修改', 'Locked during strong intervention')
                               : bi('正在盯着做完，好了请你点确认', 'Monitoring until your final sign-off'))
                         : h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } },
-                            showTextarea ? bi('失焦或 Ctrl+Enter 保存', 'Blur or Ctrl+Enter to save') : bi('点击正文可修改目标', 'Click text to edit')),
+                            bi('失焦或 Ctrl+Enter 保存', 'Blur or Ctrl+Enter to save')),
                       h(
                         'div',
                         { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
@@ -533,14 +580,7 @@ export function PlanTab({
                               title: bi('关掉强介入后就能改目标', 'Turn off intervention to unlock goal'),
                               onClick: () => void updateSecConfig({ emergencyStopIntervention: true }),
                             }, bi('关掉强介入并解锁', 'Stop & Unlock'))
-                          : (!showTextarea
-                              ? h('button', {
-                                  type: 'button',
-                                  className: 'dnb-text-filter-btn',
-                                  style: { fontSize: 10.5, gap: 3 },
-                                  onClick: () => setEditingGoal(true),
-                                }, h(Icon, { name: 'edit', size: 10.5 }), bi('修改', 'Edit'))
-                              : null),
+                          : null,
                         !isInterventionLocked && objective !== null
                           ? h('button', {
                               type: 'button',
@@ -551,20 +591,6 @@ export function PlanTab({
                                 saveObjective()
                               },
                             }, bi('保存', 'Save'))
-                          : null,
-                        hasGoalText
-                          ? h('button', {
-                              type: 'button',
-                              className: 'dnb-text-filter-btn',
-                              style: { fontSize: 10.5 },
-                              title: bi('用大白话讲讲这个目标卡在哪、怎么做', 'Explain this goal in plain words'),
-                              onClick: () => {
-                                void askLeadModel(
-                                  `请用通俗易懂的大白话给我解释一下当前核心目标「${String(current).trim().slice(0, 120)}」：核心卡点是什么、整体打算怎么解决？`,
-                                  '咨询核心目标',
-                                )
-                              },
-                            }, bi('解释目标', 'Explain'))
                           : null,
                       ),
                     )
@@ -1130,12 +1156,29 @@ export function HandoffTab({ view }) {
   const byCat = ledger.byCategory || {}
   const mr = ledger.managedRun || {}
 
+  const rawSettingsTab = (view && view.settingsSubTab) || 'basics'
+  const settingsTab = ['basics', 'voice', 'notify', 'safety'].includes(rawSettingsTab) ? rawSettingsTab : 'basics'
+  const setSettingsTab = next => patch({ settingsSubTab: next })
+
   const [appearanceOpen, setAppearanceOpen] = React.useState(true)
   const [presetsOpen, setPresetsOpen] = React.useState(true)
   const [placementOpen, setPlacementOpen] = React.useState(true)
-  const [safetyOpen, setSafetyOpen] = React.useState(false)
-  const [notifyOpen, setNotifyOpen] = React.useState(false)
-  const [ledgerOpen, setLedgerOpen] = React.useState(() => Boolean(mr.tripped))
+  const [safetyOpen, setSafetyOpen] = React.useState(true)
+  const [notifyOpen, setNotifyOpen] = React.useState(true)
+  const [ttsDraft, setTtsDraft] = React.useState(null)
+  const [ttsAdvOpen, setTtsAdvOpen] = React.useState(false)
+  const [ttsProbeBusy, setTtsProbeBusy] = React.useState(false)
+  const [ttsProbeMsg, setTtsProbeMsg] = React.useState('')
+  const [browserVoices, setBrowserVoices] = React.useState(() => listBrowserSpeechVoices())
+  const [pagerOpen, setPagerOpen] = React.useState(true)
+  const [pagerDraft, setPagerDraft] = React.useState(null)
+  const [pagerBusy, setPagerBusy] = React.useState(false)
+  const [pagerMsg, setPagerMsg] = React.useState('')
+  const [showWebhookUrl, setShowWebhookUrl] = React.useState(true)
+  const [showPagerSecret, setShowPagerSecret] = React.useState(false)
+  const [showTgToken, setShowTgToken] = React.useState(false)
+  const [tabBadgeOn, setTabBadgeOn] = React.useState(() => isTabTitleBadgeEnabled())
+  const [ledgerOpen, setLedgerOpen] = React.useState(true)
   const [guardPrefOpen, setGuardPrefOpen] = React.useState(false)
   const [notifPerm, setNotifPerm] = React.useState(() => getNotificationPermissionState())
   const [callsDraft, setCallsDraft] = React.useState(null)
@@ -1151,6 +1194,22 @@ export function HandoffTab({ view }) {
   React.useEffect(() => {
     void loadTargets()
   }, [view.sessionId])
+
+  React.useEffect(() => {
+    if (settingsTab !== 'voice') return undefined
+    void fetchChiefTtsStatusApi()
+    setBrowserVoices(listBrowserSpeechVoices())
+    if (typeof window !== 'undefined' && window.speechSynthesis && typeof window.speechSynthesis.addEventListener === 'function') {
+      const onVoices = () => setBrowserVoices(listBrowserSpeechVoices())
+      window.speechSynthesis.addEventListener('voiceschanged', onVoices)
+      return () => window.speechSynthesis.removeEventListener('voiceschanged', onVoices)
+    }
+    return undefined
+  }, [settingsTab])
+
+  React.useEffect(() => {
+    if (settingsTab === 'notify') void fetchRemotePagerStatusApi()
+  }, [settingsTab])
 
   React.useEffect(() => {
     if (mr.tripped) setLedgerOpen(true)
@@ -1205,36 +1264,54 @@ export function HandoffTab({ view }) {
     ? bi('仅主页面', 'Main Tab Only')
     : (placementMode === 'sidebar' ? bi('仅右侧栏', 'Sidebar Only') : bi('右侧栏 + 主页面', 'Sidebar + Main Tab'))
 
-  const curSkin = (view && view.uiSkin) || DEFAULT_UI_SKIN
-  const curSkinObj = UI_SKIN_OPTIONS.find(o => o.key === curSkin) || UI_SKIN_OPTIONS[0]
+  const settingsTabs = [
+    { key: 'basics', label: bi('常规与布局', 'General') },
+    { key: 'voice', label: bi('语音与朗读', 'Voice') },
+    { key: 'notify', label: bi('通知与传呼', 'Alerts') },
+    { key: 'safety', label: bi('安全与账本', 'Safety') },
+  ]
 
   return h(
-    React.Fragment,
-    null,
-    // 1. Appearance, Chief Name & Language (Default Expanded)
+    'div',
+    { style: { display: 'flex', flexDirection: 'column', gap: 8 } },
     h(
-      AccCard,
-      {
-        open: appearanceOpen,
-        onToggle: () => setAppearanceOpen(v => !v),
-        tone: 'violet',
-        icon: h(Icon, { name: 'palette', size: 13.5, style: { color: 'var(--dnb-accent)' } }),
-        title: bi('外观与基础', 'Appearance & Basics'),
-        badges: h(
+      'div',
+      { className: 'dnb-seg', style: { padding: 2 } },
+      settingsTabs.map(t =>
+        h('button', {
+          key: t.key,
+          type: 'button',
+          className: 'dnb-seg-btn',
+          style: { padding: '5px 8px', fontSize: 11.5 },
+          'data-active': settingsTab === t.key ? '1' : '0',
+          onClick: () => setSettingsTab(t.key),
+        }, t.label),
+      ),
+    ),
+
+    // ---------------- TAB 1: BASICS & LAYOUT ----------------
+    settingsTab === 'basics'
+      ? h(
           React.Fragment,
           null,
-          h('span', { className: 'dnb-acc-badge', 'data-tone': 'accent' }, bi(curSkinObj.zh, curSkinObj.en)),
-          h('span', { className: 'dnb-acc-badge' }, 'v' + EXPECTED_BACKEND_BUILD),
-        ),
-        preview: `${chiefDisplayName(view)} · ${langSummary}`,
-        bodyStyle: { padding: '8px 11px 10px', display: 'flex', flexDirection: 'column', gap: 10 },
-      },
+          h(
+            AccCard,
+            {
+              open: appearanceOpen,
+              onToggle: () => setAppearanceOpen(v => !v),
+              tone: 'violet',
+              icon: h(Icon, { name: 'sliders', size: 13.5, style: { color: 'var(--dnb-accent)' } }),
+              title: bi('称呼与布局', 'Identity & Layout'),
+              badges: h('span', { className: 'dnb-acc-badge' }, 'v' + EXPECTED_BACKEND_BUILD),
+              preview: `${chiefDisplayName(view)} · ${langSummary}`,
+              bodyStyle: { padding: '8px 11px 10px', display: 'flex', flexDirection: 'column', gap: 10 },
+            },
       // Chief Name
       h(
         'div',
         null,
         h('div', { style: { fontSize: 11.5, fontWeight: 500, color: 'var(--dnb-text-2)', marginBottom: 5 } },
-          bi('参谋长称呼（对主对话 0 字节隔离，全局生效）', 'Chief Name (global across workspaces, 0-byte isolated)')),
+          bi('参谋长称呼（仅自己可见，全局生效，不打扰主对话）', 'Chief Name (private to you, global across chats)')),
         h(
           'div',
           { style: { display: 'flex', gap: 6, alignItems: 'center', flexWrap: 'wrap' } },
@@ -1340,72 +1417,29 @@ export function HandoffTab({ view }) {
           }),
         ),
       ),
-      // 5 UI Skins + Custom DIY
+      // Dedicated Theme Studio entry
       h(
         'div',
-        { style: { paddingTop: 8, borderTop: '1px solid var(--dnb-border)' } },
-        h('div', { style: { fontSize: 11.5, fontWeight: 500, color: 'var(--dnb-text-2)', marginBottom: 6 } },
-          bi('视觉主题（深浅宿主全自动适配）', 'UI Theme (adapts to dark & light hosts)')),
-        h(
-          'div',
-          { className: 'dnb-skin-grid' },
-          UI_SKIN_OPTIONS.map(opt => {
-            const isCur = curSkin === opt.key
-            const isCustomOpt = opt.key === 'custom'
-            const cSkin = isCustomOpt ? (view.customSkin || {}) : null
-            const hasSavedCustom = Boolean(cSkin && Number(cSkin.updatedAt) > 0)
-            const cardName = isCustomOpt && hasSavedCustom ? cSkin.name : bi(opt.zh, opt.en)
-            const cardSwatches = isCustomOpt && cSkin && Array.isArray(cSkin.swatches) && cSkin.swatches.length === 3
-              ? cSkin.swatches
-              : opt.swatches
-            return h(
-              'button',
-              {
-                key: opt.key,
-                type: 'button',
-                className: 'dnb-skin-card',
-                'data-active': isCur ? '1' : '0',
-                onClick: () => {
-                  if (isCustomOpt && (!hasSavedCustom || isCur)) {
-                    openCustomThemeModal()
-                    return
-                  }
-                  saveUiSkin(opt.key)
-                  patch({ notice: bi('已切换视觉主题：', 'Theme switched to: ') + cardName })
-                },
-              },
-              h(
-                'div',
-                { className: 'dnb-skin-card-head' },
-                h('span', { className: 'dnb-skin-card-name' }, cardName),
-                h(
-                  'div',
-                  { className: 'dnb-skin-swatches' },
-                  cardSwatches.map((hex, idx) =>
-                    h('span', { key: `${hex}-${idx}`, className: 'dnb-skin-swatch-dot', style: { background: hex } })),
-                ),
-              ),
-              h('div', { className: 'dnb-skin-card-tag' }, bi(opt.tagZh, opt.tagEn)),
-              h('div', { className: 'dnb-skin-card-desc' },
-                isCustomOpt
-                  ? h(
-                      'div',
-                      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
-                      h('span', null, bi('导图提色 / 参谋长定制', 'Image / AI DIY')),
-                      h('span', {
-                        role: 'button',
-                        tabIndex: 0,
-                        style: { color: 'var(--dnb-accent)', fontWeight: 600, fontSize: 10.5 },
-                        onClick: e => {
-                          e.stopPropagation()
-                          openCustomThemeModal()
-                        },
-                      }, bi('🎨 调色工坊', '🎨 Studio')),
-                    )
-                  : bi(opt.descZh, opt.descEn)),
-            )
-          }),
-        ),
+        {
+          style: {
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            flexWrap: 'wrap',
+            paddingTop: 6,
+            borderTop: '1px solid var(--dnb-border)',
+          },
+        },
+        h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', lineHeight: 1.45 } },
+          bi('🎨 切换预设主题或进入 DIY 工坊（主题多端同步）。',
+            '🎨 Switch theme presets or open the DIY Workshop (synced across devices).')),
+        h('button', {
+          type: 'button',
+          className: 'dnb-pill',
+          style: { height: 26, padding: '0 10px', fontSize: 11 },
+          onClick: () => openThemeStudio(),
+        }, bi('🎨 打开外观与 DIY 工坊 →', '🎨 Open Theme Studio →')),
       ),
       // Interface Language
       h(
@@ -1592,148 +1626,977 @@ export function HandoffTab({ view }) {
         bi('切到主页面后可在对话顶部直接大屏切换，修改立即生效无需重启。', 'Switching placement updates the conversation top tab and sidebar immediately without restart.'),
       ),
     ),
+        )
+      : null,
 
-    // 4. Built-in Safety Block Toggles (Default Collapsed)
-    h(
-      AccCard,
-      {
-        open: safetyOpen,
-        onToggle: () => setSafetyOpen(v => !v),
-        tone: 'rose',
-        icon: h(Icon, { name: effectiveSafetyOn ? 'shieldCheck' : 'shieldOff', size: 13.5, style: { color: effectiveSafetyOn ? 'var(--dnb-sage)' : 'var(--dnb-coral)' } }),
-        title: bi('安全拦截（自动防误操作）', 'Safety Block (Auto Protection)'),
-        badges: h('span', { className: 'dnb-acc-badge', 'data-tone': effectiveSafetyOn ? 'green' : 'red' },
-          effectiveSafetyOn ? bi('保护开启', 'Active') : bi('已关闭', 'Disabled')),
-        preview: effectiveSafetyOn
-          ? bi('默认开启，防删文件、越界与读密钥', 'Active by default')
-          : (!globalSafetyOn ? bi('全部对话已关闭', 'Disabled for all chats') : bi('当前对话已关闭', 'Disabled in this chat')),
-        bodyStyle: { padding: 0 },
-      },
-      view && view.sessionId
-        ? h(
-            'div',
-            { className: 'dnb-cell', style: { justifyContent: 'space-between', gap: 8 } },
-            h('div', { style: { minWidth: 0 } },
-              h('div', { style: { fontSize: 12 } }, bi('当前对话开启安全拦截（默认开）', 'Enable Safety Block in this chat')),
-              h('div', { style: { fontSize: 10.5, color: globalSafetyOn ? 'var(--dnb-text-3)' : 'var(--dnb-coral)', marginTop: 1 } },
-                globalSafetyOn
-                  ? bi('自动拦住删文件、改项目外文件、读密钥等危险操作', 'Automatically blocks dangerous deletes, out-of-project edits, and secret reads')
-                  : bi('已被下方全部对话总开关关闭，请先打开总开关', 'Overridden by the global switch below; turn it on first')),
+    // ---------------- TAB 2: VOICE & TTS ----------------
+    settingsTab === 'voice'
+      ? (() => {
+          const savedTts = (meta.tts && typeof meta.tts === 'object') ? meta.tts : {}
+          const effTts = ttsDraft ? { ...savedTts, ...ttsDraft } : savedTts
+          const ttsProv = effTts.provider || 'deepseek'
+          const ttsVoice = effTts.voiceId || (ttsProv === 'deepseek' ? 'stella' : 'alloy')
+          const ttsStatusInfo = view.ttsStatusInfo || null
+          const hostDs = (ttsStatusInfo && ttsStatusInfo.hostDeepSeek) || null
+          const ttsRt = (ttsStatusInfo && ttsStatusInfo.runtime) || {}
+          const lastDsErr = ttsRt.lastProvider === 'deepseek' ? String(ttsRt.lastError || '').trim() : ''
+          const lastDsAuthFail = /401|403|鉴权/i.test(lastDsErr)
+          const dsVerifiedOk = ttsRt.lastProvider === 'deepseek' && !ttsRt.lastError && Number(ttsRt.synthesisCount) > 0
+          const ttsPlayer = view.ttsPlayer || {}
+          const setTtsField = (fields) => {
+            setTtsDraft(prev => ({ ...savedTts, ...(prev || {}), ...fields }))
+          }
+          const buildSavePayload = (extraPatch = null) => {
+            const merged = { ...savedTts, ...(ttsDraft || {}), ...(extraPatch || {}) }
+            delete merged.hasApiKey
+            return merged
+          }
+          const saveTtsNow = async (extraPatch = null) => {
+            const payload = buildSavePayload(extraPatch)
+            const res = await updateSecConfig({ tts: payload })
+            if (res && res.ok !== false) {
+              setTtsDraft(null)
+              void fetchChiefTtsStatusApi()
+            }
+            return res
+          }
+          const runTtsProbe = async () => {
+            setTtsProbeBusy(true)
+            setTtsProbeMsg('')
+            const sample = bi('你好，我是你的参谋长。语音播报链路已就绪，重要情况我会第一时间向你汇报。', 'Hello, this is DSH Chief. Voice playback is ready.')
+            try {
+              const payload = buildSavePayload()
+              if (payload.provider === 'browser') {
+                const res = await speakChiefText(sample, {
+                  itemId: 'probe:settings',
+                  label: bi('语音试听', 'Voice Test'),
+                  style: 'full',
+                  overrideConfig: payload,
+                })
+                setTtsProbeMsg(res && res.ok
+                  ? bi('✅ 正在使用本机系统语音试听…', '✅ Speaking via browser voice…')
+                  : `⚠️ ${(res && res.error) || bi('系统语音暂不可用', 'Browser voice unavailable')}`)
+                return
+              }
+              const res = await probeChiefTtsApi({ config: payload, text: sample })
+              if (res && res.ok && res.audioBase64) {
+                setTtsProbeMsg(`✅ ${bi('试听成功', 'Ready')} · ${res.latencyMs || 0}ms · ${((Number(res.bytes) || 0) / 1024).toFixed(1)}KB`)
+                await playChiefAudioBase64(res.audioBase64, res.mimeType || 'audio/wav', {
+                  itemId: 'probe:settings',
+                  label: bi('语音试听', 'Voice Test'),
+                  provider: res.provider || payload.provider,
+                  speed: payload.speed || 1.0,
+                  volume: payload.volume ?? 0.9,
+                })
+              } else {
+                setTtsProbeMsg(`⚠️ ${(res && res.error) || bi('试听失败', 'Probe failed')}`)
+              }
+            } finally {
+              void fetchChiefTtsStatusApi()
+              setTtsProbeBusy(false)
+            }
+          }
+          const provBadge = ttsProv === 'deepseek'
+            ? `DeepSeek · ${ttsVoice}`
+            : (ttsProv === 'openai-compat' ? `OpenAI · ${ttsVoice}` : bi('本机系统语音', 'System Voice'))
+
+          return h(
+            AccCard,
+            {
+              open: true,
+              onToggle: null,
+              tone: 'indigo',
+              icon: h(Icon, { name: 'volume', size: 13.5, style: { color: 'var(--dnb-accent)' } }),
+              title: bi('语音参谋长（TTS 播报与语音面聊）', 'Voice Chief (TTS & Voice Chat)'),
+              badges: h('span', { className: 'dnb-acc-badge', 'data-tone': effTts.enabled ? 'accent' : undefined }, provBadge),
+              preview: effTts.enabled
+                ? [
+                    effTts.autoSpeakAlerts ? bi('重要提醒开口说', 'Spoken alerts') : '',
+                    effTts.autoSpeakReplies ? bi('新回复自动播', 'Auto replies') : '',
+                  ].filter(Boolean).join(' · ') || bi('点击单条可朗读', 'Click reply to speak')
+                : bi('按需点读可用，自动播报未开', 'Manual click ready · Auto off'),
+              bodyStyle: { padding: '9px 11px 11px', display: 'flex', flexDirection: 'column', gap: 9 },
+            },
+            // Engine selector
+            h(
+              'div',
+              null,
+              h('div', { style: { fontSize: 11.5, fontWeight: 500, color: 'var(--dnb-text-2)', marginBottom: 5 } },
+                bi('发音引擎', 'Speech Engine')),
+              h(
+                'div',
+                { className: 'dnb-seg', style: { padding: 2 } },
+                [
+                  { key: 'deepseek', label: bi('DeepSeek 官方', 'DeepSeek API') },
+                  { key: 'openai-compat', label: bi('OpenAI 兼容', 'OpenAI Compat') },
+                  { key: 'browser', label: bi('本机系统语音', 'System Voice') },
+                ].map(opt =>
+                  h('button', {
+                    key: opt.key,
+                    type: 'button',
+                    className: 'dnb-seg-btn',
+                    style: { padding: '4px 7px', fontSize: 11 },
+                    'data-active': ttsProv === opt.key ? '1' : '0',
+                    onClick: () => setTtsField({
+                      provider: opt.key,
+                      voiceId: opt.key === 'deepseek' ? 'stella' : (opt.key === 'openai-compat' ? 'alloy' : effTts.voiceId),
+                      format: opt.key === 'deepseek' ? 'wav' : (opt.key === 'openai-compat' ? 'mp3' : effTts.format),
+                    }),
+                  }, opt.label),
+                ),
+              ),
             ),
-            h(Switch, {
-              checked: globalSafetyOn && sessionSafetyOn,
-              disabled: !globalSafetyOn,
-              onChange: on => {
-                if (!globalSafetyOn) return
-                if (on) {
-                  void updateSecConfig({ tacticalModes: { safetyGuardEnabled: true } })
-                } else {
-                  patch({
-                    safetyGuardModalOpen: true,
-                    safetyGuardModalScope: 'session',
-                    safetyGuardAgreed: false,
-                    safetyGuardPauseWalls: false,
-                  })
-                }
+
+            // DeepSeek panel
+            ttsProv === 'deepseek'
+              ? h(
+                  'div',
+                  { style: { display: 'flex', flexDirection: 'column', gap: 7 } },
+                  hostDs
+                    ? (() => {
+                        let dsTone = 'amber'
+                        let dsText = bi(`⚠️ 未检测到 DSH 官方登录或 ${hostDs.apiKeyEnv || 'DEEPSEEK_API_KEY'}：可在 DSH 登录账号、填密钥或改用本机系统语音`,
+                          `⚠️ No DSH login or ${hostDs.apiKeyEnv || 'DEEPSEEK_API_KEY'} found: sign in, enter a key, or use System Voice`)
+                        if (savedTts.hasApiKey) {
+                          dsTone = lastDsErr ? 'amber' : 'green'
+                          dsText = lastDsErr
+                            ? bi(`⚠️ 自定义密钥上次试听异常：${lastDsErr}`, `⚠️ Custom key probe failed: ${lastDsErr}`)
+                            : bi('✅ 已就绪：使用自定义密钥', '✅ Ready: Custom key saved')
+                        } else if (hostDs.authMode === 'dsh-account') {
+                          dsTone = lastDsErr ? 'amber' : 'green'
+                          dsText = lastDsErr
+                            ? bi(`⚠️ 已识别 DSH 官方登录凭据，但上次试听异常：${lastDsErr}`,
+                                `⚠️ DSH official account detected, but probe failed: ${lastDsErr}`)
+                            : bi('✅ 已自动复用 DSH 官方登录凭据（语音合成与语音转写均可直连，免填 Key）',
+                                '✅ Ready: Reusing signed-in DSH official account credentials')
+                        } else if (hostDs.configured) {
+                          if (lastDsErr) {
+                            dsTone = 'amber'
+                            dsText = bi(`⚠️ 检测到宿主 ${hostDs.apiKeyEnv || 'DEEPSEEK_API_KEY'}，但上次试听异常：${lastDsErr}`,
+                              `⚠️ Host ${hostDs.apiKeyEnv || 'DEEPSEEK_API_KEY'} detected, but probe failed: ${lastDsErr}`)
+                          } else if (dsVerifiedOk) {
+                            dsTone = 'green'
+                            dsText = bi(`✅ 已验证宿主 ${hostDs.apiKeyEnv || 'DEEPSEEK_API_KEY'} 可用`,
+                              `✅ Verified host ${hostDs.apiKeyEnv || 'DEEPSEEK_API_KEY'}`)
+                          } else {
+                            dsTone = undefined
+                            dsText = bi(`ℹ️ 已检测到宿主 ${hostDs.apiKeyEnv || 'DEEPSEEK_API_KEY'}（尚未验证，点下方「🔊 试听测试」验证）`,
+                              `ℹ️ Host ${hostDs.apiKeyEnv || 'DEEPSEEK_API_KEY'} detected (click Test Voice below to verify)`)
+                          }
+                        }
+                        return h('div', {
+                          className: 'dnb-tts-status-pill',
+                          ...(dsTone ? { 'data-tone': dsTone } : {}),
+                        }, dsText)
+                      })()
+                    : null,
+                  (ttsStatusInfo && ttsStatusInfo.stt)
+                    ? h('div', {
+                        className: 'dnb-tts-status-pill',
+                        'data-tone': (ttsStatusInfo.stt.local && ttsStatusInfo.stt.local.ready)
+                          ? 'green'
+                          : (ttsStatusInfo.stt.deepseekAsr && !lastDsAuthFail ? undefined : 'amber'),
+                      },
+                        ttsStatusInfo.stt.local && ttsStatusInfo.stt.local.ready
+                          ? bi(`🎙️ 语音输入已就绪：优先使用 DSH 本地离线识别（${ttsStatusInfo.stt.local.providerId || 'SenseVoice'}）`,
+                               `🎙️ Voice Input Ready: Local DSH STT (${ttsStatusInfo.stt.local.providerId || 'SenseVoice'})`)
+                          : (ttsStatusInfo.stt.deepseekAsr
+                              ? bi('🎙️ 语音输入将使用 DeepSeek 云端转写（受上方 DeepSeek 凭据有效性影响）', '🎙️ Voice Input: DeepSeek Cloud ASR')
+                              : bi('🎙️ 本地语音模型未准备且无 DeepSeek 凭据，将使用浏览器语音识别', '🎙️ Falling back to browser speech recognition')))
+                    : null,
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+                h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('声线选择', 'Voice')),
+                h(
+                  'div',
+                  { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
+                  [
+                    { id: 'stella', label: bi('Stella · 女声', 'Stella · Female') },
+                    { id: 'tide', label: bi('Tide · 男声', 'Tide · Male') },
+                  ].map(v =>
+                    h('button', {
+                      key: v.id,
+                      type: 'button',
+                      className: 'dnb-mini-btn',
+                      'data-tone': ttsVoice === v.id ? 'accent' : undefined,
+                      onClick: () => setTtsField({ voiceId: v.id }),
+                    }, v.label),
+                  ),
+                ),
+              ),
+              h(
+                'div',
+                { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '4px 0', borderBottom: 'none' } },
+                h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } },
+                  bi('自动过滤 Markdown 符号（避免念出星号反引号）', 'Filter Markdown symbols automatically')),
+                h(Switch, {
+                  checked: effTts.filterMarkdown !== false,
+                  onChange: on => setTtsField({ filterMarkdown: on }),
+                }),
+              ),
+              h('button', {
+                type: 'button',
+                className: 'dnb-mini-btn',
+                style: { alignSelf: 'flex-start' },
+                onClick: () => setTtsAdvOpen(v => !v),
+              }, ttsAdvOpen ? bi('▾ 收起自定义密钥 / 代理地址', '▾ Hide custom key & base URL') : bi('▸ 自定义密钥或代理地址（可选）', '▸ Custom API Key / Base URL (optional)')),
+              ttsAdvOpen
+                ? h(
+                    'div',
+                    { className: 'dnb-tts-field-grid' },
+                    h('input', {
+                      className: 'dnb-input',
+                      style: { height: 27, fontSize: 11.5 },
+                      placeholder: bi('Base URL（默认 api.deepseek.com）', 'Base URL (default api.deepseek.com)'),
+                      value: effTts.baseUrl || '',
+                      onChange: e => setTtsField({ baseUrl: e.target.value }),
+                    }),
+                    h('div', { style: { display: 'flex', gap: 4 } },
+                      h('input', {
+                        type: 'password',
+                        className: 'dnb-input',
+                        style: { height: 27, fontSize: 11.5, flex: 1 },
+                        placeholder: savedTts.hasApiKey ? bi('已加密保存（留空不改）', 'Saved (leave blank to keep)') : bi('专用 API Key（可选）', 'Dedicated API Key (optional)'),
+                        value: effTts.apiKey || '',
+                        onChange: e => setTtsField({ apiKey: e.target.value, clearApiKey: false }),
+                      }),
+                      savedTts.hasApiKey
+                        ? h('button', {
+                            type: 'button',
+                            className: 'dnb-mini-btn',
+                            onClick: () => void saveTtsNow({ apiKey: '', clearApiKey: true }),
+                          }, bi('清除', 'Clear'))
+                        : null,
+                    ),
+                  )
+                : null,
+            )
+          : null,
+
+        // OpenAI-compatible panel
+        ttsProv === 'openai-compat'
+          ? h(
+              'div',
+              { style: { display: 'flex', flexDirection: 'column', gap: 7 } },
+              h(
+                'div',
+                { style: { display: 'flex', gap: 4, flexWrap: 'wrap', alignItems: 'center' } },
+                h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, bi('一键预设：', 'Presets:')),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  onClick: () => setTtsField({ baseUrl: 'http://127.0.0.1:8880/v1', model: 'kokoro', voiceId: 'zf_xiaobei', format: 'mp3' }),
+                }, bi('本地 Kokoro / Edge-TTS', 'Local Kokoro / Edge-TTS')),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-mini-btn',
+                  onClick: () => setTtsField({ baseUrl: 'https://api.openai.com/v1', model: 'tts-1', voiceId: 'alloy', format: 'mp3' }),
+                }, 'OpenAI TTS'),
+              ),
+              h(
+                'div',
+                { className: 'dnb-tts-field-grid' },
+                h('input', {
+                  className: 'dnb-input',
+                  style: { height: 27, fontSize: 11.5 },
+                  placeholder: 'Base URL (http://127.0.0.1:8880/v1)',
+                  value: effTts.baseUrl || '',
+                  onChange: e => setTtsField({ baseUrl: e.target.value }),
+                }),
+                h('input', {
+                  className: 'dnb-input',
+                  style: { height: 27, fontSize: 11.5 },
+                  placeholder: bi('模型（如 tts-1 / kokoro）', 'Model (e.g. tts-1)'),
+                  value: effTts.model || 'tts-1',
+                  onChange: e => setTtsField({ model: e.target.value }),
+                }),
+                h('input', {
+                  className: 'dnb-input',
+                  style: { height: 27, fontSize: 11.5 },
+                  placeholder: bi('音色（如 alloy / nova）', 'Voice (e.g. alloy)'),
+                  value: effTts.voiceId || 'alloy',
+                  onChange: e => setTtsField({ voiceId: e.target.value }),
+                }),
+                h('select', {
+                  className: 'dnb-input',
+                  style: { height: 27, fontSize: 11.5 },
+                  value: ['mp3', 'wav', 'opus'].includes(effTts.format) ? effTts.format : 'mp3',
+                  onChange: e => setTtsField({ format: e.target.value }),
+                },
+                  h('option', { value: 'mp3' }, 'mp3'),
+                  h('option', { value: 'wav' }, 'wav'),
+                  h('option', { value: 'opus' }, 'opus'),
+                ),
+                h('input', {
+                  className: 'dnb-input',
+                  style: { height: 27, fontSize: 11.5 },
+                  placeholder: bi('环境变量名（如 OPENAI_API_KEY）', 'Env var (e.g. OPENAI_API_KEY)'),
+                  value: effTts.apiKeyEnv || '',
+                  onChange: e => setTtsField({ apiKeyEnv: e.target.value }),
+                }),
+                h('div', { style: { display: 'flex', gap: 4 } },
+                  h('input', {
+                    type: 'password',
+                    className: 'dnb-input',
+                    style: { height: 27, fontSize: 11.5, flex: 1 },
+                    placeholder: savedTts.hasApiKey ? bi('已加密保存（留空不改）', 'Saved (leave blank to keep)') : bi('API Key（本地免填）', 'API Key (optional locally)'),
+                    value: effTts.apiKey || '',
+                    onChange: e => setTtsField({ apiKey: e.target.value, clearApiKey: false }),
+                  }),
+                  savedTts.hasApiKey
+                    ? h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        onClick: () => void saveTtsNow({ apiKey: '', clearApiKey: true }),
+                      }, bi('清除', 'Clear'))
+                    : null,
+                ),
+              ),
+            )
+          : null,
+
+        // Browser system speech panel
+        ttsProv === 'browser'
+          ? h(
+              'div',
+              { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+              h('div', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } },
+                bi('使用系统自带语音合成，完全本地离线、零额外 API 花费。', 'Uses OS built-in speech synthesis: completely offline with zero API cost.')),
+              h('select', {
+                className: 'dnb-input',
+                style: { height: 28, fontSize: 11.5 },
+                value: effTts.browserVoice || '',
+                onChange: e => setTtsField({ browserVoice: e.target.value }),
               },
+                h('option', { value: '' }, bi('自动按中/英文匹配系统声线', 'Auto-match system voice by language')),
+                browserVoices.map(v =>
+                  h('option', { key: v.name, value: v.name }, `${v.name}${v.lang ? ` (${v.lang})` : ''}`)),
+              ),
+            )
+          : null,
+
+        // Speed, volume, and auto-speak switches
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, flexWrap: 'wrap', paddingTop: 6, borderTop: '1px solid var(--dnb-border)' } },
+          h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('语速', 'Speed')),
+          h(
+            'div',
+            { style: { display: 'flex', gap: 4 } },
+            [0.85, 1.0, 1.15, 1.3].map(sp =>
+              h('button', {
+                key: sp,
+                type: 'button',
+                className: 'dnb-mini-btn',
+                'data-tone': Math.abs((Number(effTts.speed) || 1.0) - sp) < 0.03 ? 'accent' : undefined,
+                onClick: () => setTtsField({ speed: sp }),
+              }, `${sp}x`),
+            ),
+          ),
+          h('div', { style: { display: 'inline-flex', alignItems: 'center', gap: 6 } },
+            h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('音量', 'Vol')),
+            h('input', {
+              type: 'range',
+              min: 0.1,
+              max: 1.0,
+              step: 0.05,
+              value: effTts.volume ?? 0.9,
+              style: { width: 72 },
+              onChange: e => setTtsField({ volume: Number(e.target.value) }),
             }),
-          )
-        : null,
-      h(
-        'div',
-        { className: 'dnb-cell', style: { justifyContent: 'space-between', gap: 8 } },
-        h('div', { style: { minWidth: 0 } },
-          h('div', { style: { fontSize: 12 } }, bi('全部对话安全拦截总开关（默认开）', 'Safety Block for all chats (master switch)')),
-          h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
-            bi('关闭后所有对话都不会再触发自动拦截（边界页里自己加的拦截规则仍独立生效）', 'Turns off built-in blocking across all chats (your Custom Block Rules stay active)')),
+            h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)', minWidth: 30 } }, `${Math.round((effTts.volume ?? 0.9) * 100)}%`),
+          ),
         ),
-        h(Switch, {
-          checked: globalSafetyOn,
-          onChange: on => {
-            if (on) {
-              void updateSecConfig({ globalSafetyGuardEnabled: true })
-            } else {
-              patch({
-                safetyGuardModalOpen: true,
-                safetyGuardModalScope: 'global',
-                safetyGuardAgreed: false,
-                safetyGuardPauseWalls: false,
+
+        h(
+          'div',
+          { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '4px 0' } },
+          h('div', { style: { minWidth: 0 } },
+            h('div', { style: { fontSize: 12 } }, bi('开启自动语音播报总开关', 'Enable automatic voice announcements')),
+            h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
+              bi('单条消息旁的 🔊 按钮随时可用；打开此项后才会在后台自动出声', 'Manual 🔊 buttons always work; turn this on for automatic speech'))),
+          h(Switch, {
+            checked: Boolean(effTts.enabled),
+            onChange: on => void saveTtsNow({ enabled: on }),
+          }),
+        ),
+        effTts.enabled
+          ? h(
+              React.Fragment,
+              null,
+              h(
+                'div',
+                { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '4px 0' } },
+                h('span', { style: { fontSize: 12 } }, bi('重要节点自动口语播报（审批/拦截/停机）', 'Speak key alerts automatically')),
+                h(Switch, {
+                  checked: Boolean(effTts.autoSpeakAlerts),
+                  onChange: on => void saveTtsNow({ autoSpeakAlerts: on }),
+                }),
+              ),
+              h(
+                'div',
+                { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '4px 0' } },
+                h('span', { style: { fontSize: 12 } }, bi('参谋新回复自动播报', 'Auto-speak new Chief replies')),
+                h(Switch, {
+                  checked: Boolean(effTts.autoSpeakReplies),
+                  onChange: on => void saveTtsNow({ autoSpeakReplies: on }),
+                }),
+              ),
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6 } },
+                h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('自动播报口语风格', 'Auto speech style')),
+                h(
+                  'div',
+                  { className: 'dnb-seg', style: { padding: 2 } },
+                  [
+                    { key: 'brief', label: bi('简洁口语简报', 'Brief Summary') },
+                    { key: 'full', label: bi('完整朗读', 'Full Text') },
+                  ].map(opt =>
+                    h('button', {
+                      key: opt.key,
+                      type: 'button',
+                      className: 'dnb-seg-btn',
+                      style: { padding: '3px 8px', fontSize: 11 },
+                      'data-active': (effTts.speechStyle || 'brief') === opt.key ? '1' : '0',
+                      onClick: () => void saveTtsNow({ speechStyle: opt.key }),
+                    }, opt.label),
+                  ),
+                ),
+              ),
+            )
+          : null,
+        h(
+          'div',
+          { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '4px 0', borderBottom: 'none' } },
+          h('span', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('云端不可用时自动降级本机系统语音', 'Fallback to system voice if cloud fails')),
+          h(Switch, {
+            checked: effTts.fallbackToBrowser !== false,
+            onChange: on => void saveTtsNow({ fallbackToBrowser: on }),
+          }),
+        ),
+        h(
+          'div',
+          { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '4px 0', borderBottom: 'none' } },
+          h('div', null,
+            h('div', { style: { fontSize: 11.5, color: 'var(--dnb-text-2)' } }, bi('语音模式默认开启免提连续聊（VAD 自动收发）', 'Hands-free auto-VAD in Voice Mode')),
+            h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } }, bi('说完停顿自动发送，播报完自动续听，开口即聊。', 'Auto-sends after pause and resumes listening after reply.')),
+          ),
+          h(Switch, {
+            checked: Boolean(effTts.handsFreeVad),
+            onChange: on => void saveTtsNow({ handsFreeVad: on }),
+          }),
+        ),
+        effTts.handsFreeVad
+          ? h(
+              'div',
+              { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+              h('span', { style: { fontSize: 11, color: 'var(--dnb-text-3)' } }, bi('说话停顿判定时长', 'Pause detection delay')),
+              h(
+                'div',
+                { className: 'dnb-seg', style: { padding: 2 } },
+                [
+                  { ms: 900, label: '0.9s' },
+                  { ms: 1300, label: '1.3s' },
+                  { ms: 2000, label: '2.0s' },
+                ].map(opt =>
+                  h('button', {
+                    key: opt.ms,
+                    type: 'button',
+                    className: 'dnb-seg-btn',
+                    style: { padding: '2px 8px', fontSize: 10.5 },
+                    'data-active': (Number(effTts.vadSilenceMs) || 1300) === opt.ms ? '1' : '0',
+                    onClick: () => void saveTtsNow({ vadSilenceMs: opt.ms }),
+                  }, opt.label),
+                ),
+              ),
+            )
+          : null,
+
+        // Action row
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', paddingTop: 4 } },
+          h('button', {
+            type: 'button',
+            className: 'dnb-pill dnb-primary',
+            style: { height: 27, padding: '0 11px', fontSize: 11.5 },
+            onClick: () => void saveTtsNow(),
+          }, bi('保存语音配置', 'Save Voice Settings')),
+          h('button', {
+            type: 'button',
+            className: 'dnb-pill',
+            style: { height: 27, padding: '0 10px', fontSize: 11.5 },
+            disabled: ttsProbeBusy,
+            onClick: () => void runTtsProbe(),
+          }, ttsProbeBusy ? bi('合成中…', 'Testing…') : bi('🔊 试听测试', '🔊 Test Voice')),
+          (ttsPlayer.status === 'playing' || ttsPlayer.status === 'loading')
+            ? h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 27, padding: '0 10px', fontSize: 11.5 },
+                onClick: () => stopChiefSpeech(),
+              }, bi('⏹ 停止', '⏹ Stop'))
+            : null,
+          ttsProbeMsg
+            ? h('span', {
+                style: {
+                  fontSize: 11,
+                  color: ttsProbeMsg.startsWith('✅') ? 'var(--dnb-sage)' : 'var(--dnb-amber)',
+                  lineHeight: 1.35,
+                },
+              }, ttsProbeMsg)
+            : null,
+        ),
+      )
+        })()
+      : null,
+
+    // ---------------- TAB 3: ALERTS & REMOTE PAGER ----------------
+    settingsTab === 'notify'
+      ? h(
+          React.Fragment,
+          null,
+          h(
+            AccCard,
+            {
+              open: notifyOpen,
+              onToggle: () => setNotifyOpen(v => !v),
+              tone: 'amber',
+              title: bi('离开电脑时的提醒、声音与标题角标', 'Desktop Alerts, Sound & Tab Badge'),
+              badges: h('span', { className: 'dnb-acc-badge', 'data-tone': notifPerm === 'granted' ? 'green' : undefined }, notifPermLabel),
+              preview: meta.notifyEnabled !== false ? bi('重要节点会通知你', 'Alerts on') : bi('通知已关', 'Alerts off'),
+              bodyStyle: { padding: 0 },
+            },
+            h(
+              'div',
+              { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
+              h('div', { style: { minWidth: 0 } },
+                h('div', { style: { fontSize: 12.5 } }, bi('重要节点弹出电脑桌面通知', 'Desktop alerts at key moments')),
+                h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
+                  bi('需要你批准、被安全拦截或自定义规则挡住、断线重连或到上限时通知', 'On approvals, safety or custom rule blocks, retries, or limits')),
+              ),
+              h(Switch, {
+                checked: meta.notifyEnabled !== false,
+                onChange: async on => {
+                  if (on && getNotificationPermissionState() === 'default') {
+                    const p = await requestNotificationPermission()
+                    setNotifPerm(p)
+                  }
+                  void updateSecConfig({ notifyEnabled: on })
+                },
+              }),
+            ),
+            h(
+              'div',
+              { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
+              h('span', { style: { fontSize: 12.5 } }, bi('响一下轻提示音（默认关闭）', 'Play a soft sound (off by default)')),
+              h(Switch, {
+                checked: Boolean(meta.notifySound),
+                onChange: on => {
+                  if (on) {
+                    fireChiefAlertNotification({ kind: 'auto_continue_rescue', level: 'info', body: bi('提示音已打开', 'Sound on') }, { sound: true })
+                  }
+                  void updateSecConfig({ notifySound: on })
+                },
+              }),
+            ),
+            h(
+              'div',
+              { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
+              h('div', { style: { minWidth: 0 } },
+                h('div', { style: { fontSize: 12.5 } }, bi('切走页面时闪烁网页标题角标（🔔 需要你）', 'Flash browser tab badge when away (🔔)')),
+                h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
+                  bi('你切去别的标签页时在标题栏闪烁提示，回来查看会自动恢复原标题', 'Alerts in tab bar when page is hidden and clears on focus')),
+              ),
+              h(Switch, {
+                checked: tabBadgeOn,
+                onChange: on => {
+                  setTabBadgeOn(setTabTitleBadgeEnabled(on))
+                },
+              }),
+            ),
+            h(
+              'div',
+              { style: { padding: '8px 12px', display: 'flex', alignItems: 'center', gap: 8 } },
+              h('button', {
+                type: 'button',
+                className: 'dnb-pill',
+                style: { height: 26, padding: '0 10px', fontSize: 11.5 },
+                onClick: async () => {
+                  if (notifPerm === 'default') {
+                    const p = await requestNotificationPermission()
+                    setNotifPerm(p)
+                  }
+                  const res = fireChiefAlertNotification(
+                    {
+                      id: 'test-' + Date.now(),
+                      kind: 'managed_auto_sleep',
+                      level: 'success',
+                      body: bi('提醒与网页标题角标工作正常（看顶部标签标题）。', 'Alerts and tab badge verified.'),
+                    },
+                    { sound: true, flashTitle: tabBadgeOn },
+                  )
+                  patch({ notice: res.toast })
+                },
+              }, bi('🔔 测试桌面提醒与标题角标', '🔔 Test Alert & Tab Badge')),
+            ),
+          ),
+
+          // Mobile Remote Pager (Feishu / DingTalk / WeCom / Telegram / Discord / Webhook)
+          (() => {
+            const savedPager = (meta.remotePager && typeof meta.remotePager === 'object') ? meta.remotePager : {}
+            const effPager = pagerDraft ? { ...savedPager, ...pagerDraft } : savedPager
+            const effEvents = (effPager.events && typeof effPager.events === 'object') ? effPager.events : {}
+            const ch = effPager.channel || 'feishu'
+            const pagerInfo = view.pagerStatusInfo || null
+            const pagerRt = (pagerInfo && pagerInfo.runtime) || {}
+            const chLabels = {
+              feishu: bi('飞书', 'Feishu'),
+              dingtalk: bi('钉钉', 'DingTalk'),
+              wecom: bi('企业微信', 'WeCom'),
+              telegram: 'Telegram',
+              discord: 'Discord',
+              webhook: bi('通用 Webhook', 'Webhook'),
+            }
+            const setPagerField = (fields) => {
+              setPagerDraft(prev => ({ ...savedPager, ...(prev || {}), ...fields }))
+            }
+            const setPagerEventField = (evKey, val) => {
+              setPagerField({
+                events: {
+                  approvalRequired: effEvents.approvalRequired !== false,
+                  wallBlocked: effEvents.wallBlocked !== false,
+                  hazardHalt: effEvents.hazardHalt !== false,
+                  taskDone: effEvents.taskDone !== false,
+                  budgetBreak: effEvents.budgetBreak !== false,
+                  [evKey]: Boolean(val),
+                },
               })
             }
-          },
-        }),
-      ),
-    ),
+            const buildPagerSavePayload = (extraPatch = null) => {
+              const merged = { ...savedPager, ...(pagerDraft || {}), ...(extraPatch || {}) }
+              delete merged.hasWebhookUrl
+              delete merged.webhookHostHint
+              delete merged.hasSecret
+              delete merged.hasTelegramBotToken
+              return merged
+            }
+            const savePagerNow = async (extraPatch = null) => {
+              const payload = buildPagerSavePayload(extraPatch)
+              const res = await updateSecConfig({ remotePager: payload })
+              if (res && res.ok !== false) {
+                setPagerDraft(null)
+                void fetchRemotePagerStatusApi()
+              }
+              return res
+            }
+            const runPagerTest = async () => {
+              setPagerBusy(true)
+              setPagerMsg('')
+              try {
+                const payload = buildPagerSavePayload()
+                const res = await testRemotePagerApi({ config: payload })
+                setPagerMsg(res && res.ok
+                  ? `✅ ${bi('测试消息已送达手机', 'Delivered')} · ${res.latencyMs || 0}ms`
+                  : `⚠️ ${(res && res.error) || bi('发送失败', 'Failed')}`)
+              } finally {
+                setPagerBusy(false)
+              }
+            }
+            const pushDigestNow = async () => {
+              setPagerBusy(true)
+              setPagerMsg('')
+              try {
+                const narText = (view.narrative && view.narrative.text) || ''
+                const payload = buildPagerSavePayload()
+                const res = await sendRemotePagerDigestApi({
+                  config: payload,
+                  title: bi('桌面工作台当前进展速报', 'Current Task Progress'),
+                  body: narText ? clampTitle(narText, 240) : bi('参谋长工作台一切正常运行中。', 'DSH Chief workspace running smoothly.'),
+                })
+                setPagerMsg(res && res.ok
+                  ? `✅ ${bi('已推送当前进展到手机', 'Digest sent')} · ${res.latencyMs || 0}ms`
+                  : `⚠️ ${(res && res.error) || bi('推送失败', 'Failed')}`)
+              } finally {
+                setPagerBusy(false)
+              }
+            }
 
-    // 5. Milestone Notifications & Gentle Sound (Default Collapsed)
-    h(
-      AccCard,
-      {
-        open: notifyOpen,
-        onToggle: () => setNotifyOpen(v => !v),
-        tone: 'amber',
-        title: bi('离开电脑时的提醒和声音', 'Away Alerts & Sound'),
-        badges: h('span', { className: 'dnb-acc-badge', 'data-tone': notifPerm === 'granted' ? 'green' : undefined }, notifPermLabel),
-        preview: meta.notifyEnabled !== false ? bi('重要节点会通知你', 'Alerts on') : bi('通知已关', 'Alerts off'),
-        actions: h('button', {
-          type: 'button',
-          className: 'dnb-pill',
-          style: { height: 21, padding: '0 7px', fontSize: 10.5 },
-          title: bi('发一条测试通知，试试弹窗和声音', 'Send a test alert and sound'),
-          onClick: async e => {
-            e.stopPropagation()
-            if (notifPerm === 'default') {
-              const p = await requestNotificationPermission()
-              setNotifPerm(p)
-            }
-            const res = fireChiefAlertNotification(
+            return h(
+              AccCard,
               {
-                id: 'test-' + Date.now(),
-                kind: 'managed_auto_sleep',
-                level: 'success',
-                body: bi('提醒功能正常。需要批准、被规则挡住、重连或到上限时都会通知你。', 'Alerts work. You’ll get notified on approvals, blocks, retries, or limits.'),
+                open: pagerOpen,
+                onToggle: () => setPagerOpen(v => !v),
+                tone: 'teal',
+                icon: h(Icon, { name: 'globe', size: 13.5, style: { color: 'var(--dnb-sage)' } }),
+                title: bi('手机远程传呼（离家挂机推送）', 'Mobile Remote Pager'),
+                badges: h('span', { className: 'dnb-acc-badge', 'data-tone': effPager.enabled ? 'green' : undefined },
+                  effPager.enabled ? `${chLabels[ch] || ch} · ON` : bi('未开启', 'Off')),
+                preview: effPager.enabled
+                  ? `${chLabels[ch] || ch}${savedPager.webhookHostHint ? ` · ${savedPager.webhookHostHint}` : ''}${pagerRt.sentCount ? ` · ${bi(`已发 ${pagerRt.sentCount} 次`, `${pagerRt.sentCount} sent`)}` : ''}`
+                  : bi('挂机撞墙、需要你审批或收工休眠时，秒推通知到手机', 'Push alerts to Feishu, DingTalk, WeCom, Telegram or Discord'),
+                bodyStyle: { padding: '9px 11px 11px', display: 'flex', flexDirection: 'column', gap: 9 },
               },
-              { sound: true },
+              h(
+                'div',
+                { className: 'dnb-cell', style: { justifyContent: 'space-between', padding: '4px 0', borderBottom: 'none' } },
+                h('span', { style: { fontSize: 11.5, fontWeight: 500, color: 'var(--dnb-text-2)' } },
+                  bi('开启自动传呼推送到手机', 'Enable automatic mobile alerts')),
+                h(Switch, {
+                  checked: Boolean(effPager.enabled),
+                  onChange: on => void savePagerNow({ enabled: on }),
+                }),
+              ),
+              h(
+                'div',
+                null,
+                h('div', { style: { fontSize: 11.5, fontWeight: 500, color: 'var(--dnb-text-2)', marginBottom: 5 } },
+                  bi('接收通道', 'Channel')),
+                h(
+                  'div',
+                  { style: { display: 'flex', gap: 4, flexWrap: 'wrap' } },
+                  ['feishu', 'dingtalk', 'wecom', 'telegram', 'discord', 'webhook'].map(k =>
+                    h('button', {
+                      key: k,
+                      type: 'button',
+                      className: 'dnb-mini-btn',
+                      'data-tone': ch === k ? 'accent' : undefined,
+                      onClick: () => setPagerField({ channel: k }),
+                    }, chLabels[k]),
+                  ),
+                ),
+              ),
+              ch === 'telegram'
+                ? h(
+                    'div',
+                    { className: 'dnb-tts-field-grid' },
+                    h('div', { style: { display: 'flex', gap: 4 } },
+                      h('input', {
+                        type: showTgToken ? 'text' : 'password',
+                        className: 'dnb-input',
+                        style: { height: 27, fontSize: 11.5, flex: 1 },
+                        placeholder: savedPager.hasTelegramBotToken ? bi('Bot Token 已加密保存（留空不改）', 'Token saved (blank to keep)') : 'Telegram Bot Token',
+                        value: effPager.telegramBotToken || '',
+                        onChange: e => setPagerField({ telegramBotToken: e.target.value, clearTelegramBotToken: false }),
+                      }),
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        title: showTgToken ? bi('隐藏 Token', 'Hide') : bi('显示 Token', 'Show'),
+                        onClick: () => setShowTgToken(v => !v),
+                      }, showTgToken ? bi('隐藏', 'Hide') : bi('显示', 'Show')),
+                      savedPager.hasTelegramBotToken
+                        ? h('button', {
+                            type: 'button',
+                            className: 'dnb-mini-btn',
+                            onClick: () => void savePagerNow({ telegramBotToken: '', clearTelegramBotToken: true }),
+                          }, bi('清除', 'Clear'))
+                        : null,
+                    ),
+                    h('input', {
+                      className: 'dnb-input',
+                      style: { height: 27, fontSize: 11.5 },
+                      placeholder: bi('Chat ID（如 123456789）', 'Telegram Chat ID'),
+                      value: effPager.telegramChatId || '',
+                      onChange: e => setPagerField({ telegramChatId: e.target.value }),
+                    }),
+                  )
+                : h(
+                    'div',
+                    { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+                    h('div', { style: { display: 'flex', gap: 4 } },
+                      h('input', {
+                        type: showWebhookUrl ? 'text' : 'password',
+                        className: 'dnb-input',
+                        style: { height: 27, fontSize: 11.5, flex: 1 },
+                        placeholder: savedPager.hasWebhookUrl
+                          ? bi(`推送地址已加密保存（${savedPager.webhookHostHint || '已配置'}，留空不改）`, `Webhook saved (${savedPager.webhookHostHint || 'configured'})`)
+                          : bi('粘贴群机器人推送地址 (https://...)', 'Paste Webhook URL (https://...)'),
+                        value: effPager.webhookUrl || '',
+                        onChange: e => setPagerField({ webhookUrl: e.target.value, clearWebhookUrl: false }),
+                      }),
+                      h('button', {
+                        type: 'button',
+                        className: 'dnb-mini-btn',
+                        title: showWebhookUrl ? bi('隐藏链接', 'Mask URL') : bi('显示链接', 'Show URL'),
+                        onClick: () => setShowWebhookUrl(v => !v),
+                      }, showWebhookUrl ? bi('隐藏', 'Hide') : bi('显示', 'Show')),
+                      savedPager.hasWebhookUrl
+                        ? h('button', {
+                            type: 'button',
+                            className: 'dnb-mini-btn',
+                            onClick: () => void savePagerNow({ webhookUrl: '', clearWebhookUrl: true }),
+                          }, bi('清除', 'Clear'))
+                        : null,
+                    ),
+                    (ch === 'feishu' || ch === 'dingtalk' || ch === 'webhook')
+                      ? h('div', { style: { display: 'flex', gap: 4 } },
+                          h('input', {
+                            type: showPagerSecret ? 'text' : 'password',
+                            className: 'dnb-input',
+                            style: { height: 27, fontSize: 11.5, flex: 1 },
+                            placeholder: savedPager.hasSecret
+                              ? bi('安全密钥已加密保存（留空不改）', 'Secret saved (blank to keep)')
+                              : bi('安全签名密钥（选填，用于校验消息来源）', 'Optional signing Secret'),
+                            value: effPager.secret || '',
+                            onChange: e => setPagerField({ secret: e.target.value, clearSecret: false }),
+                          }),
+                          h('button', {
+                            type: 'button',
+                            className: 'dnb-mini-btn',
+                            title: showPagerSecret ? bi('隐藏密钥', 'Hide') : bi('显示密钥', 'Show'),
+                            onClick: () => setShowPagerSecret(v => !v),
+                          }, showPagerSecret ? bi('隐藏', 'Hide') : bi('显示', 'Show')),
+                          savedPager.hasSecret
+                            ? h('button', {
+                                type: 'button',
+                                className: 'dnb-mini-btn',
+                                onClick: () => void savePagerNow({ secret: '', clearSecret: true }),
+                              }, bi('清除', 'Clear'))
+                            : null,
+                        )
+                      : null,
+                  ),
+              h(
+                'div',
+                { style: { display: 'flex', flexDirection: 'column', gap: 4 } },
+                h('div', { style: { fontSize: 11, fontWeight: 500, color: 'var(--dnb-text-2)' } },
+                  bi('触发传呼的重要节点', 'Alert Triggers')),
+                h(
+                  'div',
+                  { style: { display: 'flex', gap: 5, flexWrap: 'wrap' } },
+                  [
+                    { key: 'approvalRequired', label: bi('🔐 需要你审批/提权', 'Approvals') },
+                    { key: 'wallBlocked', label: bi('🧱 安全墙拦停', 'Guard Wall') },
+                    { key: 'hazardHalt', label: bi('🚨 高危急停', 'Hazard Halt') },
+                    { key: 'taskDone', label: bi('🌙 托管休眠/完成', 'Task Done') },
+                    { key: 'budgetBreak', label: bi('🛑 预算熔断', 'Budget Cap') },
+                  ].map(ev =>
+                    h('button', {
+                      key: ev.key,
+                      type: 'button',
+                      className: 'dnb-mini-btn',
+                      'data-tone': effEvents[ev.key] !== false ? 'accent' : undefined,
+                      onClick: () => setPagerEventField(ev.key, effEvents[ev.key] === false),
+                    }, ev.label),
+                  ),
+                ),
+              ),
+              h(
+                'div',
+                { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap', paddingTop: 2 } },
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pill dnb-primary',
+                  style: { height: 27, padding: '0 11px', fontSize: 11.5 },
+                  onClick: () => void savePagerNow(),
+                }, bi('保存传呼配置', 'Save Pager Config')),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pill',
+                  style: { height: 27, padding: '0 10px', fontSize: 11.5 },
+                  disabled: pagerBusy,
+                  onClick: () => void runPagerTest(),
+                }, pagerBusy ? bi('发送中…', 'Testing…') : bi('📱 发测试消息到手机', '📱 Send Test')),
+                h('button', {
+                  type: 'button',
+                  className: 'dnb-pill',
+                  style: { height: 27, padding: '0 10px', fontSize: 11.5 },
+                  disabled: pagerBusy,
+                  onClick: () => void pushDigestNow(),
+                }, bi('📤 推当前进展', '📤 Push Digest')),
+                pagerMsg
+                  ? h('span', {
+                      style: {
+                        fontSize: 11,
+                        color: pagerMsg.startsWith('✅') ? 'var(--dnb-sage)' : 'var(--dnb-amber)',
+                        lineHeight: 1.35,
+                      },
+                    }, pagerMsg)
+                  : null,
+              ),
             )
-            patch({ notice: res.toast })
-          },
-        }, bi('测试提醒', 'Test')),
-        bodyStyle: { padding: 0 },
-      },
-      h(
-        'div',
-        { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-        h('div', { style: { minWidth: 0 } },
-          h('div', { style: { fontSize: 12.5 } }, bi('重要节点弹出电脑桌面通知', 'Desktop alerts at key moments')),
-          h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
-            bi('需要你批准、被安全拦截或自定义规则挡住、断线重连或到上限时通知', 'On approvals, safety or custom rule blocks, retries, or limits')),
-        ),
-        h(Switch, {
-          checked: meta.notifyEnabled !== false,
-          onChange: async on => {
-            if (on && getNotificationPermissionState() === 'default') {
-              const p = await requestNotificationPermission()
-              setNotifPerm(p)
-            }
-            void updateSecConfig({ notifyEnabled: on })
-          },
-        }),
-      ),
-      h(
-        'div',
-        { className: 'dnb-cell', style: { justifyContent: 'space-between' } },
-        h('span', { style: { fontSize: 12.5 } }, bi('响一下轻提示音（默认关闭）', 'Play a soft sound (off by default)')),
-        h(Switch, {
-          checked: Boolean(meta.notifySound),
-          onChange: on => {
-            if (on) {
-              fireChiefAlertNotification({ kind: 'auto_continue_rescue', level: 'info', body: bi('提示音已打开', 'Sound on') }, { sound: true })
-            }
-            void updateSecConfig({ notifySound: on })
-          },
-        }),
-      ),
-    ),
+          })(),
+        )
+      : null,
+
+    // ---------------- TAB 4: SAFETY & LEDGER ----------------
+    settingsTab === 'safety'
+      ? h(
+          React.Fragment,
+          null,
+          h(
+            AccCard,
+            {
+              open: safetyOpen,
+              onToggle: () => setSafetyOpen(v => !v),
+              tone: 'rose',
+              icon: h(Icon, { name: effectiveSafetyOn ? 'shieldCheck' : 'shieldOff', size: 13.5, style: { color: effectiveSafetyOn ? 'var(--dnb-sage)' : 'var(--dnb-coral)' } }),
+              title: bi('安全拦截（自动防误操作）', 'Safety Block (Auto Protection)'),
+              badges: h('span', { className: 'dnb-acc-badge', 'data-tone': effectiveSafetyOn ? 'green' : 'red' },
+                effectiveSafetyOn ? bi('保护开启', 'Active') : bi('已关闭', 'Disabled')),
+              preview: effectiveSafetyOn
+                ? bi('默认开启，防删文件、越界与读密钥', 'Active by default')
+                : (!globalSafetyOn ? bi('全部对话已关闭', 'Disabled for all chats') : bi('当前对话已关闭', 'Disabled in this chat')),
+              bodyStyle: { padding: 0 },
+            },
+            view && view.sessionId
+              ? h(
+                  'div',
+                  { className: 'dnb-cell', style: { justifyContent: 'space-between', gap: 8 } },
+                  h('div', { style: { minWidth: 0 } },
+                    h('div', { style: { fontSize: 12 } }, bi('当前对话开启安全拦截（默认开）', 'Enable Safety Block in this chat')),
+                    h('div', { style: { fontSize: 10.5, color: globalSafetyOn ? 'var(--dnb-text-3)' : 'var(--dnb-coral)', marginTop: 1 } },
+                      globalSafetyOn
+                        ? bi('自动拦住删文件、改项目外文件、读密钥等危险操作', 'Automatically blocks dangerous deletes, out-of-project edits, and secret reads')
+                        : bi('已被下方全部对话总开关关闭，请先打开总开关', 'Overridden by the global switch below; turn it on first')),
+                  ),
+                  h(Switch, {
+                    checked: globalSafetyOn && sessionSafetyOn,
+                    disabled: !globalSafetyOn,
+                    onChange: on => {
+                      if (!globalSafetyOn) return
+                      if (on) {
+                        void updateSecConfig({ tacticalModes: { safetyGuardEnabled: true } })
+                      } else {
+                        patch({
+                          safetyGuardModalOpen: true,
+                          safetyGuardModalScope: 'session',
+                          safetyGuardAgreed: false,
+                          safetyGuardPauseWalls: false,
+                        })
+                      }
+                    },
+                  }),
+                )
+              : null,
+            h(
+              'div',
+              { className: 'dnb-cell', style: { justifyContent: 'space-between', gap: 8 } },
+              h('div', { style: { minWidth: 0 } },
+                h('div', { style: { fontSize: 12 } }, bi('全部对话安全拦截总开关（默认开）', 'Safety Block for all chats (master switch)')),
+                h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 1 } },
+                  bi('关闭后所有对话都不会再触发自动拦截（边界页里自己加的拦截规则仍独立生效）', 'Turns off built-in blocking across all chats (your Custom Block Rules stay active)')),
+              ),
+              h(Switch, {
+                checked: globalSafetyOn,
+                onChange: on => {
+                  if (on) {
+                    void updateSecConfig({ globalSafetyGuardEnabled: true })
+                  } else {
+                    patch({
+                      safetyGuardModalOpen: true,
+                      safetyGuardModalScope: 'global',
+                      safetyGuardAgreed: false,
+                      safetyGuardPauseWalls: false,
+                    })
+                  }
+                },
+              }),
+            ),
+          ),
 
     // 6. Chief LLM Ledger & Hard Budget Circuit Breaker (Default Collapsed unless Tripped)
     h(
@@ -1956,6 +2819,8 @@ export function HandoffTab({ view }) {
         }),
       ),
     ),
+        )
+      : null,
   )
 }
 

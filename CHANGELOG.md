@@ -5,6 +5,44 @@ All notable changes to **`dsh-chief`** (**DSH 参谋长**) will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.0] - 2026-11-27
+
+> 里程碑大版本：参谋长真正“能听会说、能自己记事、能守边界、会真发令、还能手机远程报平安”。上线全链路**双模语音参谋长（DeepSeek / OpenAI 兼容 / 系统语音 TTS + SenseVoice / DeepSeek ASR 双通道识别 + 行内语音舞台 + 叫名唤醒 + 防空口支票实发闭环）**、**手机远程传呼（飞书 / 钉钉 / 企业微信 / Telegram / Discord / 自定义 Webhook）**、**「档案 → 🎙️ 手记」独立语音手记子页签 & 梦境自动消化引擎**、**双语 BM25 档案检索 + 卷宗演进快照回滚 + `[[双链]]` 暗铜失效联动预警**、**记忆工坊三协议通用向量客户端（OpenAI / Ollama / Gemini）**、**开箱即用参谋记忆本自主写入**、**工作边界「暂挂」开关**、**独立「外观与主题工坊」页面（精选 5 套 + DIY 工坊内含 `@iridiumgit` 在 Issue #7 贡献的「潮汐蓝」社区配色、配色 JSON 导入导出与服务端多端自动同步）**，以及面向非程序员用户的**全量体验瘦身与沙盒真机多轮打磨**。
+
+### Added & Improved
+- **双语 CJK + Latin BM25 工程档案检索全链路打通（`archive-core.js` / `archive-dossiers.js` / `src/client/tabs/archives.js`）**：
+  - 升级 `scoreAndRankArchiveItems` 与 `listArchiveHeaders`，引入 `tokenizeArchiveBilingual` 双语切词与 BM25（`k1=1.35, b=0.6`）+ IDF 长度归一化，精准召回无空格中文长句与正文内容，彻底告别词频 `includes` 简单叠加；前端档案搜索框同步接入后端 BM25 防抖检索（含本地切词瞬时预匹配）；
+  - 保留「三色曲别针」权威分层：亮金针（`gold`）微加成 `× 1.12`，暗铜针（`copper`）温和降权 `× 0.65`（保留作反面警示而不隐藏）。
+- **卷宗演进版本快照 `history[]` 与前端一键回滚（`archive-core.js` / `archive-dossiers.js` / `src/client/tabs/archives-cards.js`）**：
+  - 每次编辑保存、`sameTitle` 覆盖以及 `applyChiefArchiveCurations`（「✦ 请参谋长重拆此卷」/ 梦境漫游）前，自动将旧版标题、摘要、曲别针、正文章节压入最多 5 版的 `history[]` 快照；
+  - 新增 `mutateArchive({ op: "rollbackHistory", id, versionIndex })` 并在卷宗展开卡片提供 `🕒 历史 (N)` 快照抽屉与 `⏪ 回滚` 按钮，无损回滚同时保留当前版本快照。
+- **卷宗 `[[双链]]` 双向关联卡片、暗铜失效联动预警 & 幽灵双链根治（`archive-core.js` / `archive-dossiers.js` / `src/client/tabs/archives-cards.js`）**：
+  - 自动解析正文与要点中的 `[[目标卷宗]]` 显式双链并持久化进 `links`（修复编辑/覆盖删光双链时旧链接残留的幽灵问题）；`getArchiveDetail` 返回 `relations`（`outgoing` 传出 / `incoming` 被引用 / `staleDependencies` 已作废依赖），展开卡片可直接展示并点击跳转；
+  - 将某卷标为暗铜（`copper`）时自动返回并弹出受影响的活跃下游卷宗 `affectedDependents` 预警通知，引用方卡片顶部同步显示 `⚠️ 本档案引用了已作废（暗铜）档案` 警示条。
+- **参谋记忆工坊三协议通用向量客户端与 UI 选择器（`state-schema.js` / `external-memory-studio.js` / `src/client/tabs/extmem.js`）**：
+  - 在原有 OpenAI 兼容 `/embeddings` 基础上，新增 `provider`（`'openai' | 'ollama' | 'gemini'`）支持：原生适配本机 Ollama `/api/embed`（404 自动回退 `/api/embeddings`）与 Google Gemini `:embedContent`（密钥严格走 `x-goog-api-key` 请求头）；修复默认 `'openai'` 锁死 URL 自动识别的问题，在「记忆 → 接入与设置」上线协议切换开关、Ollama/Gemini 预设及友好中文连通报错；
+  - 新增并接入 `tests/verify-v201-cross-pollination-gate.mjs`（`X1–X4`）至 `npm run test:ci` / `npm test` 全链路隔离回归验收。
+- **🎙️ 语音参谋长、行内语音舞台与真实发令闭环（`chief-tts.js` / `voice-inbox.js` / `src/client/tts.js` / `src/client/voice-recorder.js` / `src/client/styles/tts.js` · `T1–T13`）**：
+  - 支持 DeepSeek 原生 `/v1/tools/tts`（自动复用 DSH 宿主账号态）、OpenAI 兼容 `/v1/audio/speech` 与浏览器离线朗读，内置密钥、代码、路径口语脱敏；支持本地 SenseVoice 与云端 `/v1/tools/asr` 16kHz 语音转写。
+  - 去除全屏毛玻璃遮罩，改为面板内联 **语音面聊舞台（`Alt+V` 一键呼出）**，支持免提连续 VAD 对话、无麦克风权限静默降级、中英文同音容错与打字叫名自动唤醒。
+  - 加固语音模式防空口支票守卫：语音中让参谋长催办/push 主对话时强制走 L0–L3 权限门禁（L0/L1 弹出提权窗、L2 弹出逐项确认窗、L3 真实投递 `@lead`），权限未批时如实说明不撒谎。
+- **📲 手机远程传呼与里程碑告警（`remote-pager.js` · `P1–P8`）**：
+  - 支持 **飞书 / 钉钉 / 企业微信 / Telegram / Discord / 自定义 Webhook** 6 个通道，自动推送待审批/提权、安全拦停、高危急停、托管收工与预算熔断告警（脱敏推送、HMAC 加签、冷却去重）。
+- **🎙️ 语音手记收件区 & 「档案 → 手记」独立子页签（`voice-inbox.js` / `src/client/tabs/archives.js`）**：
+  - 语音输入与语音唠嗑先脱敏落盘 `~/.dsh/chief/voice-inbox/`，经「🌙 梦境整理」拆入长期记忆、用户画像、参谋日记与手记文稿（与 `@lead` 0 字节隔离）。
+  - 在「档案」下新增第 5 个子页签 `🎙️ 手记`，统一收纳待整理语音与已归档手记文稿，使「全局 / 本局」专注于工程档案，「记忆」页保持纯粹清单。
+- **🎨 独立「外观与主题工坊」页面 & 社区诉求响应（感谢 `@iridiumgit` · [Issue #7](https://github.com/gluztm/dsh-chief/issues/7)）**：
+  - 将主题选择由悬浮气泡升级为独立工坊页（标明多端同步）：`精选预设 (5)` 保留 5 套官方皮肤；`DIY 工坊` 内嵌顶部「🌊 社区配色」收纳 `@iridiumgit` 贡献的深浅双模 **「潮汐蓝 (`tide`)」**（支持一键启用或拿来微调），同时支持图片提色、高清壁纸、参谋长 AI DIY 及 **配色 JSON 导入/导出**。
+  - 选中主题（`uiSkin`）与自定义配色（`customSkin`）同步持久化到服务端 `~/.dsh/chief/`（支持 `127.0.0.1` / 局域网 / Tailnet / 多浏览器一致）。
+- **⏸ 工作边界「暂挂」与开箱参谋记忆自主写入**：
+  - 边界条文新增「暂挂」勾选框，可随时暂挂与恢复而无需删改重写；参谋内置长期记忆本（`builtin-md`）改为默认开箱启用，对话产出的 `memoryChanges` 实时同步写入 `MEMORY.md`。
+
+### Improved & Fixed
+- **小白体验全量瘦身与沙盒多轮实机打磨**：
+  - 底部 `+` 控制面板砍掉 18 格百分比矩阵，精简为 4 项高频开关 + 3 档预设（`65% / 80% / 90%`）；提权弹窗与回执清洗代码术语、批准后自动清理过期 L0 提示；
+  - 修复设置页「常用场景预设」3 列卡片横向溢出裁切、「档案 → 手记」窄屏顶栏重叠、进入档案时初始角标滞后刷新、DIY 4 槽标题竖向折行、L2 权限メニュー贴底微裁、气泡里孤立「思考关」与粗体 `**` 未解析、以及「按需可查 / 标记重要程度」等晦涩行话；
+  - 恢复 `autoDistill.minTurns: 2` 修复后台自动提炼竞态；全量门禁与 8 轴红队审计零回归，10 个安全内核模块 MD5 严格锁定未改。
+
 ## [1.9.0] - 2026-11-26
 
 > 里程碑大版本：推出全新**参谋专属「记忆工作台」与外部记忆桥接（`dsh-chief.provider/v1` · 对 `@lead` 严格 0 字节隔离）**（开箱 `MEMORY.md` 纯文本记事本 + 2D/3D 星云星图与艾宾浩斯遗忘曲线 + 5 维可锁定 `USER_PROFILE.md` 用户画像 + 提示词工坊 + X-Ray 召回测试 + Embedding API 语义重排，并开放接入 `mcp-http` / `chief-http` 双槽含独立心境槽位 / `markdown-vault` 只读 Obsidian / `cordis-provider`）；同步带来零依赖**第 6 套「自定义 DIY 主题工坊」（本地图片提色 + 25MB 高清壁纸 + 参谋长 AI DIY）**、全新默认**「极简左侧边栏」工作台布局 & 护眼浅色主题**、开箱即用**「安全拦截预设包 v2」（事前物理硬拦截）**、认知桌面扩容、梦境漫游跨作用域路由与品牌彩蛋联动；并在发版前完成**隔离沙盒全链路真机实测与三波边测边修，将实机暴露的 21 项大小问题全部清零**（`M1–M17` 回归门禁全绿，10 个 MD5 锁定安全内核零改动）。

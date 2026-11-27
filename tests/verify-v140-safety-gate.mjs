@@ -130,7 +130,7 @@ try {
   // -------------------------------------------------------------------------
   // S1. Safety Kernel Structure, Version Alignment, Files Whitelist, Acyclic
   // -------------------------------------------------------------------------
-  assert.match(String(pkgJson.version || ''), /^1\.[4-9]\.\d+/, 'package.json version must be >= 1.4.0')
+  assert.match(String(pkgJson.version || ''), /^(?:1\.(?:[4-9]|[1-9]\d)|[2-9]\.\d+)\.\d+/, 'package.json version must be >= 1.4.0')
   assert.equal(schemaMod.BACKEND_BUILD, pkgJson.version, 'BACKEND_BUILD must align with package.json version')
   assert.equal(constMod.EXPECTED_BACKEND_BUILD, pkgJson.version, 'EXPECTED_BACKEND_BUILD must align with package.json version')
   assert.ok(Array.isArray(pkgJson.files) && pkgJson.files.includes('safety/*.js'), 'package.json files must include safety/*.js')

@@ -35,7 +35,18 @@ import { callChiefLlm } from './chief-models.js'
 import {
   redactExternalMemoryConfigForUi,
   normalizeExternalMemoryConfig,
+  normalizeTtsConfig,
+  redactTtsConfigForUi,
+  normalizePagerConfig,
 } from './state-schema.js'
+import { getChiefTtsStatus, synthesizeChiefSpeech, probeChiefTts, transcribeChiefAudio } from './chief-tts.js'
+import { getRemotePagerStatus, sendRemotePagerMessage, testRemotePager } from './remote-pager.js'
+import {
+  appendVoiceTranscript,
+  listVoiceTranscripts,
+  deleteVoiceTranscript,
+} from './voice-inbox.js'
+import { runManagedDreamRoam } from './chief-archives.js'
 import { renderDigest } from './digest.js'
 import { memorySections, renderMemoryDigest } from './memory.js'
 import {
@@ -343,6 +354,7 @@ export function createApiRoutes(deps) {
                 managedIdleTimeoutMs: effCfg.managedIdleTimeoutMs || 15 * 60 * 1000,
                 notifyEnabled: effCfg.notifyEnabled !== false,
                 notifySound: Boolean(effCfg.notifySound),
+                tts: redactTtsConfigForUi(effCfg.tts),
                 uiLang: effCfg.uiLang || 'auto',
                 managedBudgetMaxCalls: effCfg.managedBudgetMaxCalls ?? 30,
                 managedBudgetMaxTokens: effCfg.managedBudgetMaxTokens ?? 300000,
@@ -636,6 +648,8 @@ export function createApiRoutes(deps) {
               forcedMode: typeof body.mode === 'string' ? body.mode : 'steer',
               quickAction: typeof body.quickAction === 'string' ? body.quickAction.trim().slice(0, 40) : '',
               images: Array.isArray(body.images) ? body.images : [],
+              voiceChat: Boolean(body.voiceChat),
+              voiceTranscriptId: typeof body.voiceTranscriptId === 'string' ? body.voiceTranscriptId.trim() : '',
             })
             const board = out.ok && sessionId ? boardForSession(boardFileFor(sessionId)) : undefined
             sendJson(res, out.ok ? 200 : 400, board ? { ...out, board } : out)
@@ -1532,6 +1546,183 @@ export function createApiRoutes(deps) {
                 extractedSwatches: Array.isArray(body.extractedSwatches) ? body.extractedSwatches : [],
               })
               sendJson(res, out && out.ok === false ? 400 : 200, out)
+              return
+            }
+            if (rawOp.startsWith('tts.')) {
+              const rootSid = resolveRootSessionId(sessionId) || sessionId || 'global'
+              const stNow = loadChiefState()
+              const effCfgNow = resolveWorkspaceConfig(stNow, rootSid)
+              if (rawOp === 'tts.status') {
+                const statusOut = await getChiefTtsStatus(runtime, effCfgNow.tts)
+                sendJson(res, 200, statusOut)
+                return
+              }
+              if (rawOp === 'tts.probe') {
+                const probeCfg = body.config && typeof body.config === 'object'
+                  ? normalizeTtsConfig(body.config, effCfgNow.tts)
+                  : effCfgNow.tts
+                const out = await probeChiefTts(runtime, probeCfg, {
+                  sampleText: typeof body.text === 'string' ? body.text : '',
+                })
+                const ttsStatus = await getChiefTtsStatus(runtime, probeCfg)
+                sendJson(res, out && out.ok ? 200 : 400, { ...out, ttsStatus })
+                return
+              }
+              if (rawOp === 'tts.synthesize') {
+                const draftCfg = body.config && typeof body.config === 'object'
+                  ? normalizeTtsConfig(body.config, effCfgNow.tts)
+                  : effCfgNow.tts
+                const mergedCfg = normalizeTtsConfig({
+                  ...(typeof body.provider === 'string' ? { provider: body.provider } : {}),
+                  ...(typeof body.voiceId === 'string' ? { voiceId: body.voiceId } : {}),
+                  ...(typeof body.format === 'string' ? { format: body.format } : {}),
+                  ...(body.speed !== undefined ? { speed: body.speed } : {}),
+                }, draftCfg)
+                const out = await synthesizeChiefSpeech(runtime, mergedCfg, {
+                  text: typeof body.text === 'string' ? body.text : '',
+                  style: body.style === 'brief' || body.style === 'full' ? body.style : mergedCfg.speechStyle,
+                  voiceId: typeof body.voiceId === 'string' ? body.voiceId : mergedCfg.voiceId,
+                  speed: body.speed !== undefined ? body.speed : mergedCfg.speed,
+                  format: typeof body.format === 'string' ? body.format : mergedCfg.format,
+                  maxChars: body.maxChars,
+                })
+                if (!out || !out.ok) {
+                  const errStatus = out && (out.code === 'EMPTY_TEXT' || out.code === 'MISSING_BASE_URL') ? 400 : 502
+                  sendJson(res, errStatus, out || { ok: false, error: '语音合成失败' })
+                  return
+                }
+                if (out.mode === 'browser') {
+                  sendJson(res, 200, out)
+                  return
+                }
+                const wantsBinary = body.binary === true || String((req.headers && req.headers.accept) || '').includes('audio/')
+                if (wantsBinary) {
+                  res.statusCode = 200
+                  res.setHeader('content-type', out.mimeType || 'audio/wav')
+                  res.setHeader('cache-control', 'no-store')
+                  res.setHeader('x-dsh-chief-tts-provider', out.provider || '')
+                  res.setHeader('x-dsh-chief-tts-chars', String(out.chars || 0))
+                  res.setHeader('x-dsh-chief-tts-truncated', out.truncated ? '1' : '0')
+                  res.end(out.buffer)
+                  return
+                }
+                sendJson(res, 200, {
+                  ok: true,
+                  mode: 'audio',
+                  provider: out.provider,
+                  voiceId: out.voiceId,
+                  format: out.format,
+                  mimeType: out.mimeType,
+                  bytes: out.bytes,
+                  chars: out.chars,
+                  truncated: out.truncated,
+                  textUsed: out.textUsed,
+                  latencyMs: out.latencyMs,
+                  audioBase64: out.buffer.toString('base64'),
+                })
+                return
+              }
+              if (rawOp === 'tts.transcribe') {
+                const sttOut = await transcribeChiefAudio(runtime, effCfgNow.tts, {
+                  audioBase64: typeof body.audioBase64 === 'string' ? body.audioBase64 : '',
+                  mimeType: typeof body.mimeType === 'string' ? body.mimeType : 'audio/wav',
+                  prefer: typeof body.prefer === 'string' ? body.prefer : 'auto',
+                })
+                if (!sttOut || !sttOut.ok) {
+                  sendJson(res, sttOut && sttOut.code === 'EMPTY_AUDIO' ? 400 : 502, sttOut || { ok: false, error: '语音转写失败' })
+                  return
+                }
+                let savedInbox = null
+                if (body.saveToInbox !== false) {
+                  savedInbox = appendVoiceTranscript({
+                    text: sttOut.text,
+                    mode: body.mode === 'voice_chat' ? 'voice_chat' : 'dictation',
+                    provider: sttOut.provider || 'dsh-local',
+                    sessionId: rootSid,
+                    durationMs: Number(body.durationMs) || 0,
+                  })
+                }
+                sendJson(res, 200, {
+                  ...sttOut,
+                  voiceTranscriptId: savedInbox && savedInbox.ok ? savedInbox.id : '',
+                  voiceInboxFile: savedInbox && savedInbox.ok ? savedInbox.fileName : '',
+                })
+                return
+              }
+              if (rawOp === 'tts.voice_inbox_record') {
+                const rec = appendVoiceTranscript({
+                  text: typeof body.text === 'string' ? body.text : '',
+                  mode: body.mode === 'voice_chat' ? 'voice_chat' : 'dictation',
+                  provider: typeof body.provider === 'string' ? body.provider : 'browser',
+                  sessionId: rootSid,
+                  durationMs: Number(body.durationMs) || 0,
+                  chiefReply: typeof body.chiefReply === 'string' ? body.chiefReply : '',
+                })
+                sendJson(res, rec && rec.ok ? 200 : 400, rec || { ok: false, error: '保存语音手记失败' })
+                return
+              }
+              if (rawOp === 'tts.voice_inbox_list') {
+                const listOut = listVoiceTranscripts({
+                  limit: Number(body.limit) || 40,
+                })
+                sendJson(res, 200, listOut)
+                return
+              }
+              if (rawOp === 'tts.voice_inbox_delete') {
+                const delOut = deleteVoiceTranscript(typeof body.id === 'string' ? body.id : '')
+                sendJson(res, delOut && delOut.ok ? 200 : 400, delOut)
+                return
+              }
+              if (rawOp === 'tts.voice_inbox_dream_now') {
+                const roamOut = await runManagedDreamRoam(makeChiefDeps(runtime), {
+                  sessionId: rootSid,
+                  maxPerVault: 6,
+                })
+                sendJson(res, roamOut && roamOut.ok ? 200 : 500, roamOut || { ok: false, error: '梦境整理失败' })
+                return
+              }
+              sendJson(res, 400, { ok: false, error: '未知 tts 操作: ' + rawOp })
+              return
+            }
+            if (rawOp.startsWith('pager.')) {
+              const rootSid = resolveRootSessionId(sessionId) || sessionId || 'global'
+              const stNow = loadChiefState()
+              const effCfgNow = resolveWorkspaceConfig(stNow, rootSid)
+              if (rawOp === 'pager.status') {
+                sendJson(res, 200, getRemotePagerStatus(effCfgNow.remotePager))
+                return
+              }
+              if (rawOp === 'pager.test') {
+                const mergedCfg = body.config && typeof body.config === 'object'
+                  ? normalizePagerConfig(body.config, effCfgNow.remotePager)
+                  : effCfgNow.remotePager
+                const out = await testRemotePager(mergedCfg, {
+                  text: typeof body.text === 'string' ? body.text : '',
+                })
+                const pagerStatus = getRemotePagerStatus(mergedCfg)
+                sendJson(res, out && out.ok ? 200 : 400, { ...out, pagerStatus })
+                return
+              }
+              if (rawOp === 'pager.send') {
+                const mergedCfg = body.config && typeof body.config === 'object'
+                  ? normalizePagerConfig(body.config, effCfgNow.remotePager)
+                  : effCfgNow.remotePager
+                const out = await sendRemotePagerMessage(
+                  mergedCfg,
+                  {
+                    kind: 'manual',
+                    level: typeof body.level === 'string' ? body.level : 'info',
+                    title: typeof body.title === 'string' && body.title.trim() ? body.title.trim() : '参谋长主动战报推送',
+                    body: typeof body.body === 'string' && body.body.trim() ? body.body.trim() : '请回 DSH 桌面端查看当前任务进展。',
+                    sessionId: rootSid,
+                  },
+                  { bypassCooldown: true },
+                )
+                const pagerStatus = getRemotePagerStatus(mergedCfg)
+                sendJson(res, out && out.ok ? 200 : 400, { ...out, pagerStatus })
+                return
+              }
+              sendJson(res, 400, { ok: false, error: '未知 pager 操作: ' + rawOp })
               return
             }
             markSessionActivated(sessionId)

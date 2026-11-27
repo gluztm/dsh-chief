@@ -14,6 +14,7 @@ import {
   copyText,
   addBoundRule,
   toggleBoundPin,
+  toggleBoundPause,
   removeBoundRule,
   editBoundRule,
   toggleBoundSelect,
@@ -671,7 +672,7 @@ function GuardWallsCard({ view }) {
   )
 }
 
-function BoundCard({ field, label, dot, items, pinnedItems, view }) {
+function BoundCard({ field, label, dot, items, pinnedItems, pausedItems, pausedPinnedItems, view }) {
   const [editingItem, setEditingItem] = React.useState('')
   const [editingVal, setEditingVal] = React.useState('')
 
@@ -681,20 +682,12 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
     boundCollapsedCols: { ...collapsedCols, [field]: !isColCollapsed },
   })
 
-  const draft = (store.boundDraft && store.boundDraft[field]) || ''
-  const pinDraft = Boolean(store.boundPinDraft && store.boundPinDraft[field])
-  const list = Array.isArray(items) ? items : []
+  const activeList = Array.isArray(items) ? items : []
+  const pausedList = Array.isArray(pausedItems) ? pausedItems : []
   const pinnedSet = new Set(Array.isArray(pinnedItems) ? pinnedItems : [])
-  const selected = ((store.boundSelected && store.boundSelected[field]) || []).filter(x => list.includes(x))
-  const full = list.length >= BOUND_CAP
+  const pausedPinnedSet = new Set(Array.isArray(pausedPinnedItems) ? pausedPinnedItems : [])
+  const selected = ((store.boundSelected && store.boundSelected[field]) || []).filter(x => activeList.includes(x))
   const isConsolidatingCol = store.boundConsolidating === field
-
-  const commit = () => {
-    const text = draft.trim()
-    if (!text || full) return
-    if (!list.includes(text)) void addBoundRule(field, text, pinDraft)
-    else patch({ boundDraft: { ...store.boundDraft, [field]: '' } })
-  }
 
   const saveInlineEdit = () => {
     const nextText = editingVal.trim()
@@ -706,7 +699,11 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
     }
   }
 
-  const pinnedCountInCol = list.filter(x => pinnedSet.has(x)).length
+  const pinnedCountInCol = activeList.filter(x => pinnedSet.has(x)).length
+  const combinedEntries = [
+    ...activeList.map(item => ({ item, isPaused: false })),
+    ...pausedList.map(item => ({ item, isPaused: true })),
+  ]
 
   const uiLabel = (label === '必须做' || label === '必做事项' || field === 'allowed')
     ? bi('必须做', 'Must Do')
@@ -717,6 +714,10 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
             : label))
   const boundTone = field === 'allowed' ? 'emerald' : (field === 'forbidden' ? 'rose' : 'amber')
   const softDot = field === 'allowed' ? 'var(--dnb-sage, #63d1b0)' : (field === 'forbidden' ? 'var(--dnb-coral, #f28b88)' : (dot || 'var(--dnb-amber, #f3be6d)'))
+  const countLabel = pausedList.length > 0
+    ? `${activeList.length} ${bi('生效', 'on')} · ${pausedList.length} ${bi('暂挂', 'paused')}`
+    : (activeList.length ? String(activeList.length) : '')
+
   return h(
     AccCard,
     {
@@ -726,15 +727,17 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
       title: uiLabel,
       headTitle: isColCollapsed ? bi(`展开「${uiLabel}」`, `Expand ${uiLabel}`) : bi(`收起「${uiLabel}」`, `Collapse ${uiLabel}`),
       icon: h('span', { style: { width: 7, height: 7, borderRadius: '50%', background: softDot, flexShrink: 0 } }),
-      count: list.length ? String(list.length) : '',
+      count: countLabel,
       badges: pinnedCountInCol > 0
         ? h('span', { className: 'dnb-acc-badge', 'data-tone': 'amber', style: { display: 'inline-flex', alignItems: 'center', gap: 3 } },
             h(Icon, { name: 'pin', size: 10 }),
             String(pinnedCountInCol))
         : null,
-      preview: list.length ? list.slice(0, 2).join('；') : '还没有规则',
+      preview: activeList.length
+        ? activeList.slice(0, 2).join('；')
+        : (pausedList.length ? bi(`已暂挂 ${pausedList.length} 条`, `${pausedList.length} paused`) : bi('还没有规则', 'No rules yet')),
       bodyStyle: { padding: 0 },
-      actions: list.length >= 2
+      actions: activeList.length >= 2
         ? h('button', {
             type: 'button',
             className: 'dnb-pill',
@@ -749,7 +752,7 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
             disabled: Boolean(store.secBusy),
             title: selected.length >= 2
               ? `把勾选的 ${selected.length} 条规则合并成一条`
-              : `把「${label}」下的 ${list.length} 条规则精简成一条`,
+              : `把「${label}」下的 ${activeList.length} 条规则精简成一条`,
             onClick: () => void requestConsolidateBounds(field, selected.length >= 2 ? selected : []),
           },
           h(Icon, { name: 'sparkles', size: 10.5 }),
@@ -769,136 +772,147 @@ function BoundCard({ field, label, dot, items, pinnedItems, view }) {
             borderBottom: '1px solid var(--dnb-border)',
           },
         }, bi(
-          '说明：开着「安全拦截」时，这里写的高危命令也会顺带拦下；普通文字要求请写到「注意」里。',
-          'Note: With Safety Block on, dangerous commands mentioned here may also be blocked; put general reminders under Watchouts.',
+          '说明：开着「安全拦截」时，这里写的高危命令也会顺带拦下；勾选「暂挂」可随时停用或取消，也可点右侧 × 直接撤回。',
+          'Note: Active rules here are enforced; check "Pause" to suspend temporarily or click × to remove anytime.',
         ))
       : null,
-    list.map((item, idx) => {
-      const isPinned = pinnedSet.has(item)
-      const isChecked = selected.includes(item)
-      const isRowEditing = editingItem === item
+    combinedEntries.length === 0
+      ? h('div', { style: { padding: '8px 12px', fontSize: 11.5, color: 'var(--dnb-text-3)' } },
+          bi('暂无规则（可在上方快捷栏添加）', 'No rules yet (add above)'))
+      : combinedEntries.map(({ item, isPaused }, idx) => {
+          const isPinned = isPaused ? pausedPinnedSet.has(item) : pinnedSet.has(item)
+          const isChecked = !isPaused && selected.includes(item)
+          const isRowEditing = editingItem === item
 
-      return h(
-        'div',
-        {
-          key: idx + ':' + item,
-          className: 'dnb-cell dnb-cell-hover',
-          style: {
-            justifyContent: 'space-between',
-            gap: 8,
-            boxShadow: isPinned ? 'inset 2.5px 0 0 var(--dnb-amber, #f3be6d)' : undefined,
-          },
-        },
-        // Front Pushpin Stamp (小图钉戳)
-        h('button', {
-          className: 'dnb-pin-stamp',
-          'data-pinned': isPinned ? '1' : '0',
-          title: isPinned
-            ? '已固定到全局，点一下改回仅本次有效'
-            : '仅本次有效，点一下固定到全局',
-          onClick: () => void toggleBoundPin(field, item, !isPinned),
-        }, h(Icon, { name: 'pinStamp', size: 13 })),
-
-        isRowEditing
-          ? h('input', {
-              className: 'dnb-input',
-              style: { flex: 1, height: 26, fontSize: 12, padding: '0 7px' },
-              autoFocus: true,
-              value: editingVal,
-              onChange: e => setEditingVal(e.target.value),
-              onBlur: saveInlineEdit,
-              onKeyDown: e => {
-                if (e.key === 'Enter') saveInlineEdit()
-                else if (e.key === 'Escape') {
-                  setEditingItem('')
-                  setEditingVal('')
-                }
+          return h(
+            'div',
+            {
+              key: (isPaused ? 'p:' : 'a:') + idx + ':' + item,
+              className: 'dnb-cell dnb-cell-hover',
+              style: {
+                justifyContent: 'space-between',
+                gap: 8,
+                opacity: isPaused ? 0.65 : 1,
+                boxShadow: !isPaused && isPinned ? 'inset 2.5px 0 0 var(--dnb-amber, #f3be6d)' : undefined,
               },
-            })
-          : h(
+            },
+            // Front Pushpin Stamp
+            h('button', {
+              className: 'dnb-pin-stamp',
+              'data-pinned': isPinned ? '1' : '0',
+              disabled: isPaused,
+              style: isPaused ? { opacity: 0.4, cursor: 'not-allowed' } : undefined,
+              title: isPaused
+                ? bi('已暂挂，取消暂挂后可切换全局/本任务', 'Paused; resume first to change scope')
+                : (isPinned
+                    ? '已固定到全局，点一下改回仅本次有效'
+                    : '仅本次有效，点一下固定到全局'),
+              onClick: () => { if (!isPaused) void toggleBoundPin(field, item, !isPinned) },
+            }, h(Icon, { name: 'pinStamp', size: 13 })),
+
+            isRowEditing
+              ? h('input', {
+                  className: 'dnb-input',
+                  style: { flex: 1, height: 26, fontSize: 12, padding: '0 7px' },
+                  autoFocus: true,
+                  value: editingVal,
+                  onChange: e => setEditingVal(e.target.value),
+                  onBlur: saveInlineEdit,
+                  onKeyDown: e => {
+                    if (e.key === 'Enter') saveInlineEdit()
+                    else if (e.key === 'Escape') {
+                      setEditingItem('')
+                      setEditingVal('')
+                    }
+                  },
+                })
+              : h(
+                  'div',
+                  {
+                    style: { display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 },
+                    onDoubleClick: () => {
+                      setEditingItem(item)
+                      setEditingVal(item)
+                    },
+                  },
+                  isPinned ? h('span', { className: 'dnb-pin-badge' }, '全局') : null,
+                  isPaused
+                    ? h('span', {
+                        className: 'dnb-acc-badge',
+                        'data-tone': 'amber',
+                        style: { fontSize: 10, flexShrink: 0 },
+                      }, bi('已暂挂', 'Paused'))
+                    : null,
+                  h('span', {
+                    style: {
+                      fontSize: 12.5,
+                      wordBreak: 'break-word',
+                      flex: 1,
+                      fontWeight: isPinned && !isPaused ? 500 : 400,
+                      textDecoration: isPaused ? 'line-through' : 'none',
+                      color: isPaused ? 'var(--dnb-text-3)' : 'var(--dnb-text)',
+                    },
+                  }, item),
+                ),
+
+            h(
               'div',
-              {
-                style: { display: 'flex', alignItems: 'center', gap: 6, flex: 1, minWidth: 0 },
-                onDoubleClick: () => {
-                  setEditingItem(item)
-                  setEditingVal(item)
-                },
-              },
-              isPinned ? h('span', { className: 'dnb-pin-badge' }, '全局') : null,
-              h('span', {
-                style: {
-                  fontSize: 12.5,
-                  wordBreak: 'break-word',
-                  flex: 1,
-                  fontWeight: isPinned ? 500 : 400,
-                },
-              }, item),
+              { style: { display: 'inline-flex', alignItems: 'center', gap: 5, flexShrink: 0 } },
+              !isPaused && activeList.length >= 2 && !isRowEditing
+                ? h('button', {
+                    className: 'dnb-bound-check',
+                    'data-checked': isChecked ? '1' : '0',
+                    title: isChecked ? '已勾选，可合并成一条' : '勾选多条规则后合并成一条',
+                    onClick: () => toggleBoundSelect(field, item),
+                  }, h(Icon, { name: 'check', size: 10.5 }))
+                : null,
+              !isRowEditing
+                ? h('label', {
+                    className: 'dnb-bound-pause-toggle',
+                    'data-paused': isPaused ? '1' : '0',
+                    title: isPaused
+                      ? bi('已暂挂（当前不生效），取消勾选立即恢复', 'Paused; uncheck to resume immediately')
+                      : bi('勾选后暂挂此条边界（停用生效但不删除，可随时恢复）', 'Check to pause this rule temporarily'),
+                    onClick: e => e.stopPropagation(),
+                  },
+                    h('input', {
+                      type: 'checkbox',
+                      checked: isPaused,
+                      onChange: () => void toggleBoundPause(field, item, !isPaused),
+                    }),
+                    h('span', null, bi('暂挂', 'Pause')),
+                  )
+                : null,
+              !isRowEditing
+                ? h('button', {
+                    type: 'button',
+                    className: 'dnb-icon-btn',
+                    style: { width: 22, height: 22, opacity: 0.78 },
+                    title: '编辑',
+                    onClick: () => {
+                      setEditingItem(item)
+                      setEditingVal(item)
+                    },
+                  }, h(Icon, { name: 'edit', size: 11.5 }))
+                : null,
+              h('button', {
+                type: 'button',
+                className: 'dnb-icon-btn',
+                style: { width: 22, height: 22, opacity: 0.85, color: 'var(--dnb-coral, #f28b88)' },
+                title: bi('彻底删除这条规则', 'Delete this rule'),
+                onClick: () => void removeBoundRule(field, item),
+              }, h(Icon, { name: 'x', size: 12 })),
             ),
-
-        h(
-          'div',
-          { style: { display: 'inline-flex', alignItems: 'center', gap: 4, flexShrink: 0 } },
-          list.length >= 2 && !isRowEditing
-            ? h('button', {
-                className: 'dnb-bound-check',
-                'data-checked': isChecked ? '1' : '0',
-                title: isChecked ? '已勾选，可合并成一条' : '勾选多条规则后合并成一条',
-                onClick: () => toggleBoundSelect(field, item),
-              }, h(Icon, { name: 'check', size: 10.5 }))
-            : null,
-          !isRowEditing
-            ? h('button', {
-                className: 'dnb-icon-btn dnb-row-actions',
-                style: { width: 22, height: 22 },
-                title: '编辑',
-                onClick: () => {
-                  setEditingItem(item)
-                  setEditingVal(item)
-                },
-              }, h(Icon, { name: 'edit', size: 11.5 }))
-            : null,
-          h('button', {
-            className: 'dnb-icon-btn dnb-row-actions',
-            style: { width: 22, height: 22, color: 'var(--dnb-coral, #f28b88)' },
-            title: '删除这条规则',
-            onClick: () => void removeBoundRule(field, item),
-          }, h(Icon, { name: 'x', size: 12 })),
-        ),
-      )
-    }),
-    h(
-      'div',
-      { className: 'dnb-cell', style: { padding: '6px 10px', gap: 7 } },
-      h('button', {
-        className: 'dnb-pin-stamp',
-        'data-pinned': pinDraft ? '1' : '0',
-        title: pinDraft ? '新规则会固定到全局（点图钉切换）' : '新规则仅本次有效（点图钉固定）',
-        onClick: () => patch({ boundPinDraft: { ...(store.boundPinDraft || {}), [field]: !pinDraft } }),
-      }, h(Icon, { name: 'pinStamp', size: 12.5 })),
-      h('input', {
-        className: 'dnb-input',
-        style: { border: 'none', background: 'transparent', padding: '2px 4px', height: 24, flex: 1 },
-        placeholder: full
-          ? '已达上限'
-          : (pinDraft ? '输入全局规则（所有任务都生效）…' : '输入本任务规则（点左边图钉可固定到全局）…'),
-        disabled: full,
-        value: draft,
-        onChange: e => patch({ boundDraft: { ...store.boundDraft, [field]: e.target.value } }),
-        onKeyDown: e => { if (e.key === 'Enter') commit() },
-      }),
-      draft.trim()
-        ? h('button', {
-            className: 'dnb-pill dnb-pill-accent',
-            style: { height: 24 },
-            onClick: commit,
-          }, pinDraft ? '📌 固定添加' : '添加')
-        : null,
-    ),
+          )
+        }),
   )
 }
 
 export function BoundariesTab({ store: view }) {
   const [showEnv, setShowEnv] = React.useState(() => (view && view.boundSubTab) === 'env')
+  const [quickField, setQuickField] = React.useState('forbidden')
+  const [quickText, setQuickText] = React.useState('')
+  const [quickPin, setQuickPin] = React.useState(false)
   React.useEffect(() => {
     if (view && view.boundSubTab === 'env') setShowEnv(true)
   }, [view && view.boundSubTab])
@@ -911,6 +925,18 @@ export function BoundariesTab({ store: view }) {
 
   const bounds = (view.board && view.board.bounds) || {}
   const pinnedBounds = (view.board && view.board.pinnedBounds) || {}
+  const pausedBounds = (view.board && view.board.pausedBounds) || {}
+  const pausedPinnedBounds = (view.board && view.board.pausedPinnedBounds) || {}
+  const submitQuickBound = () => {
+    const clean = String(quickText || '').trim()
+    if (!clean) return
+    const curList = Array.isArray(bounds[quickField]) ? bounds[quickField] : []
+    if (curList.length >= BOUND_CAP) return
+    setQuickText('')
+    if (!curList.includes(clean)) {
+      void addBoundRule(quickField, clean, quickPin)
+    }
+  }
   const hasConsolidatableCol = BOUND_LISTS.some(b => ((bounds[b.field] || []).length >= 2))
   const totalPinnedCount = BOUND_LISTS.reduce((acc, b) => acc + ((pinnedBounds[b.field] || []).length), 0)
   const collapsedCols = view.boundCollapsedCols || {}
@@ -1100,6 +1126,63 @@ export function BoundariesTab({ store: view }) {
         ),
       ),
     ),
+    h(
+      'div',
+      { className: 'dnb-bound-quickbar' },
+      h(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 6, flexWrap: 'wrap' } },
+        h(
+          'div',
+          { style: { display: 'inline-flex', alignItems: 'center', gap: 5 } },
+          [
+            { field: 'allowed', label: bi('必须做', 'Must Do') },
+            { field: 'forbidden', label: bi('不要做', 'Don\'t Do') },
+            { field: 'notes', label: bi('注意', 'Watchouts') },
+          ].map(opt =>
+            h('button', {
+              key: opt.field,
+              type: 'button',
+              className: 'dnb-mini-btn',
+              'data-tone': quickField === opt.field ? 'accent' : undefined,
+              onClick: () => setQuickField(opt.field),
+            }, opt.label)),
+        ),
+        h('button', {
+          type: 'button',
+          className: 'dnb-mini-btn',
+          'data-tone': quickPin ? 'amber' : undefined,
+          title: quickPin ? bi('当前将固定为所有任务通用', 'Applies globally across sessions') : bi('当前仅本次对话有效，点这里改为全局通用', 'This chat only; click to pin globally'),
+          onClick: () => setQuickPin(v => !v),
+        }, h(Icon, { name: 'pinStamp', size: 11.5 }), quickPin ? bi('📌 全局通用', '📌 Global') : bi('仅本任务', 'This Task')),
+      ),
+      h(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', gap: 6 } },
+        h('input', {
+          className: 'dnb-input',
+          style: { flex: 1, height: 30, fontSize: 12.5, padding: '0 10px' },
+          placeholder: quickPin
+            ? bi('写一条全局规矩（所有对话都生效），回车添加…', 'Add a global rule across all sessions, press Enter…')
+            : bi('写一条给 AI 的规矩，回车添加…', 'Add a rule for AI, press Enter…'),
+          value: quickText,
+          onChange: e => setQuickText(e.target.value),
+          onKeyDown: e => {
+            if (e.key === 'Enter') {
+              e.preventDefault()
+              submitQuickBound()
+            }
+          },
+        }),
+        h('button', {
+          type: 'button',
+          className: 'dnb-primary-btn',
+          style: { height: 30, padding: '0 12px', fontSize: 12, flexShrink: 0 },
+          disabled: !String(quickText || '').trim(),
+          onClick: submitQuickBound,
+        }, quickPin ? bi('📌 固定添加', '📌 Add Global') : bi('+ 添加', '+ Add')),
+      ),
+    ),
     BOUND_LISTS.map(b =>
       h(BoundCard, {
         key: b.field,
@@ -1108,6 +1191,8 @@ export function BoundariesTab({ store: view }) {
         dot: b.dot,
         items: bounds[b.field] || [],
         pinnedItems: pinnedBounds[b.field] || [],
+        pausedItems: pausedBounds[b.field] || [],
+        pausedPinnedItems: pausedPinnedBounds[b.field] || [],
         view,
       }),
     ),
@@ -1123,7 +1208,9 @@ export function BoundariesTab({ store: view }) {
           tone: 'slate',
           title: bi('运行环境', 'Runtime Info'),
           count: rows.length ? String(rows.length) : '',
-          preview: info.sessionWorkingDirectory || info.workingDirectory || info.workspaceRoot || '',
+          preview: rows.length
+            ? bi(`共 ${rows.length} 项环境与目录信息（点击展开复制）`, `${rows.length} environment items (click to expand)`)
+            : '',
           bodyStyle: { padding: 0 },
         },
         rows.map(([k, v]) =>

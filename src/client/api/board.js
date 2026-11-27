@@ -378,6 +378,20 @@ export async function toggleBoundPin(field, item, nextPinned) {
   })
 }
 
+export async function toggleBoundPause(field, item, paused) {
+  const val = String(item || '').trim()
+  if (!field || !val) return null
+  const res = await act({ action: 'bounds.pin', field, item: val, paused: Boolean(paused) })
+  if (res && res.ok) {
+    patch({
+      notice: paused
+        ? '⏸ 已暂挂该条边界（不再生效，取消勾选可随时恢复）'
+        : '▶ 已恢复该条边界生效',
+    })
+  }
+  return res
+}
+
 export async function removeBoundRule(field, item) {
   const nextSel = { ...(store.boundSelected || { allowed: [], forbidden: [], notes: [] }) }
   if (Array.isArray(nextSel[field])) {

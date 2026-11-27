@@ -20,6 +20,10 @@ import {
   harvestArchivesApi,
   clearSelectedArchives,
   openArchiveRelayModal,
+  fetchVoiceInboxApi,
+  dreamDigestVoiceInboxApi,
+  deleteVoiceInboxApi,
+  searchArchivesRemoteApi,
 } from '../api.js'
 import { Icon } from '../components/common.js'
 import {
@@ -29,17 +33,61 @@ import {
   ArchiveColdCard,
 } from './archives-cards.js'
 
+function isVoiceNoteArchive(it) {
+  if (!it || typeof it !== 'object') return false
+  if (String(it.title || '').includes('语音手记')) return true
+  return Array.isArray(it.tags) && it.tags.some(t => /语音手记|^手记$/.test(String(t || '').trim()))
+}
+
+function quickClientBilingualHits(hay, query) {
+  if (!query) return true
+  if (hay.includes(query)) return true
+  const segs = []
+  const lat = query.match(/[a-z0-9][a-z0-9._-]*/g)
+  if (lat) segs.push(...lat)
+  const cjk = query.match(/[\u4e00-\u9fff]+/g)
+  if (cjk) {
+    for (const s of cjk) {
+      if (s.length <= 2) { segs.push(s); continue }
+      for (let i = 0; i < s.length - 1; i += 1) segs.push(s.slice(i, i + 2))
+    }
+  }
+  if (!segs.length) return false
+  let hits = 0
+  for (const t of segs) {
+    if (hay.includes(t)) hits += 1
+  }
+  return hits >= Math.max(1, Math.ceil(segs.length * 0.3))
+}
+
 export function ArchiveTab({ board, view }) {
   const [openMenuKey, setOpenMenuKey] = React.useState('')
-  const activeScope = ['desktop', 'session', 'global', 'precipitated'].includes(view.archiveTabScope)
+  const [notesInboxBusy, setNotesInboxBusy] = React.useState(false)
+  const [showVoiceInboxPath, setShowVoiceInboxPath] = React.useState(false)
+  const [remoteSearch, setRemoteSearch] = React.useState({ scope: '', query: '', ids: null, order: null })
+  const activeScope = ['desktop', 'session', 'global', 'notes', 'precipitated'].includes(view.archiveTabScope)
     ? view.archiveTabScope
     : 'desktop'
-  const fetchScope = activeScope === 'desktop' ? 'session' : activeScope
+  const fetchScope = activeScope === 'desktop' ? 'session' : (activeScope === 'notes' ? 'global' : activeScope)
   const counts = view.archiveCounts || {}
   const isBoundSession = Boolean(view.sessionId && !view.archiveUnboundSession)
 
   React.useEffect(() => {
-    void loadArchives(false, '', fetchScope)
+    let cancelled = false
+    void (async () => {
+      if (activeScope === 'notes' || !view.voiceInboxData) {
+        void fetchVoiceInboxApi()
+      }
+      await loadArchives(false, '', fetchScope)
+      if (cancelled) return
+      if (fetchScope !== 'global' && !view.globalVaultLoaded) {
+        await loadArchives(false, '', 'global')
+      }
+      if (!cancelled && activeScope === 'notes' && isBoundSession) {
+        await loadArchives(false, '', 'session')
+      }
+    })()
+    return () => { cancelled = true }
   }, [view.sessionId, activeScope])
 
   React.useEffect(() => {
@@ -64,10 +112,63 @@ export function ArchiveTab({ board, view }) {
   const clipFilter = view.archiveFilterClip || 'all'
   const globalDiffFilter = view.globalVaultDiffFilter || 'all'
 
+  React.useEffect(() => {
+    const cleanQ = String(view.archiveQuery || '').trim()
+    if (!cleanQ || (activeScope !== 'session' && activeScope !== 'global')) {
+      setRemoteSearch({ scope: '', query: '', ids: null, order: null })
+      return undefined
+    }
+    let cancelled = false
+    const timer = setTimeout(() => {
+      void (async () => {
+        try {
+          const res = await searchArchivesRemoteApi(cleanQ, activeScope)
+          if (cancelled || !res || !res.ok || !Array.isArray(res.items)) return
+          const ids = new Set()
+          const order = new Map()
+          res.items.forEach((it, idx) => {
+            if (!it || !it.id) return
+            ids.add(it.id)
+            order.set(it.id, idx)
+          })
+          setRemoteSearch({ scope: activeScope, query: cleanQ.toLowerCase(), ids, order })
+        } catch {}
+      })()
+    }, 200)
+    return () => {
+      cancelled = true
+      clearTimeout(timer)
+    }
+  }, [view.archiveQuery, activeScope, view.sessionId, view.archiveCabinetId, sessionItems.length, globalItems.length])
+
+  const sessionNoteItems = sessionItems.filter(isVoiceNoteArchive)
+  const sessionRegularItems = sessionItems.filter(it => !isVoiceNoteArchive(it))
+  const globalNoteItems = globalItems.filter(isVoiceNoteArchive)
+  const globalRegularItems = globalItems.filter(it => !isVoiceNoteArchive(it))
+  const seenNoteIds = new Set()
+  const allNoteArchiveItems = []
+  for (const it of globalNoteItems) {
+    if (!it || !it.id || seenNoteIds.has(it.id)) continue
+    seenNoteIds.add(it.id)
+    allNoteArchiveItems.push({ ...it, vaultScope: 'global' })
+  }
+  for (const it of sessionNoteItems) {
+    if (!it || !it.id || seenNoteIds.has(it.id)) continue
+    seenNoteIds.add(it.id)
+    allNoteArchiveItems.push({ ...it, vaultScope: 'session' })
+  }
+  allNoteArchiveItems.sort((a, b) => Number(b.updatedAt || b.createdAt || 0) - Number(a.updatedAt || a.createdAt || 0))
+
+  const vData = view.voiceInboxData || null
+  const vPending = Array.isArray(vData && vData.pending) ? vData.pending : []
+  const vPendingCount = vData ? (Number(vData.pendingCount) || 0) : 0
+  const vProcessedCount = vData ? (Number(vData.processedCount) || 0) : 0
+
   const sessionBadgeCount = isBoundSession
-    ? (view.archiveSessionLoaded ? sessionItems.length : Number(counts.sessionCount || 0))
+    ? (view.archiveSessionLoaded ? sessionRegularItems.length : Number(counts.sessionCount || 0))
     : 0
-  const globalBadgeCount = view.globalVaultLoaded ? globalItems.length : Number(counts.globalCount || 0)
+  const globalBadgeCount = view.globalVaultLoaded ? globalRegularItems.length : Number(counts.globalCount || 0)
+  const notesBadgeCount = vPendingCount + allNoteArchiveItems.length
   const precipBadgeCount = precipList.length || Number(counts.precipitatedCount || 0)
 
   const rawDesk = Array.isArray(view.archiveDeskItems) ? view.archiveDeskItems : []
@@ -96,13 +197,29 @@ export function ArchiveTab({ board, view }) {
       archiveSearchOpen: false,
       ...(nextScope === 'session' && view.archiveCabinetId === 'cab-global' ? { archiveCabinetId: '' } : {}),
     })
+    if (nextScope === 'notes') {
+      void fetchVoiceInboxApi()
+      void (async () => {
+        await loadArchives(true, '', 'global')
+        if (isBoundSession) await loadArchives(true, '', 'session')
+      })()
+      return
+    }
     void loadArchives(true, '', nextScope === 'desktop' ? 'session' : nextScope)
   }
+
+  const activeRemoteSearch = remoteSearch
+    && remoteSearch.ids instanceof Set
+    && remoteSearch.scope === activeScope
+    && remoteSearch.query === query
+    ? remoteSearch
+    : null
 
   const matchesArchiveFilter = it => {
     if (!it) return false
     if (clipFilter !== 'all' && it.paperclip !== clipFilter) return false
     if (!query) return true
+    if (activeRemoteSearch) return activeRemoteSearch.ids.has(it.id)
     const hay = [
       it.title,
       it.summary,
@@ -111,11 +228,40 @@ export function ArchiveTab({ board, view }) {
       (it.tags || []).join(' '),
       (it.pointPreviews || []).join(' '),
     ].join(' ').toLowerCase()
-    return hay.includes(query)
+    return quickClientBilingualHits(hay, query)
   }
 
-  const filteredItems = sessionItems.filter(matchesArchiveFilter)
-  const filteredGlobalItems = globalItems.filter(it => {
+  const sortByBm25IfReady = list => {
+    if (!activeRemoteSearch || !activeRemoteSearch.order) return list
+    return list.slice().sort((a, b) => {
+      const ia = activeRemoteSearch.order.has(a.id) ? activeRemoteSearch.order.get(a.id) : 999999
+      const ib = activeRemoteSearch.order.has(b.id) ? activeRemoteSearch.order.get(b.id) : 999999
+      return ia - ib
+    })
+  }
+
+  const jumpToLinkedArchive = (targetId, targetFolder = '', targetScope = '') => {
+    const cleanId = String(targetId || '').trim()
+    if (!cleanId) return
+    const nextScope = targetScope || (activeScope === 'global' ? 'global' : 'session')
+    const folderKey = nextScope === 'global' && targetFolder ? ('global:' + targetFolder) : targetFolder
+    patch({
+      ...(nextScope !== activeScope ? { archiveTabScope: nextScope } : {}),
+      archiveQuery: '',
+      archiveOpenFolders: {
+        ...(view.archiveOpenFolders || {}),
+        ...(folderKey ? { [folderKey]: true } : {}),
+      },
+      archiveOpenFiles: {
+        ...(view.archiveOpenFiles || {}),
+        [cleanId]: true,
+      },
+    })
+    void loadArchiveDetail(cleanId, true, { scope: nextScope })
+  }
+
+  const filteredItems = sortByBm25IfReady(sessionRegularItems.filter(matchesArchiveFilter))
+  const filteredGlobalItems = sortByBm25IfReady(globalRegularItems.filter(it => {
     if (!matchesArchiveFilter(it)) return false
     if (!isBoundSession || globalDiffFilter === 'all') return true
     if (globalDiffFilter === 'mounted') return Boolean(it.chiefMounted)
@@ -123,12 +269,13 @@ export function ArchiveTab({ board, view }) {
     if (globalDiffFilter === 'synced') return it.diffStatus === 'synced'
     if (globalDiffFilter === 'differs') return it.diffStatus === 'differs'
     return true
-  })
+  }))
+  const filteredNoteArchives = allNoteArchiveItems.filter(matchesArchiveFilter)
   const filteredPrecip = precipList.filter(p => {
     if (!p) return false
     if (!query) return true
     const hay = [p.title, p.summary, p.category, p.hookCue, (p.hookKeywords || []).join(' '), (p.tags || []).join(' ')].join(' ').toLowerCase()
-    return hay.includes(query)
+    return quickClientBilingualHits(hay, query)
   })
 
   const selectedArchivesList = Object.values(view.selectedArchiveMap || {}).filter(x => x && x.id)
@@ -525,9 +672,9 @@ export function ArchiveTab({ board, view }) {
     const stripMeta = activeScope === 'global'
       ? {
           color: '#a855f7',
-          title: bi(`全局档案 · ${globalItems.length} 份`, `Global Vault · ${globalItems.length}`),
-          sub: isBoundSession ? bi(`参谋参阅 ${globalItems.filter(it => it && it.chiefMounted).length}`, `Chief Ref ${globalItems.filter(it => it && it.chiefMounted).length}`) : '',
-          hint: bi('跨对话共用的资料。打标签后参谋长可按需查看，不发给主对话。', 'Shared across chats. Chief reads tagged notes on demand; never sent to main chat.'),
+          title: bi(`全局档案 · ${globalRegularItems.length} 份`, `Global Vault · ${globalRegularItems.length}`),
+          sub: isBoundSession ? bi(`参谋参阅 ${globalRegularItems.filter(it => it && it.chiefMounted).length}`, `Chief Ref ${globalRegularItems.filter(it => it && it.chiefMounted).length}`) : '',
+          hint: bi('跨对话共用的工程资料。打标签后参谋长可按需查看，不发给主对话。', 'Shared across chats. Chief reads tagged notes on demand; never sent to main chat.'),
         }
       : activeScope === 'precipitated'
         ? {
@@ -538,11 +685,11 @@ export function ArchiveTab({ board, view }) {
           }
         : {
             color: '#38bdf8',
-            title: bi(`本局档案 · ${sessionItems.length} 份`, `Session Vault · ${sessionItems.length}`),
-            sub: isBoundSession && sessionItems.some(it => it && it.leadPulled)
-              ? bi(`主拉 ${sessionItems.filter(it => it && it.leadPulled).length}`, `Pulled ${sessionItems.filter(it => it && it.leadPulled).length}`)
+            title: bi(`本局档案 · ${sessionRegularItems.length} 份`, `Session Vault · ${sessionRegularItems.length}`),
+            sub: isBoundSession && sessionRegularItems.some(it => it && it.leadPulled)
+              ? bi(`主拉 ${sessionRegularItems.filter(it => it && it.leadPulled).length}`, `Pulled ${sessionRegularItems.filter(it => it && it.leadPulled).length}`)
               : '',
-            hint: bi('仅限当前对话的资料。打标签后主对话可按需查看。', 'For this chat only. Main chat can pull tagged notes on demand.'),
+            hint: bi('仅限当前对话的工程资料。打标签后主对话可按需查看。', 'For this chat only. Main chat can pull tagged notes on demand.'),
           }
 
     const topMenuOpen = openMenuKey === 'vault-top'
@@ -577,7 +724,7 @@ export function ArchiveTab({ board, view }) {
               type: 'button',
               className: 'dnb-pill',
               style: { height: 24, padding: '0 9px', fontSize: 11 },
-              disabled: view.archiveOrganizing || (activeScope === 'session' ? (!isBoundSession || sessionItems.length === 0) : globalItems.length === 0),
+              disabled: view.archiveOrganizing || (activeScope === 'session' ? (!isBoundSession || sessionRegularItems.length === 0) : globalRegularItems.length === 0),
               onClick: () => patch({ archiveOrganizeOpen: !view.archiveOrganizeOpen }),
             }, view.archiveOrganizing ? bi('整理中…', 'Organizing…') : bi('✦ 整理', '✦ Organize'))
           : null,
@@ -722,7 +869,7 @@ export function ArchiveTab({ board, view }) {
         h('input', {
           className: 'dnb-input',
           style: { height: 27, borderRadius: 99, padding: '0 10px', fontSize: 11.5 },
-          placeholder: '搜标题或关键词…',
+          placeholder: bi('搜标题、正文或长句（支持中文智能分词）…', 'Search titles, body, or bilingual phrases…'),
           value: view.archiveQuery || '',
           onChange: e => patch({ archiveQuery: e.target.value }),
         }),
@@ -946,6 +1093,7 @@ export function ArchiveTab({ board, view }) {
                     scopeOverride: 'session',
                     openMenuKey,
                     setOpenMenuKey,
+                    onJumpToArchive: (id, fId) => jumpToLinkedArchive(id, fId, 'session'),
                   }),
                 })
               }),
@@ -1028,7 +1176,7 @@ export function ArchiveTab({ board, view }) {
       view.archiveLoading && !view.globalVaultLoaded
         ? h('div', { className: 'dnb-empty' }, bi('正在加载全局档案…', 'Loading global vault…'))
         : nonEmptyG.length === 0
-          ? h('div', { className: 'dnb-empty' }, globalItems.length === 0 ? bi('全局档案还是空的。可以从本局整理进来，或直接新建。', 'Global vault is empty. Save notes from a session or add one.') : bi('没有找到匹配的全局档案', 'No matching global notes'))
+          ? h('div', { className: 'dnb-empty' }, globalRegularItems.length === 0 ? bi('全局工程档案还是空的。语音手记已独立放在「🎙️ 手记」页签里。', 'Global engineering vault is empty. Voice notes live in the Voice Notes subtab.') : bi('没有找到匹配的全局档案', 'No matching global notes'))
           : nonEmptyG.map(gf => {
               const fItems = gByFolder.get(gf.id) || []
               const gKey = 'global:' + gf.id
@@ -1062,6 +1210,7 @@ export function ArchiveTab({ board, view }) {
                   scopeOverride: 'global',
                   openMenuKey,
                   setOpenMenuKey,
+                  onJumpToArchive: (id, fId) => jumpToLinkedArchive(id, fId, 'global'),
                 }),
               })
             }),
@@ -1125,18 +1274,207 @@ export function ArchiveTab({ board, view }) {
     )
   }
 
+  // ── Page 3.5: Dedicated Voice Notes & Manuscripts (`notes`) ──
+  const runNotesDreamDigest = async () => {
+    if (notesInboxBusy) return
+    setNotesInboxBusy(true)
+    try {
+      const res = await dreamDigestVoiceInboxApi()
+      await Promise.all([
+        fetchVoiceInboxApi(),
+        loadArchives(true, '', 'global'),
+        ...(isBoundSession ? [loadArchives(true, '', 'session')] : []),
+      ])
+      if (res && res.ok) {
+        patch({
+          notice: res.voiceProcessed > 0
+            ? bi(`🌙 梦境整理完成：消化 ${res.voiceProcessed} 条语音手记`, `🌙 Dream Roam digested ${res.voiceProcessed} voice note(s)`)
+            : bi('🌙 当前没有待整理的语音手记', '🌙 Voice Inbox is already clean'),
+        })
+      }
+    } finally {
+      setNotesInboxBusy(false)
+    }
+  }
+
+  const renderNotesPage = () => h(
+    React.Fragment,
+    null,
+    h(
+      'div',
+      { className: 'dnb-strip-bar', style: { '--dnb-strip-color': '#a855f7', flexWrap: 'wrap', rowGap: 6, height: 'auto' } },
+      h(
+        'div',
+        { style: { display: 'flex', alignItems: 'baseline', gap: 6, minWidth: 0, flexWrap: 'wrap', flex: '1 1 160px' } },
+        h('span', { style: { fontSize: 12.5, fontWeight: 600, color: 'var(--dnb-text)', whiteSpace: 'nowrap' } },
+          bi(`🎙️ 语音手记 · ${allNoteArchiveItems.length} 份文稿`, `🎙️ Voice Notes · ${allNoteArchiveItems.length}`)),
+        h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', whiteSpace: 'nowrap' } },
+          bi(`· 待整理 ${vPendingCount} · 已消化 ${vProcessedCount}`, `· ${vPendingCount} pending · ${vProcessedCount} digested`)),
+      ),
+      h(
+        'div',
+        { style: { display: 'flex', alignItems: 'center', gap: 5, flexShrink: 0, marginLeft: 'auto', flexWrap: 'wrap' } },
+        h('button', {
+          type: 'button',
+          className: 'dnb-icon-btn',
+          'data-active': view.archiveSearchOpen ? '1' : '0',
+          style: { width: 24, height: 24 },
+          title: bi('搜索手记文稿', 'Search voice notes'),
+          onClick: () => patch({ archiveSearchOpen: !view.archiveSearchOpen }),
+        }, h(Icon, { name: 'search', size: 13 })),
+        vPendingCount > 0
+          ? h('button', {
+              type: 'button',
+              className: 'dnb-mini-btn',
+              'data-tone': 'accent',
+              disabled: notesInboxBusy,
+              onClick: () => void runNotesDreamDigest(),
+            }, notesInboxBusy ? bi('整理中…', 'Dreaming…') : bi('🌙 梦境整理', '🌙 Dream Digest'))
+          : null,
+        h('button', {
+          type: 'button',
+          className: 'dnb-pill',
+          style: { height: 24, padding: '0 9px', fontSize: 11 },
+          onClick: () => patch({
+            archiveEditor: {
+              id: '',
+              vaultScope: 'global',
+              title: '',
+              summary: '',
+              folder: 'inbox',
+              paperclip: 'silver',
+              tags: '语音手记',
+              body: '',
+            },
+          }),
+        }, bi('+ 写手记', '+ Write Note')),
+      ),
+    ),
+
+    renderSearchAndFilterStrip(),
+    view.archiveEditor ? h(ArchiveEditorCard, { folders: globalFolders, editor: view.archiveEditor, defaultScope: 'global' }) : null,
+
+    // Section 1: Pending Voice Transcripts Inbox
+    h(
+      'div',
+      { className: 'dnb-voice-inbox-card', style: { marginBottom: 10 } },
+      h(
+        'div',
+        {
+          style: {
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: 8,
+            padding: '8px 10px',
+            flexWrap: 'wrap',
+          },
+        },
+        h(
+          'div',
+          { style: { display: 'flex', alignItems: 'center', gap: 6, flexWrap: 'wrap' } },
+          h(Icon, { name: 'mic', size: 13, style: { color: 'var(--dnb-accent)' } }),
+          h('span', { style: { fontSize: 12, fontWeight: 600, color: 'var(--dnb-text)' } },
+            bi('待整理语音收件区', 'Pending Voice Inbox')),
+          h('span', { className: 'dnb-acc-badge', 'data-tone': vPendingCount > 0 ? 'accent' : undefined, style: { fontSize: 10 } },
+            bi(`待整理 ${vPendingCount} · 已消化 ${vProcessedCount}`, `${vPendingCount} pending · ${vProcessedCount} digested`)),
+        ),
+        vData && vData.dir
+          ? h('button', {
+              type: 'button',
+              className: 'dnb-mini-btn',
+              style: { fontSize: 10.5 },
+              onClick: () => setShowVoiceInboxPath(v => !v),
+            }, showVoiceInboxPath ? bi('▾ 隐藏路径', '▾ Hide path') : bi('📁 文件位置', '📁 Folder'))
+          : null,
+      ),
+      showVoiceInboxPath && vData && vData.dir
+        ? h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', padding: '0 10px 6px', wordBreak: 'break-all' } },
+            `${bi('存放目录：', 'Directory: ')}${vData.dir}`)
+        : null,
+      vData && vData.lastDigest && vData.lastDigest.processedCount > 0
+        ? h('div', { style: { fontSize: 10.5, color: 'var(--dnb-sage)', padding: '0 10px 6px' } },
+            bi(`最近梦境整理：消化 ${vData.lastDigest.processedCount} 条 → ${(vData.lastDigest.targets || []).join(' · ')}`,
+              `Last Dream Roam: ${vData.lastDigest.processedCount} notes → ${(vData.lastDigest.targets || []).join(' · ')}`))
+        : null,
+      vPending.length > 0
+        ? vPending.map(row =>
+            h(
+              'div',
+              { key: row.id, className: 'dnb-voice-inbox-row' },
+              h(
+                'div',
+                { style: { flex: 1, minWidth: 0 } },
+                h('div', { style: { display: 'flex', alignItems: 'center', gap: 5, marginBottom: 3 } },
+                  h('span', { className: 'dnb-acc-badge', style: { fontSize: 9.5 } },
+                    row.mode === 'voice_chat' ? bi('✨ 语音唠嗑', '✨ Voice Chat') : bi('🎤 语音输入', '🎤 Dictation')),
+                  h('span', { style: { fontSize: 10, color: 'var(--dnb-text-3)' } }, row.provider || ''),
+                ),
+                h('div', { style: { color: 'var(--dnb-text)', lineHeight: 1.45, wordBreak: 'break-word' } }, row.preview || ''),
+                row.replyPreview
+                  ? h('div', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)', marginTop: 3 } }, `↳ ${row.replyPreview}`)
+                  : null,
+              ),
+              h('button', {
+                type: 'button',
+                className: 'dnb-mini-btn',
+                style: { color: 'var(--dnb-coral, #f28b88)', flexShrink: 0 },
+                onClick: () => void deleteVoiceInboxApi(row.id),
+              }, h(Icon, { name: 'trash', size: 11 })),
+            ))
+        : h('div', { style: { padding: '6px 10px 8px', fontSize: 11, color: 'var(--dnb-text-3)', borderTop: '1px solid var(--dnb-border)' } },
+            bi('当前暂无待整理的语音转写；语音输入或语音唠嗑内容会先落入此处，梦境整理后归档到下方文稿。',
+              'No pending voice transcripts. Voice dictation/chat queues here until digested into manuscripts below.')),
+    ),
+
+    // Section 2: Archived Voice Note Manuscripts
+    h(
+      'div',
+      { style: { display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: 8, margin: '4px 2px 6px', flexWrap: 'wrap' } },
+      h('span', { style: { fontSize: 11.5, fontWeight: 600, color: 'var(--dnb-text-2)' } },
+        bi(`📄 已归档手记文稿 (${filteredNoteArchives.length})`, `📄 Voice Manuscripts (${filteredNoteArchives.length})`)),
+      h('span', { style: { fontSize: 10.5, color: 'var(--dnb-text-3)' } },
+        bi('日后随时展开阅读，或点右上角「钉上桌面 / 记入记忆」', 'Expand to read anytime or pin to Desk / Memory')),
+    ),
+    (view.archiveLoading && !view.globalVaultLoaded)
+      ? h('div', { className: 'dnb-empty' }, bi('正在加载手记文稿…', 'Loading voice notes…'))
+      : filteredNoteArchives.length === 0
+        ? h('div', { className: 'dnb-empty' },
+            allNoteArchiveItems.length === 0
+              ? bi('还没有已归档的语音手记文稿。使用语音聊天/输入并经梦境整理，或点上方「+ 写手记」即可沉淀到这里。',
+                  'No archived voice manuscripts yet. Use Voice Mode or click "+ Write Note" above.')
+              : bi('没有找到匹配的手记文稿', 'No matching voice notes'))
+        : h(
+            'div',
+            { style: { display: 'flex', flexDirection: 'column', gap: 6 } },
+            filteredNoteArchives.map((it, idx) =>
+              h(ArchiveDossierCard, {
+                key: 'vnote-' + it.vaultScope + '-' + it.id,
+                item: it,
+                idx,
+                folders: globalFolders,
+                view,
+                scopeOverride: it.vaultScope || 'global',
+                openMenuKey,
+                setOpenMenuKey,
+                onJumpToArchive: (id, fId) => jumpToLinkedArchive(id, fId, it.vaultScope || 'global'),
+              })),
+          ),
+  )
+
   return h(
     'div',
     { className: 'dnb-view' },
 
-    // Clean 4-Tab Vault Segmented Bar (`📌 桌面 | 🗂️ 本局 | 🌐 全局 | 🧊 冷藏`)
+    // Clean 5-Tab Vault Segmented Bar (`📌 桌面 | 🗂️ 本局 | 🌐 全局 | 🎙️ 手记 | 🧊 冷藏`)
     h(
       'div',
-      { className: 'dnb-vault-seg', role: 'tablist', 'aria-label': bi('桌面和三类档案柜', 'Desktop and Archive Vaults') },
+      { className: 'dnb-vault-seg', role: 'tablist', 'aria-label': bi('桌面和档案手记', 'Desktop, Vaults and Notes') },
       [
         { key: 'desktop', label: bi('📌 桌面', '📌 Desk'), count: deskPinned.length },
         { key: 'session', label: bi('🗂️ 本局', '🗂️ Session'), count: sessionBadgeCount },
         { key: 'global', label: bi('🌐 全局', '🌐 Global'), count: globalBadgeCount },
+        { key: 'notes', label: bi('🎙️ 手记', '🎙️ Notes'), count: notesBadgeCount },
         { key: 'precipitated', label: bi('🧊 冷藏', '🧊 Cold'), count: precipBadgeCount },
       ].map(seg =>
         h(
@@ -1188,8 +1526,10 @@ export function ArchiveTab({ board, view }) {
       ? renderDesktopPage()
       : activeScope === 'global'
         ? renderGlobalPage()
-        : activeScope === 'precipitated'
-          ? renderColdPage()
-          : renderSessionPage(),
+        : activeScope === 'notes'
+          ? renderNotesPage()
+          : activeScope === 'precipitated'
+            ? renderColdPage()
+            : renderSessionPage(),
   )
 }

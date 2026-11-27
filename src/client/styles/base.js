@@ -864,10 +864,11 @@ export const CSS_BASE = `
     background: var(--dnb-fill, rgba(128,128,136,0.18));
   }
 
-  /* Toast Notice */
+  /* Toast Notice (Top-center below header so bottom composer & voice strips never overlap) */
   .dnb-toast {
     position: absolute;
-    bottom: 82px;
+    top: 50px;
+    bottom: auto;
     left: 50%;
     transform: translateX(-50%);
     z-index: 90;
@@ -1319,6 +1320,43 @@ export const CSS_BASE = `
   .dnb-focus-banner[data-blocked="1"] {
     border-color: rgba(255, 69, 58, 0.5);
     background: rgba(255, 69, 58, 0.14);
+  }
+  .dnb-bound-quickbar {
+    display: flex;
+    flex-direction: column;
+    gap: 7px;
+    padding: 9px 10px;
+    margin-bottom: 10px;
+    border-radius: 12px;
+    border: 1px solid var(--dnb-border);
+    background: var(--dnb-card);
+  }
+  .dnb-bound-pause-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    padding: 2px 7px;
+    border-radius: 999px;
+    border: 1px solid var(--dnb-border);
+    background: var(--dnb-surface-sub, transparent);
+    color: var(--dnb-text-3);
+    font-size: 11px;
+    font-weight: 500;
+    cursor: pointer;
+    user-select: none;
+    transition: border-color 0.15s ease, background 0.15s ease, color 0.15s ease;
+  }
+  .dnb-bound-pause-toggle[data-paused="1"] {
+    border-color: rgba(243, 190, 109, 0.55);
+    background: var(--dnb-amber-soft, rgba(245, 158, 11, 0.12));
+    color: var(--dnb-amber, #f3be6d);
+  }
+  .dnb-bound-pause-toggle input[type="checkbox"] {
+    margin: 0;
+    width: 12px;
+    height: 12px;
+    accent-color: var(--dnb-amber, #f3be6d);
+    cursor: pointer;
   }
 
 `

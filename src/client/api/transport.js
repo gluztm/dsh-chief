@@ -13,11 +13,14 @@
  *   - 跨模块异步唤醒通过 `apiBridge` 完成，确保 `verify-client-modular-build.mjs` 零环引用。
  */
 
-import { API, EXPECTED_BACKEND_BUILD } from '../constants.js'
-import { store, patch, runtimeRefs } from '../store.js'
+import { API, EXPECTED_BACKEND_BUILD, DEFAULT_UI_SKIN } from '../constants.js'
+import { store, patch, runtimeRefs, saveUiSkin, saveCustomSkin, buildServerSafeCustomSkin } from '../store.js'
 import { normalizeMaxTurnsVal } from '../utils.js'
 import { setRuntimeUiLang } from '../i18n.js'
 import { processIncomingAlertEvents } from '../notify.js'
+import { maybeAutoSpeakIncomingChat } from '../tts.js'
+
+let themeMigratedToServer = false
 
 /** Late-bound callbacks populated by upper API domain modules without creating import cycles. */
 export const apiBridge = {
@@ -106,6 +109,8 @@ export function applySecView(viewData) {
       managedIdleTimeoutMs: Number(cfg.managedIdleTimeoutMs) || prevMeta.managedIdleTimeoutMs || (15 * 60 * 1000),
       notifyEnabled: nextNotifyEnabled,
       notifySound: nextNotifySound,
+      tts: cfg.tts !== undefined ? cfg.tts : (prevMeta.tts || null),
+      remotePager: cfg.remotePager !== undefined ? cfg.remotePager : (prevMeta.remotePager || null),
       uiLang: nextUiLang,
       managedBudgetMaxCalls: cfg.managedBudgetMaxCalls !== undefined ? cfg.managedBudgetMaxCalls : (prevMeta.managedBudgetMaxCalls ?? 30),
       managedBudgetMaxTokens: cfg.managedBudgetMaxTokens !== undefined ? cfg.managedBudgetMaxTokens : (prevMeta.managedBudgetMaxTokens ?? 300000),
@@ -149,12 +154,38 @@ export function applySecView(viewData) {
   const nextWorkVal = patchObj.chiefMeta.activeWork
   patch(patchObj)
   syncBackendActiveWork(nextWorkVal)
+
+  // Multi-origin / cross-browser theme sync with server config
+  const srvSkin = typeof cfg.uiSkin === 'string' ? cfg.uiSkin.trim().toLowerCase() : ''
+  const srvCustom = cfg.customSkin && typeof cfg.customSkin === 'object' ? cfg.customSkin : null
+  const localCustom = store.customSkin || null
+  const localCustomTs = Number(localCustom && localCustom.updatedAt) || 0
+  const srvCustomTs = Number(srvCustom && srvCustom.updatedAt) || 0
+  if (srvCustom && (srvCustomTs > localCustomTs || localCustomTs === 0)) {
+    saveCustomSkin(srvCustom, { activate: false, syncServer: false })
+  }
+  if (srvSkin && srvSkin !== store.uiSkin) {
+    saveUiSkin(srvSkin, { syncServer: false })
+  } else if (!themeMigratedToServer && !srvSkin && !srvCustom) {
+    const hasCustomLocal = Boolean(localCustomTs > 0 || (store.uiSkin && store.uiSkin !== DEFAULT_UI_SKIN))
+    if (hasCustomLocal && typeof runtimeRefs.syncThemeToServer === 'function') {
+      themeMigratedToServer = true
+      runtimeRefs.syncThemeToServer({
+        ...(store.uiSkin && store.uiSkin !== DEFAULT_UI_SKIN ? { uiSkin: store.uiSkin } : {}),
+        ...(localCustomTs > 0 ? { customSkin: buildServerSafeCustomSkin(localCustom) } : {}),
+      })
+    }
+  }
+
   if (Array.isArray(viewData.alertEvents)) {
     processIncomingAlertEvents(viewData.alertEvents, {
       notifyEnabled: nextNotifyEnabled,
       notifySound: nextNotifySound,
       sessionId: store.sessionId,
     })
+  }
+  if (Array.isArray(viewData.chat)) {
+    maybeAutoSpeakIncomingChat(viewData.chat, store.sessionId)
   }
 }
 

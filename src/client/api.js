@@ -32,6 +32,7 @@ import {
   copyText,
   addBoundRule,
   toggleBoundPin,
+  toggleBoundPause,
   removeBoundRule,
   editBoundRule,
   toggleBoundSelect,
@@ -59,6 +60,7 @@ import {
   rejectGoalApi,
   deliverArchiveToChat,
   searchColdArchives,
+  searchArchivesRemoteApi,
 } from './api/archives.js'
 import {
   loadChiefView,
@@ -103,6 +105,15 @@ import {
   saveMemoryPromptApi,
   resetMemoryPromptApi,
   distillMemoryNowApi,
+  fetchChiefTtsStatusApi,
+  probeChiefTtsApi,
+  recordBrowserVoiceTranscriptApi,
+  fetchVoiceInboxApi,
+  deleteVoiceInboxApi,
+  dreamDigestVoiceInboxApi,
+  fetchRemotePagerStatusApi,
+  testRemotePagerApi,
+  sendRemotePagerDigestApi,
 } from './api/chief.js'
 
 export {
@@ -124,6 +135,7 @@ export {
   copyText,
   addBoundRule,
   toggleBoundPin,
+  toggleBoundPause,
   removeBoundRule,
   editBoundRule,
   toggleBoundSelect,
@@ -149,6 +161,7 @@ export {
   rejectGoalApi,
   deliverArchiveToChat,
   searchColdArchives,
+  searchArchivesRemoteApi,
   loadChiefView,
   loadChiefModels,
   updateSecConfig,
@@ -191,6 +204,15 @@ export {
   saveMemoryPromptApi,
   resetMemoryPromptApi,
   distillMemoryNowApi,
+  fetchChiefTtsStatusApi,
+  probeChiefTtsApi,
+  recordBrowserVoiceTranscriptApi,
+  fetchVoiceInboxApi,
+  deleteVoiceInboxApi,
+  dreamDigestVoiceInboxApi,
+  fetchRemotePagerStatusApi,
+  testRemotePagerApi,
+  sendRemotePagerDigestApi,
 }
 
 function clearBoundSessionToBlank() {

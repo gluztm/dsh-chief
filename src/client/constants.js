@@ -10,7 +10,7 @@ export const SIDE_ID = 'dsh-chief'
 
 export const BRAND_NAME = 'DSH 参谋长'
 
-export const EXPECTED_BACKEND_BUILD = '1.9.0'
+export const EXPECTED_BACKEND_BUILD = '2.0.0'
 
 export const CHIEF_PERMISSION_LABELS = {
   advisor: 'L0 · 顾问模式',
@@ -206,6 +206,27 @@ export const UI_SKIN_OPTIONS = [
     descZh: '贴近宿主原生的清爽中性配色',
     descEn: 'Clean neutral palette matching host chrome',
     swatches: ['#3b82f6', '#10b981', '#94a3b8'],
+  },
+  {
+    key: 'tide',
+    community: true,
+    zh: '潮汐蓝',
+    en: 'Tide Blue',
+    tagZh: '深海潮汐 · @iridiumgit',
+    tagEn: 'Deep Tide · @iridiumgit',
+    descZh: '深海蓝底与清透天蓝强调色，配薄荷绿与暖橙点缀（@iridiumgit 贡献）',
+    descEn: 'Deep tide navy & sky blue with mint & amber accents (by @iridiumgit)',
+    swatches: ['#7aaaf0', '#35c98b', '#f2bc68'],
+    diySeed: {
+      name: '潮汐蓝·微调',
+      accentHex: '#7aaaf0',
+      secondaryHex: '#35c98b',
+      warmHex: '#f2bc68',
+      bgTintHex: '#0b1420',
+      ambientGlow: true,
+      radius: 'round',
+      serifTitle: false,
+    },
   },
   {
     key: 'custom',
