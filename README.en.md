@@ -91,7 +91,7 @@ Open the `⚙️` gear in the top bar to switch between these three built-in pre
 
 <img src="assets/hero-banner.png" alt="dsh-chief main cockpit view" width="100%" />
 
-The sidebar has 5 tabs plus a top-bar Settings page:
+Uses a clean Left Rail workspace layout by default (`6 core tabs + standalone Theme Studio + Settings`), keeping each concern separate:
 
 | Location | What you do here |
 | :--- | :--- |
@@ -100,81 +100,86 @@ The sidebar has 5 tabs plus a top-bar Settings page:
 | `Peers` tab | Coordinate `@lead`, subagents, linked windows, and local `Codex` / `Claude Code` / `Gemini CLI` with dormant scan & cross-window mailbox. |
 | `Archives` tab | Manage the Cognitive Desktop and drawers with BM25 search, 5-version history rollback, `[[WikiLinks]]`, and the dedicated `🎙️ Notes` voice subtab. |
 | `Memory` tab | Manage `MEMORY.md`, 2D/3D Starfield, 5-section User Profile, 3-protocol embedding, and external memory bridges (0-byte `@lead` isolated). |
-| `Guards` tab | Top: **🛡️ Safety Block** (built-in protection + `🚧 Custom Block Rules` with 1-click `⏸` pause). Bottom: **📝 Rules for AI** (`✅ Must Do` / `🚫 Don't Do` / `💡 Notes`). |
-| Top-bar `⚙️` | Switch presets/placement, configure alerts & budget caps, and open the dedicated **Theme Studio**, **Voice TTS**, and **6-Channel Mobile Pager**. |
+| `Guards` tab | Top: **🛡️ Safety Block** (3 out-of-the-box Preset Packs v2 + `🚧 Custom Block Rules` with 1-click `⏸` pause). Bottom: **📝 Rules for AI** (`✅ Must Do` / `🚫 Don't Do` / `💡 Notes`). |
+| `🎨 Studio` & `⚙️ Settings` | Standalone Appearance & Theme Studio (5 skins + Tide Blue + DIY sync), Voice TTS/ASR, 6-channel Mobile Pager, and budget cap controls. |
 
-### 01 · Chief Cockpit (`参谋` Tab)
-**In one sentence:** Give Chief plain-language instructions, switch permission and run tiers, or hit the red halt button from this tab.
+### 01 · Chief Cockpit & Inline Voice Stage (`Chief` Tab)
+**In one sentence:** Keep `@lead` untouched on the left while Chief handles speaker alerts, hands-free voice dispatch, and session reports on the right.
 
-- Use the bottom composer to delegate research, draft Custom Block Rules, or organize notes; open the `+` Control Panel to toggle `🛡️ Safety Block`, `⚡ 强介入`, `✦ 智选压缩`, `✓ Verify Evidence`, `📄 Plain Briefs`, or switch `L0–L3`, `⏹ Halt`, `⏸ Off / 🛡 Patrol / 🤖 Managed` (hover for plain explanations) and the `180°` effort gauge in the top bar.
-- When Dream Roam or auto-review dims the panel with a translucent overlay, **click anywhere on the overlay to dismiss it while the outer border stays lit to show background activity**.
-
-![01 - Chief Cockpit Overview](assets/screenshots/01-chief-cockpit-overview.png)
-
-### 02 · Bento Objective Ring & Unified Beam Flow (`任务 / Tasks` Tab)
-**In one sentence:** Track progress in the top **Bento Objective Ring Card** and follow sequential steps plus subagent **dispatch & return** curves directly inside one unified **Task Beam Flow Canvas**.
-
-- The top left tile presents crisp, click-to-edit objective text alongside `Report / Set Goal / Break Down`, while the right tile renders a live SVG progress ring and active step focus hint; below, legacy Org Tree and view-mode clutter are removed in favor of a single unified canvas connecting sequential steps with anti-jitter Bezier light beams, attaching subagent satellite pills directly beneath parent steps with SVG dispatch/return curves, and opening an inline detail drawer below on click.
+- Use the bottom composer for plain instructions, lean `+` control toggles, `L0–L3` tiers, and red `⏹ Halt`; press `Alt+V` or enable hands-free VAD to launch the inline Voice Stage with name-call wake and strict L0–L3 permission gates.
+- When Dream Roam dims the panel, **click anywhere on the overlay to dismiss it while the outer glow keeps indicating background progress**.
 
 <div align="center">
-  <img src="assets/screenshots/02-full-spread-pyramid-dag.png" alt="02 - Subagent DAG View" width="80%" />
+  <img src="assets/screenshots/01-chief-cockpit-overview.png" alt="01 - Chief Cockpit and Inline Voice Stage" width="92%" />
 </div>
 
-### 03 · Cognitive Desktop & Vault Drawers (`档案` Tab)
-**In one sentence:** Pin only active notes to the Cognitive Desktop (`2,400 Tokens / 6 items`) and keep everything else folded in three drawers with keyword hooks.
+### 02 · Bento Objective Ring, Serpentine Beam Flow & Step Explain (`Tasks` Tab)
+**In one sentence:** Lock your goal in the top **Bento Objective Ring**, follow serpentine workflow beams plus subagent dispatch/return arcs, and click `Explain` on any node.
 
-- The top **📌 Cognitive Desktop** bar tracks the `2,400 Tokens / 6 items` limit (the sole automatic per-turn prompt injection); below sit Session, System Global, and Precipitated drawers with folded cards showing titles, `🪝` keyword hooks, and who pulled each item.
+- Lock your Core Objective before enabling Strong Intervention; click any step on the unified flow canvas to open its plain-language `Explain` drawer or pin a `📌 Pin Lock` cross-session Handoff Packet below.
 
 <div align="center">
-  <img src="assets/screenshots/03-cold-archive-cabinet.png" alt="03 - Three-Tier Cold Vaults and Cognitive Desktop" width="90%" />
+  <img src="assets/screenshots/02-full-spread-pyramid-dag.png" alt="02 - Bento Objective Ring and Serpentine Beam Flow" width="92%" />
 </div>
 
-### 04 · Objective Lock & Step Explain (`Tasks` Tab)
-**In one sentence:** Lock your Core Objective with `🎯 Set Objective` and click `Explain` on any step for a plain-language summary without pausing `@lead`.
+### 03 · Cognitive Desktop, Bilingual BM25 & Voice Notes (`Archives` Tab)
+**In one sentence:** Keep only active items on the Cognitive Desktop, store everything else in three folded drawers, and route voice thoughts into `🎙️ Notes`.
 
-- Click `🎯 Set Objective` before enabling Strong Intervention, inspect the collapsible Work Topology and Progress Task Board below, or click `Explain` on any step to hear what it does and what skipping it affects.
+- The top **📌 Cognitive Desktop** bar tracks the `2,400 Tokens / 6 items` cap; search uses **CJK+Latin BM25** ranking (with gold priority `×1.12` & copper downweighting `×0.65`), bidirectional `[[WikiLinks]]` with deprecation alerts, and 5-snapshot `history[]` rollback.
+- Dedicated **`🎙️ Notes`** subtab digests queued `~/.dsh/chief/voice-inbox/` transcripts via Dream Roam with 0-byte `@lead` isolation.
 
 <div align="center">
-  <img src="assets/screenshots/04-dual-tier-goal-and-step-qa.png" alt="04 - Goal Supervision and Step Q&A" width="68%" />
+  <img src="assets/screenshots/03-cold-archive-cabinet.png" alt="03 - Cognitive Desktop, BM25 WikiLinks and Voice Notes" width="92%" />
 </div>
 
-### 05 · Collaboration System & Local CLIs (`Peers` Tab)
-**In one sentence:** Connect the main chat, subagents, peer windows, and local `Codex` / `Claude Code` on one canvas—locking active squads automatically and staying visually still when idle.
+### 04 · Chief-Only Memory Studio & 3-Protocol Embedding (`Memory` Tab)
+**In one sentence:** Give Chief its own `MEMORY.md`, 2D/3D Starfield, and locked 5-section profile while keeping `@lead` strictly **0-byte isolated**.
 
-- **Direct Local CLI Dispatch**: Auto-detects local `Codex` / `Claude Code` without `ccSwitch` (including Windows `.cmd` shims), injects Rules for AI and Custom Block Rules on dispatch, auto-locks editing while busy (`HTTP 409`), and supports one-click `⏹ Halt`.
-- **Cross-Window Mail & Standby Scan**: One-click **Refresh Scan** discovers dormant DSH windows without tab-switching while filtering out background maintenance (`Mnemon`) and blank shells; external messages group cleanly under cross-window pairs, detaching clears caches, and pasted images save to `<cwd>/.dsh-chief/uploads/`.
+- Includes out-of-the-box `MEMORY.md` writing with Ebbinghaus vitality tracking, lockable `USER_PROFILE.md`, native **OpenAI / Ollama / Google Gemini** embedding support, and external bridges (`mcp-http`, dual-slot `chief-http`, read-only Obsidian, and `cordis-provider`).
 
 <div align="center">
-  <img src="assets/screenshots/05-cross-session-collab-bus.png" alt="05 - Collaboration System idle and active-locked views with local Codex/Claude Code dispatch and cross-window mailbox" width="88%" />
+  <img src="assets/screenshots/04-dual-tier-goal-and-step-qa.png" alt="04 - Chief-Only Memory Studio and 3-Protocol Vector" width="92%" />
+</div>
+
+### 05 · Collaboration 2.0 & Direct Local CLIs (`Peers` Tab)
+**In one sentence:** Coordinate `@lead`, subagents, dormant windows, and local `Codex` / `Claude Code` / `Gemini CLI` on one canvas—still when idle, locked when busy.
+
+- **Direct Local CLI Dispatch & 2-Hop Chaining**: Auto-detects local CLIs without `ccSwitch`, streams redacted live logs, supports `Codex → Claude Code / Gemini CLI` 2-hop relays, and locks squads (`HTTP 409`) with one-click `⏹ Halt`.
+- **Standby Scan & Anti-Self-Steer Guards**: One-click **Refresh Scan** discovers dormant DSH sessions (filtering maintenance tasks and empty shells) with unified cross-window mail routing.
+
+<div align="center">
+  <img src="assets/screenshots/05-cross-session-collab-bus.png" alt="05 - Collaboration 2.0 idle vs active-locked views" width="92%" />
 </div>
 
 ### 06 · Safety Block & Rules for AI (`Guards` Tab)
-**In one sentence:** Top section is **🛡️ Safety Block · Enforced before tools run** (built-in protection + Custom Block Rules); bottom section is **📝 Rules for AI · Reminded every turn**.
+**In one sentence:** Top section enforces **🛡️ Safety Block** before tools run (Preset Packs v2 + 1-click `⏸` rule pause); bottom section manages **📝 Rules for AI**.
 
-- **🛡️ Safety Block**: Shows the live status of built-in Auto Mistake Prevention (with a quick link to Control Panel) followed by **🚧 Custom Block Rules** (`⏸ Pause All / ▶ Enable All`, `+ Add Rule`, `✨ Ask Chief`, `🌐 Global / 📁 Workspace`, and merge similar rules).
-- **📝 Rules for AI**: Split into `✅ Must Do (allowed)`, `🚫 Don't Do (forbidden)` (which also enforces matching shell command blocks when Safety Block is on), and `💡 Notes (notes)`. No L0–L3 model can delete locked rules without human approval.
-
-<div align="center">
-  <img src="assets/screenshots/06-pinned-bounds-and-handoff.png" alt="06 - Pinned Global Redlines and Proposals" width="68%" />
-</div>
-
-### 07 · Top-Bar Settings: Presets, Placement, Toggles & Budget Cap (`⚙️` Settings)
-**In one sentence:** Click the `⚙️` gear in the top bar to pick a preset, switch placement and shortcuts, toggle session opt-in or the Safety Shield, or set alerts and budget caps.
-
-- **Presets & placement**: Pick from **Observer / Co-Pilot / Away Mode** presets, switch `Sidebar + Main Tab / Main Tab Only / Sidebar Only`, toggle composer or floating corner shortcuts, choose `Sidebar Tab / New Split Pane` for subagents, and toggle per-session or default auto-enable.
-- **Safety Block, alerts & budget**: Toggle per-session or global built-in Safety Block (requires plain-language confirmation with an option to pause custom rules), configure 7 milestone desktop alerts and chimes, monitor the `chat / review / dream` LLM ledger & budget cap, and switch `zh / en` live.
-- **Session handoff**: `📌 Pin Lock` Session Handoff and redacted `.md` report export sit at the bottom of **Tasks**. Pick how much archive scope moves into a new window while Strong Intervention resets off for safety.
+- **🛡️ Safety Block**: Displays built-in Mistake Prevention with 3 streamlined **Preset Packs v2** (Secrets & Destructive Git on by default); toggle individual Custom Block Rules with a `⏸` pause checkbox or draft rules with `✨ Ask Chief`.
+- **📝 Rules for AI**: Split into `✅ Must Do`, `🚫 Don't Do` (also blocks matching commands when Safety Block is on), and `💡 Notes`.
 
 <div align="center">
-  <img src="assets/screenshots/07-session-handoff-and-guard.png" alt="07 - Top-bar Settings: presets, placement, per-session opt-in, Safety Guard toggles, alerts, and budget caps" width="88%" />
+  <img src="assets/screenshots/06-pinned-bounds-and-handoff.png" alt="06 - Guard Wall Presets v2, Pause Checkbox and Rules for AI" width="92%" />
 </div>
 
-### 08 · Voice Chief Stage, 6-Channel Mobile Pager & Theme Studio (`v2.0.0`)
-**In one sentence:** Desktop speakers announce safety intercepts out loud, an inline Voice Stage takes hands-free wake commands, mobile pagers keep you posted away from your desk, and Theme Studio skins stay synced across origins.
+### 07 · Settings, Voice TTS/VAD & 6-Channel Mobile Pager (`⚙️ Settings`)
+**In one sentence:** Configure presets, per-session opt-in, spend caps, speaker voice alerts, and 6-channel mobile pagers from `⚙️ Settings`.
 
-- **Voice Alerts & Inline Voice Stage (`Alt+V`)**: Pairs DeepSeek native `/v1/tools/tts`, OpenAI `/v1/audio/speech`, and offline browser speech (scrubbing secrets and code paths automatically) with SenseVoice + DeepSeek ASR recognition; wake hands-free VAD by calling your Chief's name and issue real L0–L3 routed commands to `@lead`, while casual voice thoughts queue into `Archives → 🎙️ Notes`.
-- **6-Channel Mobile Pager (`remote-pager.js`)**: Sends scrubbed milestone alerts (pending approvals, elevations, safety blocks, budget stops, and Managed completion) to Feishu, DingTalk, WeCom, Telegram, Discord, or custom HMAC-signed Webhooks.
-- **Standalone Appearance & Theme Studio**: Open directly from Settings to pick any of the 5 curated skins or customize with the DIY Workshop—now featuring `@iridiumgit`'s community **Tide Blue (`tide`)** theme, canvas palette extraction, AI DIY, JSON import/export, and server-side sync under `~/.dsh/chief/`.
+- **Presets, Opt-In & Spend Caps**: Switch **Observer / Co-Pilot / Away Mode**, toggle per-session or default auto-enable, flip the human-only Safety Guard switch, and monitor the `chat / review / dream` `30 calls / 300K tokens` breaker.
+- **Voice Chief & Mobile Pager**: Pair DeepSeek/OpenAI/offline speaker TTS + SenseVoice/DS ASR with **Feishu / DingTalk / WeCom / Telegram / Discord / Webhook** scrubbed push alerts.
+
+<div align="center">
+  <img src="assets/screenshots/07-session-handoff-and-guard.png" alt="07 - Settings, Voice Chief TTS and 6-Channel Mobile Pager" width="92%" />
+</div>
+
+### 08 · Standalone Appearance & Theme Studio (`🎨 Studio` · `v2.0.0`)
+**In one sentence:** Switch between 5 curated themes or `@iridiumgit`'s community **Tide Blue**, extract palettes from images, and sync skins automatically across origins.
+
+- **Curated Presets + Tide Blue**: Combines **Frosted Mist / Warm Paper / Botanical / Starlight / Classic Clean** with `@iridiumgit`'s dark/light adaptive **Tide Blue (`tide`)** theme card.
+- **DIY Workshop & Server Sync**: Supports 4-swatch WCAG derivation, zero-token `<canvas>` palette extraction, 25MB `IndexedDB` wallpapers, AI DIY, **JSON import/export**, and server persistence under `~/.dsh/chief/`.
+
+<div align="center">
+  <img src="assets/screenshots/08-theme-studio-and-voice.png" alt="08 - Standalone Theme Studio, Tide Blue and Multi-Origin Sync" width="92%" />
+</div>
 
 ---
 
@@ -212,7 +217,7 @@ The sidebar has 5 tabs plus a top-bar Settings page:
 No. Under `⏸ Off` and `🛡 Patrol`, idle sessions make zero background LLM calls. Only `🤖 Managed` runs background checks, and it stops at a default cap of `30 calls / 300K tokens`; you can check exact counts by category (`chat / review / dream`) inside `⚙️ Settings`.
 
 **Will it run hooks or block paths in ordinary chats where I never opened Chief?**
-No. Starting with `v1.7.0`, new chats start unactivated by default—Chief skips prompt injection, pre-execute workspace checks, idle guards, and disk writes until you click **Enable for This Session** or invoke a Chief feature. If you prefer every new session protected automatically, turn on **Auto-enable Chief in new sessions** under `⚙️ Settings -> Panel Placement`.
+No. New chats start **unactivated by default**—Chief skips prompt injection, pre-execute workspace checks, idle guards, and disk writes until you click **Enable for This Session** or invoke a Chief feature. If you prefer every new session protected automatically, turn on **Auto-enable Chief in new sessions** under `⚙️ Settings -> Panel Placement`.
 
 **Can it edit or delete my files by mistake?**
 New sessions default to `L0` read-only. In `L2`, important edits and commands pop up for per-action approval. Hard rules (disk formatting, force pushes, `git reset --hard`) stay blocked whenever **Safety Block** is on, and no L0–L3 model can remove locked Custom Block Rules or flip Safety Block switches (only humans can confirm turning it off in Control Panel or Settings).
@@ -319,7 +324,7 @@ Read the full story and tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md
 </details>
 
 <details>
-<summary>Six Daily Problems It Fixes</summary>
+<summary>Eight Daily Problems It Fixes</summary>
 
 ### 1. Context compaction (`/compact`) wipes paths, commands, and errors
 **In one sentence:** Chief saves verified file paths, ports, and errors into your session archive before asking DSH to compact.
@@ -360,6 +365,18 @@ Read the full story and tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md
 
 - **What goes wrong**: After 100 turns you want a fresh window without re-explaining paths and status, and you do not want a background plugin making extra API calls while idle.
 - **How `dsh-chief` handles it**: Defaults to `⏸ Off` / `🛡 Patrol` (0 idle LLM calls), follows your active session's model, and includes a `180°` fan thinking effort gauge with `🪄 Auto` depth. Click `解释` on any step for a plain-language breakdown, freeze handoff notes with `📌 定住防改`, and open a new linked window with only the archive scope you choose.
+
+### 7. You step away from your desk and miss urgent blocks or completion
+**In one sentence:** Desktop speakers call out critical intercepts immediately, and the 6-channel Mobile Pager forwards scrubbed alerts straight to your phone.
+
+- **What goes wrong**: When a subagent hits an approval gate or destructive-command block while you are away, the session sits idle until you walk back.
+- **How `dsh-chief` handles it**: Voice Chief plays redacted alerts over your speakers and lets you reply hands-free (`Alt+V` / name wake), while `remote-pager.js` pushes HMAC-signed, cooldown-deduped milestone alerts over **Feishu, DingTalk, WeCom, Telegram, Discord, or Webhook**.
+
+### 8. Skins reset across ports or Chief notes leak into main-chat context
+**In one sentence:** Theme presets & DIY skins persist in `~/.dsh/chief/` across origins, while Memory Studio and Voice Notes stay 0-byte isolated from `@lead`.
+
+- **What goes wrong**: Switching between localhost, LAN, or Tailnet resets browser skins, or mixing assistant notes into system prompts pollutes coding focus.
+- **How `dsh-chief` handles it**: Selected skins (including `@iridiumgit`'s Tide Blue) and DIY palettes sync server-side under `~/.dsh/chief/` with JSON export/import, while `MEMORY.md`, 2D/3D Starfield, locked `USER_PROFILE.md`, and `🎙️ Notes` never inject a single byte into `@lead`.
 
 </details>
 
@@ -406,7 +423,7 @@ flowchart TB
     T8["Header & Settings (GitHub Star · Appearance & DIY Studio · Voice TTS · Mobile Pager)"]
   end
 
-  subgraph Core["Local Backend & Safety Kernel (Zero External Deps · 45 modules)"]
+  subgraph Core["Local Backend & Safety Kernel (Zero External Deps · 53 modules)"]
     Hot["Hot Boards: ~/.dsh/chief/board.json & boards/<sid>.json\nCross-process / worker_threads O_EXCL locks"]
     Walls["Guard Walls: ~/.dsh/chief/guard-walls.json\nGlobal / Workspace / Paused"]
     Cold["3-Tier Vaults: 2400T Cognitive Desktop + Hooked Drawers + 0-byte Cold Vault"]

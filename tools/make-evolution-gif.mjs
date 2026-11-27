@@ -1,15 +1,15 @@
 #!/usr/bin/env node
 /**
- * make-evolution-gif.mjs — dsh-chief v1.0 -> v1.7 架构演进高清高帧率动态图生成器
+ * make-evolution-gif.mjs — dsh-chief v1.0 -> v2.0 架构演进高清高帧率动态图生成器
  *
- * 输出中英双版 10 FPS (276 帧 / 27.6 秒循环) 单舞台极简动图：
- *   - assets/evolution-roadmap.gif     (zh, 880x495, 276 frames)
- *   - assets/evolution-roadmap-en.gif  (en, 880x495, 276 frames)
+ * 输出中英双版 10 FPS (294 帧 / 29.4 秒循环) 单舞台极简动图：
+ *   - assets/evolution-roadmap.gif     (zh, 880x495, 294 frames)
+ *   - assets/evolution-roadmap-en.gif  (en, 880x495, 294 frames)
  *
  * 技术特性：
  *   - 单 Chrome CDP 实例 (Node 24 原生 WebSocket + fetch)，无外部依赖
  *   - Python Pillow 255 色全局自适应调色板 + C 级帧间透明差分 (disposal=1)
- *   - 内置逐帧解码校验 (n_frames==276, duration==27600ms, max_diff==0 零残影)
+ *   - 内置逐帧解码校验 (n_frames==294, duration==29400ms, max_diff==0 零残影)
  *
  * 用法：
  *   node tools/make-evolution-gif.mjs
@@ -37,7 +37,9 @@ const MILESTONES = {
     { ver: 'v1.3', label: '拆巨石' },
     { ver: 'v1.4', label: '物理墙' },
     { ver: 'v1.5–1.6', label: '认知桌' },
-    { ver: 'v1.7', label: '成中枢' },
+    { ver: 'v1.7', label: '主屏协同' },
+    { ver: 'v1.8–1.9', label: '主题记忆' },
+    { ver: 'v2.0', label: '语音传呼' },
   ],
   en: [
     { ver: 'v1.0–1.1', label: 'Co-Pilot' },
@@ -45,7 +47,9 @@ const MILESTONES = {
     { ver: 'v1.3', label: 'Modular' },
     { ver: 'v1.4', label: 'Pre-Exec' },
     { ver: 'v1.5–1.6', label: 'Desktop' },
-    { ver: 'v1.7', label: 'Hub' },
+    { ver: 'v1.7', label: 'Main Hub' },
+    { ver: 'v1.8–1.9', label: 'Studio' },
+    { ver: 'v2.0', label: 'Voice Hub' },
   ],
 }
 
@@ -53,7 +57,7 @@ const SCENES = {
   zh: [
     {
       id: 1,
-      frames: 44,
+      frames: 34,
       chip: 'v1.0–1.1 · 8 文件',
       tone: 'info',
       title: 'v1.0–1.1 · 右侧记事本长成副驾',
@@ -61,7 +65,7 @@ const SCENES = {
     },
     {
       id: 2,
-      frames: 44,
+      frames: 34,
       chip: 'v1.2–1.2.1 · 10 巨石!',
       tone: 'warn',
       title: 'v1.2–1.2.1 · 装上执行手，立刻造好笼子',
@@ -69,7 +73,7 @@ const SCENES = {
     },
     {
       id: 3,
-      frames: 44,
+      frames: 34,
       chip: 'v1.3 · 45 模块',
       tone: 'ok',
       title: 'v1.3 · 拆掉万行巨石，换上工程底座',
@@ -77,7 +81,7 @@ const SCENES = {
     },
     {
       id: 4,
-      frames: 44,
+      frames: 34,
       chip: 'v1.4 · 54 模块',
       tone: 'ok',
       title: 'v1.4 · 执行前立物理墙，不抢主对话活',
@@ -85,7 +89,7 @@ const SCENES = {
     },
     {
       id: 5,
-      frames: 44,
+      frames: 34,
       chip: 'v1.5–1.6 · 58 模块',
       tone: 'ok',
       title: 'v1.5–1.6 · 2400T 认知桌面 · 硬预算熔断',
@@ -93,17 +97,33 @@ const SCENES = {
     },
     {
       id: 6,
-      frames: 56,
-      chip: 'v1.7 · 83 模块 · 0 依赖',
-      tone: 'good',
-      title: 'v1.7 · 走出侧边栏，也学会克制',
+      frames: 34,
+      chip: 'v1.7 · 83 模块',
+      tone: 'ok',
+      title: 'v1.7 · 主页面大屏 · 本机外协 · 按需启用',
       sub: '主屏外协直连 Codex / Claude · 普通闲聊窗 8 钩子全放行',
+    },
+    {
+      id: 7,
+      frames: 38,
+      chip: 'v1.8–1.9 · 95 模块',
+      tone: 'ok',
+      title: 'v1.8–1.9 · DIY 主题与 0 字节参谋记忆工坊',
+      sub: '5+1 自适应皮肤 · Bento 流光图 · Gemini CLI · 2D/3D 星图 + 外挂桥',
+    },
+    {
+      id: 8,
+      frames: 52,
+      chip: 'v2.0 · 101 模块 · 0 依赖',
+      tone: 'good',
+      title: 'v2.0 · 语音参谋外放 · 6 通道传呼 · 三协议向量',
+      sub: '音箱急报 + 唤醒发令 + BM25 / 双链回滚 · 53 后端 + 48 前端零外部依赖',
     },
   ],
   en: [
     {
       id: 1,
-      frames: 44,
+      frames: 34,
       chip: 'v1.0–1.1 · 8 files',
       tone: 'info',
       title: 'v1.0–1.1 · From Notepad to Co-Pilot',
@@ -111,7 +131,7 @@ const SCENES = {
     },
     {
       id: 2,
-      frames: 44,
+      frames: 34,
       chip: 'v1.2–1.2.1 · 10 monoliths!',
       tone: 'warn',
       title: 'v1.2–1.2.1 · Add Hands, Build a Cage',
@@ -119,7 +139,7 @@ const SCENES = {
     },
     {
       id: 3,
-      frames: 44,
+      frames: 34,
       chip: 'v1.3 · 45 modules',
       tone: 'ok',
       title: 'v1.3 · Split Monoliths Into 45 Modules',
@@ -127,7 +147,7 @@ const SCENES = {
     },
     {
       id: 4,
-      frames: 44,
+      frames: 34,
       chip: 'v1.4 · 54 modules',
       tone: 'ok',
       title: 'v1.4 · Hold Execution, Stop Edit Stealing',
@@ -135,7 +155,7 @@ const SCENES = {
     },
     {
       id: 5,
-      frames: 44,
+      frames: 34,
       chip: 'v1.5–1.6 · 58 modules',
       tone: 'ok',
       title: 'v1.5–1.6 · 2,400T Desktop & Hard Cap',
@@ -143,11 +163,27 @@ const SCENES = {
     },
     {
       id: 6,
-      frames: 56,
-      chip: 'v1.7 · 83 modules · 0 deps',
-      tone: 'good',
-      title: 'v1.7 · Main Tab Hub & Zero Intrusion',
+      frames: 34,
+      chip: 'v1.7 · 83 modules',
+      tone: 'ok',
+      title: 'v1.7 · Main Tab, Local CLIs & Opt-In',
       sub: 'Local Codex / Claude dispatch · All 8 hooks skip plain chats by default',
+    },
+    {
+      id: 7,
+      frames: 38,
+      chip: 'v1.8–1.9 · 95 modules',
+      tone: 'ok',
+      title: 'v1.8–1.9 · Theme Studio & 0-Byte Memory Hub',
+      sub: '5+1 DIY skins · Bento Beam Flow · Gemini CLI · 2D/3D Starfield & Bridges',
+    },
+    {
+      id: 8,
+      frames: 52,
+      chip: 'v2.0 · 101 modules · 0 deps',
+      tone: 'good',
+      title: 'v2.0 · Voice Chief, Mobile Pager & 3-Protocol Vector',
+      sub: 'Speaker alerts · 6-ch pager · BM25/Links/Rollback · 53 backend + 48 frontend',
     },
   ],
 }
@@ -185,10 +221,10 @@ body { display:flex; flex-direction:column; position:relative;
 .stage { height:292px; flex:0 0 auto; display:flex; align-items:center; justify-content:center; padding:0 30px; }
 .stage svg { width:820px; height:292px; display:block; }
 .timeline { height:83px; flex:0 0 auto; background:#0d1524; border-top:1px solid #1e293b;
-  padding:11px 44px 8px; position:relative; display:flex; align-items:flex-start; justify-content:space-between; }
-.track { position:absolute; left:86px; right:86px; top:22px; height:3px; background:#1e293b; border-radius:2px; }
+  padding:11px 28px 8px; position:relative; display:flex; align-items:flex-start; justify-content:space-between; }
+.track { position:absolute; left:68px; right:68px; top:22px; height:3px; background:#1e293b; border-radius:2px; }
 .fill { height:100%; background:#34d399; border-radius:2px; width:0%; }
-.node { position:relative; z-index:2; display:flex; flex-direction:column; align-items:center; width:92px; }
+.node { position:relative; z-index:2; display:flex; flex-direction:column; align-items:center; width:86px; }
 .dotwrap { height:24px; display:flex; align-items:center; justify-content:center; margin-bottom:3px; }
 .ndot { width:20px; height:20px; border-radius:50%; display:flex; align-items:center; justify-content:center;
   font-size:10.5px; font-weight:700; border:2px solid #334155; background:#0b111c; color:#94a3b8; }
@@ -626,7 +662,83 @@ function svgScene6(u) {
   </svg>\`;
 }
 
-const RENDERERS = [svgScene1, svgScene2, svgScene3, svgScene4, svgScene5, svgScene6];
+function svgScene7(u) {
+  const stepProgress = (u * 3) % 1;
+  const flowX = lerp(96, 336, stepProgress);
+  const starPulse = (Math.sin(u * Math.PI * 4) * 0.5 + 0.5).toFixed(2);
+  return \`<svg viewBox="0 0 820 292" width="820" height="292" xmlns="http://www.w3.org/2000/svg">
+    <rect x="18" y="14" width="386" height="148" rx="12" fill="#101b30" stroke="#38bdf8" stroke-width="1.8"/>
+    <text x="36" y="42" fill="#7dd3fc" font-size="14.5" font-weight="700">\${IS_EN ? 'Bento Beam Flow &amp; Adaptive 5+1 Themes' : 'Bento 目标圆环 + 蛇形流光图 + 5+1 自适应皮肤'}</text>
+    <rect x="36" y="58" width="102" height="36" rx="8" fill="#112a46" stroke="#38bdf8"/>
+    <text x="87" y="81" text-anchor="middle" fill="#e0f2fe" font-size="12" font-weight="600">\${IS_EN ? 'Step 1 Plan' : '步骤 1 · 拆解'}</text>
+    <path d="M 138 76 L 178 76" stroke="#38bdf8" stroke-width="2.5"/>
+    <rect x="178" y="58" width="102" height="36" rx="8" fill="#0f2c27" stroke="#34d399"/>
+    <text x="229" y="81" text-anchor="middle" fill="#a7f3d0" font-size="12" font-weight="600">\${IS_EN ? 'Step 2 Run' : '步骤 2 · 执行'}</text>
+    <path d="M 280 76 L 320 76" stroke="#34d399" stroke-width="2.5"/>
+    <rect x="320" y="58" width="66" height="36" rx="8" fill="#1b2640" stroke="#a78bfa"/>
+    <text x="353" y="81" text-anchor="middle" fill="#ddd6fe" font-size="12" font-weight="600">\${IS_EN ? 'QA' : '核验'}</text>
+    <circle cx="\${flowX.toFixed(1)}" cy="76" r="5" fill="#67e8f9"/>
+    <rect x="36" y="110" width="350" height="36" rx="8" fill="#0d172a" stroke="#24385c"/>
+    <circle cx="52" cy="128" r="7" fill="#38bdf8"/>
+    <circle cx="72" cy="128" r="7" fill="#f59e0b"/>
+    <circle cx="92" cy="128" r="7" fill="#34d399"/>
+    <circle cx="112" cy="128" r="7" fill="#a78bfa"/>
+    <text x="128" y="132" fill="#cbd5e1" font-size="11">\${IS_EN ? 'DIY Studio: 4 swatches -> dark/light + AI' : 'DIY 工坊：4 色推导双模 · 25MB 壁纸 · AI'}</text>
+
+    <rect x="422" y="14" width="380" height="148" rx="12" fill="#141832" stroke="#a78bfa" stroke-width="1.8"/>
+    <text x="440" y="42" fill="#ddd6fe" font-size="14.5" font-weight="700">\${IS_EN ? 'Chief-Only Memory Studio (0B @lead)' : '参谋专属记忆星图与外部桥 (0B 隔离)'}</text>
+    <circle cx="496" cy="96" r="14" fill="#1e293b" stroke="#a78bfa" stroke-width="2"/>
+    <circle cx="496" cy="96" r="5" fill="#c4b5fd" opacity="\${starPulse}"/>
+    <line x1="510" y1="92" x2="572" y2="74" stroke="#7c3aed" stroke-width="1.6"/>
+    <line x1="509" y1="103" x2="574" y2="122" stroke="#38bdf8" stroke-width="1.6"/>
+    <circle cx="578" cy="72" r="7.5" fill="#38bdf8"/>
+    <circle cx="580" cy="124" r="7.5" fill="#34d399"/>
+    <rect x="602" y="57" width="186" height="30" rx="6" fill="#1e2444" stroke="#6366f1"/>
+    <text x="695" y="76" text-anchor="middle" fill="#e0e7ff" font-size="10.5">MEMORY.md · USER_PROFILE</text>
+    <rect x="602" y="96" width="186" height="30" rx="6" fill="#132b3d" stroke="#38bdf8"/>
+    <text x="695" y="115" text-anchor="middle" fill="#bae6fd" font-size="10.5">mcp-http / Obsidian / Cordis</text>
+
+    <rect x="18" y="176" width="784" height="102" rx="12" fill="#0f212c" stroke="#34d399" stroke-width="1.8"/>
+    <text x="40" y="206" fill="#6ee7b7" font-size="15" font-weight="700">\${IS_EN ? 'Collaboration 2.0 + Preset Pack v2 + 21 Live-QA Fixes' : '协同系统 2.0 + 安全预设包 v2 + 3 轮真机沙盒 21 项清零'}</text>
+    <text x="40" y="232" fill="#cbd5e1" font-size="12.5">\${IS_EN ? 'Discovers Codex / Claude / Gemini CLI with redacted live stream &amp; 2-hop relay' : '自动探测 Codex / Claude / Gemini CLI · 脱敏实时流 · 2 棒链式接力 · 左上角真 Star 同步'}</text>
+    <text x="40" y="257" fill="#94a3b8" font-size="12">\${IS_EN ? 'Custom Chief naming &amp; Memory Studio stay 0-byte isolated from @lead main chat' : '全局自定义参谋昵称 · 开箱防泄密防误删防线 · 严格对 @lead 主对话保持 0 字节零打扰'}</text>
+  </svg>\`;
+}
+
+function svgScene8(u) {
+  const wave = (u * 2.5) % 1;
+  const r1 = 22 + wave * 24;
+  const op1 = (1 - wave).toFixed(2);
+  const pulse = (Math.sin(u * Math.PI * 4) * 0.5 + 0.5).toFixed(2);
+  return \`<svg viewBox="0 0 820 292" width="820" height="292" xmlns="http://www.w3.org/2000/svg">
+    <rect x="18" y="14" width="384" height="190" rx="12" fill="#191324" stroke="#fb7185" stroke-width="2"/>
+    <text x="38" y="42" fill="#fda4af" font-size="15" font-weight="700">\${IS_EN ? 'Voice Chief &amp; Inline Stage (Alt+V)' : '双模语音参谋长 &amp; 行内语音舞台'}</text>
+    <circle cx="72" cy="96" r="22" fill="#2c1626" stroke="#fb7185" stroke-width="2"/>
+    <circle cx="72" cy="96" r="\${r1.toFixed(1)}" fill="none" stroke="#fb7185" stroke-width="2" opacity="\${op1}"/>
+    <text x="72" y="102" text-anchor="middle" fill="#ffe4e6" font-size="15">🔊</text>
+    <rect x="112" y="64" width="276" height="60" rx="8" fill="#261320" stroke="#f43f5e"/>
+    <text x="124" y="87" fill="#fecdd3" font-size="12" font-weight="700">\${IS_EN ? 'Boss! @worker-2 tried rm -rf - held!' : '老板不好啦，@worker-2 造反已被按住！'}</text>
+    <text x="124" y="109" fill="#fda4af" font-size="10.5">\${IS_EN ? 'Scrubbed TTS + Dual ASR · Name Wake' : 'DS/OpenAI/离线 TTS · 双通道 ASR · 喊名唤醒'}</text>
+    <rect x="34" y="148" width="354" height="38" rx="8" fill="#112438" stroke="#38bdf8"/>
+    <text x="46" y="172" fill="#bae6fd" font-size="11.5" font-weight="600">\${IS_EN ? 'Strict L0-L3 dispatch guard + Archives -> Voice Notes' : '语音发令走 L0-L3 硬门禁不放空炮 · 唠嗑进「档案 -> 手记」'}</text>
+
+    <rect x="418" y="14" width="384" height="190" rx="12" fill="#0f232e" stroke="#38bdf8" stroke-width="2"/>
+    <text x="438" y="42" fill="#7dd3fc" font-size="15" font-weight="700">\${IS_EN ? '6-Channel Mobile Pager &amp; BM25 Vaults' : '6 通道手机传呼 &amp; 档案 / 向量 / 主题'}</text>
+    <rect x="438" y="58" width="344" height="44" rx="8" fill="#102d3d" stroke="#22d3ee"/>
+    <text x="452" y="85" fill="#cffafe" font-size="12" font-weight="700">\${IS_EN ? '📲 Feishu · DingTalk · WeCom · TG · Discord · Hook' : '📲 飞书 · 钉钉 · 企微 · TG · Discord · Webhook'}</text>
+    <rect x="438" y="112" width="344" height="36" rx="8" fill="#122822" stroke="#34d399"/>
+    <text x="452" y="135" fill="#a7f3d0" font-size="12">\${IS_EN ? 'CJK+Latin BM25 · 5-Rev Rollback · [[WikiLinks]]' : '双语 BM25 搜正文 · 5 版回滚 · [[双链]] 作废预警'}</text>
+    <rect x="438" y="156" width="344" height="34" rx="8" fill="#1b1c3a" stroke="#a78bfa"/>
+    <text x="452" y="177" fill="#ddd6fe" font-size="11.5">\${IS_EN ? 'OpenAI/Ollama/Gemini Vector · Tide Blue + Server Sync' : '三协议向量 · 社区「潮汐蓝」+ JSON + 服务端多端同步'}</text>
+
+    <rect x="18" y="218" width="784" height="62" rx="12" fill="#0b2821" stroke="#34d399" stroke-width="2.2"/>
+    <circle cx="48" cy="249" r="7" fill="#34d399" opacity="\${pulse}"/>
+    <text x="68" y="244" fill="#6ee7b7" font-size="14.5" font-weight="700">\${IS_EN ? 'dsh-chief v2.0.0 — Ready at Desk &amp; Away From Keyboard' : 'dsh-chief v2.0.0 — 平时不打扰 · 出事会喊你 · 离桌发手机 · 零外部依赖'}</text>
+    <text x="68" y="266" fill="#d1fae5" font-size="12">\${IS_EN ? '53 backend (9 safety kernel) + 48 frontend modules · 27 fail-closed routes · npm &amp; GitHub Release' : '53 后端 (9 安全内核) + 48 前端模块 · 27 条环回接口 · 全局安装 dsh plugin --profile desktop add dsh-chief'}</text>
+  </svg>\`;
+}
+
+const RENDERERS = [svgScene1, svgScene2, svgScene3, svgScene4, svgScene5, svgScene6, svgScene7, svgScene8];
 
 function renderNodes(sIdx) {
   const wrap = document.getElementById('nodes');
@@ -659,8 +771,9 @@ window.__renderFrame = function(frameIdx) {
 
   document.getElementById('stage').innerHTML = RENDERERS[sIdx](u);
 
-  const prevPct = sIdx === 0 ? 0 : ((sIdx - 1) / 5) * 100;
-  const targetPct = (sIdx / 5) * 100;
+  const denom = Math.max(1, MILES.length - 1);
+  const prevPct = sIdx === 0 ? 0 : ((sIdx - 1) / denom) * 100;
+  const targetPct = (sIdx / denom) * 100;
   const lineT = f < 10 ? easeOutCubic(f / 9) : 1;
   document.getElementById('fill').style.width = lerp(prevPct, targetPct, lineT).toFixed(2) + '%';
   renderNodes(sIdx);
