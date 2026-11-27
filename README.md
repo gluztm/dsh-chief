@@ -14,7 +14,7 @@
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-<img src="assets/chief-10s-compare.gif" alt="原生长会话与挂载 dsh-chief v2.0.0 对比：普通窗口默认不打扰，支持语音参谋外放告警、6 通道手机传呼、主题多端同步、协同系统连线本机外协与执行前安全护栏" width="840" />
+<img src="assets/chief-10s-compare.gif?v=2.0.0" alt="原生长会话与挂载 dsh-chief v2.0.0 对比：普通窗口默认不打扰，支持语音参谋外放告警、6 通道手机传呼、主题多端同步、协同系统连线本机外协与执行前安全护栏" width="840" />
 
 <sub>新对话默认只读 · 改文件前先问你 · 一条命令安装</sub>
 
@@ -89,7 +89,7 @@ flowchart LR
 
 ## 界面长什么样
 
-<img src="assets/hero-banner.png" alt="dsh-chief 面板主视图" width="100%" />
+<img src="assets/hero-banner.png?v=2.0.0" alt="dsh-chief 面板主视图" width="100%" />
 
 默认采用左侧极简导航栏（`6 个主页签 + 独立主题工坊 + 顶栏设置页`），各自管一块：
 
@@ -110,7 +110,7 @@ flowchart LR
 - 后台运行「🌙 梦境漫游」或自动审查时，**点一下半透明遮罩任意位置即可收起恢复操作，外框继续亮着提示后台运行中**。
 
 <div align="center">
-  <img src="assets/screenshots/01-chief-cockpit-overview.png" alt="01 - 参谋主面板与行内语音舞台" width="92%" />
+  <img src="assets/screenshots/01-chief-cockpit-overview.png?v=2.0.0" alt="01 - 参谋主面板与行内语音舞台" width="92%" />
 </div>
 
 ### 02 · Bento 目标圆环卡、蛇形流光图与步骤「解释」（`任务` 页签）
@@ -119,7 +119,7 @@ flowchart LR
 - 左上锁住核心目标（开启 `⚡ 强介入` 前必须锁定），右卡实时显示进度圆环；画布用流畅贝塞尔光束连接主线与子代理卫星卡，点击任意节点就地展开大白话「解释」抽屉与跨会话 `📌 定住防改` 交接单。
 
 <div align="center">
-  <img src="assets/screenshots/02-full-spread-pyramid-dag.png" alt="02 - Bento 目标圆环与蛇形流光任务图" width="92%" />
+  <img src="assets/screenshots/02-full-spread-pyramid-dag.png?v=2.0.0" alt="02 - Bento 目标圆环与蛇形流光任务图" width="92%" />
 </div>
 
 ### 03 · 认知桌面、双语 BM25 与语音「手记」（`档案` 页签）
@@ -129,7 +129,7 @@ flowchart LR
 - 独立第 5 子页签 **`🎙️ 手记`** 专注承接 `~/.dsh/chief/voice-inbox/` 语音来稿与梦境整理产物。
 
 <div align="center">
-  <img src="assets/screenshots/03-cold-archive-cabinet.png" alt="03 - 认知桌面、BM25 双链档案与语音手记" width="92%" />
+  <img src="assets/screenshots/03-cold-archive-cabinet.png?v=2.0.0" alt="03 - 认知桌面、BM25 双链档案与语音手记" width="92%" />
 </div>
 
 ### 04 · 参谋专属「记忆工作台」与三协议向量（`记忆` 页签）
@@ -139,7 +139,7 @@ flowchart LR
 - 原生接入 **OpenAI / Ollama / Google Gemini** 三协议向量客户端与 `mcp-http` / `chief-http` / 只读 Obsidian / `cordis-provider` 四类外部记忆桥。
 
 <div align="center">
-  <img src="assets/screenshots/04-dual-tier-goal-and-step-qa.png" alt="04 - 参谋专属记忆工作台与三协议向量" width="92%" />
+  <img src="assets/screenshots/04-dual-tier-goal-and-step-qa.png?v=2.0.0" alt="04 - 参谋专属记忆工作台与三协议向量" width="92%" />
 </div>
 
 ### 05 · 协同系统 2.0 与本机外协直连（`协同` 页签）
@@ -149,7 +149,7 @@ flowchart LR
 - **刷新扫描与防自回旋路由**：一键捞出工作区休眠 DSH 窗（自动剔除后台维护任务与空壳），外协消息收归跨窗信箱。
 
 <div align="center">
-  <img src="assets/screenshots/05-cross-session-collab-bus.png" alt="05 - 协同系统 2.0 空闲与工作中自动锁编双态对比" width="92%" />
+  <img src="assets/screenshots/05-cross-session-collab-bus.png?v=2.0.0" alt="05 - 协同系统 2.0 空闲与工作中自动锁编双态对比" width="92%" />
 </div>
 
 ### 06 · 安全拦截与给 AI 的规矩（`边界` 页签）
@@ -159,7 +159,7 @@ flowchart LR
 - **给 AI 的规矩区**：`✅ 必须做`、`🚫 不要做`、`💡 注意` 三栏清晰分明，不会写正则可直接点 `✨ 让参谋长帮写`。
 
 <div align="center">
-  <img src="assets/screenshots/06-pinned-bounds-and-handoff.png" alt="06 - 边界预设包、单条暂挂与给 AI 的规矩" width="92%" />
+  <img src="assets/screenshots/06-pinned-bounds-and-handoff.png?v=2.0.0" alt="06 - 边界预设包、单条暂挂与给 AI 的规矩" width="92%" />
 </div>
 
 ### 07 · 顶栏设置、语音 TTS/VAD 与 6 通道手机传呼（`⚙️ 设置`）
@@ -169,7 +169,7 @@ flowchart LR
 - **语音播报 & 6 通道传呼**：配置 DeepSeek / OpenAI / 离线 TTS 音箱急报与 SenseVoice/DS ASR 识别；接入 **飞书 / 钉钉 / 企业微信 / Telegram / Discord / Webhook** 6 通道脱敏推手机。
 
 <div align="center">
-  <img src="assets/screenshots/07-session-handoff-and-guard.png" alt="07 - 顶栏设置、语音 TTS 与 6 通道手机传呼" width="92%" />
+  <img src="assets/screenshots/07-session-handoff-and-guard.png?v=2.0.0" alt="07 - 顶栏设置、语音 TTS 与 6 通道手机传呼" width="92%" />
 </div>
 
 ### 08 · 独立「外观与主题工坊」与多端同步（`🎨 工坊` · `v2.0.0`）
@@ -179,7 +179,7 @@ flowchart LR
 - **四色工坊 & 服务端同步**：支持本地 `<canvas>` 图片 0 Token 提色、25MB 高清壁纸、`AI DIY`、配色 **JSON 导入导出**，并自动持久化至 `~/.dsh/chief/` 在多端口与浏览器间同步生效。
 
 <div align="center">
-  <img src="assets/screenshots/08-theme-studio-and-voice.png" alt="08 - 独立外观与主题工坊、潮汐蓝与多端同步" width="92%" />
+  <img src="assets/screenshots/08-theme-studio-and-voice.png?v=2.0.0" alt="08 - 独立外观与主题工坊、潮汐蓝与多端同步" width="92%" />
 </div>
 
 ---
@@ -248,7 +248,7 @@ flowchart LR
 从最初共享一份 JSON 的右侧记事本（`dnb-`），到如今 `53` 个后端模块 + `48` 个前端模块、0 外部依赖的管理中心，每一步都是遇到实际问题后再改出来的：
 
 <div align="center">
-  <img src="assets/evolution-roadmap.gif" alt="dsh-chief 架构演进动态图：从右侧记事本到多代理与语音管理中心" width="840" />
+  <img src="assets/evolution-roadmap.gif?v=2.0.0" alt="dsh-chief 架构演进动态图：从右侧记事本到多代理与语音管理中心" width="840" />
 </div>
 
 ```mermaid

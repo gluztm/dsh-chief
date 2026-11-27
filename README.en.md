@@ -14,7 +14,7 @@
 [![Zero Dependencies](https://img.shields.io/badge/Dependencies-0%20External-ffe033?style=flat-square)](#)
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL%20v3-f87171?style=flat-square)](LICENSE)
 
-<img src="assets/chief-10s-compare.gif" alt="Comparison of plain long sessions vs dsh-chief v2.0.0: stays off in plain chats by default, adding Voice Chief alerts, 6-channel mobile pager, Theme Studio server sync, local CLI orchestration, and pre-execute guardrails" width="840" />
+<img src="assets/chief-10s-compare.gif?v=2.0.0" alt="Comparison of plain long sessions vs dsh-chief v2.0.0: stays off in plain chats by default, adding Voice Chief alerts, 6-channel mobile pager, Theme Studio server sync, local CLI orchestration, and pre-execute guardrails" width="840" />
 
 <sub>Read-only by default · Asks before editing workspace · One-command install</sub>
 
@@ -89,7 +89,7 @@ Open the `⚙️` gear in the top bar to switch between these three built-in pre
 
 ## What the panel looks like
 
-<img src="assets/hero-banner.png" alt="dsh-chief main cockpit view" width="100%" />
+<img src="assets/hero-banner.png?v=2.0.0" alt="dsh-chief main cockpit view" width="100%" />
 
 Uses a clean Left Rail workspace layout by default (`6 core tabs + standalone Theme Studio + Settings`), keeping each concern separate:
 
@@ -110,7 +110,7 @@ Uses a clean Left Rail workspace layout by default (`6 core tabs + standalone Th
 - When Dream Roam dims the panel, **click anywhere on the overlay to dismiss it while the outer glow keeps indicating background progress**.
 
 <div align="center">
-  <img src="assets/screenshots/01-chief-cockpit-overview.png" alt="01 - Chief Cockpit and Inline Voice Stage" width="92%" />
+  <img src="assets/screenshots/01-chief-cockpit-overview.png?v=2.0.0" alt="01 - Chief Cockpit and Inline Voice Stage" width="92%" />
 </div>
 
 ### 02 · Bento Objective Ring, Serpentine Beam Flow & Step Explain (`Tasks` Tab)
@@ -119,7 +119,7 @@ Uses a clean Left Rail workspace layout by default (`6 core tabs + standalone Th
 - Lock your Core Objective before enabling Strong Intervention; click any step on the unified flow canvas to open its plain-language `Explain` drawer or pin a `📌 Pin Lock` cross-session Handoff Packet below.
 
 <div align="center">
-  <img src="assets/screenshots/02-full-spread-pyramid-dag.png" alt="02 - Bento Objective Ring and Serpentine Beam Flow" width="92%" />
+  <img src="assets/screenshots/02-full-spread-pyramid-dag.png?v=2.0.0" alt="02 - Bento Objective Ring and Serpentine Beam Flow" width="92%" />
 </div>
 
 ### 03 · Cognitive Desktop, Bilingual BM25 & Voice Notes (`Archives` Tab)
@@ -129,7 +129,7 @@ Uses a clean Left Rail workspace layout by default (`6 core tabs + standalone Th
 - Dedicated **`🎙️ Notes`** subtab digests queued `~/.dsh/chief/voice-inbox/` transcripts via Dream Roam with 0-byte `@lead` isolation.
 
 <div align="center">
-  <img src="assets/screenshots/03-cold-archive-cabinet.png" alt="03 - Cognitive Desktop, BM25 WikiLinks and Voice Notes" width="92%" />
+  <img src="assets/screenshots/03-cold-archive-cabinet.png?v=2.0.0" alt="03 - Cognitive Desktop, BM25 WikiLinks and Voice Notes" width="92%" />
 </div>
 
 ### 04 · Chief-Only Memory Studio & 3-Protocol Embedding (`Memory` Tab)
@@ -138,7 +138,7 @@ Uses a clean Left Rail workspace layout by default (`6 core tabs + standalone Th
 - Includes out-of-the-box `MEMORY.md` writing with Ebbinghaus vitality tracking, lockable `USER_PROFILE.md`, native **OpenAI / Ollama / Google Gemini** embedding support, and external bridges (`mcp-http`, dual-slot `chief-http`, read-only Obsidian, and `cordis-provider`).
 
 <div align="center">
-  <img src="assets/screenshots/04-dual-tier-goal-and-step-qa.png" alt="04 - Chief-Only Memory Studio and 3-Protocol Vector" width="92%" />
+  <img src="assets/screenshots/04-dual-tier-goal-and-step-qa.png?v=2.0.0" alt="04 - Chief-Only Memory Studio and 3-Protocol Vector" width="92%" />
 </div>
 
 ### 05 · Collaboration 2.0 & Direct Local CLIs (`Peers` Tab)
@@ -148,7 +148,7 @@ Uses a clean Left Rail workspace layout by default (`6 core tabs + standalone Th
 - **Standby Scan & Anti-Self-Steer Guards**: One-click **Refresh Scan** discovers dormant DSH sessions (filtering maintenance tasks and empty shells) with unified cross-window mail routing.
 
 <div align="center">
-  <img src="assets/screenshots/05-cross-session-collab-bus.png" alt="05 - Collaboration 2.0 idle vs active-locked views" width="92%" />
+  <img src="assets/screenshots/05-cross-session-collab-bus.png?v=2.0.0" alt="05 - Collaboration 2.0 idle vs active-locked views" width="92%" />
 </div>
 
 ### 06 · Safety Block & Rules for AI (`Guards` Tab)
@@ -158,7 +158,7 @@ Uses a clean Left Rail workspace layout by default (`6 core tabs + standalone Th
 - **📝 Rules for AI**: Split into `✅ Must Do`, `🚫 Don't Do` (also blocks matching commands when Safety Block is on), and `💡 Notes`.
 
 <div align="center">
-  <img src="assets/screenshots/06-pinned-bounds-and-handoff.png" alt="06 - Guard Wall Presets v2, Pause Checkbox and Rules for AI" width="92%" />
+  <img src="assets/screenshots/06-pinned-bounds-and-handoff.png?v=2.0.0" alt="06 - Guard Wall Presets v2, Pause Checkbox and Rules for AI" width="92%" />
 </div>
 
 ### 07 · Settings, Voice TTS/VAD & 6-Channel Mobile Pager (`⚙️ Settings`)
@@ -168,7 +168,7 @@ Uses a clean Left Rail workspace layout by default (`6 core tabs + standalone Th
 - **Voice Chief & Mobile Pager**: Pair DeepSeek/OpenAI/offline speaker TTS + SenseVoice/DS ASR with **Feishu / DingTalk / WeCom / Telegram / Discord / Webhook** scrubbed push alerts.
 
 <div align="center">
-  <img src="assets/screenshots/07-session-handoff-and-guard.png" alt="07 - Settings, Voice Chief TTS and 6-Channel Mobile Pager" width="92%" />
+  <img src="assets/screenshots/07-session-handoff-and-guard.png?v=2.0.0" alt="07 - Settings, Voice Chief TTS and 6-Channel Mobile Pager" width="92%" />
 </div>
 
 ### 08 · Standalone Appearance & Theme Studio (`🎨 Studio` · `v2.0.0`)
@@ -178,7 +178,7 @@ Uses a clean Left Rail workspace layout by default (`6 core tabs + standalone Th
 - **DIY Workshop & Server Sync**: Supports 4-swatch WCAG derivation, zero-token `<canvas>` palette extraction, 25MB `IndexedDB` wallpapers, AI DIY, **JSON import/export**, and server persistence under `~/.dsh/chief/`.
 
 <div align="center">
-  <img src="assets/screenshots/08-theme-studio-and-voice.png" alt="08 - Standalone Theme Studio, Tide Blue and Multi-Origin Sync" width="92%" />
+  <img src="assets/screenshots/08-theme-studio-and-voice.png?v=2.0.0" alt="08 - Standalone Theme Studio, Tide Blue and Multi-Origin Sync" width="92%" />
 </div>
 
 ---
@@ -247,7 +247,7 @@ Yes. You can type plain instructions in the composer, switch presets with one cl
 What began as a shared-JSON sidebar scratchpad (`dnb-`) grew through practical daily issues into a zero-dependency control hub with **53 backend modules + 48 frontend modules**:
 
 <div align="center">
-  <img src="assets/evolution-roadmap-en.gif" alt="dsh-chief architecture evolution animation" width="840" />
+  <img src="assets/evolution-roadmap-en.gif?v=2.0.0" alt="dsh-chief architecture evolution animation" width="840" />
 </div>
 
 ```mermaid
