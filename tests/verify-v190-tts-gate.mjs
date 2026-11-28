@@ -713,6 +713,62 @@ try {
   assert.equal(cloudAsrRes.ok, true, `T10 cloud ASR failed: ${cloudAsrRes.error || ''}`)
   assert.equal(cloudAsrRes.provider, 'deepseek-asr')
   assert.match(cloudAsrRes.text, /请求编号/)
+
+  // Ensure OpenAI-compat TTS baseUrl/key never hijack DeepSeek ASR endpoint or auth
+  let isolatedAsrUrl = ''
+  let isolatedAsrHeaders = null
+  const isolatedRes = await ttsMod.transcribeChiefAudio(accountRuntime, {
+    provider: 'openai-compat',
+    baseUrl: 'http://127.0.0.1:8880/v1',
+    apiKey: 'sk-local-tts-only',
+  }, {
+    audioBase64: localSttWav.toString('base64'),
+    prefer: 'cloud',
+    fetchImpl: async (url, init) => {
+      isolatedAsrUrl = String(url)
+      isolatedAsrHeaders = (init && init.headers) ? { ...init.headers } : {}
+      return {
+        ok: true,
+        status: 200,
+        async json() { return { text: '云端隔离测试通过' } },
+      }
+    },
+  })
+  assert.equal(isolatedRes.ok, true)
+  assert.equal(isolatedAsrUrl, 'https://api.deepseek.com/v1/tools/asr', 'T10 ASR must ignore openai-compat baseUrl')
+  assert.equal(isolatedAsrHeaders['x-dsh-auth-token'], DSH_GRANT_SECRET, 'T10 ASR must use host account grant instead of openai-compat key')
+  assert.equal(isolatedAsrHeaders.authorization, undefined)
+
+  // Ensure local silence returns EMPTY_TRANSCRIPT directly without falling through to cloud fetch
+  let silenceFetchCalls = 0
+  const silentLocalRuntime = {
+    get(name) {
+      if (name === 'speechToText') {
+        return {
+          listProviders: () => [{ id: 'sensevoice', preparation: { phase: 'ready' } }],
+          snapshot: () => ({ providers: [{ id: 'sensevoice', preparation: { phase: 'ready' } }] }),
+          resolve: ({ audio }) => ({ providerId: 'sensevoice', audio }),
+          async transcribe() { return { text: '   ' } },
+        }
+      }
+      return undefined
+    },
+  }
+  const silentRes = await ttsMod.transcribeChiefAudio(silentLocalRuntime, {
+    provider: 'openai-compat',
+    baseUrl: 'http://127.0.0.1:8880/v1',
+    apiKey: 'sk-local-tts-only',
+  }, {
+    audioBase64: localSttWav.toString('base64'),
+    prefer: 'auto',
+    fetchImpl: async () => {
+      silenceFetchCalls += 1
+      return { ok: true, status: 200, async json() { return { text: 'should-not-happen' } } }
+    },
+  })
+  assert.equal(silentRes.ok, false)
+  assert.equal(silentRes.code, 'EMPTY_TRANSCRIPT', 'T10 local silence under auto mode must return EMPTY_TRANSCRIPT directly')
+  assert.equal(silenceFetchCalls, 0, 'T10 local silence must not trigger cloud fallback fetch')
   console.log('[T10 PASS] Dual-path STT (DSH SenseVoice local + DeepSeek /v1/tools/asr FormData) verified')
 
   // =========================================================================

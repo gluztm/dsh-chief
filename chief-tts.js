@@ -790,9 +790,7 @@ export async function transcribeChiefAudio(
             latencyMs,
           }
         }
-        if (cleanPrefer === 'local') {
-          return { ok: false, code: 'EMPTY_TRANSCRIPT', error: '未识别到有效语音内容' }
-        }
+        return { ok: false, code: 'EMPTY_TRANSCRIPT', error: '未识别到有效语音内容' }
       } catch (err) {
         const msg = redactKeyFromErrorText(err && err.message ? err.message : err)
         ttsRuntimeStats.lastSttError = msg
@@ -815,8 +813,12 @@ export async function transcribeChiefAudio(
 
   const cfg = normalizeTtsConfig(rawTtsCfg)
   const hostCtx = await resolveHostDeepSeekTtsContext(runtime)
-  const endpoint = buildDeepSeekAsrEndpoint(cfg.baseUrl || hostCtx.baseUrl || 'https://api.deepseek.com')
-  const dsCandidates = await resolveDeepSeekAuthCandidates(runtime, cfg, hostCtx, endpoint)
+  const isDeepSeekTtsCfg = cfg.provider === 'deepseek'
+  const asrBaseUrl = (isDeepSeekTtsCfg && cfg.baseUrl)
+    ? cfg.baseUrl
+    : (hostCtx.baseUrl || 'https://api.deepseek.com')
+  const endpoint = buildDeepSeekAsrEndpoint(asrBaseUrl)
+  const dsCandidates = await resolveDeepSeekAuthCandidates(runtime, isDeepSeekTtsCfg ? cfg : null, hostCtx, endpoint)
   if (!dsCandidates.length) {
     return {
       ok: false,

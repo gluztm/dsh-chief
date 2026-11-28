@@ -23,6 +23,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 在 `deliverCrossMessage` 下发强介入指令前再次校验 `@lead` 是否已切入 `running` 或对话已推进至更新的 `msgCount / stamp`，直接丢弃滞后过期复盘并回退 `interventionTurns` 计数。
 - **参谋面板顶栏按钮前端报错修复（`src/client/components/Panel.js`）**：
   - 移除主题工坊重构后在模型选择与后台运行模式按钮 `onClick` 中残留的已废弃 `setSkinMenuAnchor('')` 调用（消除 `ReferenceError: setSkinMenuAnchor is not defined`）。
+- **语音识别（ASR）隔离 OpenAI 兼容 TTS 地址与静音防误穿透（`chief-tts.js`）**：
+  - 当配置了本机或第三方 OpenAI 兼容 TTS（如 `http://127.0.0.1:8880/v1`）时，云端 DeepSeek ASR 严格回用宿主 DeepSeek 基址与登录鉴权，不再错打向本地 TTS 端口造成 `HTTP 404: Not found`；同时本地 SenseVoice 正常识别但返回静音空文本时直接回报 `EMPTY_TRANSCRIPT`，不再穿透触发云端 ASR。
 
 ### Added & Verified
 - 新增回归门禁套件 [`tests/verify-v202-blocker-and-guard-gate.mjs`](tests/verify-v202-blocker-and-guard-gate.mjs)（覆盖 `B1–B5`），全面接入 `npm run test:ci` 与 `npm test`，并在独立隔离沙箱 `DSH 0.2.2-rc.5` 上联动真实大模型跑通硬阻塞停机与 `chief.request` 转呈零回弹实测；10 个 MD5 锁定安全内核模块保持零改动。
