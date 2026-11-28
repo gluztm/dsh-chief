@@ -487,7 +487,6 @@ flowchart TB
 | [Gemini](https://github.com/gemini-code-assist) | 功能研发、`pkg/safety/` 安全内核、认知桌面、表盘与测试门禁 |
 | [Codex](https://github.com/codex) | 模块化拆分、并发压测、红队测试与边界审查 |
 | [deepseek-ai](https://github.com/deepseek-ai) | DeepSeek Harness 宿主运行时与 SuperAgent 机制支持 |
-| [@iridiumgit](https://github.com/iridiumgit) | 社区贡献：Issues `#5/#6/#7` 实测反馈、主题多端同步与配色 JSON 导入导出建议及「潮汐蓝」社区配色 |
 
 ---
 
