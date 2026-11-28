@@ -386,14 +386,14 @@ Read the full story and tradeoffs in **[Architecture Evolution (`EVOLUTION.en.md
 Search **`dsh-chief`** inside [dshmarket](https://github.com/dsh-market/dsh-market) / DSH Plugin Market, or install via CLI (replace `desktop` with `web` for the web profile):
 
 ```bash
-# Option 1: Install latest release (v2.0.0) from npm
+# Option 1: Install latest release (v2.0.1) from npm
 dsh plugin --profile desktop add dsh-chief
 
 # Option 2: Install directly from GitHub main branch
 dsh plugin --profile desktop add github:gluztm/dsh-chief
 
-# Option 3: Install prebuilt GitHub Release tarball (v2.0.0)
-dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v2.0.0/dsh-chief-2.0.0.tgz
+# Option 3: Install prebuilt GitHub Release tarball (v2.0.1)
+dsh plugin --profile desktop add https://github.com/gluztm/dsh-chief/releases/download/v2.0.1/dsh-chief-2.0.1.tgz
 ```
 
 | DeepSeek Harness (DSH) Version | Panel / Board / Vaults / Pre-Execute Walls | Named Subagent Tree (`task.dispatch` / `team.*`) | Notes |

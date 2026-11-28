@@ -588,9 +588,9 @@ export function readAnswer(session, turn) {
   return result
 }
 
-const PREMATURE_ASK_OR_STOP_RE = /(?:请确认|请选择|是否继续|需要您|您看|请指示|请拍板|全部完成|已交付完毕|已完成交付|本轮无进展|卡住了，因为|已暂停待命|优雅退出|收工待命)/
+const PREMATURE_ASK_OR_STOP_RE = /(?:请确认|请选择|是否继续|需要您|您看|请指示|请拍板|全部完成|已交付完毕|已完成交付|本轮无进展|卡住了，因为|已暂停待命|优雅退出|收工待命|硬阻塞|外部阻塞|卡在(?:用户|外部|凭证|接入|拍板)|等(?:用户|您|人工)(?:拍板|确认|回复|提供|授权)|这轮收工|本轮收工)/
 const COMPLETED_ACTION_PHRASE_RE = /(?:(?:已|已经|刚|刚刚|刚才)?(?:重启|拉起|补跑|续跑|写入?|跑|执行|验证|核验|确认|测试|排查|检查)(?:完成|完毕|好了?|了|成功|通过)|(?:重启|补跑|拉起)前|已(?:重启|拉起|补跑|续跑|写完|完成|执行|验证|核验|确认|通过)|无需(?:重启|补跑|继续|验证)|[，,]?\s*已(?:通过|完成|落盘|跑完|核验))/g
-const PREMATURE_PROMISE_CUE_RE = /(?:重启|拉起|补跑|续跑|继续跑|继续执行|开始跑|开始写|开始验证|开始排查|补充验证|补充测试|补充核验|确认[^\n。]{0,24}一致性|写[^\n。]{0,20}驱动|接下来(?:我|先|去|开始|将|执行|验证)|下面(?:我|先|开始|执行|验证|确认)|下一步(?:我|先|将|执行|验证|核验|确认)|马上(?:去|执行|重启|补跑|修复|验证)|这就去|现在(?:去|开始|重启|补跑|执行|验证|核验))/
+const PREMATURE_PROMISE_CUE_RE = /(?:重启(?!命令|脚本|方式|指令|参数|路径|策略|文档|说明|指南)|拉起|补跑|续跑|继续跑|继续执行|开始跑|开始写|开始验证|开始排查|补充验证|补充测试|补充核验|确认[^\n。]{0,24}一致性|写[^\n。]{0,20}驱动|接下来(?:我|先|去|开始|将|执行|验证)|下面(?:我|先|开始|执行|验证|确认)|下一步(?:我|先|将|执行|验证|核验|确认)|马上(?:去|执行|重启|补跑|修复|验证)|这就去|现在(?:去|开始|重启|补跑|执行|验证|核验))/
 
 /**
  * Detect short wrap-up answers that merely promise the next concrete action
@@ -613,7 +613,7 @@ export function detectPrematurePromiseText(text) {
   return ''
 }
 
-const EXTERNAL_WAIT_TEXT_RE = /(?:等待(?:外部|对方|主对话|子代理|参谋|跨会话|跨窗口|人工|用户|测试|回传|回复|响应|投递|输入|核对|确认|完成)|待(?:对方|外部|子代理|人工|用户|跨会话)(?:回复|回传|响应|输入|确认|核对|完成)|已(?:发信|递话|派发|交由|转交|发出挑战|发送请求)[^\n。！？]{0,24}(?:等待|待回|待确认)|停等(?:外部|对方|平台|人工|回复)|waiting\s+for\s+(?:external|reply|response|input|peer|subagent|agent|user|confirmation)|awaiting\s+(?:external|reply|response|input|peer|subagent|confirmation))/i
+const EXTERNAL_WAIT_TEXT_RE = /(?:等待(?:外部|对方|主对话|子代理|参谋|跨会话|跨窗口|人工|用户|测试|回传|回复|响应|投递|输入|核对|确认|完成)|待(?:对方|外部|子代理|人工|用户|跨会话)(?:回复|回传|响应|输入|确认|核对|完成)|已(?:发信|递话|派发|交由|转交|发出挑战|发送请求)[^\n。！？]{0,24}(?:等待|待回|待确认)|停等(?:外部|对方|平台|人工|回复)|等(?:用户|您|人工)(?:拍板|确认|提供|回复|授权|接入)|卡在(?:用户|外部|人工|凭证|接入|拍板)|硬阻塞|外部依赖|转呈用户|递呈用户|需(?:要)?用户(?:提供|拍板|确认|授权)|waiting\s+for\s+(?:external|reply|response|input|peer|subagent|agent|user|confirmation)|awaiting\s+(?:external|reply|response|input|peer|subagent|confirmation))/i
 
 /** Whether assistant answer explicitly explains it is waiting for external input/reply/peer completion. */
 export function isWaitingExternalInputText(text) {
@@ -678,6 +678,10 @@ export function shouldGuard({ board, session, sessionId, turn, settings, strongI
   const hasExternalWaitGrounding = calledExternalWait || Boolean(hasRunningSubagent) || Boolean(hasLinkedPeers) || cursorBlocked || allOpenTasksBlocked
   const waitingExternalText = isWaitingExternalInputText(answer.lastText)
   if (waitingExternalText && hasExternalWaitGrounding) {
+    return null
+  }
+  const explicitBlockerText = /(?:硬阻塞|外部阻塞|外部依赖|blocked|卡在|等用户|待用户|请用户|拍板|无新动作|收工)/i.test(answer.lastText)
+  if ((allOpenTasksBlocked || cursorBlocked) && (waitingExternalText || explicitBlockerText)) {
     return null
   }
 

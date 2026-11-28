@@ -5,9 +5,31 @@ All notable changes to **`dsh-chief`** (**DSH 参谋长**) will be documented in
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [2.0.1] - 2026-11-28
+
+> 稳定性热修版本：彻底根治**「强介入模式下遇外部硬阻塞时无限催促主对话交卷」**的鬼打墙死循环（`session.v4.jsonl` 现场复盘 5 处叠加根因），并在真实沙盒 `DSH 0.2.2-rc.5` 结合真实大模型完成全链路对抗实测。
+
+### Fixed
+- **强介入外部硬阻塞停机阀（`chief-review.js` / `state-schema.js`）**：
+  - 当主对话因缺少云机 SSH/凭证、外部权限或需用户先拍板，且已在看板将任务标为 `blocked` 或写入断点卡点时，`runTurnReview` 与复盘系统提示词（`TURN_REVIEW_SYSTEM` 第 4/6 条）现会识别 `goalStatus: "blocked"` 与外部硬阻塞特征，**立即暂停强介入**（`tacticalModes.intervention = false`）、取消自动续跑并推送 `blocker_halt`（`level: 'warn'`）待拍板卡片，不再通过 `unmetMustDoFallback` 机械下发「请逐项补齐并交卷」；
+  - 复盘 Prompt 同步补充 `当前执行断点 (Cursor)` 视野，并在看板已处阻塞态时自动屏蔽零模型兜底续推（`canZeroLlmFallback`）。
+- **结构化防死循环熔断指纹（`chief-review.js`）**：
+  - 将 `assistantTail` 文本尾部切片从防死循环哈希 `sig` 中移除，改为锚定 `objective / goalStatus / plan / tasks / cursorBlocked / unmetCount / latestActionToolSig`（排除 `chief_board` 等纯粹状态汇报工具的实质工作区工具轨迹）的结构化进展指纹，防止主对话每次换种措辞解释卡顿导致 `unchangedCount` 被反复清零；同时将阻塞态熔断阈值收紧至 2 轮、无限轮次模式收紧至 4 轮。
+- **空转拦截防误杀「重启命令」并尊重要求阻塞的看板（`idle-guard.js`）**：
+  - 收紧 `PREMATURE_PROMISE_CUE_RE`，将裸词 `重启` 改为 `重启(?!命令|脚本|方式|指令|参数|路径|策略|文档|说明|指南)`，消除汇报「缺……重启命令」时误触发口头预告拦截；同步扩充 `PREMATURE_ASK_OR_STOP_RE` 与 `EXTERNAL_WAIT_TEXT_RE` 对「硬阻塞 / 卡在用户拍板 / 本轮收工」的识别，并在看板已显式全部阻塞（`allOpenTasksBlocked || cursorBlocked`）时直接放行。
+- **`chief.request` 升级用户拍板不再回弹进 `@lead`（`command-ops.js`）**：
+  - L3 权限下 `handleLeadDirectRequestToChief` 识别主对话递呈用户拍板请求及参谋长面向用户的三选一停等战报后，自动暂停强介入、记录 `blocker_halt` 告警与任务台账并返回 `actionTaken: 'escalated_to_user'`，**严禁**再将给用户的决策 Prompt 封装为 `[EXECUTION_REQUEST]` 塞回 `@lead` 收件箱（常规 L3 协同请求仍正常回传 `@lead`）。
+- **异步复盘投递前新鲜度校验（`chief-review.js`）**：
+  - 在 `deliverCrossMessage` 下发强介入指令前再次校验 `@lead` 是否已切入 `running` 或对话已推进至更新的 `msgCount / stamp`，直接丢弃滞后过期复盘并回退 `interventionTurns` 计数。
+- **参谋面板顶栏按钮前端报错修复（`src/client/components/Panel.js`）**：
+  - 移除主题工坊重构后在模型选择与后台运行模式按钮 `onClick` 中残留的已废弃 `setSkinMenuAnchor('')` 调用（消除 `ReferenceError: setSkinMenuAnchor is not defined`）。
+
+### Added & Verified
+- 新增回归门禁套件 [`tests/verify-v202-blocker-and-guard-gate.mjs`](tests/verify-v202-blocker-and-guard-gate.mjs)（覆盖 `B1–B5`），全面接入 `npm run test:ci` 与 `npm test`，并在独立隔离沙箱 `DSH 0.2.2-rc.5` 上联动真实大模型跑通硬阻塞停机与 `chief.request` 转呈零回弹实测；10 个 MD5 锁定安全内核模块保持零改动。
+
 ## [2.0.0] - 2026-11-27
 
-> 里程碑大版本：参谋长真正“能听会说、能自己记事、能守边界、会真发令、还能手机远程报平安”。上线全链路**双模语音参谋长（DeepSeek / OpenAI 兼容 / 系统语音 TTS + SenseVoice / DeepSeek ASR 双通道识别 + 行内语音舞台 + 叫名唤醒 + 防空口支票实发闭环）**、**手机远程传呼（飞书 / 钉钉 / 企业微信 / Telegram / Discord / 自定义 Webhook）**、**「档案 → 🎙️ 手记」独立语音手记子页签 & 梦境自动消化引擎**、**双语 BM25 档案检索 + 卷宗演进快照回滚 + `[[双链]]` 暗铜失效联动预警**、**记忆工坊三协议通用向量客户端（OpenAI / Ollama / Gemini）**、**开箱即用参谋记忆本自主写入**、**工作边界「暂挂」开关**、**独立「外观与主题工坊」页面（精选 5 套 + DIY 工坊内含 `@iridiumgit` 在 Issue #7 贡献的「潮汐蓝」社区配色、配色 JSON 导入导出与服务端多端自动同步）**，以及面向非程序员用户的**全量体验瘦身与沙盒真机多轮打磨**。
+> 里程碑大版本：参谋长真正“能听会说、能自己记事、能守边界、会真发令、还能手机远程报平安”。上线全链路**双模语音参谋长（DeepSeek / OpenAI 兼容 / 系统语音 TTS + SenseVoice / DeepSeek ASR 双通道识别 + 行内语音舞台 + 叫名唤醒 + 防空口支票实发闭环）**、**手机远程传呼（飞书 / 钉钉 / 企业微信 / Telegram / Discord / 自定义 Webhook）**、**「档案 → 🎙️ 手记」独立语音手记子页签 & 梦境自动消化引擎**、**双语 BM25 档案检索 + 卷宗演进快照回滚 + `[[双链]]` 暗铜失效联动预警**、**记忆工坊三协议通用向量客户端（OpenAI / Ollama / Gemini）**、**开箱即用参谋记忆本自主写入**、**工作边界「暂挂」开关**、**独立「外观与主题工坊」页面（精选 5 套 + DIY 工坊内含 `@iridiumgit` 在 Issue #7 贡献的社区配色、配色 JSON 导入导出与服务端多端自动同步）**，以及面向非程序员用户的**全量体验瘦身与沙盒真机多轮打磨**。
 
 ### Added & Improved
 - **双语 CJK + Latin BM25 工程档案检索全链路打通（`archive-core.js` / `archive-dossiers.js` / `src/client/tabs/archives.js`）**：
@@ -32,7 +54,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - 语音输入与语音唠嗑先脱敏落盘 `~/.dsh/chief/voice-inbox/`，经「🌙 梦境整理」拆入长期记忆、用户画像、参谋日记与手记文稿（与 `@lead` 0 字节隔离）。
   - 在「档案」下新增第 5 个子页签 `🎙️ 手记`，统一收纳待整理语音与已归档手记文稿，使「全局 / 本局」专注于工程档案，「记忆」页保持纯粹清单。
 - **🎨 独立「外观与主题工坊」页面 & 社区诉求响应（感谢 `@iridiumgit` · [Issue #7](https://github.com/gluztm/dsh-chief/issues/7)）**：
-  - 将主题选择由悬浮气泡升级为独立工坊页（标明多端同步）：`精选预设 (5)` 保留 5 套官方皮肤；`DIY 工坊` 内嵌顶部「🌊 社区配色」收纳 `@iridiumgit` 贡献的深浅双模 **「潮汐蓝 (`tide`)」**（支持一键启用或拿来微调），同时支持图片提色、高清壁纸、参谋长 AI DIY 及 **配色 JSON 导入/导出**。
+  - 将主题选择由悬浮气泡升级为独立工坊页（标明多端同步）：`精选预设 (5)` 保留 5 套官方皮肤；`DIY 工坊` 内嵌顶部「🌊 社区配色」收纳 `@iridiumgit` 贡献的双模社区配色（支持一键启用或拿来微调），同时支持图片提色、高清壁纸、参谋长 AI DIY 及 **配色 JSON 导入/导出**。
   - 选中主题（`uiSkin`）与自定义配色（`customSkin`）同步持久化到服务端 `~/.dsh/chief/`（支持 `127.0.0.1` / 局域网 / Tailnet / 多浏览器一致）。
 - **⏸ 工作边界「暂挂」与开箱参谋记忆自主写入**：
   - 边界条文新增「暂挂」勾选框，可随时暂挂与恢复而无需删改重写；参谋内置长期记忆本（`builtin-md`）改为默认开箱启用，对话产出的 `memoryChanges` 实时同步写入 `MEMORY.md`。
@@ -40,7 +62,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 ### Improved & Fixed
 - **小白体验全量瘦身与沙盒多轮实机打磨**：
   - 底部 `+` 控制面板砍掉 18 格百分比矩阵，精简为 4 项高频开关 + 3 档预设（`65% / 80% / 90%`）；提权弹窗与回执清洗代码术语、批准后自动清理过期 L0 提示；
-  - 修复设置页「常用场景预设」3 列卡片横向溢出裁切、「档案 → 手记」窄屏顶栏重叠、进入档案时初始角标滞后刷新、DIY 4 槽标题竖向折行、L2 权限メニュー贴底微裁、气泡里孤立「思考关」与粗体 `**` 未解析、以及「按需可查 / 标记重要程度」等晦涩行话；
+  - 修复设置页「常用场景预设」3 列卡片横向溢出裁切、「档案 → 手记」窄屏顶栏重叠、进入档案时初始角标滞后刷新、DIY 4 槽标题竖向折行、L2 权限菜单贴底微裁、气泡里孤立「思考关」与粗体 `**` 未解析、以及「按需可查 / 标记重要程度」等晦涩行话；
   - 恢复 `autoDistill.minTurns: 2` 修复后台自动提炼竞态；全量门禁与 8 轴红队审计零回归，10 个安全内核模块 MD5 严格锁定未改。
 
 ## [1.9.0] - 2026-11-26

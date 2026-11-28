@@ -846,7 +846,6 @@ function PanelInner(props) {
             })(),
             onClick: () => {
               const nextOpen = !view.secModelMenuOpen
-              setSkinMenuAnchor('')
               patch({ secModelMenuOpen: nextOpen, secPaceMenuOpen: false, secPermMenuOpen: false })
               if (nextOpen) void loadChiefModels(true)
             },
@@ -879,7 +878,6 @@ function PanelInner(props) {
                   'data-rm': opt.key,
                   title: rm.hint || opt.hint,
                   onClick: () => {
-                    setSkinMenuAnchor('')
                     if (opt.key === 'managed' && curRunMode !== 'managed') {
                       patch({ autoPilotConfirmOpen: true, secPaceMenuOpen: false })
                       return

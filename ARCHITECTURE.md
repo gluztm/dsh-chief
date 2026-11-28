@@ -18,7 +18,7 @@
   - 持有进程唯一 `hostState` 与 `deps` 总线，按序装配工厂模块并对外转调：`apply`、`resolveWorkspaceIdForSession`、`getSessionCwd`、`executeHostSessionCompaction`、`deployStateToTargetChief`、`transferChief`。
   - 避免多实例各自持锁导致状态冲突。
 - **`board-schema.js` & `board-store.js` & `subagent-runtime.js`**
-  - `board-schema.js`：维护常量、字段长度上限（`BODY_LIMIT` 等）、任务 DAG 归一化、工作流进度推演、`normalizeCursorBlocked`、`emptyBoard` 与版本标识 `BACKEND_BUILD = '2.0.0'`。
+  - `board-schema.js`：维护常量、字段长度上限（`BODY_LIMIT` 等）、任务 DAG 归一化、工作流进度推演、`normalizeCursorBlocked`、`emptyBoard` 与版本标识 `BACKEND_BUILD = '2.0.1'`。
   - `board-store.js`：负责看板 JSON 文件缓存、跨进程 `O_EXCL` 文件锁与带 `threadId` 的原子重命名写盘，自动合并全局红线 `pinnedBounds`。
   - `subagent-runtime.js`：解析子代理树谱系、工作区 `cwd` / `workspaceId`、会话 Token 用量以及 `/compact` 上下文压缩桥接。
 - **`board-actions.js` & `board-handoff.js`**
@@ -77,9 +77,9 @@
 
 ## 五、客户端 ES Module 结构（`pkg/src/client/` 48 模块 → `client.js`）
 
-由 [build-client.mjs](scripts/build-client.mjs) 按拓扑顺序打包为单文件 [client.js](client.js)，`package.json`、`board-schema.js`（`BACKEND_BUILD`）与 `src/client/constants.js`（`EXPECTED_BACKEND_BUILD`）版本统一对齐 `2.0.0`：
+由 [build-client.mjs](scripts/build-client.mjs) 按拓扑顺序打包为单文件 [client.js](client.js)，`package.json`、`board-schema.js`（`BACKEND_BUILD`）与 `src/client/constants.js`（`EXPECTED_BACKEND_BUILD`）版本统一对齐 `2.0.1`：
 
-- **基础与语音引擎**：`react-runtime.js`、`constants.js`、`i18n.js`（`zh/en` 切换）、`store.js`（唯一客户端可变状态）、`utils.js`、`notify.js`、`report.js`、`custom-theme.js`（WCAG 双模派生 + 社区「潮汐蓝」+ JSON 导入导出 + 服务端同步）、`tts.js`（TTS/ASR 播报与语音舞台驱动）与 `voice-recorder.js`（免提 VAD 与录音队列）。
+- **基础与语音引擎**：`react-runtime.js`、`constants.js`、`i18n.js`（`zh/en` 切换）、`store.js`（唯一客户端可变状态）、`utils.js`、`notify.js`、`report.js`、`custom-theme.js`（WCAG 双模派生 + 社区配色 + JSON 导入导出 + 服务端同步）、`tts.js`（TTS/ASR 播报与语音舞台驱动）与 `voice-recorder.js`（免提 VAD 与录音队列）。
 - **通信与样式**：`api.js` + `api/{archives,board,chief,transport}.js`；`styles.js` + `styles/{archives,base,bubble,chief,extmem,modals,skins,tasks-flow,theme,tts,v180}.js`。
 - **组件与弹窗**：`components/{common,modals,Panel}.js` + `components/modals/{intervention,pickers,safety,theme-diy,workflow}.js`（含独立「外观与主题工坊」页面与极简 `+` 控制面板）。
 - **页签视图**：`tabs/{chief,tasks,tasks-flow,tasks-widgets,peers,archives,archives-cards,extmem,extmem-starfield,extmem-studio,boundaries,plan}.js`（顶栏 6 页签 `参谋 / 任务 / 协同 / 档案 / 记忆 / 边界` + `⚙️` 设置、语音舞台、2D/3D 记忆星图、档案 `🎙️ 手记` 子页签与边界单条暂挂）。

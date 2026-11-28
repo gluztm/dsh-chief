@@ -912,6 +912,7 @@ export function normalizeAlertEvent(raw) {
     'managed_auto_sleep',
     'budget_circuit_break',
     'hazard_halt',
+    'blocker_halt',
   ]
   const kind = validKinds.includes(raw.kind) ? raw.kind : 'pending_approval'
   const level = ['info', 'warn', 'danger', 'success'].includes(raw.level) ? raw.level : 'info'

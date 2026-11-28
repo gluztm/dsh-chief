@@ -7,7 +7,7 @@
 import crypto from 'node:crypto'
 import { loadArchiveStore } from './archives.js'
 import { normalizePermissionMode, permissionRank, buildCapabilityScope } from './chief-executor.js'
-import { detectPrematurePromiseText } from './idle-guard.js'
+import { detectPrematurePromiseText, isWaitingExternalInputText } from './idle-guard.js'
 import {
   CHAT_CAP,
   SUGGESTIONS_CAP,
@@ -62,14 +62,14 @@ const TURN_REVIEW_SYSTEM = [
   '3. `planAssessment`：`{ "stale": true|false, "reason": "…" }`，指明当前计划步骤是否与总目标失配陈旧。',
   '4. `goalStatus` 与 `unmetMustDo`：当开启 `GOAL_MODE` 或 `INTERVENTION_SUPERVISOR`（主动强介入）时重点评估，取值 `"in_progress" | "achieved" | "blocked"`。',
   '   - **核心目标目的地铁律**：只要 `工作区核心目标 (Objective)` 非空，主动强介入的所有介入判断**一律以该核心目标有无完成作为最终目的地**（仅当核心目标为空时才退回对照最新用户原始诉求）。',
-  '   - **必做事项核验铁律**：`已有工作边界` 中的 `必做事项 (allowed)` 为硬性交付清单！在主对话/子代理交上来的作业未完成任何一条适用必做事项或缺少对应交付/验证证据前，**必须将未完成项逐条写入 `unmetMustDo` 数组，并保持 `goalStatus: "in_progress"` 与 `shouldIntervene: true`**（严禁判为 `"achieved"`）！',
+  '   - **必做事项核验铁律**：`已有工作边界` 中的 `必做事项 (allowed)` 为硬性交付清单！在主对话/子代理交上来的作业未完成任何一条适用必做事项或缺少对应交付/验证证据前，严禁判为 `"achieved"`：若主对话仍可继续推进（或偷懒敷衍未做完），将未完成项逐条写入 `unmetMustDo` 并保持 `goalStatus: "in_progress"` 与 `shouldIntervene: true`；**但若未完成项受限于明确外部硬阻塞**（如缺用户提供 SSH 接入/凭证/外部权限、必须由用户先拍板，且主对话已在看板 `blocked` 或断点中列明缺失项并提交了先期产物），则**必须**设 `goalStatus: "blocked"`、`shouldIntervene: false`、`interventionText: ""`，把具体需要用户提供或拍板的清单写入 `goalMissing`，绝不再催主对话反复补交无法单方面执行的项！',
   '   - 仅当核心目标与全部适用必做事项均已完成并有实证支撑时，才可设 `goalStatus: "achieved"`（并填 `goalSummary` 与 `goalEvidence`）；否则填 `goalMissing`。',
   '5. `hazardStop`（**强介入紧急安全煞车与撞边界熔断 · 最高优先级，优先于一切续推！**）：',
   '   - `{ "triggered": false, "category": "none|irreversible_risk|boundary_collision", "title": "", "reason": "" }`',
   '   - 当 `INTERVENTION_SUPERVISOR` 或 `AUTO_PILOT_SESSION_ONLY` 开启时，你必须严密审查：主/子代理刚刚提出、准备执行、请求用户拍板，或接下来继续推进是否**存在重大不可逆风险，或继续推进必然会撞穿当前生效边界（尤其 🚫 禁止红线）**？',
   '   - **重要提示（下列仅是常见举例，绝不限于此！）**：包括但不限于实际花钱/扣费/下单/付费 API 调用、不可逆删除或清空文件/数据/仓库、下载超大文件占用巨额磁盘或流量、关闭/重启服务器或关键宿主服务、对外公开推送/发布不可撤回变更、破坏宿主机隔离边界、以及任何一旦继续推跑就会导致不可逆损失或必然撞穿红线的情形。',
   '   - 一旦命中任一上述风险或必然撞边界：**必须立即设 `"hazardStop": { "triggered": true, "category": "...", "title": "简短醒目告警标题", "reason": "用清晰人话说清具体会造成什么不可逆损失或必然撞上哪条边界，以及为何必须立即停下等用户处理" }`，并强制设 `"shouldIntervene": false`、`interventionText: ""`**（严禁再推下一轮！）。',
-  '6. `shouldIntervene` & `interventionText`：当开启「主动强介入 (`INTERVENTION_SUPERVISOR`)」且 `hazardStop.triggered === false` 时，**触发复盘代表主对话刚刚结束了本轮输出、当前已停下进入空闲 (`status=idle`)**！对照「核心目标 + 必做事项 + 最新用户/参谋诉求」逐项核验：只要目标或必做事项尚未真正做完、主对话仅用「重启 XX / 补跑剩余 N 张 / 接下来写脚本 / 继续推进」等口头预告收尾却未真正调用工具落实、或缺少实测验证证据却自称完成，**必须**设 `shouldIntervene: true` 并写出清晰可执行、可直接投递给 `@lead` 继续推进下一回合的 `interventionText` 督导指令；若处于 `strictVerify` 模式但回复无实测输出证据，务必驳回自称完成并要求补跑验证；若开启 `conciseBrief`，督导指令严格限定在 3 条以内要点。仅当核心目标与必做事项均已完成 (`achieved`)、或确认有活跃子代理正在后台运行等待回信时，才设 `shouldIntervene: false`。',
+  '6. `shouldIntervene` & `interventionText`：当开启「主动强介入 (`INTERVENTION_SUPERVISOR`)」且 `hazardStop.triggered === false` 时，**触发复盘代表主对话刚刚结束了本轮输出、当前已停下进入空闲 (`status=idle`)**！对照「核心目标 + 必做事项 + 最新用户/参谋诉求」逐项核验：只要目标或必做事项尚未真正做完、主对话仅用「重启 XX / 补跑剩余 N 张 / 接下来写脚本 / 继续推进」等口头预告收尾却未真正调用工具落实、或缺少实测验证证据却自称完成，**必须**设 `shouldIntervene: true` 并写出清晰可执行、可直接投递给 `@lead` 继续推进下一回合的 `interventionText` 督导指令；若处于 `strictVerify` 模式但回复无实测输出证据，务必驳回自称完成并要求补跑验证；若开启 `conciseBrief`，督导指令严格限定在 3 条以内要点。仅当核心目标与必做事项均已完成 (`achieved`)、确认有活跃子代理正在后台运行等待回信、**或确认因外部硬阻塞（缺用户凭证/权限/拍板且看板已标 blocked）无法单方面推进**时，才设 `shouldIntervene: false`。',
   '7. `suggestions`（最多 1 条，宁缺毋滥）：',
   '   - `"kind": "bound"`：明显撞墙或发现长期红线/必做规矩时请示注入边界；',
   '   - `"kind": "relay"`：发现明确跨对话信息差时的递话建议；',
@@ -284,6 +284,35 @@ function extractLatestTurnDigest(agent, turn) {
       const collected = []
       let hasUser = false
       let lastAssistantText = ''
+      let lastDirectiveIdx = -1
+      for (let i = msgs.length - 1; i >= 0; i -= 1) {
+        const m = msgs[i]
+        if (!m || m.role !== 'user') continue
+        const srcKind = String((m.source && m.source.kind) || '').trim()
+        if (!DIRECTIVE_SOURCE_KINDS.has(srcKind)) continue
+        const uTxt = extractMessageTextBlocks(m).text
+        if (uTxt && !isInternalCheckpointNoise(uTxt)) {
+          lastDirectiveIdx = i
+          break
+        }
+      }
+      const actionToolHints = []
+      const boardOnlyTools = new Set(['chief_board', 'notebook_board', 'notebook_memory'])
+      for (let i = Math.max(0, lastDirectiveIdx + 1); i < msgs.length; i += 1) {
+        const m = msgs[i]
+        if (!m || m.role !== 'assistant') continue
+        const { toolHints } = extractMessageTextBlocks(m)
+        for (const hint of toolHints) {
+          const baseName = String(hint || '').split('(')[0].trim()
+          if (baseName && !boardOnlyTools.has(baseName)) {
+            actionToolHints.push(hint)
+          }
+        }
+      }
+      const latestActionToolSig = actionToolHints.length
+        ? clamp(actionToolHints.slice(-6).join(' -> '), 220)
+        : ''
+
       for (let i = msgs.length - 1; i >= scanStart && collected.length < 8; i -= 1) {
         const m = msgs[i]
         if (!m || !m.role) continue
@@ -317,7 +346,7 @@ function extractLatestTurnDigest(agent, turn) {
         const lastMsgId = String((lastMsg && (lastMsg.id || lastMsg.messageId || lastMsg.timestamp)) || 'm').slice(0, 24)
         const tailHash8 = crypto.createHash('sha1').update(joined).digest('hex').slice(0, 8)
         const stamp = `${resolveTurnTag(turn)}:${msgs.length}:${lastMsgId}:${tailHash8}`
-        return { text: joined, hasUser, latestUserPrompt, lastAssistantText, msgCount: msgs.length, stamp }
+        return { text: joined, hasUser, latestUserPrompt, lastAssistantText, latestActionToolSig, msgCount: msgs.length, stamp }
       }
     }
   } catch {}
@@ -558,6 +587,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     `最新用户原始诉求：${digest.latestUserPrompt || '（见下方对话片段）'}`,
     `当前计划步骤 (Plan)：${planSteps.length ? planSteps.map((s, i) => `${i + 1}.${s.done ? '[✓]' : '[ ]'} ${clamp(s.text, 60)}`).join('；') : '（空）'}`,
     `当前任务列表 (Tasks)：${tasks.length ? tasks.slice(0, 10).map(t => `[${t.status}] #${t.id} ${clamp(t.title, 48)}`).join('；') : '（空）'}`,
+    `当前执行断点 (Cursor)：${board && board.cursor && (board.cursor.step || board.cursor.blocked) ? `${board.cursor.step ? `做到=${clamp(board.cursor.step, 80)}` : ''}${board.cursor.blocked ? `；卡在=${clamp(board.cursor.blocked, 120)}` : ''}` : '（无）'}`,
     `刚刚结束回合的对话身份：${speaker}（sessionId=${sid}）`,
     `活跃团队成员：${activeTargets.map(t => `${t.handle}[key=${t.key}, ${t.status}${t.taskTitle ? ', 任务:' + t.taskTitle : ''}]`).join('；')}${idleCount > 0 ? `（另有 ${idleCount} 名空闲子代理已折叠）` : ''}`,
     '',
@@ -602,9 +632,14 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
         requireAck: true,
         hasChiefRiskAck: hasValidChiefRiskAck(wsBefore),
       })
+      const openTasksForFb = tasks.filter(t => t && t.status !== 'done')
+      const allOpenTasksBlockedForFb = openTasksForFb.length > 0 && openTasksForFb.every(t => t.status === 'blocked')
+      const cursorBlockedForFb = Boolean(board && board.cursor && String(board.cursor.blocked || '').trim())
       const canZeroLlmFallback = permCheck === 'chief'
         && hasValidChiefRiskAck(wsBefore)
         && !(identity && identity.isChild)
+        && !allOpenTasksBlockedForFb
+        && !cursorBlockedForFb
         && !HIGH_RISK_FALLBACK_RE.test(digest.lastAssistantText || '')
       const fallbackCue = canZeroLlmFallback ? detectPrematurePromiseText(digest.lastAssistantText || '') : ''
       if (fallbackCue && lastFallbackStampByRoot.get(rootId) !== digest.stamp) {
@@ -666,6 +701,17 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   const unmetMustDo = Array.isArray(parsed.unmetMustDo)
     ? parsed.unmetMustDo.map(x => clamp(String(x || '').trim(), 140)).filter(Boolean).slice(0, 6)
     : []
+  const openTasks = tasks.filter(t => t && t.status !== 'done')
+  const allOpenTasksBlocked = openTasks.length > 0 && openTasks.every(t => t.status === 'blocked')
+  const cursorBlockedText = String((board && board.cursor && board.cursor.blocked) || '').trim()
+  const lastAsstText = String(digest.lastAssistantText || '')
+  const prematureCue = !(identity && identity.isChild)
+    ? detectPrematurePromiseText(lastAsstText)
+    : ''
+  const assistantExplainsHardBlocker = isWaitingExternalInputText(lastAsstText)
+    || /(?:硬阻塞|外部阻塞|外部依赖|已(?:正式)?标\s*blocked|等用户拍板|缺\s*SSH|缺云机接入|无法单方面|等待用户)/i.test(lastAsstText)
+  const unmetAllExternalBlocked = unmetMustDo.length > 0
+    && unmetMustDo.every(u => /(?:缺[^\n，,]{0,16}(?:接入|凭证|SSH|授权|密钥|权限)|无法执行|待验收后|须待验收|需验收后|等用户|待用户拍板|硬阻塞)/i.test(u))
   const hazardInfo = detectEmergencyHazardFallback({
     parsed,
     digestText: digest.text,
@@ -678,6 +724,12 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     && evalGoalCompletion
     && String(parsed.goalStatus || '') === 'achieved'
     && unmetMustDo.length === 0
+  const isExternalHardBlocker = !hazardInfo.triggered
+    && !isGoalAchieved
+    && (
+      String(parsed.goalStatus || '') === 'blocked'
+      || ((allOpenTasksBlocked || Boolean(cursorBlockedText)) && (assistantExplainsHardBlocker || unmetAllExternalBlocked) && !prematureCue)
+    )
   let goalProposalCreated = false
   if (permRankNow >= 1 && isGoalAchieved && deps.runAction && hasObjectiveTarget) {
     const existingApproval = board && board.goalApproval
@@ -699,6 +751,8 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
 
   let circuitTripped = false
   let circuitReason = ''
+  let blockerPaused = false
+  let blockerPauseReason = ''
   let hazardStopped = false
   let hazardAlertCreated = null
   let interventionMessage = ''
@@ -718,9 +772,6 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   let desktopArchivePinned = null
 
   const hasRunningChild = realPeers.some(p => p.kind === 'subagent' && p.status === 'running')
-  const prematureCue = !(identity && identity.isChild)
-    ? detectPrematurePromiseText(digest.lastAssistantText || '')
-    : ''
 
   const isInternalRelayTarget = (targetRaw) => {
     const tq = String(targetRaw || '').trim().replace(/^@/, '')
@@ -915,6 +966,48 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
         dedupeKey: 'haz:' + hazardAlertCreated.id,
         at: hazardAlertCreated.at || Date.now(),
       })
+    } else if (tactical.intervention && isExternalHardBlocker) {
+      blockerPaused = true
+      blockerPauseReason = cleanMultiline(
+        parsed.goalMissing
+        || cursorBlockedText
+        || (unmetMustDo.length ? '外部硬阻塞待用户拍板：' + unmetMustDo.join('；') : '')
+        || '任务处于外部硬阻塞状态，需用户提供凭证、权限或拍板后再继续。',
+        420,
+      )
+      if (!ws.config || typeof ws.config !== 'object') ws.config = resolveWorkspaceConfig(s, rootId)
+      ws.config.tacticalModes = {
+        ...normalizeTacticalModes(ws.config.tacticalModes),
+        intervention: false,
+      }
+      if (s.config && typeof s.config === 'object') {
+        s.config.tacticalModes = {
+          ...normalizeTacticalModes(s.config.tacticalModes),
+          intervention: false,
+        }
+      }
+      ws.runtimeGuard.circuitBroken = true
+      ws.runtimeGuard.circuitReason = blockerPauseReason
+      ws.runtimeGuard.interventionTurns = 0
+      ws.runtimeGuard.unchangedCount = 0
+      interventionMessage = ''
+      ws.chat.push({
+        id: nextId('chat'),
+        role: 'chief',
+        text: `- 【⏸️ 外部硬阻塞 · 强介入已暂停待您拍板】\n  原因：${blockerPauseReason}`,
+        actions: ['硬阻塞暂停', '待用户拍板'],
+        at: Date.now(),
+      })
+      if (ws.chat.length > CHAT_CAP) ws.chat = ws.chat.slice(-CHAT_CAP)
+      pushAuditToWs(ws, { mode: permNow, stage: 'safety_guard', decision: 'blocker_pause', operation: '外部硬阻塞暂停强介入', target: 'lead', reason: blockerPauseReason, outcome: 'paused', by: 'chief' })
+      pushAlertEventToWs(ws, {
+        kind: 'blocker_halt',
+        level: 'warn',
+        title: '外部硬阻塞 · 强介入已暂停待您拍板',
+        body: blockerPauseReason,
+        dedupeKey: `blk:${rootId}:${Math.floor(Date.now() / 15_000)}`,
+        at: Date.now(),
+      })
     } else {
       // Intervention Supervisor follow-up + Circuit Breaker (differentiated across L0 / L1 / L2 / L3)
       const unmetMustDoFallback = unmetMustDo.length > 0
@@ -931,7 +1024,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
         || goalMissingFallback
         || prematureFallback
         || (parsed.nextActionForLead && (parsed.shouldIntervene || parsed.goalStatus === 'in_progress') ? parsed.nextActionForLead : '')
-      const wantsIntervene = Boolean(
+      const wantsIntervene = String(parsed.goalStatus || '') !== 'blocked' && Boolean(
         parsed.shouldIntervene
         || unmetMustDo.length > 0
         || (parsed.goalStatus === 'in_progress' && (
@@ -942,16 +1035,18 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
         ))
       )
       if (!isGoalAchieved && tactical.intervention && wantsIntervene && candidateIntervention) {
-        const assistantTail = (digest.text.split('Assistant:').pop() || digest.text)
         const sig = crypto
           .createHash('sha1')
           .update(JSON.stringify({
             objective: (board && board.objective) || '',
             goalStatus: parsed.goalStatus || '',
-            donePlanCount: planSteps.filter(p => p.done).length,
-            doneTaskCount: tasks.filter(t => t.status === 'done').length,
-            blockedTaskCount: tasks.filter(t => t.status === 'blocked').length,
-            assistantTail: clamp(assistantTail, 140),
+            donePlanCount: planSteps.filter(p => p && p.done).length,
+            totalPlanCount: planSteps.length,
+            doneTaskCount: tasks.filter(t => t && t.status === 'done').length,
+            blockedTaskCount: tasks.filter(t => t && t.status === 'blocked').length,
+            cursorBlocked: clamp(cursorBlockedText, 80),
+            unmetCount: unmetMustDo.length,
+            latestActionToolSig: digest.latestActionToolSig || '',
           }))
           .digest('hex')
           .slice(0, 12)
@@ -961,7 +1056,9 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
         const nextTurns = ws.runtimeGuard.interventionTurns + 1
         const isUnlimitedTurns = tactical.maxInterventionTurns === 0
         const maxTurns = isUnlimitedTurns ? Infinity : Math.max(1, Number(tactical.maxInterventionTurns) || 10)
-        const unchangedLimit = isUnlimitedTurns ? 8 : 3
+        const unchangedLimit = (allOpenTasksBlocked || Boolean(cursorBlockedText))
+          ? 2
+          : (isUnlimitedTurns ? 4 : 3)
 
         if ((!isUnlimitedTurns && nextTurns > maxTurns) || nextUnchanged >= unchangedLimit) {
           circuitTripped = true
@@ -1048,10 +1145,11 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     }
   })
 
-  if (hazardStopped && deps && typeof deps.cancelAutoContinue === 'function') {
-    try { deps.cancelAutoContinue(sid, 'hazard-stop') } catch {}
+  if ((hazardStopped || blockerPaused) && deps && typeof deps.cancelAutoContinue === 'function') {
+    const cancelReason = hazardStopped ? 'hazard-stop' : 'blocker-pause'
+    try { deps.cancelAutoContinue(sid, cancelReason) } catch {}
     if (rootId && rootId !== sid) {
-      try { deps.cancelAutoContinue(rootId, 'hazard-stop') } catch {}
+      try { deps.cancelAutoContinue(rootId, cancelReason) } catch {}
     }
   }
 
@@ -1209,6 +1307,27 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   }
 
   let interventionDeliveredFailed = false
+  let staleInterventionSkipped = ''
+  if (interventionMessage && !force) {
+    try {
+      if (typeof deps.getAgentStatus === 'function' && deps.getAgentStatus(sid) === 'running') {
+        staleInterventionSkipped = 'agent-running'
+      }
+    } catch {}
+    if (!staleInterventionSkipped) {
+      const latestDigestNow = extractLatestTurnDigest(agent, turn)
+      if (latestDigestNow && (latestDigestNow.msgCount > digest.msgCount || latestDigestNow.stamp !== digest.stamp)) {
+        staleInterventionSkipped = 'stale-turn'
+      }
+    }
+    if (staleInterventionSkipped) {
+      mutateChiefState((s) => {
+        const ws = ensureWorkspace(s, rootId)
+        ws.runtimeGuard.interventionTurns = Math.max(0, (ws.runtimeGuard.interventionTurns || 0) - 1)
+      })
+      interventionMessage = ''
+    }
+  }
   if (interventionMessage) {
     const tags = [
       tactical.strictVerify ? '严格校验实测' : '',
@@ -1284,7 +1403,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   }
 
   let dreamRoamRes = null
-  if (autoPilot && permRankNow >= 1 && !hazardStopped && rootId && rootId !== 'global') {
+  if (autoPilot && permRankNow >= 1 && !hazardStopped && !blockerPaused && rootId && rootId !== 'global') {
     try {
       const sessOpt = archiveTargetForRoot(deps, rootId, { vaultScope: 'session' })
       const globOpt = archiveTargetForRoot(deps, rootId, { vaultScope: 'global' })
@@ -1311,7 +1430,7 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
   // L3 Chief + Strong Intervention: One-Stop Task Runner sweeping safe pending suggestions
   // (excludes guard_wall, goal_approval, pinGlobal global bounds, and superseded L1 fallback advice when live intervention ran)
   let oneStopReport = null
-  if (permNow === 'chief' && hasAckNow && tactical.intervention && !hazardStopped) {
+  if (permNow === 'chief' && hasAckNow && tactical.intervention && !hazardStopped && !blockerPaused) {
     try {
       const wsLatest = ensureWorkspace(loadChiefState(), rootId)
       const safePending = (wsLatest.suggestions || []).filter(s =>
@@ -1498,6 +1617,9 @@ export async function runTurnReview(deps, { agent, sessionId, turn, force = fals
     goalAchieved: isGoalAchieved,
     goalProposalCreated,
     hazardStopped,
+    blockerPaused,
+    blockerPauseReason,
+    staleInterventionSkipped,
     ...(hazardAlertCreated ? { hazardAlert: hazardAlertCreated } : {}),
     intervened: Boolean(interventionMessage && !interventionDeliveredFailed),
     queuedInterventionApproval: Boolean(interventionForApproval),

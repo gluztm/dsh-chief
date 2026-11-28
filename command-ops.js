@@ -45,6 +45,9 @@ import {
   normalizeFact,
   normalizeSuggestion,
   resolveWorkspaceConfig,
+  normalizeTacticalModes,
+  pushAlertEventToWs,
+  pushAuditToWs,
   loadChiefState,
   mutateChiefState,
   setPeerLink,
@@ -1195,13 +1198,84 @@ export async function handleLeadDirectRequestToChief(deps, {
   }
 
   // L3 (chief): directly run Chief handling & reply back to @lead via execution_request
+  // UNLESS Lead explicitly escalated a user-facing decision / hard blocker (prevent echoing human prompts back to @lead)
   if (!askOrCommandChiefRunner) throw new Error('askOrCommandChief runner not registered')
+  const isHumanEscalationReq = /(?:(?:递呈|转呈|转交|提交|上报|交给|呈报)(?:给)?(?:用户|人类|总司令|老板)|请(?:用户|您)拍板|不是继续催我|不要(?:再)?催我|硬阻塞[^\n]{0,30}(?:用户|拍板|SSH|凭证)|等待用户(?:拍板|提供|确认))/i.test(combinedReqText)
   const execRes = await askOrCommandChiefRunner(deps, {
     sessionId: rootId,
     text: `[来自 ${fromLabel} 的直接协同请求${subject ? ` · ${subject}` : ''}]\n${cleanBody}`,
     _fromLeadRequest: true,
   })
+  const replyTxt = String((execRes && execRes.reply) || '')
+  const isUserAddressedBlockerReply = /(?:请您|请直接回复|等您过目拍板|用户需要提供什么|需要您拍板|三选一)/i.test(replyTxt)
+    && /(?:受阻|阻塞|SSH|凭证|拍板|三选一|无法继续|已停滞)/i.test(replyTxt)
   const alreadyRelayed = Boolean(execRes && Array.isArray(execRes.relays) && execRes.relays.some(r => r && r.ok))
+  if (!alreadyRelayed && (isHumanEscalationReq || isUserAddressedBlockerReply)) {
+    let pausedIntervention = false
+    mutateChiefState((s) => {
+      const ws = ensureWorkspace(s, rootId)
+      const cfg = resolveWorkspaceConfig(s, rootId)
+      if (cfg && cfg.tacticalModes && cfg.tacticalModes.intervention) {
+        if (!ws.config || typeof ws.config !== 'object') ws.config = { ...cfg }
+        ws.config.tacticalModes = {
+          ...normalizeTacticalModes(ws.config.tacticalModes),
+          intervention: false,
+        }
+        if (s.config && typeof s.config === 'object') {
+          s.config.tacticalModes = {
+            ...normalizeTacticalModes(s.config.tacticalModes),
+            intervention: false,
+          }
+        }
+        pausedIntervention = true
+      }
+      ws.runtimeGuard.circuitBroken = true
+      ws.runtimeGuard.circuitReason = '主对话已上报外部硬阻塞并转呈用户拍板，强介入已自动暂停'
+      ws.runtimeGuard.interventionTurns = 0
+      ws.runtimeGuard.unchangedCount = 0
+      pushAuditToWs(ws, {
+        mode: permissionMode,
+        stage: 'safety_guard',
+        decision: 'escalated_to_user',
+        operation: '硬阻塞升级用户拍板（停止回弹主对话）',
+        target: 'user',
+        reason: clamp(replyTxt || cleanBody, 160),
+        outcome: 'paused',
+        by: 'chief',
+      })
+      pushAlertEventToWs(ws, {
+        kind: 'blocker_halt',
+        level: 'warn',
+        title: '主对话上报硬阻塞 · 请您拍板',
+        body: clamp(replyTxt || cleanBody, 240),
+        dedupeKey: `esc:${rootId}:${Math.floor(Date.now() / 15_000)}`,
+        at: Date.now(),
+      })
+      if (ledgerTaskId) {
+        upsertTaskLedgerOnWs(ws, {
+          id: ledgerTaskId,
+          taskId: ledgerTaskId,
+          kind: 'tool_execution',
+          status: 'completed',
+          originalText: `[主对话直传求助 · ${fromLabel}] ${cleanBody}`,
+          lastReceipt: '已转呈用户拍板并暂停强介入（未回弹主对话）',
+          resolvedAt: Date.now(),
+        })
+      }
+    })
+    if (deps && typeof deps.cancelAutoContinue === 'function') {
+      try { deps.cancelAutoContinue(rootId, 'blocker-escalated') } catch {}
+    }
+    return {
+      ok: Boolean(execRes && execRes.ok !== false),
+      mode: 'chief',
+      actionTaken: 'escalated_to_user',
+      pausedIntervention,
+      taskId: ledgerTaskId,
+      reply: replyTxt,
+      ...(execRes && execRes.view ? { view: execRes.view } : {}),
+    }
+  }
   if (!alreadyRelayed && execRes && execRes.reply) {
     try {
       await deliverCrossMessage(deps, {
